@@ -1,0 +1,5545 @@
+/* Smart Pricing wizard chrome (V25 + Figma EchoTest parity)
+ * Layout locked to EchoTest Classic Light; colors follow active palette
+ * (cyan light / orange-classic / dark) via global theme tokens, with
+ * Figma-sampled fallbacks for orange-classic surfaces.
+ */
+.page,
+.listPage,
+.modalBackdrop {
+  /* EchoTest Figma literals as Classic defaults (dark overrides below) */
+  --classic-cream: #fefbf8;
+  --classic-card: #ffffff;
+  --classic-ink: #231814;
+  --classic-body: #231814;
+  --classic-muted: #6e605a;
+  --classic-muted-soft: #6e605a;
+  --classic-line: #e9e3df;
+  --classic-line-strong: #e9e3df;
+  --classic-wash: #f8f2ee;
+  --classic-track: #f8f2ee;
+  --classic-neutral: rgba(35, 24, 20, 0.06);
+  --classic-radius: 20px;
+  --classic-radius-sm: 12px;
+  --classic-orange: #f16a1a;
+  --classic-orange-soft: #ffebd6;
+  --classic-orange-deep: #942e00;
+  --classic-orange-border: rgba(241, 106, 26, 0.55);
+  --classic-success: #3fb171;
+  --classic-success-bg: rgba(63, 177, 113, 0.15);
+  --classic-shadow: var(--shadow-md, rgba(0, 0, 0, 0.08));
+
+  /* Type scale (DM Sans / Inter fallback) */
+  --classic-fs-display: 1.875rem; /* 30px list page titles */
+  --classic-fs-title-sm: 1.25rem; /* 20px modal / wizard titles */
+  --classic-fs-stat: 1.75rem; /* KPI numbers */
+  --classic-fs-body: 0.9375rem; /* 15px subtitles */
+  --classic-fs-label: 0.875rem; /* 14px field labels */
+  --classic-fs-ui: 0.875rem; /* buttons, pills */
+  --classic-fs-meta: 0.8125rem; /* 13px secondary */
+  --classic-fs-help: 0.75rem; /* 12px help */
+  --classic-fs-overline: 0.6875rem; /* 11px caps headers */
+  --classic-fs-step: 0.875rem;
+  --classic-fs-step-sub: 0.6875rem;
+
+  --classic-fw-regular: 400;
+  --classic-fw-medium: 500;
+  --classic-fw-semibold: 600;
+  --classic-fw-bold: 700;
+  --classic-fw-extrabold: 800;
+
+  --classic-space-field: 20px;
+  --classic-space-section: 28px;
+  --classic-space-label: 8px;
+
+  /* Pricing / table surfaces — EchoTest Figma */
+  --classic-table-head: #fcf6f0;
+  --classic-table-row: #ffffff;
+  --classic-table-row-hover: #faf7f2;
+  /* Figma accordion body: rgba(252,246,240,0.4) */
+  --classic-table-variant: rgba(252, 246, 240, 0.4);
+  --classic-table-variant-hover: rgba(252, 246, 240, 0.65);
+  --classic-pricing-toolbar: rgba(252, 246, 240, 0.4);
+  --classic-pricing-input: #fefbf8;
+  --classic-pricing-border: #e9e3df;
+  --classic-panel-tint: rgba(252, 246, 240, 0.3);
+  --classic-callout-bg: rgba(255, 235, 214, 0.5);
+  --classic-callout-border: rgba(241, 106, 26, 0.3);
+  --classic-segment-on: rgba(255, 255, 255, 0.55);
+  --classic-disabled-field: #f3f0ec;
+  --classic-disabled-text: #9a9590;
+  --classic-primary-btn-text: #fefbf8;
+}
+
+.page {
+  min-height: calc(100vh - 64px);
+  padding: 32px 32px 48px;
+  background: var(--classic-cream);
+  color: var(--classic-ink);
+  font-family: var(--ripx-font-classic, var(--ripx-font-ui, 'Inter', system-ui, sans-serif));
+  font-size: var(--classic-fs-body);
+  font-weight: var(--classic-fw-regular);
+  -webkit-font-smoothing: antialiased;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  box-sizing: border-box;
+  gap: 32px;
+}
+
+.topBar,
+.stepper,
+.card,
+.footer {
+  max-width: 768px;
+  width: 100%;
+}
+
+.topBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 0;
+  width: 100%;
+}
+
+.backLink,
+.footerLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  background: transparent;
+  color: var(--classic-muted);
+  font-family: inherit;
+  font-size: var(--classic-fs-label);
+  font-weight: var(--classic-fw-regular); /* Back to experiments */
+  line-height: 20px;
+  cursor: pointer;
+  padding: 0;
+}
+
+.footerLink {
+  font-weight: var(--classic-fw-medium); /* Figma Cancel / Back */
+  padding: 10px 16px; /* match Figma footer ghost hit area */
+}
+
+.backLink:hover,
+.footerLink:hover {
+  color: var(--classic-orange);
+}
+
+.footerLink:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.stepOf {
+  color: var(--classic-muted);
+  font-size: var(--classic-fs-help);
+  font-weight: var(--classic-fw-regular);
+  letter-spacing: 0;
+  line-height: 16px;
+}
+
+/* Figma: equal ~147px step columns + fixed 24px connectors, gap 8px */
+.stepper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin: 0;
+  width: 100%;
+}
+
+.stepItem {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  text-align: left;
+  position: relative;
+  z-index: 1;
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: 148px;
+}
+
+.stepConnector {
+  /* Figma Horizontal Divider: fixed 24×1 (short tick, not a full flex rule) */
+  flex: 0 0 24px;
+  width: 24px;
+  min-width: 24px;
+  max-width: 24px;
+  height: 1px;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: var(--classic-line);
+  align-self: flex-start;
+  margin-top: 13.5px; /* center on 28px stepDot (dot mid = 14px) */
+}
+
+.stepConnectorDone {
+  background: var(--classic-orange);
+}
+
+.stepDot {
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: var(--classic-fw-semibold);
+  line-height: 16px;
+  border: 0;
+  background: var(--classic-wash);
+  color: var(--classic-muted);
+  position: relative;
+  z-index: 1;
+  box-shadow: none;
+}
+
+/* Active = peach fill + orange ring + deep ink number (EchoTest Figma) */
+.stepItemActive .stepDot {
+  border: 0;
+  background: var(--classic-orange-soft);
+  color: var(--classic-orange-deep, #942e00);
+  box-shadow: 0 0 0 2px rgba(241, 106, 26, 0.4);
+}
+
+.stepItemDone .stepDot {
+  border: 0;
+  background: var(--classic-orange);
+  color: #fff;
+  box-shadow: none;
+}
+
+.stepText {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-width: 0;
+  position: relative;
+  z-index: 1;
+}
+
+/* Figma stacks label/sub with slight overlap (mb -1) for 34px text column */
+.stepText .stepLabel {
+  margin-bottom: -1px;
+}
+
+.stepLabel {
+  font-family: var(--ripx-font-classic, var(--ripx-font-ui, 'Inter', system-ui, sans-serif));
+  font-size: var(--classic-fs-step);
+  font-weight: var(--classic-fw-medium);
+  color: var(--classic-ink);
+  line-height: 20px;
+  white-space: nowrap;
+}
+
+.stepItem:not(.stepItemActive):not(.stepItemDone) .stepLabel {
+  color: var(--classic-muted);
+  font-weight: var(--classic-fw-medium);
+}
+
+.stepSub {
+  font-family: var(--ripx-font-classic, var(--ripx-font-ui, 'Inter', system-ui, sans-serif));
+  font-size: var(--classic-fs-step-sub);
+  font-weight: var(--classic-fw-regular);
+  color: var(--classic-muted);
+  line-height: 13.75px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.stepItem:not(.stepItemActive):not(.stepItemDone) .stepSub {
+  color: var(--classic-muted);
+}
+
+.card {
+  margin: 0 auto;
+  background: var(--classic-card);
+  border: 1px solid var(--classic-line);
+  border-radius: var(--classic-radius);
+  box-shadow: none;
+  padding: 33px;
+  box-sizing: border-box;
+}
+
+/* Wizard card titles — Figma 20px / SemiBold */
+.title {
+  margin: 0 0 4px;
+  font-family: var(--ripx-font-classic, var(--ripx-font-ui, 'Inter', system-ui, sans-serif));
+  font-size: 1.25rem;
+  font-weight: var(--classic-fw-semibold);
+  letter-spacing: -0.025em;
+  line-height: 28px;
+  color: var(--classic-ink);
+}
+
+.modalTitle {
+  margin: 0 0 4px;
+  font-family: var(--ripx-font-classic, var(--ripx-font-ui, 'Inter', system-ui, sans-serif));
+  font-size: 1.25rem; /* 20px */
+  font-weight: var(--classic-fw-semibold);
+  letter-spacing: -0.02em;
+  line-height: 1.25;
+  color: var(--classic-ink);
+}
+
+.subtitle {
+  margin: 0 0 24px;
+  font-family: var(--ripx-font-classic, var(--ripx-font-ui, 'Inter', system-ui, sans-serif));
+  color: var(--classic-muted);
+  font-size: var(--classic-fs-label);
+  font-weight: var(--classic-fw-regular);
+  line-height: 20px;
+}
+
+.footer {
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  /* keep below portaled overlays (country dropdown, modals) */
+  position: relative;
+  z-index: 0;
+}
+
+.footerActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+/* RipX-only: quieter than Continue so it doesn’t compete with Figma primary CTA */
+.saveDraftLink {
+  border: 0;
+  background: transparent;
+  color: var(--classic-muted);
+  font-family: inherit;
+  font-size: var(--classic-fs-label);
+  font-weight: var(--classic-fw-medium);
+  line-height: 20px;
+  cursor: pointer;
+  padding: 10px 8px;
+}
+
+.saveDraftLink:hover:not(:disabled) {
+  color: var(--classic-orange);
+}
+
+.saveDraftLink:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.expTitleRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.expExpandBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  margin-top: 2px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--classic-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.expExpandBtn:hover {
+  background: var(--classic-orange-soft);
+  color: var(--classic-orange);
+}
+
+.expExpandSpacer {
+  width: 22px;
+  flex-shrink: 0;
+}
+
+.expChildRow td {
+  background: rgba(var(--accent-primary-rgb), 0.03);
+  border-top: none;
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+
+.expChildInner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-left: 28px;
+}
+
+.expChildMeta {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.expChildArms {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.stepItemActive .stepLabel,
+.stepItemDone .stepLabel {
+  color: var(--classic-ink);
+  font-weight: var(--classic-fw-medium);
+}
+
+.stepItemDone .stepSub,
+.stepItemActive .stepSub {
+  color: var(--classic-muted);
+}
+
+.primaryBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px; /* Figma Continue: text + ArrowRight gap 6 */
+  min-height: 40px;
+  padding: 10px 16px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--classic-orange);
+  color: var(--classic-primary-btn-text, #fefbf8);
+  font-family: inherit;
+  font-size: var(--classic-fs-label);
+  font-weight: var(--classic-fw-medium);
+  letter-spacing: 0;
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.1);
+  -webkit-font-smoothing: antialiased;
+}
+
+.primaryBtn:hover:not(:disabled) {
+  filter: brightness(1.05);
+  color: var(--classic-primary-btn-text, #fefbf8);
+}
+
+.primaryBtn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.ghostBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 40px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--classic-line);
+  background: var(--classic-card);
+  color: var(--classic-ink);
+  font-family: inherit;
+  font-size: var(--classic-fs-label);
+  font-weight: var(--classic-fw-medium);
+  cursor: pointer;
+}
+
+.ghostBtn:hover {
+  border-color: var(--classic-orange-border);
+  color: var(--classic-orange);
+}
+
+.label {
+  display: block;
+  margin-bottom: var(--classic-space-label);
+  font-family: inherit;
+  font-size: var(--classic-fs-label);
+  font-weight: var(--classic-fw-medium);
+  color: var(--classic-ink);
+  line-height: 1.35;
+}
+
+.required {
+  color: var(--classic-orange);
+  margin-left: 4px;
+  font-weight: var(--classic-fw-medium);
+}
+
+.field {
+  width: 100%;
+  margin-bottom: 24px; /* Figma card section gap 24 */
+  display: flex;
+  flex-direction: column;
+  gap: 8px; /* Figma label → control → help */
+}
+
+.field .label {
+  margin-bottom: 0;
+}
+
+.field .labelRow {
+  margin-bottom: 0;
+}
+
+.input,
+.textarea,
+.select {
+  width: 100%;
+  border: 1px solid var(--classic-line);
+  border-radius: 12px;
+  background: var(--classic-cream);
+  color: var(--classic-ink);
+  font-family: inherit;
+  font-size: var(--classic-fs-label);
+  font-weight: var(--classic-fw-regular);
+  padding: 12px 15px;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  box-sizing: border-box;
+}
+
+.input::placeholder,
+.textarea::placeholder {
+  color: rgba(35, 24, 20, 0.5);
+  font-weight: var(--classic-fw-regular);
+}
+
+.textarea {
+  min-height: 88px;
+  resize: vertical;
+  line-height: 1.45;
+  padding-top: 11px;
+}
+
+.input:focus,
+.textarea:focus,
+.select:focus {
+  border-color: var(--classic-orange);
+  box-shadow: 0 0 0 2px rgba(241, 106, 26, 0.2);
+}
+
+.help {
+  margin: 0;
+  font-size: var(--classic-fs-help);
+  font-weight: var(--classic-fw-regular);
+  color: var(--classic-muted);
+  line-height: 16px; /* Figma hypothesis helper */
+}
+
+.sectionLabel {
+  margin: 0 0 8px; /* Figma Experiment type label → grid gap 8 */
+  font-family: var(--ripx-font-classic, var(--ripx-font-ui, 'Inter', system-ui, sans-serif));
+  font-size: var(--classic-fs-label);
+  font-weight: var(--classic-fw-medium);
+  color: var(--classic-ink);
+  line-height: 20px;
+}
+
+.typeGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px; /* Figma type grid gap-x/y 8 */
+  margin-bottom: 24px; /* gap before Advanced options */
+}
+
+.choiceCard {
+  position: relative;
+  text-align: left;
+  border: 1px solid var(--classic-line);
+  border-radius: var(--classic-radius-sm);
+  background: var(--classic-card);
+  padding: 13px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+}
+
+.productsStep .choiceCard {
+  display: flex;
+  flex-direction: column;
+  gap: 6px; /* Figma pick/price mode cards */
+}
+
+.choiceCard:hover {
+  border-color: rgba(var(--accent-primary-rgb), 0.35);
+}
+
+.choiceCardSelected {
+  border-color: var(--classic-orange);
+  background: var(--classic-orange-soft);
+  box-shadow: none;
+}
+
+.choiceCardSelected .choiceTitle {
+  color: var(--classic-ink);
+}
+
+/* Setup type cards: plain orange check (16px), not a filled circle */
+.choiceCardSelected .checkInline {
+  background: transparent;
+  color: var(--classic-orange);
+  width: 16px;
+  height: 16px;
+  border-radius: 0;
+}
+
+.choiceCardDisabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.choiceTitle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: inherit;
+  font-size: var(--classic-fs-label);
+  font-weight: var(--classic-fw-medium);
+  color: var(--classic-ink);
+  margin-bottom: 4px;
+  line-height: 1.3;
+  width: 100%;
+}
+
+.productsStep .choiceTitle {
+  margin-bottom: 0;
+}
+
+/* Setup type cards: title left, 16px check right (Figma 13:409 justify-between) */
+.choiceTitle .checkInline {
+  flex-shrink: 0;
+}
+
+.typeGrid .choiceTitle {
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 0; /* card uses flex gap 2px between title row and desc */
+  line-height: 20px;
+}
+
+.typeGrid .choiceDesc {
+  white-space: normal;
+}
+
+.typeGrid .choiceTitleText {
+  flex: 1 1 auto;
+}
+
+.typeGrid .choiceTitleText + .checkInline {
+  margin-left: 0;
+}
+
+.typeGrid .checkInline {
+  margin-left: 0;
+  width: 16px;
+  height: 16px;
+}
+
+.typeGrid .choiceCard {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  min-height: 64px;
+  padding: 13px;
+}
+
+.choiceIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--classic-orange);
+  flex-shrink: 0;
+}
+
+.choiceIconAccent {
+  color: var(--classic-orange);
+}
+
+.choiceCardSelected .choiceIcon {
+  color: var(--classic-orange);
+}
+
+.choiceTitleText {
+  flex: 0 1 auto;
+  min-width: 0;
+  text-align: left;
+}
+
+.checkInlineEnd {
+  margin-left: auto;
+}
+
+/* Products mode cards: reserve space for corner check (match product tiles) */
+.choiceCard:has(> .checkCorner) {
+  padding-right: 36px;
+}
+
+.choiceCard:has(> .checkCorner) .choiceTitle {
+  padding-right: 4px;
+}
+
+.iconBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 10px; /* Figma mode/pick card icon wells */
+  flex-shrink: 0;
+}
+
+.iconBadgeSoft {
+  background: var(--classic-orange-soft);
+  color: var(--classic-orange-deep, #942e00);
+}
+
+.iconBadgeFilled {
+  background: var(--classic-orange);
+  color: #fff;
+}
+
+.choiceCard .iconBadge svg {
+  width: 16px;
+  height: 16px;
+}
+
+.choiceDesc {
+  margin: 0;
+  color: var(--classic-muted);
+  font-size: 12px;
+  font-weight: var(--classic-fw-regular);
+  line-height: 16px;
+}
+
+.check {
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: var(--classic-orange);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--classic-fs-overline);
+  font-weight: var(--classic-fw-extrabold);
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.checkCorner {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  margin-left: 0;
+}
+
+.advanced {
+  border: 1px dashed var(--classic-line);
+  border-radius: var(--classic-radius-sm);
+  /* visible so nested menus are not clipped; portal dropdown is the primary path */
+  overflow: visible;
+  background: transparent;
+}
+
+.advancedSummary {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  cursor: pointer;
+  font-size: var(--classic-fs-label);
+  font-weight: var(--classic-fw-regular);
+  color: var(--classic-muted);
+  line-height: 20px;
+}
+
+.advancedSummary svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  color: var(--classic-muted);
+}
+
+.advancedSummary::-webkit-details-marker {
+  display: none;
+}
+
+.advancedBody {
+  padding: 17px 16px 16px; /* Figma Advanced open body */
+  border-top: 1px solid var(--classic-line);
+}
+
+.advancedBody .modeRow {
+  margin-bottom: 20px; /* Figma advanced grid gap-y 20 */
+}
+
+.audienceMinSample {
+  max-width: 320px; /* Figma min sample input width */
+}
+
+.audienceMinSample .input {
+  max-width: 320px;
+}
+
+.audienceAdvanced {
+  margin-top: 24px; /* Figma section gap after guardrails help */
+}
+
+/* Variations */
+/* Variations */
+.trafficBanner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 17px;
+  border-radius: 12px;
+  background: var(--classic-table-head);
+  border: 1px solid var(--classic-line);
+  margin-bottom: 24px; /* Figma: banner → variation list gap 24 */
+  font-size: var(--classic-fs-label);
+  font-weight: var(--classic-fw-regular);
+  color: var(--classic-body);
+}
+
+.trafficBannerLeft {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px; /* Figma: scales · label · 100% · / 100% */
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.trafficBannerIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--classic-muted); /* Figma scales stroke #6E605A */
+  flex-shrink: 0;
+}
+
+.trafficBanner .ghostBtn {
+  min-height: 26px;
+  padding: 5px 11px;
+  border-radius: 10px;
+  background: var(--classic-cream); /* Figma Split evenly #fefbf8 */
+  border: 1px solid var(--classic-line);
+  color: var(--classic-muted);
+  font-size: 12px;
+  font-weight: var(--classic-fw-medium);
+}
+
+.trafficBannerText {
+  color: var(--classic-muted);
+  font-weight: var(--classic-fw-regular);
+  line-height: 20px;
+}
+
+.trafficBannerMuted {
+  color: var(--classic-muted);
+  font-weight: var(--classic-fw-regular);
+}
+
+.trafficOk {
+  color: var(--classic-success, #3fb171);
+  font-weight: var(--classic-fw-semibold);
+}
+
+.trafficBad {
+  color: var(--status-error, #dc2626);
+  font-weight: var(--classic-fw-semibold);
+}
+
+.variationBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  border: 1px solid var(--classic-line);
+  border-radius: 12px;
+  padding: 17px;
+  margin-bottom: 12px;
+  background: var(--classic-cream); /* #fefbf8 */
+}
+
+.variationHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 0;
+  width: 100%;
+}
+
+.variationBadgeLetter,
+.letter {
+  width: 24px;
+  height: 24px;
+  border-radius: 10px; /* Figma letter wells are 10px radius, not full circles */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: var(--classic-fw-semibold);
+  font-size: 11px;
+  line-height: 16.5px;
+  background: var(--classic-orange-soft);
+  color: var(--classic-orange-deep, #942e00);
+  flex-shrink: 0;
+}
+
+.letterAlt {
+  background: var(--classic-orange-soft);
+  color: var(--classic-orange-deep, #942e00);
+}
+
+.variationTag {
+  font-size: 12px;
+  font-weight: var(--classic-fw-regular);
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--classic-muted);
+  line-height: 16px;
+}
+
+.variationRemove {
+  margin-left: auto;
+}
+
+.variationInput {
+  margin-bottom: 0;
+  background: var(--classic-card) !important; /* white inputs on cream card */
+  border-radius: 10px !important;
+  padding: 9px 13px !important;
+  min-height: 38px;
+}
+
+.variationInput:last-of-type {
+  margin-bottom: 0;
+}
+
+.sliderRow {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 6px;
+  align-items: center;
+  margin-top: 0;
+}
+
+.sliderCol {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 6px; /* Figma Traffic label → track */
+}
+
+.sliderMeta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0;
+}
+
+.trafficLabel {
+  font-size: 11px;
+  font-weight: var(--classic-fw-medium);
+  letter-spacing: 0.55px;
+  text-transform: uppercase;
+  color: var(--classic-muted); /* Figma #6E605A */
+  line-height: 16.5px;
+}
+
+.slider {
+  width: 100%;
+  margin: 0;
+  height: 8px;
+  border-radius: 999px;
+  appearance: none;
+  -webkit-appearance: none;
+  background: linear-gradient(
+    to right,
+    var(--classic-orange) 0%,
+    var(--classic-orange) var(--slider-fill, 50%),
+    var(--classic-wash) var(--slider-fill, 50%),
+    var(--classic-wash) 100%
+  );
+  outline: none;
+  cursor: pointer;
+  box-sizing: border-box;
+}
+
+.slider::-webkit-slider-thumb {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--classic-cream);
+  border: 2px solid var(--classic-orange);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.1);
+  cursor: pointer;
+}
+
+.slider::-moz-range-thumb {
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--classic-cream);
+  border: 2px solid var(--classic-orange);
+  cursor: pointer;
+}
+
+.pct {
+  font-weight: var(--classic-fw-medium);
+  font-size: 11px;
+  letter-spacing: 0.55px;
+  text-transform: uppercase;
+  color: var(--classic-ink);
+  line-height: 16.5px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.addVariation {
+  width: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 42px;
+  padding: 11px 16px;
+  border: 1px dashed var(--classic-line);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--classic-muted);
+  font-family: inherit;
+  font-size: var(--classic-fs-label);
+  font-weight: var(--classic-fw-regular); /* Figma Regular */
+  cursor: pointer;
+}
+
+.addVariation svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+.addVariation:hover {
+  background: var(--classic-wash);
+  border-color: var(--classic-muted-soft);
+  color: var(--classic-ink);
+}
+
+/* Products */
+.modeRow {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px; /* Figma mode / product card gap */
+  margin-bottom: 24px; /* Figma major section gap */
+}
+
+.modeRow3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.searchWrap {
+  position: relative;
+  margin-bottom: 10px;
+}
+
+.searchWrap svg {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--classic-muted);
+}
+
+.searchInput {
+  width: 100%;
+  border: 1px solid var(--classic-line);
+  border-radius: 12px;
+  background: var(--classic-cream);
+  color: var(--classic-ink);
+  font-family: inherit;
+  font-size: var(--classic-fs-body);
+  font-weight: var(--classic-fw-regular);
+  padding: 11px 12px 11px 38px;
+  outline: none;
+}
+
+.searchWrapPill {
+  margin-bottom: 0;
+}
+
+.searchInputPill {
+  border-radius: 12px !important;
+  padding-left: 40px !important;
+  min-height: 44px;
+  background: var(--classic-cream);
+}
+
+.tableSearch {
+  flex: 1 1 240px;
+  min-width: 220px;
+  max-width: 360px;
+  margin-bottom: 0;
+}
+
+.tableToolbar .tableSearch .input,
+.tableToolbar .tableSearch .searchInputPill {
+  background: var(--classic-pricing-input, #fefbf8) !important;
+  border: 1px solid var(--classic-pricing-border, #e9e3df) !important;
+  border-radius: 10px !important;
+  box-shadow: none !important;
+  min-height: 32px;
+  font-size: var(--classic-fs-meta);
+  color: var(--classic-ink);
+}
+
+.tableToolbar .tableSearch .input::placeholder {
+  color: var(--classic-muted);
+}
+
+.tableToolbar .tableSearch .input:-webkit-autofill,
+.tableToolbar .tableSearch .input:-webkit-autofill:hover,
+.tableToolbar .tableSearch .input:-webkit-autofill:focus {
+  -webkit-box-shadow: 0 0 0 1000px #fefbf8 inset !important;
+  box-shadow: 0 0 0 1000px #fefbf8 inset !important;
+  -webkit-text-fill-color: var(--classic-ink);
+}
+
+.tableToolbar .tableSearch svg {
+  color: var(--classic-muted);
+}
+
+.tableCount {
+  color: var(--classic-muted);
+  font-size: var(--classic-fs-help);
+  font-weight: var(--classic-fw-regular);
+  white-space: nowrap;
+}
+
+.tableFooter {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  margin-top: 10px;
+}
+
+.tablePager {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tablePageSize {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--classic-muted);
+  font-size: var(--classic-fs-help);
+  font-weight: var(--classic-fw-regular);
+  white-space: nowrap;
+}
+
+.tablePageSizeSelect {
+  width: auto;
+  min-width: 72px;
+  padding: 6px 28px 6px 10px;
+  border-radius: 8px;
+  font-size: var(--classic-fs-help);
+  line-height: 1.2;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5 6 8l3.5-3.5' fill='none' stroke='%236b7280' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  cursor: pointer;
+}
+
+.tablePagerBtn {
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--classic-line);
+  border-radius: 8px;
+  background: var(--classic-surface, #fff);
+  color: var(--classic-ink);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.tablePagerBtn:hover:not(:disabled) {
+  border-color: rgba(var(--accent-primary-rgb), 0.45);
+  color: var(--classic-orange);
+  background: var(--classic-orange-soft);
+}
+
+.tablePagerBtn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.tablePagerChevronPrev {
+  display: inline-flex;
+  transform: scaleX(-1);
+}
+
+.tableScroll {
+  overflow-x: auto;
+  border: 1px solid var(--classic-line);
+  border-radius: 12px;
+  background: var(--classic-card);
+}
+
+.tableScroll .table {
+  margin: 0;
+  background: var(--classic-card);
+}
+
+.tableScroll .table th:first-child,
+.tableScroll .table td:first-child {
+  padding-left: 14px;
+}
+
+.productsStep {
+  display: flex;
+  flex-direction: column;
+}
+
+.choiceCardCompact {
+  padding: 12px 14px;
+}
+
+.allProductsBox {
+  margin-bottom: 10px;
+  padding: 13px;
+  border-radius: var(--classic-radius-sm);
+  background: var(--classic-panel-tint, rgba(252, 246, 240, 0.3));
+  border: 1px solid var(--classic-line);
+}
+
+.allProductsHeader {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 12px;
+  font-size: var(--classic-fs-label);
+  font-weight: var(--classic-fw-semibold);
+  color: var(--classic-orange-deep, #942e00);
+  line-height: 1.4;
+}
+
+.allProductsCheck {
+  display: inline-flex;
+  color: var(--classic-orange-deep, #942e00);
+  margin-top: 1px;
+  flex-shrink: 0;
+}
+
+.clearSelectionLink {
+  border: 0;
+  background: transparent;
+  color: var(--classic-muted);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: var(--classic-fw-regular);
+  line-height: 16px;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.clearSelectionLink:hover {
+  color: var(--classic-ink);
+}
+
+.clearSelectionLink:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  text-decoration: none;
+}
+
+.successBannerInline {
+  margin-bottom: 0;
+  border-radius: 12px 12px 0 0;
+  border-bottom: 0;
+}
+
+.allProductsBox .chipGrid {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  margin-bottom: 12px;
+}
+
+.allProductsBox .showAllBtn {
+  margin: 0;
+}
+
+.productChipLabel {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.productChipMore {
+  color: var(--classic-muted);
+  font-weight: var(--classic-fw-semibold);
+  padding-left: 12px;
+}
+
+.aiSuggestBanner {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: stretch;
+  margin-bottom: 14px;
+  padding: 14px 16px;
+  background: var(--classic-orange-soft);
+  border: 1px solid rgba(241, 106, 26, 0.28);
+  border-radius: 12px;
+}
+
+.aiSuggestTitle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--classic-orange-deep, #942e00);
+  font-size: 14px;
+  font-weight: var(--classic-fw-semibold);
+  line-height: 20px;
+}
+
+.aiSuggestTitle svg {
+  color: var(--classic-orange);
+  flex-shrink: 0;
+}
+
+.aiSuggestBody {
+  margin: 0;
+  color: var(--classic-muted);
+  font-size: 13px;
+  font-weight: var(--classic-fw-regular);
+  line-height: 1.45;
+}
+
+.labelRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+
+.labelRow .label {
+  margin-bottom: 0;
+}
+
+.aiTextBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  background: transparent;
+  color: var(--classic-orange);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: var(--classic-fw-semibold);
+  cursor: pointer;
+  padding: 0;
+  white-space: nowrap;
+}
+
+.aiTextBtn:hover:not(:disabled) {
+  color: var(--classic-orange-deep, #942e00);
+}
+
+.aiTextBtn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.bulkBarPeach {
+  background: var(--classic-orange-soft);
+  border-color: rgba(241, 106, 26, 0.28);
+  padding: 14px 16px;
+}
+
+/* Figma 60:11746 — single cream bar, compact controls, Apply right */
+.bulkBarFigma {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-height: 52px;
+  padding: 11px 13px;
+  background: var(--classic-panel-tint, #fcf6f0);
+  border: 1px solid var(--classic-line, #e9e3df);
+  border-radius: 12px;
+}
+
+.collectionPlus {
+  font-weight: var(--classic-fw-bold);
+  color: var(--classic-muted);
+  line-height: 1;
+}
+
+.collectionName {
+  font-weight: var(--classic-fw-semibold);
+}
+
+.collectionPillHasSelection {
+  border-color: rgba(var(--accent-primary-rgb), 0.45);
+  background: var(--classic-orange-soft);
+}
+
+.collectionPillHasSelection .collectionPlus,
+.collectionPillActive .collectionPlus {
+  color: var(--classic-orange);
+}
+
+.bulkBarLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  font-size: 14px;
+  font-weight: var(--classic-fw-regular);
+  line-height: 20px;
+  color: var(--classic-muted, #6e605a);
+  white-space: nowrap;
+}
+
+.bulkBarMuted {
+  color: var(--classic-muted);
+  font-size: var(--classic-fs-meta);
+}
+
+.bulkField {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--classic-fs-meta);
+  color: var(--classic-muted);
+  font-weight: var(--classic-fw-semibold);
+}
+
+.bulkInput {
+  width: 64px !important;
+  min-height: 30px;
+  height: 30px;
+  padding: 5px 9px !important;
+  margin: 0 !important;
+  text-align: left;
+  font-size: 14px !important;
+  line-height: 20px !important;
+  background: var(--classic-cream, #fefbf8) !important;
+  border: 1px solid var(--classic-line, #e9e3df) !important;
+  border-radius: 10px !important;
+  color: var(--classic-ink, #231814) !important;
+  box-shadow: none !important;
+  box-sizing: border-box;
+  flex-shrink: 0;
+}
+
+.bulkInput:focus {
+  border-color: var(--classic-orange) !important;
+  box-shadow: 0 0 0 2px rgba(241, 106, 26, 0.2) !important;
+}
+
+.segmentInline {
+  margin-bottom: 0;
+}
+
+.dismissibleBanner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.infoBanner.dismissibleBanner {
+  align-items: center;
+}
+
+.dismissibleBannerIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: inherit;
+  line-height: 0;
+}
+
+.dismissibleBannerText {
+  flex: 1;
+  line-height: 1.45;
+}
+
+.bannerClose {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+  opacity: 0.7;
+}
+
+.bannerClose:hover {
+  opacity: 1;
+}
+
+.tableProductCell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.tableThumb {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  object-fit: cover;
+  background: var(--classic-table-head);
+  flex-shrink: 0;
+  display: block;
+}
+
+.expandSpacer {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+}
+
+.variantLabel {
+  display: flex;
+  align-items: center;
+  gap: 8px; /* Figma variant row */
+  padding-left: 0;
+  font-size: 13px; /* Figma Size S */
+  font-weight: var(--classic-fw-regular);
+  line-height: 18.5px;
+  color: var(--classic-muted); /* Figma #6e605a — not ink */
+}
+
+.variantBullet {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--classic-line, #e9e3df); /* Figma bullet */
+  flex-shrink: 0;
+  font-size: 0;
+  line-height: 0;
+  color: transparent;
+}
+
+.pillRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 26px; /* Figma secondary / device pills */
+  padding: 5px 13px;
+  border-radius: 999px;
+  border: 1px solid var(--classic-line);
+  background: var(--classic-card);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: var(--classic-fw-regular);
+  color: var(--classic-muted);
+  cursor: pointer;
+  line-height: 16px;
+}
+
+.pillActive {
+  border-color: var(--classic-orange);
+  background: var(--classic-orange-soft);
+  color: var(--classic-orange-deep, #942e00);
+  font-weight: var(--classic-fw-medium);
+}
+
+.pill:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Secondary metrics — Figma: cream fill + muted text #6e605a */
+.metricPillRow .pill:not(.pillActive) {
+  background: var(--classic-card);
+  color: var(--classic-muted);
+  font-weight: var(--classic-fw-regular);
+}
+
+.audiencePanel .pill:not(.pillActive) {
+  background: var(--classic-cream); /* Figma device/source inactive */
+  color: var(--classic-muted);
+  font-weight: var(--classic-fw-regular);
+}
+
+.audiencePanel .pill.pillActive {
+  font-weight: var(--classic-fw-regular); /* Figma Regular on active device/source */
+}
+
+.audiencePanel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px; /* Figma label → pills → help */
+  padding: 17px;
+  margin-bottom: 0;
+  border: 1px solid var(--classic-line);
+  border-radius: 12px;
+  background: var(--classic-panel-tint, rgba(252, 246, 240, 0.3));
+}
+
+.audiencePanelHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.audiencePanelHead .sectionLabel {
+  margin: 0;
+}
+
+.includeExcludeToggle {
+  margin-bottom: 0;
+  flex-shrink: 0;
+}
+
+.customGoalPill {
+  border-style: dashed;
+  font-weight: var(--classic-fw-medium);
+}
+
+.customGoalPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  padding: 14px 16px;
+  border: 1px solid var(--classic-line);
+  border-radius: 12px;
+  background: var(--classic-panel-tint, rgba(252, 246, 240, 0.3));
+}
+
+.customGoalPanelLabel {
+  font-size: 13px;
+  font-weight: var(--classic-fw-medium);
+  color: var(--classic-ink);
+}
+
+.customGoalPanel .help {
+  margin: 0;
+}
+
+.customGoalGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 12px;
+}
+
+.customGoalField {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.customGoalField > span {
+  font-size: 12px;
+  font-weight: var(--classic-fw-medium);
+  color: var(--classic-muted);
+}
+
+.customGoalField .input,
+.customGoalField .select,
+.customGoalField .textarea {
+  background: var(--classic-card);
+}
+
+.customGoalHint {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--classic-cream, #fefbf8);
+  border: 1px solid var(--classic-line);
+  color: var(--classic-muted);
+  font-size: 12px;
+  line-height: 1.4;
+  overflow-x: auto;
+}
+
+.customGoalHint code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  color: var(--classic-ink);
+  white-space: pre-wrap;
+}
+
+.customGoalError {
+  margin: 0;
+  color: #b42318;
+  font-size: 12px;
+}
+
+.customGoalList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.customGoalList li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--classic-line);
+  border-radius: 10px;
+  background: var(--classic-card);
+}
+
+.customGoalList li strong {
+  display: block;
+  font-size: 13px;
+  color: var(--classic-ink);
+}
+
+.customGoalList li span {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--classic-muted);
+}
+
+.customGoalList .ghostBtn {
+  min-height: 32px;
+  padding: 6px 10px;
+  flex-shrink: 0;
+}
+
+.customGoalActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.customGoalActions .ghostBtn:disabled,
+.customGoalActions .primaryBtn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Classic Goal Picker modal */
+.goalPickerModal {
+  width: min(880px, 100%);
+  max-height: min(86vh, 720px);
+}
+
+.goalPickerTabs {
+  display: flex;
+  gap: 4px;
+  padding: 10px 22px 0;
+  border-bottom: 1px solid var(--classic-line);
+  background: var(--classic-card);
+}
+
+.goalPickerTab {
+  min-height: 36px;
+  padding: 8px 14px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--classic-muted);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: var(--classic-fw-medium);
+  cursor: pointer;
+}
+
+.goalPickerTabActive {
+  color: var(--classic-ink);
+  border-bottom-color: var(--classic-orange);
+}
+
+.goalPickerBody {
+  display: block !important;
+  grid-template-columns: none !important;
+  min-height: 360px;
+  overflow: auto;
+  padding: 16px 22px 20px;
+}
+
+.goalPickerBrowse,
+.goalPickerCreate {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.goalPickerToolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 12px;
+}
+
+.goalPickerSourceFilter {
+  margin-bottom: 0;
+}
+
+.goalPickerSourceFilter .segmentBtn {
+  min-height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.goalPickerPanes {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  min-height: 280px;
+}
+
+.goalPickerPane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border: 1px solid var(--classic-line);
+  border-radius: 12px;
+  background: var(--classic-panel-tint, rgba(252, 246, 240, 0.3));
+  overflow: hidden;
+}
+
+.goalPickerPaneHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--classic-line);
+  background: var(--classic-card);
+}
+
+.goalPickerPaneHead strong {
+  font-size: 13px;
+  color: var(--classic-ink);
+}
+
+.goalPickerPaneHead span {
+  font-size: 12px;
+  color: var(--classic-muted);
+}
+
+.goalPickerList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  overflow: auto;
+  max-height: 340px;
+}
+
+.goalPickerRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--classic-line);
+  border-radius: 10px;
+  background: var(--classic-card);
+}
+
+.goalPickerRowMeta {
+  min-width: 0;
+}
+
+.goalPickerRowMeta strong {
+  display: block;
+  font-size: 13px;
+  color: var(--classic-ink);
+}
+
+.goalPickerRowMeta span {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--classic-muted);
+  line-height: 1.35;
+}
+
+.goalPickerRow .ghostBtn {
+  min-height: 30px;
+  padding: 5px 10px;
+  flex-shrink: 0;
+  font-size: 12px;
+}
+
+.goalPickerEmpty {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 8px 4px;
+}
+
+.goalPickerEmptyActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+}
+
+.goalPickerCreate .customGoalField {
+  margin-top: 0;
+}
+
+.goalPickerCreate .customGoalActions .primaryBtn {
+  min-height: 36px;
+  padding: 8px 14px;
+  font-size: 13px;
+}
+
+@media (max-width: 720px) {
+  .customGoalGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .goalPickerPanes {
+    grid-template-columns: 1fr;
+  }
+}
+
+.audiencePanel.field {
+  margin-bottom: var(--classic-space-field);
+}
+
+.audiencePanel .sectionLabel {
+  margin: 0;
+}
+
+.audiencePanel .pillRow {
+  margin-bottom: 0;
+}
+
+.audiencePanel .help {
+  margin: 0;
+}
+
+.audiencePanel .label {
+  margin-bottom: 0;
+}
+
+.modeRow .audiencePanel {
+  margin-bottom: 0;
+}
+
+.productGridShell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  border: 1px solid var(--classic-line);
+  border-radius: 12px;
+  padding: 9px;
+  margin-bottom: 12px;
+  background: var(--classic-panel-tint, rgba(252, 246, 240, 0.3)); /* Figma grid shell */
+}
+
+.productGridShell .productGrid {
+  width: 100%;
+}
+
+.productGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 0;
+}
+
+.productGridShell .showAllBtn {
+  margin-top: 8px;
+  width: auto; /* Figma: compact left-aligned control, not full bleed */
+  align-self: flex-start;
+}
+
+.productCard {
+  position: relative;
+  display: grid;
+  grid-template-columns: 48px 1fr;
+  gap: 12px;
+  align-items: flex-start;
+  text-align: left;
+  border: 1px solid var(--classic-line);
+  border-radius: 12px;
+  padding: 13px 36px 13px 13px;
+  background: var(--classic-cream); /* Figma #fefbf8 */
+  cursor: pointer;
+  font-family: inherit;
+  min-height: 76px;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.productGrid .productName {
+  font-size: 14px; /* Figma product card title */
+  font-weight: var(--classic-fw-medium);
+  line-height: 20px;
+  color: var(--classic-ink);
+}
+
+.productMeta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding-top: 0;
+}
+
+.productGrid .productSub {
+  font-size: 12px;
+  font-weight: var(--classic-fw-regular);
+  line-height: 16px;
+  color: var(--classic-muted);
+}
+
+.productCard:hover {
+  border-color: rgba(var(--accent-primary-rgb), 0.35);
+}
+
+.productCardSelected {
+  border-color: var(--classic-orange);
+  background: var(--classic-orange-soft);
+}
+
+/* Selected product / mode cards: plain orange check (not filled circle) */
+.productCardSelected .checkCorner,
+.productCardSelected .checkInline,
+.choiceCardSelected .checkCorner,
+.choiceCardSelected .checkInline.checkCorner {
+  width: 16px;
+  height: 16px;
+  border-radius: 0;
+  background: transparent;
+  color: var(--classic-orange);
+  top: 10px;
+  right: 10px;
+  box-shadow: none;
+}
+
+.thumb {
+  width: 48px;
+  height: 48px;
+  border-radius: 10px;
+  object-fit: cover;
+  background: var(--classic-table-head);
+}
+
+.controlBadge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 18px;
+  padding: 1px 6px;
+  margin-left: 8px;
+  border-radius: 4px;
+  background: var(--classic-wash);
+  color: var(--classic-muted);
+  font-size: 10px;
+  font-weight: var(--classic-fw-regular);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.productName {
+  font-weight: var(--classic-fw-medium);
+  font-size: var(--classic-fs-label);
+  color: var(--classic-ink);
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.productSub {
+  color: var(--classic-muted);
+  font-size: var(--classic-fs-help);
+  font-weight: var(--classic-fw-regular);
+  line-height: 1.35;
+  margin-top: 0;
+}
+
+.selectionBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 8px 0 0;
+  width: 100%;
+  font-size: 12px;
+  font-weight: var(--classic-fw-regular);
+  line-height: 16px;
+  color: var(--classic-muted);
+}
+
+.selectionBarActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.productsHeaderRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 4px 0 0;
+}
+
+.productsHeaderActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.selectAllLink {
+  border: 1px solid var(--classic-line);
+  background: var(--classic-cream);
+  padding: 6px 12px;
+  border-radius: 10px;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: var(--classic-fw-medium);
+  color: var(--classic-ink);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.selectAllLink:hover:not(:disabled) {
+  border-color: var(--classic-orange-border);
+  color: var(--classic-orange-deep, #942e00);
+}
+
+.selectAllLink:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.groupTabRow {
+  display: inline-flex;
+  gap: 4px;
+  padding: 3px;
+  margin: 14px 0 0;
+  border-radius: 999px;
+  background: var(--classic-wash);
+  border: 1px solid var(--classic-line);
+}
+
+.groupTab {
+  border: 0;
+  background: transparent;
+  min-height: 30px;
+  padding: 0 12px;
+  border-radius: 999px;
+  font-family: inherit;
+  font-size: var(--classic-fs-meta);
+  font-weight: var(--classic-fw-semibold);
+  color: var(--classic-muted);
+  cursor: pointer;
+}
+
+.groupTab:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.groupTabActive {
+  background: var(--classic-card);
+  color: var(--classic-orange);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+  font-weight: var(--classic-fw-bold);
+}
+
+.productsFooterActions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 4px;
+  width: 100%;
+}
+
+.emptyProducts {
+  padding: 16px;
+  border: 1px dashed var(--classic-line);
+  border-radius: var(--classic-radius-sm);
+  background: var(--classic-wash);
+  margin-bottom: 12px;
+}
+
+.productsDivider {
+  border: 0;
+  border-top: 1px solid var(--classic-line);
+  margin: 24px 0 24px; /* Figma: products ↔ Set prices for */
+  width: 100%;
+}
+
+.variantCountAccent {
+  color: var(--classic-orange-deep, #942e00); /* Figma pricing table variant count */
+  font-weight: var(--classic-fw-regular);
+}
+
+.segment {
+  display: inline-flex;
+  gap: 4px;
+  padding: 3px;
+  border-radius: 12px;
+  background: var(--classic-wash);
+  border: 1px solid var(--classic-line);
+  margin-bottom: 14px;
+}
+
+.segmentBtn {
+  min-height: 34px;
+  padding: 0 12px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background: var(--classic-card);
+  font-family: inherit;
+  font-weight: var(--classic-fw-medium);
+  font-size: var(--classic-fs-meta);
+  cursor: pointer;
+  color: var(--classic-muted);
+}
+
+.segmentBtnActive {
+  background: var(--classic-orange);
+  color: #fff;
+  border-color: var(--classic-orange);
+}
+
+.segmentOnPeach {
+  background: var(--classic-segment-on, rgba(255, 255, 255, 0.55));
+  border-color: rgba(var(--accent-primary-rgb), 0.18);
+}
+
+.segmentOnPeach .segmentBtn:not(.segmentBtnActive) {
+  background: var(--classic-card);
+  color: var(--classic-orange);
+}
+
+.infoBanner {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--classic-orange-soft);
+  border: 1px solid rgba(var(--accent-primary-rgb), 0.25);
+  margin-bottom: 14px;
+  font-size: var(--classic-fs-label);
+  font-weight: var(--classic-fw-regular);
+  color: var(--classic-ink);
+  line-height: 1.45;
+}
+
+.bulkBar {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+  padding: 11px 13px;
+  border-radius: 12px;
+  background: var(--classic-panel-tint, #fcf6f0);
+  border: 1px solid var(--classic-line, #e9e3df);
+  box-sizing: border-box;
+}
+
+.bulkBarInner {
+  display: contents;
+}
+
+.bulkBarControls {
+  display: contents;
+}
+
+.bulkBar .segment,
+.bulkSegment {
+  margin-bottom: 0;
+  flex-shrink: 0;
+  background: var(--classic-cream, #fefbf8);
+  border: 1px solid var(--classic-line, #e9e3df);
+  border-radius: 10px;
+  padding: 1px;
+  gap: 0;
+  overflow: hidden;
+}
+
+.bulkBar .segmentBtn,
+.bulkSegment .segmentBtn {
+  min-height: 24px;
+  height: 24px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: var(--classic-fw-medium);
+  line-height: 16px;
+  border-radius: 0;
+  border: 0;
+  background: transparent;
+  color: var(--classic-muted, #6e605a);
+  box-shadow: none;
+}
+
+.bulkBar .segmentBtn:not(.segmentBtnActive):hover,
+.bulkSegment .segmentBtn:not(.segmentBtnActive):hover {
+  color: var(--classic-ink);
+  background: transparent;
+}
+
+.bulkBar .segmentBtnActive,
+.bulkSegment .segmentBtnActive {
+  background: var(--classic-orange, #f16a1a);
+  color: var(--classic-cream, #fefbf8);
+  border-color: transparent;
+  border-radius: 8px;
+}
+
+.bulkBar .segmentBtn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.bulkBarAction.primaryBtn,
+.bulkBar .bulkBarAction,
+.bulkBar .primaryBtn {
+  margin-left: auto;
+  min-height: 24px !important;
+  height: 24px;
+  padding: 4px 10px !important;
+  border-radius: 10px;
+  font-size: 12px !important;
+  font-weight: var(--classic-fw-medium);
+  line-height: 16px;
+  box-shadow: none !important;
+  flex-shrink: 0;
+}
+
+.bulkBarAction:disabled,
+.bulkBar .primaryBtn:disabled {
+  opacity: 0.55;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--classic-fs-label);
+  background: var(--classic-card);
+}
+
+.table th {
+  text-align: left;
+  font-size: 11px;
+  font-weight: var(--classic-fw-medium);
+  letter-spacing: 0.55px;
+  text-transform: uppercase;
+  color: var(--classic-muted);
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--classic-line);
+  background: var(--classic-table-head, #fcf6f0);
+}
+
+.table td {
+  padding: 14px;
+  border-bottom: 1px solid var(--classic-line);
+  vertical-align: middle;
+  font-size: var(--classic-fs-label);
+  font-weight: var(--classic-fw-regular);
+  color: var(--classic-body);
+  background: var(--classic-card);
+  text-align: left;
+}
+
+.priceCell {
+  text-align: right;
+}
+
+.priceField {
+  display: inline-flex;
+  align-items: center;
+  width: 96px;
+  min-height: 32px;
+  padding: 0 9px 0 21px;
+  border: 1px solid var(--classic-pricing-border, #e9e3df);
+  border-radius: 10px;
+  background: var(--classic-pricing-input, #fefbf8);
+  vertical-align: middle;
+  box-sizing: border-box;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  position: relative;
+}
+
+.priceField:hover {
+  border-color: #cfc9c4;
+}
+
+.priceField:focus-within {
+  border-color: var(--classic-orange);
+  box-shadow: 0 0 0 2px rgba(241, 106, 26, 0.2);
+}
+
+.pricePrefix {
+  position: absolute;
+  left: 9px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-right: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--classic-muted);
+  font-size: var(--classic-fs-label);
+  font-weight: var(--classic-fw-regular);
+  line-height: 1;
+  user-select: none;
+  pointer-events: none;
+}
+
+.priceInput {
+  flex: 1;
+  width: 100%;
+  min-width: 0;
+  border: 0 !important;
+  border-radius: 0;
+  padding: 5px 0;
+  text-align: right; /* Figma test-price field */
+  font-family: inherit;
+  font-size: var(--classic-fs-label);
+  font-weight: var(--classic-fw-regular);
+  color: var(--classic-ink);
+  background: transparent !important;
+  outline: none;
+  box-shadow: none !important;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.priceInput:-webkit-autofill,
+.priceInput:-webkit-autofill:hover,
+.priceInput:-webkit-autofill:focus {
+  -webkit-box-shadow: 0 0 0 1000px #fefbf8 inset !important;
+  box-shadow: 0 0 0 1000px #fefbf8 inset !important;
+  -webkit-text-fill-color: var(--classic-ink);
+}
+
+.priceInput:disabled {
+  color: var(--classic-muted);
+  cursor: not-allowed;
+  opacity: 1;
+  background: transparent !important;
+}
+
+.priceField:has(.priceInput:disabled) {
+  background: var(--classic-disabled-field, #f3f0ec);
+  border-color: var(--classic-pricing-border, #e5e1de);
+  box-shadow: none;
+}
+
+.priceField:has(.priceInput:disabled) .pricePrefix {
+  background: transparent;
+  color: var(--classic-disabled-text, #9a9590);
+}
+
+.deltaBadge {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 1px;
+  min-height: 28px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--classic-success-bg);
+  color: var(--classic-success, #3fb171);
+  font-weight: var(--classic-fw-bold);
+  font-size: var(--classic-fs-help);
+  line-height: 1.15;
+  white-space: nowrap;
+}
+
+.deltaPct {
+  font-size: var(--classic-fs-help);
+  font-weight: var(--classic-fw-bold);
+  color: inherit;
+}
+
+.deltaAmount {
+  font-size: 0.65rem;
+  font-weight: var(--classic-fw-semibold);
+  color: inherit;
+  opacity: 0.9;
+}
+
+.deltaPos {
+  display: inline-flex;
+  align-items: center;
+  min-height: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  color: #2f8f5b;
+  font-weight: var(--classic-fw-medium);
+  font-size: 11px;
+  background: rgba(63, 177, 113, 0.15);
+}
+
+.deltaNeg {
+  display: inline-flex;
+  align-items: center;
+  min-height: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  color: #b91c1c;
+  font-weight: var(--classic-fw-medium);
+  font-size: 11px;
+  background: rgba(185, 28, 28, 0.1);
+}
+
+/* Product rows: white. Accordion variant rows: separate wash. */
+.table tbody tr.productPriceRow > td {
+  background: var(--classic-table-row, #ffffff);
+}
+
+.table tbody tr.productPriceRow:hover > td {
+  background: var(--classic-table-row-hover, #faf7f2);
+}
+
+.table tbody tr.variantRow > td {
+  background: var(--classic-table-variant);
+  color: var(--classic-muted);
+  border-top: 1px solid rgba(233, 227, 223, 0.6);
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+
+.table tbody tr.variantRow:hover > td {
+  background: var(--classic-table-variant-hover);
+}
+
+.table tbody tr.variantRow > td:first-child {
+  padding-left: 40px; /* Figma accordion indent */
+}
+
+/* Audience */
+.pillSelect {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid var(--classic-line);
+  background: var(--classic-card);
+  font-family: inherit;
+  font-size: var(--classic-fs-meta);
+  font-weight: var(--classic-fw-semibold);
+  cursor: pointer;
+  color: var(--classic-ink);
+}
+
+.guardTable {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: var(--classic-fs-meta);
+  margin-top: 8px;
+  border: 1px solid var(--classic-line);
+  border-radius: var(--classic-radius-sm);
+  overflow: hidden;
+  background: var(--classic-card);
+}
+
+.guardTable th,
+.guardTable td {
+  padding: 12px;
+  border-bottom: 1px solid var(--classic-line);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.guardTable tr:last-child td {
+  border-bottom: 0;
+}
+
+.guardTable th {
+  font-size: 11px;
+  font-weight: var(--classic-fw-medium);
+  letter-spacing: 0.55px;
+  text-transform: uppercase;
+  color: var(--classic-muted);
+  background: var(--classic-table-head);
+  padding: 8px 12px;
+}
+
+.guardTable th:nth-child(3),
+.guardTable td:nth-child(3) {
+  text-align: right;
+  padding-right: 16px;
+}
+
+.guardTable th:nth-child(4),
+.guardTable td:nth-child(4) {
+  text-align: center;
+  width: 64px;
+  padding-left: 8px;
+  padding-right: 12px;
+}
+
+.guardMetricHead {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+}
+
+.guardThresholdCell {
+  text-align: right;
+}
+
+.guardThresholdCell .thresholdInput {
+  margin-left: auto;
+  display: inline-block;
+}
+
+.guardOnCell {
+  text-align: center;
+  vertical-align: middle;
+}
+
+.guardOnCell .toggle {
+  margin: 0 auto;
+  display: inline-block;
+  vertical-align: middle;
+}
+
+.thresholdInput {
+  width: 80px;
+  border: 1px solid var(--classic-line);
+  border-radius: 10px;
+  padding: 5px 9px;
+  font: inherit;
+  font-size: var(--classic-fs-label);
+  text-align: right;
+  color: var(--classic-ink);
+  background: var(--classic-cream);
+}
+
+.thresholdInput:focus {
+  border-color: var(--classic-orange);
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(241, 106, 26, 0.2);
+}
+
+.toggle {
+  width: 36px;
+  height: 20px;
+  border-radius: 999px;
+  border: 0;
+  background: var(--classic-wash, #f8f2ee); /* Figma off track */
+  position: relative;
+  cursor: pointer;
+  flex-shrink: 0;
+  padding: 0 4px 0 16px;
+}
+
+.thresholdInputDim {
+  opacity: 0.5;
+}
+
+.toggleOn {
+  background: var(--classic-orange);
+}
+
+.toggleKnob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background: var(--classic-cream);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.1);
+  transition: left 0.15s ease;
+}
+
+.toggleOn .toggleKnob {
+  left: 18px;
+}
+
+/* Review */
+.reviewStack {
+  display: flex;
+  flex-direction: column;
+  gap: 24px; /* Figma Review Main content gap */
+}
+
+.callout {
+  display: flex;
+  gap: 12px; /* Figma ETA callout */
+  align-items: flex-start;
+  padding: 17px;
+  border-radius: 12px;
+  background: var(--classic-callout-bg, rgba(255, 235, 214, 0.5));
+  border: 1px solid var(--classic-callout-border, rgba(241, 106, 26, 0.3));
+  margin-bottom: 0;
+  font-size: var(--classic-fs-label);
+  font-weight: var(--classic-fw-regular);
+  color: var(--classic-body);
+  line-height: 1.45;
+}
+
+.calloutIcon {
+  display: inline-flex;
+  align-items: flex-start;
+  flex-shrink: 0;
+  width: 16px;
+  height: 18px;
+  padding-top: 2px;
+  color: var(--classic-orange);
+}
+
+.reviewSection {
+  border: 1px solid var(--classic-line);
+  border-radius: 12px;
+  padding: 17px;
+  margin-bottom: 0;
+  background: var(--classic-cream); /* Figma review cards #fefbf8 */
+  display: flex;
+  flex-direction: column;
+  gap: 12px; /* Figma section head → body */
+}
+
+.reviewHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0;
+}
+
+.reviewHead h3 {
+  margin: 0;
+  font-family: var(--ripx-font-classic, var(--ripx-font-ui, 'Inter', system-ui, sans-serif));
+  font-size: var(--classic-fs-label);
+  font-weight: var(--classic-fw-semibold);
+  letter-spacing: -0.28px; /* Figma review section titles */
+  color: var(--classic-ink);
+  line-height: 20px;
+}
+
+.checkInline {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: var(--classic-orange);
+  color: #fff;
+  flex-shrink: 0;
+}
+
+/* Step 3 cards + step 4 pills: plain orange stroke check, no filled circle */
+.checkPlain {
+  background: transparent;
+  color: var(--classic-orange);
+  width: 16px;
+  height: 16px;
+  border-radius: 0;
+}
+
+.pill .checkPlain,
+.countryField .checkPlain {
+  width: 13px;
+  height: 13px;
+}
+
+.pillActive .checkPlain {
+  color: var(--classic-orange-deep, #942e00);
+}
+
+.editLink {
+  border: 0;
+  background: transparent;
+  color: var(--classic-orange-deep, #942e00); /* Figma Edit #942e00 */
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: var(--classic-fw-medium);
+  cursor: pointer;
+  padding: 0;
+  line-height: 16px;
+}
+
+.editLink:hover {
+  color: var(--classic-orange);
+}
+
+.badgeRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 0;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--classic-table-head);
+  border: 0;
+  font-size: var(--classic-fs-help);
+  font-weight: var(--classic-fw-regular);
+  color: var(--classic-muted);
+}
+
+.badge strong {
+  font-weight: var(--classic-fw-medium);
+  color: var(--classic-ink);
+}
+
+.badgeAccent {
+  background: var(--classic-orange-soft);
+  border: 0;
+  color: var(--classic-orange-deep, #942e00);
+  font-weight: var(--classic-fw-regular);
+}
+
+.badgeAccent strong {
+  color: var(--classic-orange-deep, #942e00);
+}
+
+.armChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 23px;
+  padding: 3px 9px;
+  border-radius: 10px;
+  border: 1px solid var(--classic-line, #e9e3df);
+  background: var(--classic-cream, #fefbf8);
+  font-size: 11px;
+  font-weight: var(--classic-fw-medium);
+  color: var(--classic-ink);
+  margin-left: 0;
+}
+
+.armChipAlt {
+  background: var(--classic-cream, #fefbf8);
+}
+
+.armLetter {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  background: var(--classic-orange-soft, #ffebd6);
+  color: var(--classic-orange-deep, #942e00);
+  font-size: 9px;
+  font-weight: var(--classic-fw-semibold);
+}
+
+.kvLabel {
+  margin: 0 0 4px;
+  font-size: var(--classic-fs-label);
+  font-weight: var(--classic-fw-regular);
+  color: var(--classic-muted);
+  line-height: 20px;
+}
+
+.kvValue {
+  margin: 0;
+  font-size: var(--classic-fs-label);
+  font-weight: var(--classic-fw-regular);
+  color: var(--classic-ink);
+  line-height: 20px;
+}
+
+.reviewRows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.reviewRow {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.reviewRow .kvLabel {
+  width: 96px;
+  flex-shrink: 0;
+  margin: 0;
+}
+
+.reviewRow .kvValue {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.reviewLine {
+  margin: 0 0 6px;
+  font-size: var(--classic-fs-body);
+  font-weight: var(--classic-fw-regular);
+  color: var(--classic-body);
+  line-height: 1.45;
+}
+
+.panelTitle {
+  margin: 0;
+  font-family: var(--ripx-font-classic, var(--ripx-font-ui, 'Inter', system-ui, sans-serif));
+  font-size: var(--classic-fs-label);
+  font-weight: var(--classic-fw-semibold);
+  letter-spacing: -0.02em;
+  color: var(--classic-ink);
+  line-height: 1.3;
+}
+
+.reviewGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 24px;
+}
+
+.reviewProductList {
+  border: 1px solid var(--classic-line);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--classic-card);
+}
+
+.reviewProductRow {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--classic-line);
+}
+
+.reviewProductMeta {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.reviewArmChips {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.reviewProductRow:last-child {
+  border-bottom: 0;
+}
+
+.reviewThumb {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  object-fit: cover;
+  background: var(--classic-table-head);
+  display: block;
+  flex-shrink: 0;
+}
+
+.conversionRow {
+  margin: 0 0 16px; /* Figma conversion rows gap */
+}
+
+.conversionRow:last-child {
+  margin-bottom: 0;
+}
+
+.conversionRowMeta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.conversionRowMeta strong:last-child {
+  color: var(--classic-muted); /* Figma rate values */
+  font-weight: var(--classic-fw-regular);
+}
+
+.overviewHeaderCopy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+}
+
+.overviewActions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+@media (min-width: 900px) {
+  .overviewActionBtn {
+    width: 168px;
+    min-width: 168px;
+    justify-content: center;
+  }
+}
+
+.overviewMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin-top: 4px;
+  font-size: 12px;
+  font-weight: var(--classic-fw-regular);
+  color: var(--classic-muted);
+  line-height: 16px;
+}
+
+.overviewSplit {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr;
+  gap: 16px;
+}
+
+.overviewSplit > .statCard {
+  padding: 25px; /* Conversion + Totals — Figma */
+}
+
+.overviewSplit .selectionBar {
+  margin: 0;
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.overviewSplit .selectionBar + .selectionBar {
+  margin-top: 12px; /* Figma Totals row gap */
+}
+
+.overviewSplit .selectionBar strong {
+  font-weight: var(--classic-fw-medium);
+  color: var(--classic-ink);
+}
+
+/* Overview KPI cards: label → value → caption with 4px stack */
+.statGrid > .statCard:has(.statValueLg) {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.statGrid > .statCard:has(.statValueLg) .statLabel {
+  margin-bottom: 0;
+}
+
+.statGrid > .statCard:has(.statValueLg) .productSub {
+  margin-top: 0;
+}
+
+.barTrack {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--classic-wash);
+  overflow: hidden;
+}
+
+.barFill {
+  height: 100%;
+  border-radius: 999px;
+  background: rgba(241, 106, 26, 0.4);
+}
+
+.barFillWinner {
+  background: var(--classic-orange);
+}
+
+.rowLink {
+  border: 0;
+  background: transparent;
+  color: var(--classic-ink);
+  font-family: var(--ripx-font-classic, var(--ripx-font-ui, 'Inter', system-ui, sans-serif));
+  font-size: var(--classic-fs-label);
+  font-weight: var(--classic-fw-medium);
+  line-height: 1.3;
+  cursor: pointer;
+  padding: 0;
+  text-align: left;
+}
+
+.overviewTabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--classic-line);
+  margin-bottom: 0; /* listPage gap handles spacing to panels */
+  overflow-x: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.overviewTabs::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+.overviewTitleRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.overviewHypothesis {
+  margin: 0;
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--classic-muted);
+}
+
+.variationArmGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 16px;
+}
+
+.variationArmCard {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.variationsProductsPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.variationsProductsToolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.variationsProductsSearch {
+  flex: 1;
+  min-width: 220px;
+  margin-bottom: 0;
+}
+
+.variationsProductsTableScroll {
+  border-radius: 12px;
+}
+
+.variationsProductsTableScroll .table th:first-child,
+.variationsProductsTableScroll .table td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--classic-card);
+  box-shadow: 1px 0 0 var(--classic-line);
+}
+
+.variationsProductsTableScroll .table th:first-child {
+  z-index: 2;
+  background: var(--classic-table-head, var(--classic-wash));
+}
+
+.variationsPriceCol {
+  text-align: right;
+  white-space: nowrap;
+  width: 1%;
+}
+
+.variationsActionsCol {
+  text-align: right;
+  white-space: nowrap;
+  width: 1%;
+}
+
+.variationsActionsCol .ghostBtn {
+  min-height: 34px;
+  padding: 7px 11px;
+  font-size: 12px;
+}
+
+.variationsProductsFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.variationProductBlockHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.variationProductMeta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.variationsProductCopy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.variationsProductCopy strong {
+  font-size: 13px;
+  font-weight: var(--classic-fw-medium);
+  color: var(--classic-ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 840px) {
+  .variationsProductsFooter {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .variationsProductsFooter .tablePager {
+    justify-content: space-between;
+  }
+}
+
+.variationPreviewRow {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 14px;
+}
+
+.variationPreviewRow .ghostBtn {
+  min-height: 36px;
+  padding: 8px 12px;
+}
+
+.variationQrPopover {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 20;
+  width: min(280px, calc(100vw - 48px));
+  padding: 14px;
+  border-radius: 12px;
+  border: 1px solid var(--classic-line);
+  background: var(--classic-card);
+  box-shadow: 0 8px 24px rgba(35, 24, 20, 0.12);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.variationQrImage {
+  width: 168px;
+  height: 168px;
+  align-self: center;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.variationProductPreviewList {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 4px;
+  border-top: 1px solid var(--classic-line);
+}
+
+.overviewTabPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+.overviewTab {
+  border: 0;
+  background: transparent;
+  padding: 10px 12px 12px;
+  font-family: inherit;
+  font-size: var(--classic-fs-label);
+  font-weight: var(--classic-fw-regular);
+  color: var(--classic-muted);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.overviewTabActive {
+  color: var(--classic-ink); /* Figma active tab label is ink + orange underline */
+  font-weight: var(--classic-fw-regular);
+  border-bottom-color: var(--classic-orange);
+}
+
+.overviewTabActive svg {
+  color: var(--classic-ink);
+}
+
+.winnerBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 18px;
+  padding: 0 6px 0 4px;
+  border-radius: 4px;
+  background: rgba(63, 177, 113, 0.15);
+  color: var(--classic-success);
+  font-size: 10px;
+  font-weight: var(--classic-fw-medium);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  margin-left: 8px;
+}
+
+.compactSearch {
+  margin-bottom: 18px;
+}
+
+.compactSearch .label {
+  margin-bottom: 8px;
+}
+
+.compactSearch .help {
+  margin-top: 8px;
+}
+
+.collectionsLabel {
+  margin: 16px 0 8px;
+  font-size: var(--classic-fs-overline);
+  font-weight: var(--classic-fw-extrabold);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--classic-muted);
+}
+
+.collectionPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid var(--classic-line);
+  background: var(--classic-card);
+  font-family: inherit;
+  font-size: var(--classic-fs-meta);
+  font-weight: var(--classic-fw-semibold);
+  cursor: pointer;
+  color: var(--classic-ink);
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+
+.collectionPill:hover {
+  border-color: rgba(var(--accent-primary-rgb), 0.4);
+}
+
+.collectionPillActive {
+  border-color: var(--classic-orange);
+  background: var(--classic-orange-soft);
+  color: var(--classic-ink);
+}
+
+.collectionPillFilled {
+  /* Kept for backwards compatibility; prefer soft selection states */
+  border-color: var(--classic-orange);
+  background: var(--classic-orange-soft);
+  color: var(--classic-ink);
+}
+
+.collectionPillFilled .collectionCount {
+  color: var(--classic-muted);
+}
+
+.collectionCount {
+  color: var(--classic-muted);
+  font-weight: var(--classic-fw-semibold);
+  font-size: var(--classic-fs-help);
+}
+
+.browseBtn {
+  border-radius: 12px !important;
+  margin-top: 10px;
+  gap: 8px;
+  min-height: 36px;
+  font-size: var(--classic-fs-meta);
+}
+
+.successBanner {
+  background: var(--classic-success-bg);
+  border-color: rgba(63, 177, 113, 0.35);
+  color: var(--classic-success);
+}
+
+.chipGrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--classic-line);
+  border-radius: var(--classic-radius-sm);
+  background: var(--classic-wash);
+  margin-bottom: 10px;
+}
+
+.productChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 4px 12px 4px 4px;
+  border-radius: 999px;
+  background: var(--classic-card);
+  border: 1px solid var(--classic-line);
+  font-size: var(--classic-fs-meta);
+  font-weight: var(--classic-fw-semibold);
+  color: var(--classic-ink);
+}
+
+.productChip img,
+.chipThumb {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  object-fit: cover;
+  background: var(--classic-wash);
+  display: block;
+}
+
+.tableToolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 16px 0 10px;
+  padding: 9px;
+  border: 1px solid var(--classic-pricing-border, #e9e3df);
+  border-radius: 12px;
+  background: var(--classic-pricing-toolbar, rgba(252, 246, 240, 0.4));
+}
+
+.productsStep .tableScroll {
+  margin-top: 0;
+  border: 1px solid var(--classic-pricing-border, #e5e1de);
+  border-radius: 12px;
+  background: var(--classic-table-row, #ffffff);
+}
+
+.productsStep .tableScroll .table {
+  background: transparent;
+}
+
+.productsStep .tableScroll .table th {
+  background: var(--classic-table-head, #fcf6f0);
+  color: var(--classic-muted);
+  border-bottom-color: var(--classic-pricing-border, #e9e3df);
+}
+
+.productsStep .tableScroll .table td {
+  border-bottom-color: var(--classic-pricing-border, #e5e1de);
+}
+
+.productsStep .tableScroll .table tbody tr.productPriceRow > td {
+  background: var(--classic-table-row, #ffffff);
+}
+
+.productsStep .tableScroll .table tbody tr.productPriceRow:hover > td {
+  background: var(--classic-table-row-hover, #faf7f2);
+}
+
+.productsStep .tableScroll .table tbody tr.variantRow > td {
+  background: var(--classic-table-variant);
+  color: var(--classic-muted);
+  border-top-color: rgba(233, 227, 223, 0.6);
+  border-bottom-color: rgba(233, 227, 223, 0.6);
+  padding-top: 10px;
+  padding-bottom: 10px;
+  vertical-align: middle;
+}
+
+.productsStep .tableScroll .table tbody tr.variantRow:hover > td {
+  background: var(--classic-table-variant-hover);
+}
+
+.productsStep .tableScroll .table tbody tr.variantRow > td:first-child {
+  padding-left: 40px; /* Figma pl-40 accordion body */
+}
+
+.productsStep .tableScroll .table tbody tr.variantRow .priceField {
+  background: var(--classic-pricing-input, #fefbf8);
+}
+
+.productsStep .tableScroll .table tbody tr.variantRow .priceInput {
+  color: var(--classic-ink); /* input value stays readable ink */
+  -webkit-text-fill-color: var(--classic-ink);
+}
+
+.productsStep .tableScroll .table tbody tr.variantRow .deltaPlain,
+.productsStep .tableScroll .table tbody tr.variantRow .deltaPlainEmpty {
+  color: var(--classic-muted);
+}
+
+.tableToolBtn {
+  min-height: 32px;
+  padding: 0 13px;
+  border-radius: 10px;
+  border: 1px solid var(--classic-pricing-border, #e9e3df);
+  background: var(--classic-pricing-input, #fefbf8);
+  color: var(--classic-ink);
+  font-family: inherit;
+  font-size: var(--classic-fs-meta);
+  font-weight: var(--classic-fw-medium);
+  cursor: pointer;
+}
+
+.tableToolBtn:hover {
+  border-color: #cfc9c4;
+  color: var(--classic-ink);
+  background: var(--classic-pricing-input, #fefbf8);
+}
+
+.tableCategorySelect {
+  width: auto;
+  min-width: 140px;
+  max-width: 180px;
+  min-height: 32px;
+  padding: 6px 28px 6px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--classic-pricing-border, #e9e3df) !important;
+  background-color: var(--classic-pricing-input, #fefbf8) !important;
+  color: var(--classic-ink);
+  font-size: var(--classic-fs-meta);
+  appearance: none;
+  box-shadow: none !important;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5 6 8l3.5-3.5' fill='none' stroke='%236e605a' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  cursor: pointer;
+}
+
+.tableCategorySelect:focus {
+  border-color: var(--classic-orange) !important;
+  box-shadow: 0 0 0 2px rgba(241, 106, 26, 0.2) !important;
+}
+
+.tableCount {
+  margin-left: auto;
+  color: var(--classic-muted);
+  font-size: var(--classic-fs-help);
+  font-weight: var(--classic-fw-regular);
+  white-space: nowrap;
+}
+
+.deltaPlain {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 22px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: var(--classic-fw-medium);
+  color: var(--classic-muted);
+  white-space: nowrap;
+  text-align: center;
+  background: var(--classic-wash);
+}
+
+.deltaPlainPos {
+  color: #2f8f5b;
+  background: rgba(63, 177, 113, 0.15); /* Figma green Δ pills */
+}
+
+.deltaPlainNeg {
+  color: #b91c1c;
+  background: rgba(185, 28, 28, 0.1);
+}
+
+.deltaPlainEmpty {
+  font-size: 12px;
+  font-weight: var(--classic-fw-regular);
+  color: var(--classic-muted);
+  text-align: right;
+}
+
+.expandToggle {
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  color: var(--classic-muted);
+  font-family: inherit;
+  font-size: var(--classic-fs-label);
+  font-weight: var(--classic-fw-medium);
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border-radius: 6px;
+}
+
+.expandToggle:hover {
+  color: var(--classic-ink);
+  background: var(--classic-wash);
+}
+
+/* Nested inside .aiSuggestBanner — one peach card, light control strip */
+.aiBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 12px;
+  margin: 2px 0 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--classic-segment-on, rgba(255, 255, 255, 0.55));
+  border: 1px solid rgba(241, 106, 26, 0.16);
+  box-sizing: border-box;
+}
+
+.aiBarLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  color: var(--classic-ink);
+  font-size: 14px;
+  font-weight: var(--classic-fw-medium);
+  line-height: 20px;
+  white-space: nowrap;
+}
+
+.aiBarLabel svg {
+  color: var(--classic-orange);
+  flex-shrink: 0;
+}
+
+.aiBarControls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  flex: 1 1 220px;
+  min-width: 0;
+}
+
+.aiBar .bulkField {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 12px;
+  font-weight: var(--classic-fw-medium);
+  color: var(--classic-muted);
+  line-height: 1;
+}
+
+.aiBar .bulkField span {
+  white-space: nowrap;
+}
+
+.aiBarInput,
+.aiBar .bulkInput {
+  width: 64px !important;
+  min-height: 34px;
+  padding: 6px 8px !important;
+  margin: 0 !important;
+  text-align: center;
+  background: var(--classic-cream, #fefbf8) !important;
+  border: 1px solid var(--classic-line, #e9e3df) !important;
+  border-radius: 10px !important;
+  color: var(--classic-ink) !important;
+  box-shadow: none !important;
+}
+
+.aiBarInput:focus,
+.aiBar .bulkInput:focus {
+  border-color: var(--classic-orange) !important;
+  box-shadow: 0 0 0 2px rgba(241, 106, 26, 0.2) !important;
+}
+
+.aiBarInput:disabled,
+.aiBar .bulkInput:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.aiBar .bulkBarMuted {
+  color: var(--classic-muted);
+  font-size: 12px;
+  font-weight: var(--classic-fw-regular);
+  line-height: 1;
+}
+
+.aiBar .segment {
+  margin-bottom: 0;
+  flex-shrink: 0;
+}
+
+.aiBar .segmentOnPeach {
+  background: var(--classic-wash, #f8f2ee);
+  border-color: var(--classic-line, #e9e3df);
+}
+
+.aiBar .segmentOnPeach .segmentBtn:not(.segmentBtnActive) {
+  background: var(--classic-cream, #fefbf8);
+  color: var(--classic-muted);
+}
+
+.aiBar .segmentBtn {
+  min-height: 30px;
+  min-width: 36px;
+  padding: 0 10px;
+}
+
+.aiBarAction,
+.aiBar .primaryBtn {
+  margin-left: auto;
+  min-height: 34px;
+  padding: 0 14px;
+  font-size: 13px;
+  font-weight: var(--classic-fw-medium);
+  box-shadow: none;
+  flex-shrink: 0;
+}
+
+.aiBarAction:disabled,
+.aiBar .primaryBtn:disabled {
+  opacity: 0.55;
+}
+
+.iconClose {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  border: 1px solid var(--classic-line);
+  background: var(--classic-card);
+  color: var(--classic-muted);
+  font-size: var(--classic-fs-title-sm);
+  line-height: 1;
+  cursor: pointer;
+}
+
+.iconClose:hover {
+  color: var(--classic-ink);
+  border-color: var(--classic-orange-border);
+}
+
+.segmentLetter {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  background: var(--classic-orange-soft);
+  color: var(--classic-orange-deep, #942e00);
+  font-size: 10px;
+  font-weight: var(--classic-fw-semibold);
+  margin-right: 2px;
+  flex-shrink: 0;
+}
+
+.segmentBtnActive .segmentLetter {
+  background: rgba(255, 255, 255, 0.25);
+  color: #fff;
+}
+
+.calloutStrong {
+  font-weight: var(--classic-fw-medium); /* Figma Medium, not Bold */
+  color: var(--classic-ink);
+}
+
+.calloutBody {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.calloutMeta {
+  color: var(--classic-muted);
+  font-size: 14px; /* Figma ETA subline */
+  font-weight: var(--classic-fw-regular);
+  line-height: 20px;
+}
+
+.priceTabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 5px;
+  border-radius: 12px;
+  background: var(--classic-table-head, #fcf6f0); /* Figma track */
+  border: 1px solid var(--classic-line);
+  margin-bottom: 8px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.priceTab {
+  flex: 1;
+  border: 1px solid transparent;
+  background: transparent;
+  min-height: 28px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  font-family: inherit;
+  font-weight: var(--classic-fw-medium);
+  font-size: 12px; /* Figma Set prices for tabs */
+  color: var(--classic-muted);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+.priceTab:hover {
+  color: var(--classic-ink);
+}
+
+.priceTabActive {
+  color: var(--classic-ink);
+  background: var(--classic-cream); /* Figma active tab #fefbf8 */
+  font-weight: var(--classic-fw-medium);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.1);
+  border-color: transparent;
+}
+
+.priceTabActive .segmentLetter {
+  background: var(--classic-orange-soft);
+  color: var(--classic-orange-deep, #942e00);
+}
+
+.priceTab:not(.priceTabActive) .segmentLetter {
+  background: var(--classic-orange-soft);
+  color: var(--classic-orange-deep, #942e00);
+  font-weight: var(--classic-fw-semibold);
+}
+
+.variantRow td {
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+
+.variantRow .pricePrefix {
+  color: var(--classic-muted);
+}
+
+.showAllBtn {
+  width: auto;
+  margin: 0;
+  justify-content: flex-start;
+  gap: 6px;
+  border-radius: 12px;
+  border: 1px solid var(--classic-line);
+  font-size: 12px;
+  font-weight: var(--classic-fw-medium);
+  line-height: 16px;
+  color: var(--classic-ink);
+  min-height: 34px;
+  padding: 9px 13px;
+  background: var(--classic-cream);
+}
+
+.showAllBtn svg {
+  width: 14px;
+  height: 14px;
+  color: var(--classic-ink);
+  flex-shrink: 0;
+}
+
+.error {
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(215, 44, 13, 0.1);
+  border: 1px solid rgba(215, 44, 13, 0.28);
+  color: var(--status-error, #991b1b);
+  font-size: var(--classic-fs-label);
+  font-weight: var(--classic-fw-regular);
+  line-height: 1.4;
+}
+
+.errorList {
+  margin: 8px 0 0;
+  padding-left: 1.15rem;
+}
+
+.errorList li + li {
+  margin-top: 4px;
+}
+
+.errorActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.success {
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--classic-success-bg);
+  border: 1px solid rgba(63, 177, 113, 0.35);
+  color: var(--classic-success);
+  font-size: var(--classic-fs-label);
+  font-weight: var(--classic-fw-regular);
+  line-height: 1.4;
+}
+
+/* Experiments list */
+.listPage {
+  min-height: calc(100vh - 64px);
+  padding: 32px 24px 48px;
+  background: var(--classic-cream);
+  color: var(--classic-ink);
+  font-family: var(--ripx-font-classic, var(--ripx-font-ui, 'Inter', system-ui, sans-serif));
+  font-size: var(--classic-fs-body);
+  font-weight: var(--classic-fw-regular);
+  -webkit-font-smoothing: antialiased;
+  /* Figma list: full content-pane width (no 1152 cap) */
+  max-width: none;
+  margin: 0;
+  width: 100%;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+}
+
+.listHeader {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 0;
+}
+
+.listHeader.overviewHeader {
+  align-items: flex-start;
+}
+
+.eyebrow {
+  margin: 0 0 4px; /* Figma header stack gap */
+  font-size: 12px;
+  font-weight: var(--classic-fw-medium);
+  letter-spacing: 1.68px; /* Figma WORKSPACE tracking */
+  text-transform: uppercase;
+  color: var(--classic-orange-deep, #942e00);
+  line-height: 16px;
+}
+
+.listTitle {
+  margin: 0 0 4px;
+  font-family: var(--ripx-font-classic, var(--ripx-font-ui, 'Inter', system-ui, sans-serif));
+  font-size: 1.875rem; /* 30px */
+  font-weight: var(--classic-fw-semibold);
+  letter-spacing: -0.0375em; /* -0.6px */
+  line-height: 36px;
+  color: var(--classic-ink);
+}
+
+.listHeader .primaryBtn {
+  gap: 8px; /* Figma New experiment icon gap */
+}
+
+.overviewTitle {
+  margin: 0;
+  font-family: var(--ripx-font-classic, var(--ripx-font-ui, 'Inter', system-ui, sans-serif));
+  font-size: 1.5rem; /* 24px — Figma overview H1 */
+  font-weight: var(--classic-fw-semibold);
+  letter-spacing: -0.02em; /* -0.48px */
+  line-height: 32px;
+  color: var(--classic-ink);
+}
+
+.statGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 0; /* listPage uses gap: 32px */
+}
+
+.statCard {
+  background: var(--classic-card);
+  border: 1px solid var(--classic-line);
+  border-radius: 16px; /* Figma list + overview KPI cards */
+  padding: 21px;
+}
+
+.statCardTop {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.statLabel {
+  color: var(--classic-muted);
+  font-size: 12px;
+  font-weight: var(--classic-fw-regular);
+  margin-bottom: 0;
+  line-height: 16px;
+}
+
+.statValue {
+  font-size: 1.5rem; /* 24px — list KPIs */
+  font-weight: var(--classic-fw-semibold);
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+  color: var(--classic-ink);
+}
+
+.statValueLg {
+  font-size: 1.875rem; /* 30px — overview KPIs */
+  line-height: 1.15;
+}
+
+.statIcon {
+  width: 24px;
+  height: 24px;
+  border-radius: 10px; /* Figma list KPI icon wells */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--classic-orange-soft);
+  color: var(--classic-orange-deep, #942e00);
+  margin-bottom: 0;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.statIcon svg {
+  width: 14px;
+  height: 14px;
+  display: block;
+}
+
+.statIconAccent {
+  background: var(--classic-orange);
+  color: #fff;
+}
+
+.filterRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 0; /* listPage uses gap: 32px */
+}
+
+.filterPillTrack {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 5px;
+  border-radius: 12px;
+  border: 1px solid var(--classic-line);
+  background: var(--classic-card);
+}
+
+.filterPill {
+  min-height: 28px;
+  padding: 6px 12px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--classic-muted);
+  font-family: inherit;
+  font-size: 12px; /* Figma filter pills */
+  font-weight: var(--classic-fw-medium);
+  cursor: pointer;
+  line-height: 16px;
+}
+
+.filterPillActive {
+  background: var(--classic-orange-soft);
+  color: var(--classic-orange-deep, #942e00); /* Figma active filter label */
+  font-weight: var(--classic-fw-medium);
+}
+
+.listSearch {
+  flex: 0 1 288px;
+  max-width: 288px;
+  margin-bottom: 0;
+}
+
+.listSearch .input,
+.listSearch .searchInputPill {
+  min-height: 36px;
+  background: var(--classic-card) !important; /* Figma list search = white */
+  border-color: var(--classic-line);
+  border-radius: 12px;
+}
+
+.expTableWrap {
+  background: var(--classic-card);
+  border: 1px solid var(--classic-line);
+  border-radius: 16px; /* Figma table shell */
+  overflow: hidden;
+}
+
+.listEmptyState {
+  padding: 28px 20px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+
+.listEmptyState .subtitle {
+  margin: 0;
+}
+
+.listFooterLinks {
+  margin-top: 16px;
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.expTableWrap .table th {
+  background: var(--classic-table-head);
+  padding: 12px 20px;
+}
+
+.expTableWrap .table td {
+  padding: 20px;
+}
+
+.expTableWrap .table th:nth-child(2),
+.expTableWrap .table td:nth-child(2) {
+  text-align: left; /* Figma status pills are left-padded, not centered */
+}
+
+.expTableWrap .table th:nth-child(n + 4):not(:last-child),
+.expTableWrap .table td:nth-child(n + 4):not(:last-child) {
+  text-align: right;
+}
+
+.expTableWrap .table td:nth-child(3) {
+  color: var(--classic-muted);
+}
+
+.expTableWrap .table th:last-child,
+.expTableWrap .table td:last-child {
+  width: 52px;
+  padding-left: 12px;
+  padding-right: 18px;
+  text-align: center;
+  color: inherit;
+}
+
+.expRowOpen {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--classic-muted);
+  cursor: pointer;
+  padding: 0;
+}
+
+.expRowOpen:hover {
+  background: var(--classic-orange-soft);
+  color: var(--classic-orange);
+}
+
+.iconGhostBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  min-height: 36px;
+  padding: 0;
+  border-radius: 12px;
+  border: 1px solid var(--classic-line);
+  background: var(--classic-card);
+  color: var(--classic-ink);
+  cursor: pointer;
+}
+
+.iconGhostBtn:hover {
+  border-color: var(--classic-orange-border);
+  color: var(--classic-orange);
+}
+
+.overviewActions .ghostBtn {
+  min-height: 38px;
+  padding: 9px 13px;
+}
+
+.overviewActions .overviewActionBtn.ghostBtn,
+.overviewActions .overviewActionBtn.primaryBtn {
+  justify-content: center;
+}
+
+.reviewProductList .productSub {
+  font-size: 11px;
+}
+
+/* Figma pricing table: Product left · Base right · Test price center · Δ right */
+.productsStep .tableScroll .table th:first-child,
+.productsStep .tableScroll .table td:first-child {
+  text-align: left;
+}
+
+.productsStep .tableScroll .table th:nth-child(2),
+.productsStep .tableScroll .table td:nth-child(2) {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.productsStep .tableScroll .table th:nth-child(3),
+.productsStep .tableScroll .table td:nth-child(3) {
+  text-align: center;
+}
+
+.productsStep .tableScroll .table td:nth-child(3) .priceField {
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.productsStep .tableScroll .table th:nth-child(4),
+.productsStep .tableScroll .table td:nth-child(4) {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.expTableWrap .table td:nth-child(2) .statusPill {
+  margin: 0;
+}
+
+.statusRunning {
+  background: var(--classic-success-bg);
+  color: var(--classic-success);
+}
+
+.statusDraft {
+  background: var(--classic-wash);
+  color: var(--classic-muted);
+}
+
+.statusPaused {
+  background: rgba(239, 168, 49, 0.2);
+  color: #7e4700;
+}
+
+.statusCompleted {
+  background: var(--classic-orange-soft);
+  color: var(--classic-orange-deep, #942e00);
+}
+
+.statusPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 20px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: var(--classic-fw-medium);
+  text-transform: lowercase; /* Figma status labels */
+  line-height: 16px;
+}
+
+.statusDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: 0.7;
+}
+
+.liftPos {
+  color: var(--classic-success, #3fb171);
+  font-weight: var(--classic-fw-regular); /* Figma Regular */
+}
+
+.rowLink:hover {
+  color: var(--classic-orange);
+}
+
+.modalBackdrop {
+  position: fixed;
+  inset: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  margin: 0;
+  background: rgba(0, 0, 0, 0.45);
+  /* Above app TopBar (1000); below Classic country portal menus (20050) */
+  z-index: 20040;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  box-sizing: border-box;
+}
+
+.goalPickerBackdrop {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  z-index: 20040;
+}
+
+.modal {
+  width: min(1024px, 100%);
+  max-height: min(84vh, 780px);
+  background: var(--classic-card);
+  border-radius: 20px;
+  border: 1px solid var(--classic-line);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 24px 60px var(--shadow-xl, rgba(0, 0, 0, 0.16));
+}
+
+.modalHeader {
+  padding: 20px 22px 12px;
+  border-bottom: 1px solid var(--classic-line);
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.modalBody {
+  display: grid;
+  grid-template-columns: 260px 1fr; /* Figma aside = 260 */
+  min-height: 420px;
+  overflow: hidden;
+}
+
+.modalSide,
+.modalMain {
+  overflow: auto;
+  padding: 14px;
+}
+
+.modalSide {
+  border-right: 1px solid var(--classic-line);
+  background: var(--classic-card);
+}
+
+.modalSearch {
+  margin-bottom: 10px;
+}
+
+.modalSearchInput {
+  padding-left: 38px !important;
+  margin-bottom: 0 !important;
+  border-radius: 12px !important;
+  min-height: 30px;
+  background: var(--classic-cream) !important;
+}
+
+.collectionItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 4px 4px 4px 6px;
+  border-radius: 10px;
+  margin-bottom: 2px;
+}
+
+.collectionItemActive {
+  background: var(--classic-orange-soft);
+}
+
+.collectionItemLabel {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  padding: 8px 8px 8px 0;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: var(--classic-fs-label);
+  font-weight: var(--classic-fw-semibold);
+  color: var(--classic-ink);
+  text-align: left;
+}
+
+.collectionItemIcon {
+  display: inline-flex;
+  color: var(--classic-orange);
+  flex-shrink: 0;
+}
+
+.collectionItemName {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.modalCheck {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  border: 1.5px solid var(--classic-line);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--classic-fs-overline);
+  font-weight: var(--classic-fw-extrabold);
+  color: #fff;
+  flex-shrink: 0;
+  background: var(--classic-card);
+  cursor: pointer;
+  padding: 0;
+}
+
+.modalCheckOn {
+  background: var(--classic-orange);
+  border-color: var(--classic-orange);
+  color: #fff;
+}
+
+.modalCheckPartial {
+  background: var(--classic-orange-soft);
+  border-color: var(--classic-orange);
+  color: var(--classic-orange);
+}
+
+.modalMainHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.modalMainTitle {
+  font-size: var(--classic-fs-label);
+  font-weight: var(--classic-fw-bold);
+  color: var(--classic-ink);
+}
+
+.modalProductList {
+  margin-top: 4px;
+}
+
+.modalThumb {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  object-fit: cover;
+  background: var(--classic-table-head);
+  display: block;
+  flex-shrink: 0;
+}
+
+.productRow {
+  display: grid;
+  grid-template-columns: 18px 36px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 4px;
+  border-bottom: 1px solid var(--classic-line);
+  cursor: pointer;
+}
+
+.productRowCheck {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--classic-orange);
+  cursor: pointer;
+}
+
+.productRowPrice {
+  font-size: var(--classic-fs-label);
+  font-weight: var(--classic-fw-medium);
+  color: var(--classic-ink);
+  white-space: nowrap;
+  text-align: right;
+}
+
+.modalFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 18px;
+  border-top: 1px solid var(--classic-line);
+  background: var(--classic-card);
+}
+
+@media (max-width: 840px) {
+  .page {
+    padding: 18px 14px 36px;
+  }
+
+  .card {
+    padding: 22px 16px;
+  }
+
+  .typeGrid,
+  .modeRow,
+  .modeRow3,
+  .productGrid,
+  .statGrid,
+  .modalBody {
+    grid-template-columns: 1fr;
+  }
+
+  .stepper {
+    gap: 8px;
+    justify-content: flex-start;
+    overflow-x: auto;
+    padding-bottom: 4px;
+  }
+
+  .stepItem {
+    flex: 0 0 auto;
+    max-width: none;
+  }
+
+  .stepConnector {
+    flex: 0 0 16px;
+    width: 16px;
+    min-width: 16px;
+    max-width: 16px;
+    margin: 0;
+  }
+
+  .stepSub {
+    display: none;
+  }
+
+  .stepItem {
+    flex: 0 0 auto;
+  }
+
+  .stepLabel {
+    font-size: var(--classic-fs-meta);
+  }
+
+  .overviewSplit {
+    grid-template-columns: 1fr;
+  }
+}
+
+:global([data-theme='dark']) .page,
+:global([data-theme='dark']) .listPage,
+:global([data-theme='dark']) .modalBackdrop {
+  --classic-cream: var(--bg-primary);
+  --classic-card: var(--bg-secondary, #1e293b);
+  --classic-ink: var(--text-primary, #f1f5f9);
+  --classic-body: var(--text-primary, #f1f5f9);
+  --classic-muted: var(--text-secondary, #cbd5e1);
+  --classic-muted-soft: var(--text-tertiary, #94a3b8);
+  --classic-line: var(--border-primary, rgba(148, 163, 184, 0.35));
+  --classic-line-strong: var(--border-primary, rgba(148, 163, 184, 0.45));
+  --classic-wash: var(--bg-tertiary, #334155);
+  --classic-track: rgba(148, 163, 184, 0.35);
+  --classic-neutral: var(--bg-hover, rgba(255, 255, 255, 0.06));
+  --classic-orange: var(--accent-primary);
+  --classic-orange-soft: rgba(var(--accent-primary-rgb), 0.2);
+  --classic-orange-deep: var(--accent-secondary, #fdba74);
+  --classic-orange-border: rgba(var(--accent-primary-rgb), 0.55);
+  --classic-success: var(--status-success, #34d399);
+  --classic-success-bg: rgba(52, 211, 153, 0.18);
+  --classic-table-head: var(--bg-tertiary, #334155);
+  --classic-table-row: var(--bg-secondary, #1e293b);
+  --classic-table-row-hover: rgba(255, 255, 255, 0.06);
+  --classic-table-variant: rgba(255, 255, 255, 0.04);
+  --classic-table-variant-hover: rgba(255, 255, 255, 0.07);
+  --classic-pricing-toolbar: rgba(255, 255, 255, 0.04);
+  --classic-pricing-input: var(--bg-primary, #111827);
+  --classic-pricing-border: var(--border-primary, rgba(148, 163, 184, 0.35));
+  --classic-panel-tint: rgba(255, 255, 255, 0.04);
+  --classic-callout-bg: rgba(var(--accent-primary-rgb, 6, 182, 212), 0.12);
+  --classic-callout-border: rgba(var(--accent-primary-rgb, 6, 182, 212), 0.35);
+  --classic-segment-on: rgba(255, 255, 255, 0.08);
+  --classic-disabled-field: var(--bg-tertiary, #334155);
+  --classic-disabled-text: var(--text-tertiary, #94a3b8);
+  --classic-primary-btn-text: #0f172a;
+}
+
+:global([data-theme='dark']) .stepConnector {
+  background: var(--classic-track);
+}
+
+:global([data-theme='dark']) .stepConnectorDone {
+  background: var(--classic-orange);
+}
+
+:global([data-theme='dark']) .card,
+:global([data-theme='dark']) .statCard,
+:global([data-theme='dark']) .expTableWrap,
+:global([data-theme='dark']) .variationBlock,
+:global([data-theme='dark']) .choiceCard,
+:global([data-theme='dark']) .productCard,
+:global([data-theme='dark']) .productGridShell,
+:global([data-theme='dark']) .reviewSection,
+:global([data-theme='dark']) .allProductsBox,
+:global([data-theme='dark']) .audiencePanel,
+:global([data-theme='dark']) .modal,
+:global([data-theme='dark']) .modalSide,
+:global([data-theme='dark']) .modalFooter,
+:global([data-theme='dark']) .variationQrPopover,
+:global([data-theme='dark']) .variationsProductsTableScroll .table th:first-child,
+:global([data-theme='dark']) .variationsProductsTableScroll .table td:first-child,
+:global([data-theme='dark']) .countryField,
+:global([data-theme='dark']) .filterPillTrack {
+  background: var(--classic-card);
+  color: var(--classic-ink);
+  border-color: var(--classic-line);
+}
+
+:global([data-theme='dark']) .variationsProductsTableScroll .table th:first-child {
+  background: var(--classic-table-head, var(--classic-wash));
+}
+
+:global([data-theme='dark']) .tablePagerBtn {
+  background: var(--classic-card);
+  color: var(--classic-ink);
+  border-color: var(--classic-line);
+}
+
+:global([data-theme='dark']) .input,
+:global([data-theme='dark']) .textarea,
+:global([data-theme='dark']) .select,
+:global([data-theme='dark']) .thresholdInput,
+:global([data-theme='dark']) .variationInput,
+:global([data-theme='dark']) .ghostBtn,
+:global([data-theme='dark']) .iconGhostBtn,
+:global([data-theme='dark']) .listSearch .input,
+:global([data-theme='dark']) .listSearch .searchInputPill {
+  background: var(--classic-pricing-input, var(--classic-cream)) !important;
+  color: var(--classic-ink) !important;
+  border-color: var(--classic-line) !important;
+}
+
+:global([data-theme='dark']) .input::placeholder,
+:global([data-theme='dark']) .textarea::placeholder,
+:global([data-theme='dark']) .countrySearchInput::placeholder {
+  color: var(--classic-muted-soft);
+}
+
+:global([data-theme='dark']) .title,
+:global([data-theme='dark']) .listTitle,
+:global([data-theme='dark']) .overviewTitle,
+:global([data-theme='dark']) .label,
+:global([data-theme='dark']) .sectionLabel,
+:global([data-theme='dark']) .productName,
+:global([data-theme='dark']) .kvValue,
+:global([data-theme='dark']) .statValue,
+:global([data-theme='dark']) .rowLink,
+:global([data-theme='dark']) .choiceTitle,
+:global([data-theme='dark']) .modalTitle,
+:global([data-theme='dark']) .modalMainTitle,
+:global([data-theme='dark']) .reviewHead h3,
+:global([data-theme='dark']) .panelTitle {
+  color: var(--classic-ink);
+}
+
+:global([data-theme='dark']) .subtitle,
+:global([data-theme='dark']) .help,
+:global([data-theme='dark']) .productSub,
+:global([data-theme='dark']) .kvLabel,
+:global([data-theme='dark']) .statLabel,
+:global([data-theme='dark']) .choiceDesc,
+:global([data-theme='dark']) .backLink,
+:global([data-theme='dark']) .footerLink,
+:global([data-theme='dark']) .stepOf,
+:global([data-theme='dark']) .filterPill,
+:global([data-theme='dark']) .variationTag {
+  color: var(--classic-muted);
+}
+
+:global([data-theme='dark']) .eyebrow,
+:global([data-theme='dark']) .editLink,
+:global([data-theme='dark']) .filterPillActive,
+:global([data-theme='dark']) .allProductsHeader,
+:global([data-theme='dark']) .allProductsCheck,
+:global([data-theme='dark']) .letter,
+:global([data-theme='dark']) .variationBadgeLetter,
+:global([data-theme='dark']) .armLetter,
+:global([data-theme='dark']) .stepItemActive .stepDot {
+  color: var(--classic-orange-deep);
+}
+
+:global([data-theme='dark']) .pill:not(.pillActive),
+:global([data-theme='dark']) .metricPillRow .pill:not(.pillActive) {
+  background: transparent;
+  border-color: var(--classic-line);
+  color: var(--classic-muted);
+}
+
+:global([data-theme='dark']) .pillActive,
+:global([data-theme='dark']) .audiencePanel .pill.pillActive {
+  background: var(--classic-orange-soft);
+  border-color: var(--classic-orange);
+  color: var(--classic-orange-deep);
+}
+
+:global([data-theme='dark']) .audiencePanel .pill:not(.pillActive) {
+  background: var(--classic-wash);
+  color: var(--classic-muted);
+}
+
+:global([data-theme='dark']) .toggle {
+  background: var(--classic-wash);
+}
+
+:global([data-theme='dark']) .toggleKnob {
+  background: var(--classic-ink);
+}
+
+:global([data-theme='dark']) .toggleOn .toggleKnob {
+  background: #1c1917;
+}
+
+:global([data-theme='dark']) .statusPaused {
+  background: rgba(251, 191, 36, 0.18);
+  color: #fbbf24;
+}
+
+:global([data-theme='dark']) .statusCompleted {
+  background: var(--classic-orange-soft);
+  color: var(--classic-orange-deep);
+}
+
+:global([data-theme='dark']) .statusDraft {
+  background: var(--classic-wash);
+  color: var(--classic-muted);
+}
+
+:global([data-theme='dark']) .badge {
+  background: var(--classic-wash);
+  color: var(--classic-muted);
+}
+
+:global([data-theme='dark']) .badge strong {
+  color: var(--classic-ink);
+}
+
+:global([data-theme='dark']) .badgeAccent {
+  background: var(--classic-orange-soft);
+  color: var(--classic-orange-deep);
+}
+
+:global([data-theme='dark']) .armChip {
+  background: var(--classic-cream);
+  border-color: var(--classic-line);
+  color: var(--classic-ink);
+}
+
+:global([data-theme='dark']) .priceTabs {
+  background: var(--classic-wash);
+  border-color: var(--classic-line);
+}
+
+:global([data-theme='dark']) .priceTabActive {
+  background: var(--classic-card);
+  color: var(--classic-ink);
+}
+
+:global([data-theme='dark']) .callout {
+  background: var(--classic-callout-bg);
+  border-color: var(--classic-callout-border);
+  color: var(--classic-body);
+}
+
+:global([data-theme='dark']) .advanced {
+  border-color: var(--classic-line);
+}
+
+:global([data-theme='dark']) .advancedSummary {
+  color: var(--classic-muted);
+}
+
+:global([data-theme='dark']) .searchInputPill:-webkit-autofill,
+:global([data-theme='dark']) .input:-webkit-autofill,
+:global([data-theme='dark']) .priceInput:-webkit-autofill {
+  -webkit-box-shadow: 0 0 0 1000px var(--classic-pricing-input, #111827) inset !important;
+  box-shadow: 0 0 0 1000px var(--classic-pricing-input, #111827) inset !important;
+  -webkit-text-fill-color: var(--classic-ink) !important;
+}
+
+:global([data-theme='dark']) .trafficBanner,
+:global([data-theme='dark']) .segment,
+:global([data-theme='dark']) .table th,
+:global([data-theme='dark']) .guardTable th,
+:global([data-theme='dark']) .chipGrid {
+  background: var(--classic-table-head, var(--classic-wash));
+}
+
+:global([data-theme='dark']) .tableScroll,
+:global([data-theme='dark']) .table,
+:global([data-theme='dark']) .table td {
+  background: var(--classic-card);
+}
+
+:global([data-theme='dark']) .table tbody tr.productPriceRow > td {
+  background: var(--classic-table-row);
+}
+
+:global([data-theme='dark']) .table tbody tr.productPriceRow:hover > td {
+  background: var(--classic-table-row-hover);
+}
+
+:global([data-theme='dark']) .table tbody tr.variantRow > td {
+  background: var(--classic-table-variant, rgba(255, 255, 255, 0.04));
+  color: var(--classic-muted);
+}
+
+:global([data-theme='dark']) .table tbody tr.variantRow:hover > td {
+  background: var(--classic-table-variant-hover, rgba(255, 255, 255, 0.07));
+}
+
+:global([data-theme='dark']) .table tbody tr.variantRow > td:first-child {
+  padding-left: 40px;
+}
+
+:global([data-theme='dark']) .variantLabel {
+  color: var(--classic-muted);
+}
+
+:global([data-theme='dark']) .variantBullet {
+  background: var(--classic-line-strong, rgba(231, 229, 228, 0.28));
+}
+
+:global([data-theme='dark']) .aiBar {
+  background: rgba(0, 0, 0, 0.22);
+  border-color: rgba(241, 106, 26, 0.28);
+}
+
+:global([data-theme='dark']) .aiBarInput,
+:global([data-theme='dark']) .aiBar .bulkInput {
+  background: var(--classic-card) !important;
+  border-color: var(--classic-line) !important;
+  color: var(--classic-ink) !important;
+}
+
+:global([data-theme='dark']) .bulkBar,
+:global([data-theme='dark']) .bulkBarFigma {
+  background: var(--classic-panel-tint, rgba(252, 246, 240, 0.12));
+  border-color: var(--classic-line);
+}
+
+:global([data-theme='dark']) .bulkBar .bulkInput {
+  background: var(--classic-card) !important;
+  border-color: var(--classic-line) !important;
+  color: var(--classic-ink) !important;
+}
+
+:global([data-theme='dark']) .bulkBar .segment,
+:global([data-theme='dark']) .bulkSegment {
+  background: var(--classic-card);
+  border-color: var(--classic-line);
+}
+
+:global([data-theme='dark']) .bulkBar .segmentBtn:not(.segmentBtnActive),
+:global([data-theme='dark']) .bulkSegment .segmentBtn:not(.segmentBtnActive) {
+  background: transparent;
+  color: var(--classic-muted);
+}
+
+:global([data-theme='dark']) .tableToolbar {
+  background: var(--classic-wash);
+  border-color: var(--classic-line);
+}
+
+:global([data-theme='dark']) .tableToolBtn,
+:global([data-theme='dark']) .tableCategorySelect,
+:global([data-theme='dark']) .tableToolbar .tableSearch .input,
+:global([data-theme='dark']) .tableToolbar .tableSearch .searchInputPill {
+  background: var(--classic-card) !important;
+  border-color: var(--classic-line) !important;
+  color: var(--classic-ink);
+}
+
+:global([data-theme='dark']) .priceField {
+  background: var(--classic-card);
+  border-color: var(--classic-line-strong);
+}
+
+:global([data-theme='dark']) .pricePrefix {
+  background: transparent;
+  color: var(--classic-muted);
+}
+
+:global([data-theme='dark']) .priceInput {
+  background: transparent !important;
+  color: var(--classic-ink);
+}
+
+:global([data-theme='dark']) .priceInput:disabled,
+:global([data-theme='dark']) .priceField:has(.priceInput:disabled) {
+  background: var(--classic-wash) !important;
+  color: var(--classic-muted);
+}
+
+:global([data-theme='dark']) .priceField:has(.priceInput:disabled) .pricePrefix {
+  background: transparent;
+}
+
+:global([data-theme='dark']) .deltaBadge,
+:global([data-theme='dark']) .deltaPos {
+  background: transparent;
+  color: #6ee7b7;
+}
+
+:global([data-theme='dark']) .deltaNeg {
+  background: rgba(248, 113, 113, 0.18);
+  color: #fca5a5;
+}
+
+/* Light orange-classic only — must NOT win over dark tokens */
+:global([data-palette='orange-classic']:not([data-theme='dark'])) .page,
+:global([data-palette='orange-classic']:not([data-theme='dark'])) .listPage,
+:global([data-palette='orange-classic']:not([data-theme='dark'])) .modalBackdrop {
+  --classic-cream: #fefbf8;
+  --classic-card: #ffffff;
+  --classic-ink: #231814;
+  --classic-body: #231814;
+  --classic-muted: #6e605a;
+  --classic-muted-soft: #6e605a;
+  --classic-line: #e9e3df;
+  --classic-line-strong: #e9e3df;
+  --classic-wash: #f8f2ee;
+  --classic-orange: #f16a1a;
+  --classic-orange-soft: #ffebd6;
+  --classic-orange-deep: #942e00;
+  --classic-orange-border: rgba(241, 106, 26, 0.55);
+  --classic-success: #3fb171;
+  --classic-success-bg: rgba(63, 177, 113, 0.14);
+  --classic-table-head: #fcf6f0;
+  --classic-table-row: #ffffff;
+  --classic-table-row-hover: #faf7f2;
+  --classic-table-variant: rgba(252, 246, 240, 0.4);
+  --classic-table-variant-hover: rgba(252, 246, 240, 0.65);
+  --classic-pricing-toolbar: rgba(252, 246, 240, 0.4);
+  --classic-pricing-input: #fefbf8;
+  --classic-pricing-border: #e9e3df;
+  --classic-panel-tint: rgba(252, 246, 240, 0.3);
+  --classic-callout-bg: rgba(255, 235, 214, 0.5);
+  --classic-callout-border: rgba(241, 106, 26, 0.3);
+  --classic-segment-on: rgba(255, 255, 255, 0.55);
+  --classic-disabled-field: #f3f0ec;
+  --classic-disabled-text: #9a9590;
+  --classic-primary-btn-text: #fefbf8;
+}
+
+/*
+ * Classic dark + orange palette: warm stone surfaces + light ink.
+ * Matches global [data-theme=dark][data-palette=orange-classic] tokens.
+ */
+:global([data-theme='dark'][data-palette='orange-classic']) .page,
+:global([data-theme='dark'][data-palette='orange-classic']) .listPage,
+:global([data-theme='dark'][data-palette='orange-classic']) .modalBackdrop {
+  --classic-cream: #1c1917;
+  --classic-card: #292524;
+  --classic-ink: #fafaf9;
+  --classic-body: #fafaf9;
+  --classic-muted: #d6d3d1;
+  --classic-muted-soft: #a8a29e;
+  --classic-line: rgba(231, 229, 228, 0.16);
+  --classic-line-strong: rgba(231, 229, 228, 0.28);
+  --classic-wash: #44403c;
+  --classic-track: rgba(231, 229, 228, 0.22);
+  --classic-neutral: rgba(231, 229, 228, 0.08);
+  --classic-orange: #fb923c;
+  --classic-orange-soft: rgba(251, 146, 60, 0.2);
+  --classic-orange-deep: #fdba74;
+  --classic-orange-border: rgba(251, 146, 60, 0.55);
+  --classic-success: #34d399;
+  --classic-success-bg: rgba(52, 211, 153, 0.18);
+  --classic-table-head: #44403c;
+  --classic-table-row: #292524;
+  --classic-table-row-hover: rgba(231, 229, 228, 0.08);
+  --classic-table-variant: #1c1917;
+  --classic-table-variant-hover: rgba(231, 229, 228, 0.1);
+  --classic-pricing-toolbar: rgba(68, 64, 60, 0.55);
+  --classic-pricing-input: #1c1917;
+  --classic-pricing-border: rgba(231, 229, 228, 0.16);
+  --classic-panel-tint: rgba(231, 229, 228, 0.06);
+  --classic-callout-bg: rgba(251, 146, 60, 0.14);
+  --classic-callout-border: rgba(251, 146, 60, 0.4);
+  --classic-segment-on: rgba(231, 229, 228, 0.08);
+  --classic-disabled-field: #44403c;
+  --classic-disabled-text: #a8a29e;
+  --classic-primary-btn-text: #1c1917;
+}
+
+/* Classic country multi-select (Step 4) */
+.countryMultiSelect {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  position: relative;
+}
+
+.countryMultiSelectOpen {
+  z-index: 40;
+}
+
+.countryField {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-height: 46px;
+  padding: 9px;
+  border: 1px solid var(--classic-line, #e9e3df);
+  border-radius: 12px;
+  background: var(--classic-cream, #fefbf8);
+  cursor: text;
+  position: relative;
+  z-index: 1;
+}
+
+.countryField .pill {
+  min-height: 24px;
+  padding: 2px 8px;
+  font-size: 12px;
+  font-weight: var(--classic-fw-medium);
+  gap: 4px;
+}
+
+.countryFieldOpen {
+  border-color: var(--classic-orange, #f16a1a);
+  box-shadow: 0 0 0 2px rgba(241, 106, 26, 0.2);
+}
+
+.countryChipRemove {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: 14px;
+  line-height: 1;
+  margin-left: 4px;
+  padding: 0 2px;
+  cursor: pointer;
+  opacity: 0.8;
+}
+
+.countryChipRemove:hover {
+  opacity: 1;
+}
+
+.countrySearchWrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 140px;
+  min-width: 120px;
+  color: var(--classic-muted);
+}
+
+.countrySearchInput {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  font-family: inherit;
+  font-size: var(--classic-fs-body);
+  color: var(--classic-ink);
+  padding: 4px 0;
+}
+
+.countrySearchInput::placeholder {
+  color: var(--classic-muted-soft);
+}
+
+/*
+ * Portaled to document.body — must use hex fallbacks because --classic-*
+ * tokens live on .page/.listPage and do not inherit onto body.
+ * Opaque fill + high z-index so the menu sits above wizard footer actions.
+ */
+.countryDropdown {
+  position: fixed;
+  z-index: 20050;
+  isolation: isolate;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  border: 1px solid #e9e3df;
+  border-radius: 12px;
+  /* Opaque hex fill — portaled to body, so page --classic-* tokens are unavailable */
+  background: #ffffff;
+  background-color: #ffffff;
+  color: #231814;
+  box-shadow: 0 12px 32px rgba(35, 24, 20, 0.16);
+  /* local tokens for nested option/header styles */
+  --classic-card: #ffffff;
+  --classic-cream: #fefbf8;
+  --classic-ink: #231814;
+  --classic-muted: #6e605a;
+  --classic-line: #e9e3df;
+  --classic-wash: #f8f2ee;
+  --classic-orange: #f16a1a;
+  --classic-orange-soft: #ffebd6;
+}
+
+:global([data-palette='orange-classic']:not([data-theme='dark'])) .countryDropdown {
+  background: #ffffff;
+  background-color: #ffffff;
+  border-color: #e9e3df;
+  color: #231814;
+  box-shadow: 0 12px 32px rgba(35, 24, 20, 0.16);
+  --classic-card: #ffffff;
+  --classic-cream: #fefbf8;
+  --classic-ink: #231814;
+  --classic-muted: #6e605a;
+  --classic-line: #e9e3df;
+  --classic-wash: #f8f2ee;
+  --classic-orange: #f16a1a;
+  --classic-orange-soft: #ffebd6;
+}
+
+:global([data-theme='dark']) .countryDropdown {
+  background: #1e293b;
+  background-color: #1e293b;
+  border-color: rgba(148, 163, 184, 0.35);
+  color: #f1f5f9;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  --classic-card: #1e293b;
+  --classic-cream: #111827;
+  --classic-ink: #f1f5f9;
+  --classic-muted: #94a3b8;
+  --classic-line: rgba(148, 163, 184, 0.35);
+  --classic-wash: #334155;
+  --classic-orange: var(--accent-primary, #06b6d4);
+  --classic-orange-soft: rgba(var(--accent-primary-rgb, 6, 182, 212), 0.18);
+}
+
+:global([data-theme='dark'][data-palette='orange-classic']) .countryDropdown {
+  background: #292524;
+  background-color: #292524;
+  border-color: rgba(231, 229, 228, 0.16);
+  color: #fafaf9;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+  --classic-card: #292524;
+  --classic-cream: #1c1917;
+  --classic-ink: #fafaf9;
+  --classic-muted: #a8a29e;
+  --classic-line: rgba(231, 229, 228, 0.16);
+  --classic-wash: #44403c;
+  --classic-orange: #fb923c;
+  --classic-orange-soft: rgba(251, 146, 60, 0.2);
+}
+
+.countryDropdownHeader {
+  padding: 10px 12px 8px;
+  border-bottom: 1px solid var(--classic-line, #e9e3df);
+  color: var(--classic-muted, #6e605a);
+  font-size: var(--classic-fs-help, 0.75rem);
+  font-weight: var(--classic-fw-medium, 500);
+  flex-shrink: 0;
+  background-color: var(--classic-card, #ffffff);
+}
+
+.countryDropdownList {
+  list-style: none;
+  margin: 0;
+  padding: 6px;
+  overflow-y: auto;
+  flex: 1 1 auto;
+  background-color: var(--classic-card, #ffffff);
+}
+
+.countryDropdownList li {
+  margin: 0;
+}
+
+.countryOption {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-family: inherit;
+  color: var(--classic-ink, #231814);
+}
+
+.countryOption:hover {
+  background: var(--classic-wash, #f8f2ee);
+}
+
+.countryOptionSelected {
+  background: var(--classic-orange-soft, #ffebd6);
+  color: var(--classic-orange, #f16a1a);
+}
+
+.countryOptionCheck {
+  width: 16px;
+  flex-shrink: 0;
+  font-size: 12px;
+  font-weight: var(--classic-fw-bold, 700);
+  color: var(--classic-orange, #f16a1a);
+}
+
+.countryOptionName {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--classic-fs-meta, 0.8125rem);
+  font-weight: var(--classic-fw-semibold, 600);
+}
+
+.countryOptionCode {
+  flex-shrink: 0;
+  font-size: var(--classic-fs-help, 0.75rem);
+  font-weight: var(--classic-fw-bold, 700);
+  color: var(--classic-muted, #6e605a);
+  letter-spacing: 0.04em;
+}
+
+.countryDropdownEmpty {
+  padding: 16px 12px;
+  color: var(--classic-muted, #6e605a);
+  font-size: var(--classic-fs-meta, 0.8125rem);
+  background-color: var(--classic-card, #ffffff);
+}
+
+/* Experiment detail tabs (Performance / Variations / …) */
+.detailStack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.detailTableWrap {
+  overflow-x: auto;
+  margin-top: 12px;
+  scrollbar-width: none;
+}
+
+.detailTableWrap::-webkit-scrollbar {
+  display: none;
+}
+
+.detailTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.detailTable th,
+.detailTable td {
+  text-align: left;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--classic-line);
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.detailTable th {
+  color: var(--classic-muted);
+  font-weight: var(--classic-fw-medium);
+  font-size: 12px;
+}
+
+.detailTable td strong {
+  margin-right: 8px;
+}
+
+.trapBadge,
+.okBadge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: var(--classic-fw-medium);
+}
+
+.trapBadge {
+  background: rgba(214, 92, 48, 0.12);
+  color: #b44522;
+}
+
+.okBadge {
+  background: rgba(63, 177, 113, 0.12);
+  color: var(--classic-success);
+}
+
+.activityList {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.activityItem {
+  display: grid;
+  grid-template-columns: minmax(120px, 160px) 1fr;
+  gap: 12px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--classic-line);
+}
+
+.activityItem:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.activityWhen {
+  font-size: 12px;
+  color: var(--classic-muted);
+  line-height: 1.4;
+}
+
+.activityBody strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.activityBody .help {
+  margin: 0;
+}
+
+.monoValue {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  font-weight: var(--classic-fw-medium);
+}
+
+.moreMenuWrap {
+  position: relative;
+}
+
+.moreMenu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 180px;
+  background: var(--classic-card);
+  border: 1px solid var(--classic-line);
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(35, 24, 20, 0.12);
+  padding: 6px;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.moreMenuPortal {
+  position: fixed;
+  z-index: 20100;
+  isolation: isolate;
+  min-width: 180px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  border: 1px solid #e9e3df;
+  border-radius: 12px;
+  /* Opaque hex — portaled to body, page --classic-* tokens do not apply */
+  background: #ffffff;
+  background-color: #ffffff;
+  color: #231814;
+  box-shadow: 0 12px 32px rgba(35, 24, 20, 0.16);
+  --classic-ink: #231814;
+  --classic-wash: #f8f2ee;
+}
+
+:global([data-palette='orange-classic']:not([data-theme='dark'])) .moreMenuPortal {
+  background: #ffffff;
+  background-color: #ffffff;
+  border-color: #e9e3df;
+  color: #231814;
+  box-shadow: 0 12px 32px rgba(35, 24, 20, 0.16);
+  --classic-ink: #231814;
+  --classic-wash: #f8f2ee;
+}
+
+:global([data-theme='dark']) .moreMenuPortal {
+  background: #1e293b;
+  background-color: #1e293b;
+  border-color: rgba(148, 163, 184, 0.35);
+  color: #f1f5f9;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  --classic-ink: #f1f5f9;
+  --classic-wash: #334155;
+}
+
+:global([data-theme='dark'][data-palette='orange-classic']) .moreMenuPortal {
+  background: #292524;
+  background-color: #292524;
+  border-color: rgba(231, 229, 228, 0.16);
+  color: #fafaf9;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+  --classic-ink: #fafaf9;
+  --classic-wash: #44403c;
+}
+
+.moreMenuPortal button {
+  border: 0;
+  background: transparent;
+  text-align: left;
+  padding: 10px 12px;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--classic-ink, #231814);
+  cursor: pointer;
+}
+
+.moreMenuPortal button:hover:not(:disabled) {
+  background: var(--classic-wash, #f8f2ee);
+}
+
+.moreMenuPortal button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.moreMenu button {
+  border: 0;
+  background: transparent;
+  text-align: left;
+  padding: 10px 12px;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--classic-ink);
+  cursor: pointer;
+}
+
+.moreMenu button:hover {
+  background: var(--classic-wash);
+}
+
+.menuItemDanger {
+  color: #b42318;
+}
+
+.menuItemDanger:hover {
+  background: rgba(180, 35, 24, 0.08);
+}
+
+.expRowActions {
+  display: inline-flex;
+  justify-content: center;
+}
+
+.expTableWrap .table td:last-child {
+  overflow: visible;
+}
+
+@media (max-width: 720px) {
+  .activityItem {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+}

@@ -1,0 +1,1 @@
+module.exports = { assertCanStart: async () => {} };

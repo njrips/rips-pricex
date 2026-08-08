@@ -1,0 +1,63 @@
+query Input {
+  cart {
+    ripxCartTransformTestAmount: attribute(key: "_ripx_cart_transform_test_amount") {
+      value
+    }
+    ripxCartTransformTestVariantId: attribute(key: "_ripx_cart_transform_test_variant_id") {
+      value
+    }
+    lines {
+      id
+      quantity
+      cost {
+        amountPerQuantity {
+          amount
+          currencyCode
+        }
+      }
+      ripxTest: attribute(key: "_ripx_price_test") {
+        value
+      }
+      ripxVariant: attribute(key: "_ripx_variant") {
+        value
+      }
+      ripxTargetUnit: attribute(key: "_ripx_target_unit") {
+        value
+      }
+      ripxPriceMethod: attribute(key: "_ripx_price_method") {
+        value
+      }
+      ripxPriceApplicationMethod: attribute(key: "_ripx_price_application_method") {
+        value
+      }
+      ripxPriceApplicationMethodLegacy: attribute(key: "__ripx_price_application_method") {
+        value
+      }
+      ripxAssignmentSig: attribute(key: "_ripx_assignment_sig") {
+        value
+      }
+      ripxAssignmentTs: attribute(key: "_ripx_assignment_ts") {
+        value
+      }
+      ripxAssignmentUser: attribute(key: "_ripx_assignment_user") {
+        value
+      }
+      sellingPlanAllocation {
+        sellingPlan {
+          id
+        }
+      }
+      merchandise {
+        __typename
+        ... on ProductVariant {
+          id
+          title
+          product {
+            id
+            title
+          }
+        }
+      }
+    }
+  }
+}

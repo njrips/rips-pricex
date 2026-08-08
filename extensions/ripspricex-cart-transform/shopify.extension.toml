@@ -1,0 +1,16 @@
+api_version = "2025-10"
+
+[[extensions]]
+name = "RipsPriceX cart transform"
+handle = "ripspricex-cart-transform"
+type = "function"
+description = "Apply direct RipsPriceX price overrides from cart line attributes on Plus/dev stores."
+
+[[extensions.targeting]]
+target = "cart.transform.run"
+input_query = "src/cart_transform_run.graphql"
+export = "cart-transform-run"
+
+[extensions.build]
+command = ""
+path = "dist/function.wasm"

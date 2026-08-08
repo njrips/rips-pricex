@@ -1,0 +1,364 @@
+/**
+ * Joins Smart Pricing plan projections with live test analytics for merchant reporting.
+ */
+
+const { getTestById } = require('../../models/test');
+const analyticsService = require('../analytics');
+const { findInboxPlanByTestId } = require('../../models/smartPricingInboxStore');
+
+function variantFixedPrice(variant = {}) {
+  const cfg = variant.config && typeof variant.config === 'object' ? variant.config : {};
+  if (cfg.price !== undefined && cfg.price !== null && String(cfg.price).trim() !== '') {
+    return Number(cfg.price);
+  }
+  const byProduct = cfg.byProduct;
+  if (byProduct && typeof byProduct === 'object') {
+    for (const productCfg of Object.values(byProduct)) {
+      const byVariant =
+        productCfg?.byVariant && typeof productCfg.byVariant === 'object'
+          ? productCfg.byVariant
+          : null;
+      if (!byVariant) {
+        continue;
+      }
+      for (const variantCfg of Object.values(byVariant)) {
+        if (
+          variantCfg?.price !== undefined &&
+          variantCfg?.price !== null &&
+          String(variantCfg.price).trim() !== ''
+        ) {
+          return Number(variantCfg.price);
+        }
+      }
+    }
+  }
+  return null;
+}
+
+function matchVariantToArm(arm, testVariants = [], analyticsVariants = []) {
+  const targetPrice = Number(arm?.price);
+  if (!Number.isFinite(targetPrice)) {
+    return { testVariant: null, analyticsVariant: null };
+  }
+
+  const testVariant =
+    testVariants.find(variant => {
+      const price = variantFixedPrice(variant);
+      return Number.isFinite(price) && Math.abs(price - targetPrice) < 0.02;
+    }) ||
+    testVariants.find(variant => String(variant?.name || '').includes(String(targetPrice))) ||
+    null;
+
+  const analyticsVariant =
+    analyticsVariants.find(row => {
+      if (testVariant?.id !== undefined && testVariant?.id !== null) {
+        return String(row.id) === String(testVariant.id);
+      }
+      if (testVariant?.name && row.name) {
+        return String(row.name).trim() === String(testVariant.name).trim();
+      }
+      return false;
+    }) ||
+    analyticsVariants.find(row => String(row.name || '').includes(String(targetPrice))) ||
+    null;
+
+  return { testVariant, analyticsVariant };
+}
+
+function buildArmAnalyticsRow(arm, projection, matches, baselinePpv) {
+  const live = matches.analyticsVariant || {};
+  const visitors = Number(live.visitors) || 0;
+  const livePpv = Number(live.profitPerVisitor ?? live.profit_per_visitor);
+  const liveRpv = Number(live.revenuePerVisitor ?? live.revenue_per_visitor);
+  const projectedPpv = Number(projection?.projected_ppv);
+  const baseline = Number(baselinePpv);
+  const ppvDelta =
+    Number.isFinite(livePpv) && Number.isFinite(projectedPpv)
+      ? Math.round((livePpv - projectedPpv) * 1000) / 1000
+      : null;
+
+  const revenueTrapLive =
+    Number.isFinite(liveRpv) &&
+    Number.isFinite(livePpv) &&
+    liveRpv > (baseline || 0) &&
+    livePpv < (baseline || liveRpv);
+
+  return {
+    arm_id: arm.id,
+    role: arm.role,
+    label: arm.label || null,
+    price: arm.price,
+    variant_id: live.id || matches.testVariant?.id || null,
+    variant_name: live.name || matches.testVariant?.name || null,
+    visitors,
+    conversions: Number(live.conversions) || 0,
+    conversion_rate: Number(live.conversionRate ?? live.conversion_rate) || 0,
+    revenue_per_visitor: Number.isFinite(liveRpv) ? liveRpv : null,
+    profit_per_visitor: Number.isFinite(livePpv) ? livePpv : null,
+    projected_ppv: Number.isFinite(projectedPpv) ? projectedPpv : null,
+    projected_conversion_delta_percent: projection?.projected_conversion_delta_percent ?? null,
+    ppv_vs_projection_delta: ppvDelta,
+    revenue_trap_projected: projection?.revenue_trap_risk === true,
+    revenue_trap_live: revenueTrapLive,
+  };
+}
+
+function isControlArm(arm) {
+  const role = String(arm?.role || '')
+    .trim()
+    .toLowerCase();
+  if (role === 'control') {
+    return true;
+  }
+  const label = String(arm?.label || '')
+    .trim()
+    .toLowerCase();
+  return label === 'control' || label.startsWith('control ');
+}
+
+/**
+ * Pick winner arm only when analytics declares a promoteable winner.
+ * Do not invent a challenger from "best rate" when significance.winner is unset.
+ */
+function resolveWinnerArm(armRows = [], significance = null) {
+  if (!significance?.significant) {
+    return { winner_arm_id: null, winner_variant_id: null };
+  }
+
+  const winnerFlag = String(significance.winner || '')
+    .trim()
+    .toLowerCase();
+  // Two-variant: variantB = challenger. Multi: best + winnerVariantId.
+  // Control / empty winner → not roll-out-ready.
+  if (winnerFlag !== 'variantb' && winnerFlag !== 'best') {
+    return { winner_arm_id: null, winner_variant_id: null };
+  }
+
+  let winnerVariantId = significance.winnerVariantId || null;
+  if (
+    (winnerVariantId === null ||
+      winnerVariantId === undefined ||
+      String(winnerVariantId).trim() === '') &&
+    winnerFlag === 'best'
+  ) {
+    winnerVariantId = significance.bestVariantId || null;
+  }
+
+  if (
+    winnerVariantId !== null &&
+    winnerVariantId !== undefined &&
+    String(winnerVariantId).trim() !== ''
+  ) {
+    const byVariant = armRows.find(row => String(row.variant_id) === String(winnerVariantId));
+    if (byVariant && !isControlArm(byVariant)) {
+      return {
+        winner_arm_id: byVariant.arm_id || null,
+        winner_variant_id: byVariant.variant_id || null,
+      };
+    }
+    return { winner_arm_id: null, winner_variant_id: null };
+  }
+
+  // Two-variant path: significance.winner === 'variantB' without variant ids.
+  // Prefer the first non-control arm with the highest conversion rate among challengers
+  // only when there is exactly one non-control arm.
+  const nonControl = armRows.filter(row => !isControlArm(row));
+  if (winnerFlag === 'variantb' && nonControl.length === 1) {
+    return {
+      winner_arm_id: nonControl[0].arm_id || null,
+      winner_variant_id: nonControl[0].variant_id || null,
+    };
+  }
+
+  return { winner_arm_id: null, winner_variant_id: null };
+}
+
+function buildSignificanceSummary(analytics) {
+  const sig =
+    analytics?.significance && typeof analytics.significance === 'object'
+      ? analytics.significance
+      : null;
+  if (!sig) {
+    return {
+      significant: false,
+      lift: null,
+      confidence: null,
+      message: analytics?.error || 'Collecting data',
+      winner: null,
+      winnerVariantId: null,
+      bestVariantId: null,
+    };
+  }
+  return {
+    significant: sig.significant === true,
+    lift: Number.isFinite(Number(sig.lift)) ? Number(sig.lift) : null,
+    confidence: Number.isFinite(Number(sig.confidence)) ? Number(sig.confidence) : null,
+    message: sig.message || null,
+    winner: sig.winner ?? null,
+    winnerVariantId: sig.winnerVariantId ?? null,
+    bestVariantId: sig.bestVariantId ?? null,
+  };
+}
+
+function descriptionLooksLikeSmartPricing(test = {}) {
+  const description = String(test.description || '');
+  const name = String(test.name || '');
+  return (
+    /Created from Smart Pricing plan/i.test(description) ||
+    /^Smart Pricing\s*·/i.test(name) ||
+    /smart[_ ]pricing/i.test(description)
+  );
+}
+
+function synthesizeArmsFromTestVariants(testVariants = []) {
+  return (Array.isArray(testVariants) ? testVariants : []).map((variant, index) => {
+    const price = variantFixedPrice(variant);
+    const name = String(variant?.name || `Variant ${index + 1}`).trim();
+    const role =
+      index === 0 || /^control\b/i.test(name) || /\bcontrol\b/i.test(name)
+        ? 'control'
+        : 'challenger';
+    return {
+      id: variant?.id || `variant_${index}`,
+      role,
+      label:
+        name || (role === 'control' ? 'Control' : `Variation ${String.fromCharCode(65 + index)}`),
+      price: Number.isFinite(price) ? price : null,
+      allocation_percent: Number(variant?.allocation) || null,
+    };
+  });
+}
+
+async function buildSmartPricingTestAnalytics(shopDomain, testId) {
+  const test = await getTestById(testId, shopDomain);
+  if (!test) {
+    throw new Error('Test not found');
+  }
+
+  // tests table has no metadata column today — linkage usually lives on the inbox plan.
+  const metadata = test.metadata && typeof test.metadata === 'object' ? test.metadata : {};
+  const plan = (await findInboxPlanByTestId(shopDomain, testId)) || null;
+  const isSmartPricing =
+    metadata.smart_pricing_source === 'smart_pricing' ||
+    Boolean(metadata.smart_pricing_plan_id) ||
+    Boolean(plan?.id) ||
+    descriptionLooksLikeSmartPricing(test);
+  if (!isSmartPricing) {
+    throw new Error('Test is not linked to Smart Pricing');
+  }
+
+  const armsFromPlan = Array.isArray(plan?.price_arms) ? plan.price_arms : [];
+  const armsFromMeta = Array.isArray(metadata.price_arms) ? metadata.price_arms : [];
+  const testVariants = Array.isArray(test.variants) ? test.variants : [];
+  const arms =
+    armsFromPlan.length > 0
+      ? armsFromPlan
+      : armsFromMeta.length > 0
+        ? armsFromMeta
+        : synthesizeArmsFromTestVariants(testVariants);
+  const projections = Array.isArray(plan?.arm_projections)
+    ? plan.arm_projections
+    : Array.isArray(metadata.arm_projections)
+      ? metadata.arm_projections
+      : [];
+
+  const analytics = await analyticsService.getTestAnalytics(testId, shopDomain).catch(() => null);
+  const analyticsVariants = Array.isArray(analytics?.variants) ? analytics.variants : [];
+  const baselinePpv =
+    plan?.statistical_design?.baseline_ppv ??
+    metadata.baseline_ppv ??
+    analyticsVariants[0]?.profitPerVisitor ??
+    null;
+
+  const projectionByArmId = new Map(
+    projections.filter(row => row?.arm_id).map(row => [String(row.arm_id), row])
+  );
+  const projectionByPrice = new Map(
+    projections
+      .filter(row => row?.price !== undefined && row?.price !== null)
+      .map(row => [String(Number(row.price)), row])
+  );
+
+  const armRows = arms.map(arm => {
+    const projection =
+      projectionByArmId.get(String(arm.id)) ||
+      projectionByPrice.get(String(Number(arm.price))) ||
+      null;
+    const matches = matchVariantToArm(arm, testVariants, analyticsVariants);
+    return buildArmAnalyticsRow(arm, projection, matches, baselinePpv);
+  });
+
+  const totalVisitorsFromArms = armRows.reduce((sum, row) => sum + (Number(row.visitors) || 0), 0);
+  const totalConversionsFromArms = armRows.reduce(
+    (sum, row) => sum + (Number(row.conversions) || 0),
+    0
+  );
+  const analyticsSummary =
+    analytics?.summary && typeof analytics.summary === 'object' ? analytics.summary : {};
+  const totalVisitors =
+    Number.isFinite(Number(analyticsSummary.totalVisitors)) &&
+    Number(analyticsSummary.totalVisitors) > 0
+      ? Number(analyticsSummary.totalVisitors)
+      : totalVisitorsFromArms;
+  const totalConversions =
+    Number.isFinite(Number(analyticsSummary.totalConversions)) &&
+    Number(analyticsSummary.totalConversions) >= 0
+      ? Number(analyticsSummary.totalConversions)
+      : totalConversionsFromArms;
+  const overallConversionRate =
+    totalVisitors > 0 ? Math.round((totalConversions / totalVisitors) * 10000) / 100 : null;
+
+  const weightedLivePpv =
+    totalVisitorsFromArms > 0
+      ? armRows.reduce(
+          (sum, row) =>
+            sum +
+            (Number.isFinite(row.profit_per_visitor) ? row.profit_per_visitor : 0) *
+              (Number(row.visitors) || 0),
+          0
+        ) / totalVisitorsFromArms
+      : null;
+
+  const significance = buildSignificanceSummary(analytics);
+  const winner = resolveWinnerArm(armRows, significance);
+
+  return {
+    test_id: testId,
+    plan_id: plan?.id || metadata.smart_pricing_plan_id || null,
+    test_status: test.status,
+    baseline_ppv: baselinePpv,
+    cogs: test.goal?.cogs || null,
+    currency: plan?.currency || metadata.currency || 'USD',
+    arms: armRows,
+    significance,
+    winner_arm_id: winner.winner_arm_id,
+    winner_variant_id: winner.winner_variant_id,
+    summary: {
+      visitors: totalVisitors,
+      conversions: totalConversions,
+      overall_conversion_rate: overallConversionRate,
+      live_weighted_ppv: weightedLivePpv,
+      projected_best_ppv: armRows.reduce((best, row) => {
+        const ppv = Number(row.projected_ppv);
+        if (!Number.isFinite(ppv)) {
+          return best;
+        }
+        return best === null || ppv > best ? ppv : best;
+      }, null),
+      revenue_trap_flags: armRows.filter(row => row.revenue_trap_live || row.revenue_trap_projected)
+        .length,
+      lift: significance.lift,
+      confidence: significance.confidence,
+      significant: significance.significant,
+    },
+  };
+}
+
+module.exports = {
+  buildSmartPricingTestAnalytics,
+  matchVariantToArm,
+  variantFixedPrice,
+  resolveWinnerArm,
+  buildSignificanceSummary,
+  isControlArm,
+};

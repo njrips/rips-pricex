@@ -1,0 +1,43 @@
+# RipsPriceX — Shopify-only Smart Pricing (Classic)
+# Link Partner app: npm run config:link
+
+name = "RipsPriceX"
+client_id = ""
+application_url = "https://localhost"
+embedded = true
+handle = "ripspricex"
+
+[build]
+automatically_update_urls_on_dev = true
+
+[access_scopes]
+scopes = "read_products,write_products,read_orders,read_cart_transforms,write_cart_transforms"
+optional_scopes = []
+use_legacy_install_flow = false
+
+[auth]
+redirect_urls = [ "https://localhost/auth/callback" ]
+
+[webhooks]
+api_version = "2025-10"
+
+  [[webhooks.subscriptions]]
+  topics = ["app/uninstalled"]
+  uri = "/webhooks/app/uninstalled"
+
+  [[webhooks.subscriptions]]
+  topics = ["products/update"]
+  uri = "/webhooks/products/update"
+
+  [[webhooks.subscriptions]]
+  topics = ["app/scopes_update"]
+  uri = "/webhooks/app/scopes_update"
+
+# Proxy base must be /api/proxy (NOT .../script.js) so /apps/ripspricex/script.js maps correctly
+[app_proxy]
+url = "/api/proxy"
+subpath = "ripspricex"
+prefix = "apps"
+
+[pos]
+embedded = false

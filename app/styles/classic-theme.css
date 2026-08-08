@@ -1,0 +1,40 @@
+/* Classic Smart Pricing theme tokens (Figma / EchoTest orange-classic) */
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap');
+
+:root,
+[data-palette='orange-classic'] {
+  --ripx-font-classic: 'DM Sans', 'Inter', system-ui, sans-serif;
+  --accent-primary-rgb: 232, 93, 4;
+  --accent-secondary-rgb: 120, 53, 15;
+  --accent-primary: rgb(var(--accent-primary-rgb));
+  --text-link: #c2410c;
+  --bg-primary: #faf7f2;
+  --bg-secondary: #ffffff;
+  --border-primary: #e7e0d6;
+  --text-primary: #1c1917;
+}
+
+html,
+body {
+  margin: 0;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: var(--ripx-font-classic);
+}
+
+h1.ripx-classic-sans,
+h2.ripx-classic-sans,
+.ripx-classic-sans {
+  font-family: var(--ripx-font-classic);
+}
+
+.rpx-page-shell {
+  min-height: 100%;
+  box-sizing: border-box;
+}
+
+.rpx-page-shell *,
+.rpx-page-shell *::before,
+.rpx-page-shell *::after {
+  box-sizing: border-box;
+}

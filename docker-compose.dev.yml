@@ -1,0 +1,28 @@
+# Local Postgres for RipsPriceX (use a different port if RipX uses 5432)
+services:
+  postgres:
+    image: postgres:16-alpine
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_USER: ripspricex
+      POSTGRES_PASSWORD: ripspricex
+      POSTGRES_DB: ripspricex_dev
+    volumes:
+      - ripspricex_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ripspricex"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6380:6379"
+    volumes:
+      - ripspricex_redis_data:/data
+
+volumes:
+  ripspricex_pg_data:
+  ripspricex_redis_data:
