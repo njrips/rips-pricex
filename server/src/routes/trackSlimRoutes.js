@@ -14,6 +14,8 @@ const {
   mapTestToStorefrontPayload,
   SCRIPT_VERSION,
 } = require('../utils/storefrontScriptRuntime');
+const { listGoalMetricDefinitions } = require('../models/goalMetricDefinition');
+const { getShopPriceSurfaceMappings } = require('../services/priceSurfaceRegistryService');
 const abTestEngine = require('../services/abTestEngine');
 const logger = require('../utils/logger');
 
@@ -39,18 +41,33 @@ function resolveShop(req) {
 async function serveScript(req, res) {
   const shop = resolveShop(req);
   let activeTests = [];
+  let goalMetricDefinitions = [];
+  let shopPriceSurfaceMappings = [];
   try {
     if (shop) {
-      const tests = await getActiveTestsForStorefront(shop);
+      const [tests, goals, surfaces] = await Promise.all([
+        getActiveTestsForStorefront(shop),
+        listGoalMetricDefinitions(shop).catch(() => []),
+        getShopPriceSurfaceMappings(shop).catch(() => []),
+      ]);
       activeTests = (tests || []).filter((t) => t.type === 'price' || t.type === 'pricing');
+      goalMetricDefinitions = goals || [];
+      shopPriceSurfaceMappings = surfaces || [];
     }
   } catch (err) {
     logger.warn('active tests load failed', { message: err.message });
   }
 
-  const config = buildStorefrontRuntimeConfig(shop, activeTests, req, [], {}, {
-    runtimeSource: 'ripspricex-track',
-  });
+  const config = buildStorefrontRuntimeConfig(
+    shop,
+    activeTests,
+    req,
+    goalMetricDefinitions,
+    { shopMappings: shopPriceSurfaceMappings },
+    {
+      runtimeSource: 'ripspricex-track',
+    }
+  );
   // Prefer public API base when set (tunnel / production)
   if (process.env.RIPSPRICEX_PUBLIC_API_BASE) {
     config.apiUrl = String(process.env.RIPSPRICEX_PUBLIC_API_BASE).replace(/\/+$/, '');

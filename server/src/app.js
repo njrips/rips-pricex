@@ -11,6 +11,9 @@ const logger = require('./utils/logger');
 const app = express();
 const PORT = Number(process.env.RIPSPRICEX_API_PORT || process.env.PORT || 3456);
 
+// Shopify CLI / Cloudflare tunnels set X-Forwarded-* (storefront apiUrl + proxy)
+app.set('trust proxy', 1);
+
 app.use(
   cors({
     origin: true,
@@ -60,6 +63,11 @@ try {
     message: err.message,
     stack: err.stack,
   });
+  // Pilot / production must not silently run without launch. Set
+  // RIPSPRICEX_ALLOW_SP_FALLBACK=true only for emergency inbox-only mode.
+  if (String(process.env.RIPSPRICEX_ALLOW_SP_FALLBACK || '').toLowerCase() !== 'true') {
+    throw err;
+  }
   const fallback = require('./routes/smartPricingFallbackRoutes');
   app.use('/api/smart-pricing', requireShop, fallback);
 }
@@ -84,6 +92,14 @@ try {
   app.use('/api/qa', qaStubRoutes);
 } catch (err) {
   logger.warn('qaStubRoutes not available', { message: err.message });
+}
+
+try {
+  const goalMetricRoutes = require('./routes/goalMetricRoutes');
+  app.use('/api/goal-metrics', requireShop, goalMetricRoutes);
+  logger.info('Goal metrics routes mounted (Classic Goals picker)');
+} catch (err) {
+  logger.warn('goalMetricRoutes not available', { message: err.message });
 }
 
 // Track + proxy aliases

@@ -161,6 +161,42 @@ function getHeatmapCollectionRuntimeConfig() {
  * @param {object[]} tests
  * @param {import('express').Request} req
  */
+/**
+ * Public origin browsers can call for /api (storefront). Prefer explicit public base,
+ * then Shopify tunnel / forwarded host when APP_URL is localhost (local `shopify app dev`).
+ */
+function resolvePublicAppUrl(req) {
+  const explicit = String(process.env.RIPSPRICEX_PUBLIC_API_BASE || '').trim();
+  if (explicit) {
+    return explicit.replace(/\/+$/, '').replace(/\/api$/i, '');
+  }
+
+  const configured = String(process.env.APP_URL || process.env.SHOPIFY_APP_URL || '')
+    .trim()
+    .replace(/\/+$/, '');
+  const configuredIsLocal =
+    !configured || /^(https?:\/\/)?(localhost|127\.0\.0\.1)(:|\/|$)/i.test(configured);
+
+  if (!configuredIsLocal) {
+    return configured;
+  }
+
+  const forwardedHost = String(req?.get?.('x-forwarded-host') || '').split(',')[0].trim();
+  const host = forwardedHost || String(req?.get?.('host') || '').trim();
+  const hostIsLocal = !host || /^(localhost|127\.0\.0\.1)(:|$)/i.test(host);
+  if (host && !hostIsLocal) {
+    const proto = String(
+      req?.get?.('x-forwarded-proto') || (req?.secure ? 'https' : req?.protocol) || 'https'
+    )
+      .split(',')[0]
+      .trim();
+    return `${proto}://${host}`.replace(/\/+$/, '');
+  }
+
+  if (configured) return configured;
+  return `${req?.protocol || 'http'}://${req?.get?.('host') || '127.0.0.1'}`.replace(/\/+$/, '');
+}
+
 function buildStorefrontRuntimeConfig(
   shop,
   tests,
@@ -169,10 +205,7 @@ function buildStorefrontRuntimeConfig(
   priceSurfaceRegistry = {},
   options = {}
 ) {
-  const appUrl = (process.env.APP_URL || `${req.protocol}://${req.get('host')}`).replace(
-    /\/+$/,
-    ''
-  );
+  const appUrl = resolvePublicAppUrl(req);
   const shopMappings = normalizePriceSurfaceMappings(priceSurfaceRegistry.shopMappings);
   const runtimeSource = String(options.runtimeSource || 'unknown').trim() || 'unknown';
 

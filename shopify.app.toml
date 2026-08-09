@@ -1,17 +1,18 @@
-# RipsPriceX — Shopify-only Smart Pricing (Classic)
-# Link Partner app: npm run config:link
+# Alternate: EchoLogyx Ltd "rips-pricex"
+# Default local testing: shopify.app.ripspricex.toml
+# Learn more: https://shopify.dev/docs/apps/tools/cli/configuration
 
-name = "RipsPriceX"
-client_id = ""
+name = "rips-pricex"
+client_id = "1427bfea71317ff9999f4ad85b59675b"
 application_url = "https://localhost"
 embedded = true
-handle = "ripspricex"
 
 [build]
 automatically_update_urls_on_dev = true
+include_config_on_deploy = true
 
 [access_scopes]
-scopes = "read_products,write_products,read_orders,read_cart_transforms,write_cart_transforms"
+scopes = "read_products,write_products,read_orders,read_inventory,read_locations,read_cart_transforms,write_cart_transforms,read_themes,read_content,read_online_store_pages,read_markets,read_reports"
 optional_scopes = []
 use_legacy_install_flow = false
 
@@ -33,7 +34,6 @@ api_version = "2025-10"
   topics = ["app/scopes_update"]
   uri = "/webhooks/app/scopes_update"
 
-# Proxy base must be /api/proxy (NOT .../script.js) so /apps/ripspricex/script.js maps correctly
 [app_proxy]
 url = "/api/proxy"
 subpath = "ripspricex"

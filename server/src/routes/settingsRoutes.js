@@ -113,10 +113,12 @@ function isCartTransformFunctionIdTypeMismatchError(error) {
   const message = String(error?.message || '')
     .trim()
     .toLowerCase();
+  // Shopify has flipped ID! vs String across Admin API versions:
+  // "Type mismatch on variable $functionId and argument functionId (ID! / String)"
   return (
-    message.includes('type mismatch on variable $functionid') &&
+    message.includes('type mismatch') &&
     message.includes('functionid') &&
-    message.includes('id! / string!')
+    (message.includes('id!') || message.includes('string'))
   );
 }
 
@@ -253,8 +255,24 @@ router.post(
       );
     }
 
-    const createMutation = `
-      mutation rpxCreateCartTransform($functionId: ID!) {
+    // Current Admin API expects String for cartTransformCreate.functionId; keep ID! fallback.
+    const createMutationString = `
+      mutation rpxCreateCartTransform($functionId: String!) {
+        cartTransformCreate(functionId: $functionId) {
+          cartTransform {
+            id
+            functionId
+            blockOnFailure
+          }
+          userErrors {
+            field
+            message
+          }
+        }
+      }
+    `;
+    const createMutationId = `
+      mutation rpxCreateCartTransformId($functionId: ID!) {
         cartTransformCreate(functionId: $functionId) {
           cartTransform {
             id
@@ -273,32 +291,58 @@ router.post(
       createResp = await shopifyService.requestAdminGraphql(
         shopDomain,
         accessToken,
-        createMutation,
-        { functionId: chosenFunction.id }
+        createMutationString,
+        { functionId: chosenFunctionId }
       );
     } catch (createErr) {
       if (isCartTransformFunctionIdTypeMismatchError(createErr)) {
-        const compatMutation = `
-          mutation rpxCreateCartTransformCompat {
-            cartTransformCreate(functionId: ${JSON.stringify(String(chosenFunction.id || '').trim())}) {
-              cartTransform {
-                id
-                functionId
-                blockOnFailure
+        try {
+          createResp = await shopifyService.requestAdminGraphql(
+            shopDomain,
+            accessToken,
+            createMutationId,
+            { functionId: chosenFunctionId }
+          );
+        } catch (idErr) {
+          if (isCartTransformFunctionIdTypeMismatchError(idErr)) {
+            const compatMutation = `
+              mutation rpxCreateCartTransformCompat {
+                cartTransformCreate(functionId: ${JSON.stringify(chosenFunctionId)}) {
+                  cartTransform {
+                    id
+                    functionId
+                    blockOnFailure
+                  }
+                  userErrors {
+                    field
+                    message
+                  }
+                }
               }
-              userErrors {
-                field
-                message
+            `;
+            createResp = await shopifyService.requestAdminGraphql(
+              shopDomain,
+              accessToken,
+              compatMutation,
+              {}
+            );
+          } else if (isWriteCartTransformsScopeError(idErr)) {
+            return sendError(
+              res,
+              403,
+              'Missing write_cart_transforms scope for cartTransformCreate. Re-install the app with updated scopes and retry.',
+              {
+                function: {
+                  id: chosenFunction.id,
+                  title: chosenFunction.title || null,
+                  apiType: chosenFunction.apiType || null,
+                },
               }
-            }
+            );
+          } else {
+            throw idErr;
           }
-        `;
-        createResp = await shopifyService.requestAdminGraphql(
-          shopDomain,
-          accessToken,
-          compatMutation,
-          {}
-        );
+        }
       } else if (isWriteCartTransformsScopeError(createErr)) {
         return sendError(
           res,
@@ -358,6 +402,14 @@ router.post(
     }
 
     clearShopInstallStateCaches(shopDomain);
+    try {
+      const {
+        clearSmartPricingCheckoutReadinessCache,
+      } = require('../services/smartPricing/smartPricingCheckoutReadinessService');
+      clearSmartPricingCheckoutReadinessCache?.(shopDomain);
+    } catch {
+      // optional
+    }
     return res.json({
       success: true,
       created: true,

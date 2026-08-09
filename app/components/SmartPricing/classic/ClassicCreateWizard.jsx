@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { resolveCountryToCode } from '../../../utils/iso3166CountryDisplay';
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import PageShell from '../../Shared/PageShell';
+import { useNavigate, useSearchParams } from 'react-router';
+import PageShell from '../../shared/PageShell';
 import { ROUTES } from '../../../constants';
-import { apiGet, getShopDomain } from '../../../services';
+import { apiGet } from '../../../services';
+import useClassicShopDomain from '../../../hooks/useClassicShopDomain';
 import {
   createSmartPricingBatch,
   getSmartPricingGuardrails,
@@ -127,10 +128,9 @@ function rebuildPlanArmsFromVariations(plan, variations = [], priceOverrides = {
 }
 
 export default function ClassicCreateWizard() {
-  const { domain } = useParams();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const shopDomain = domain || getShopDomain();
+  const shopDomain = useClassicShopDomain();
   const resumeId = String(searchParams.get('resume') || '').trim();
 
   const [step, setStep] = useState(0);

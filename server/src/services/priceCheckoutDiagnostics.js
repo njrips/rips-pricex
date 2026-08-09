@@ -638,14 +638,28 @@ function buildCheckoutPriceDiagnostics(opts = {}) {
     return String(node?.functionId || '').trim() === String(cartTransformFunction?.id || '').trim();
   });
 
+  // RipsPriceX Classic price tests use Cart Transform only (no checkout discount function).
+  const classicPriceTestOnly =
+    String(process.env.RIPSPRICEX_CLASSIC_PRICE_TEST_ONLY || 'true').toLowerCase() !== 'false';
+
   if (functionSnapshot.length === 0 && shopifyAdminApiStatus === 'ok') {
-    checklist.push({
-      id: 'discount_function_available',
-      ok: false,
-      severity: 'warning',
-      message:
-        'No deployed Shopify discount function was found for this app on the shop. Deploy extensions (shopify app deploy) and release the app version, then run diagnostics again.',
-    });
+    if (!classicPriceTestOnly) {
+      checklist.push({
+        id: 'discount_function_available',
+        ok: false,
+        severity: 'warning',
+        message:
+          'No deployed Shopify discount function was found for this app on the shop. Deploy extensions (shopify app deploy) and release the app version, then run diagnostics again.',
+      });
+    } else {
+      checklist.push({
+        id: 'discount_function_available',
+        ok: true,
+        severity: 'ok',
+        message:
+          'Checkout discount function not required for Classic Smart Pricing (Cart Transform path).',
+      });
+    }
     checklist.push({
       id: 'cart_transform_function_available',
       ok: false,
@@ -656,14 +670,25 @@ function buildCheckoutPriceDiagnostics(opts = {}) {
   }
 
   if (functionSnapshot.length > 0) {
-    checklist.push({
-      id: 'discount_function_available',
-      ok: Boolean(discountFunction?.id),
-      severity: discountFunction?.id ? 'ok' : 'warning',
-      message: discountFunction?.id
-        ? `Shop has a deployed discount function available for RipX checkout pricing (${discountFunction.title || discountFunction.id}).`
-        : 'No deployed Shopify discount function was found for this app on the shop.',
-    });
+    if (!classicPriceTestOnly) {
+      checklist.push({
+        id: 'discount_function_available',
+        ok: Boolean(discountFunction?.id),
+        severity: discountFunction?.id ? 'ok' : 'warning',
+        message: discountFunction?.id
+          ? `Shop has a deployed discount function available for RipX checkout pricing (${discountFunction.title || discountFunction.id}).`
+          : 'No deployed Shopify discount function was found for this app on the shop.',
+      });
+    } else {
+      checklist.push({
+        id: 'discount_function_available',
+        ok: true,
+        severity: 'ok',
+        message: discountFunction?.id
+          ? `Optional discount function present (${discountFunction.title || discountFunction.id}); Classic price tests still use Cart Transform.`
+          : 'Checkout discount function not required for Classic Smart Pricing (Cart Transform path).',
+      });
+    }
     checklist.push({
       id: 'cart_transform_function_available',
       ok: Boolean(cartTransformFunction?.id),

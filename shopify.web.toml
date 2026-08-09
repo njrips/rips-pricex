@@ -4,4 +4,5 @@ webhooks_path = "/webhooks/app/uninstalled"
 
 [commands]
 predev = "npm exec prisma generate"
+# Sync Cloudflare tunnel into .env so Express storefront apiUrl / APP_URL stay public
 dev = "npm exec prisma migrate deploy && node scripts/sync-tunnel-env.js && npm exec react-router dev"

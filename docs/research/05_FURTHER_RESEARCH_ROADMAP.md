@@ -1,6 +1,6 @@
 # 05 — Further research roadmap
 
-**Updated:** 2026-08-09  
+**Updated:** 2026-08-10  
 **Purpose:** backlog of research tracks that should be pursued **inside this repo’s `docs/research/`**, independent of RipX.
 
 When a track finishes, add a dated research note and update [02_PARITY_MATRIX.md](./02_PARITY_MATRIX.md) + the research log in [README.md](./README.md).
@@ -45,6 +45,8 @@ When a track finishes, add a dated research note and update [02_PARITY_MATRIX.md
 4. Launch 1-SKU + multi-SKU Classic experiment; verify PDP + cart + checkout.  
 5. Stop → Apply winner; confirm Shopify product price update.
 
+**Progress (2026-08-10):** extensions deployed, CT ensured, price surfaces mapped, readiness `ready: true` — see [2026-08-10_LIVE_E2E_FINISH.md](./2026-08-10_LIVE_E2E_FINISH.md). Remaining: merchant theme-embed Save + Create→Launch proof.
+
 **Exit:** Checklist in `PILOT_READINESS.md` fully checked for one shop; optional video/notes in research/.
 
 ---
@@ -55,12 +57,12 @@ When a track finishes, add a dated research note and update [02_PARITY_MATRIX.md
 
 **Research tasks:**
 
-1. Walk create + details against design frames (document deltas).  
+1. Walk create + details against design frames (document deltas). — ✅ see `CLASSIC_FIGMA_DELTA.md`  
 2. Decide TitleBar vs Classic sticky headers (avoid double chrome).  
-3. Goals & Metrics: keep stub vs ship slim page.  
+3. Goals & Metrics: ✅ picker catalog via `/api/goal-metrics`; full Goals page stays out of scope.  
 4. Empty states / locked Create copy polish for App Store review.
 
-**Exit:** `docs/research/CLASSIC_FIGMA_DELTA.md` with must-fix / accept list.
+**Exit:** `docs/research/CLASSIC_FIGMA_DELTA.md` + [RIPX_SMART_PRICING_PARITY.md](./RIPX_SMART_PRICING_PARITY.md). Pixel must-fix list still open for Track C polish.
 
 ---
 

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 import { ROUTES } from '../../../constants';
 import { apiPost } from '../../../services';
 import { useSmartPricingLaunch } from '../../../hooks/useSmartPricingLaunch';

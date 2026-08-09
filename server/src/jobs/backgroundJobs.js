@@ -10,10 +10,18 @@ const {
 let timersStarted = false;
 
 async function listInstalledShops() {
+  // Prefer shops with a live offline token; fall back to shops table.
   const { rows } = await query(
-    `SELECT shop_domain FROM shops WHERE uninstalled_at IS NULL`
+    `SELECT DISTINCT LOWER(TRIM(shop_domain)) AS shop_domain
+     FROM (
+       SELECT shop_domain FROM shop_sessions
+       WHERE access_token IS NOT NULL AND LENGTH(TRIM(access_token)) > 0
+       UNION
+       SELECT shop_domain FROM shops WHERE uninstalled_at IS NULL
+     ) s
+     WHERE shop_domain IS NOT NULL AND shop_domain <> ''`
   ).catch(() => ({ rows: [] }));
-  return rows.map((r) => r.shop_domain);
+  return rows.map((r) => r.shop_domain).filter(Boolean);
 }
 
 async function pauseStaleRunningOnCancelPolicy() {
@@ -36,7 +44,20 @@ async function pauseStaleRunningOnCancelPolicy() {
 async function syncAllInboxes(reason = 'interval') {
   const shops = await listInstalledShops();
   for (const shop of shops) {
-    scheduleSmartPricingInboxSync(shop, reason).catch(() => {});
+    // scheduleSmartPricingInboxSync(shop, testId, meta) — never pass reason as testId
+    const { rows } = await query(
+      `SELECT id FROM tests
+       WHERE LOWER(TRIM(shop_domain)) = LOWER(TRIM($1))
+         AND type IN ('price', 'pricing')
+         AND status IN ('running', 'stopped', 'paused')
+       ORDER BY updated_at DESC NULLS LAST
+       LIMIT 50`,
+      [shop]
+    ).catch(() => ({ rows: [] }));
+    for (const row of rows) {
+      if (!row?.id) continue;
+      scheduleSmartPricingInboxSync(shop, row.id, { reason });
+    }
   }
 }
 

@@ -62,7 +62,8 @@ Important families:
 |-------|------|
 | `/api/tests` | Price-test lifecycle (start/stop/pause…) |
 | `/api/shopify` | Slim store resources (e.g. product for visual pick) |
-| `/api/track` & `/api/proxy` | Storefront script + assignment/events |
+| `/api/track` & `/api/proxy` | Storefront script + assignment/events (embeds goals + price surfaces) |
+| `/api/goal-metrics` | Classic Goals picker catalog (builtins + custom CRUD) |
 
 ---
 
@@ -72,6 +73,7 @@ Important families:
 |------|------|
 | `app/services/api.js` | Axios base + shop header (`apiGet`/`apiPost`/…) |
 | `app/services/smartPricingApi.js` | Classic Smart Pricing calls |
+| `app/services/goalMetricsApi.js` | Goals catalog for ClassicGoalPickerModal |
 | `app/lib/api.client.ts` | `rpxApi` helpers used by RR pages (billing, readiness) |
 
 Base URL: `VITE_API_URL` or `window.__RIPSPRICEX_API_BASE__` or `http://127.0.0.1:3456/api`.
@@ -90,6 +92,7 @@ Defined mainly in `migrations/001_ripspricex_core.sql` (+ follow-ups).
 | Inbox / plans tables | Classic experiment drafts & sync |
 | `tests` (+ extras in `003_…`) | Price A/B tests |
 | Assignments / events | Runtime analytics |
+| `goal_metric_definitions` (`004_…`) | Custom Goals catalog rows (builtins are in-code) |
 
 Prisma owns Shopify **session** storage separately under `prisma/`.
 

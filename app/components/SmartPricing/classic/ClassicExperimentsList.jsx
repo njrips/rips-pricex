@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import PageShell from '../../Shared/PageShell';
+import { useNavigate, useSearchParams } from 'react-router';
+import PageShell from '../../shared/PageShell';
 import { ROUTES } from '../../../constants';
-import { getShopDomain } from '../../../services';
+import useClassicShopDomain from '../../../hooks/useClassicShopDomain';
 import { readInboxPlans, setInboxPersistHandler, writeInboxPlans } from '../smartPricingConstants';
 import { filterPlansByQuery, groupInboxPlans } from '../smartPricingUiHelpers';
 import { hydrateInboxFromServer, schedulePersistInboxPlans } from '../smartPricingInboxPersistence';
@@ -57,10 +57,9 @@ function formatMetricLabel(metric) {
 }
 
 export default function ClassicExperimentsList() {
-  const { domain } = useParams();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const shopDomain = domain || getShopDomain();
+  const shopDomain = useClassicShopDomain();
 
   const initialFilter = searchParams.get('tab') || 'all';
   const [filter, setFilter] = useState(

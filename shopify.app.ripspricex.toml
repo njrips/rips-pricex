@@ -1,0 +1,53 @@
+# RipsPriceX — default CLI config (M.A.K. Ripon Partner org / ripx-plus)
+# Learn more: https://shopify.dev/docs/apps/tools/cli/configuration
+#
+# Do not set `handle` unless it is globally unique (taken handles break app preview).
+
+name = "RipsPriceX"
+client_id = "4c6899f56aea53cbee6e22893c179fa4"
+application_url = "https://submitted-polls-frank-ports.trycloudflare.com"
+embedded = true
+
+[build]
+automatically_update_urls_on_dev = true
+
+[access_scopes]
+# Classic Smart Pricing / price tests — aligned with RipX Admin usage for catalog, orders,
+# inventory/COGS, theme mapping, pages, markets, cart-transform money path, and ShopifyQL.
+# After changing scopes: reinstall / approve updated permissions on the store.
+#
+# NOT included (needs Partner Dashboard "Request access" first):
+#   read_all_orders  — orders older than 60 days
+# RipX shipping/discount/payment customization scopes omitted (not used by Classic-only).
+scopes = "read_products,write_products,read_orders,read_inventory,read_locations,read_cart_transforms,write_cart_transforms,read_themes,read_content,read_online_store_pages,read_markets,read_reports"
+optional_scopes = []
+use_legacy_install_flow = false
+
+[auth]
+redirect_urls = [ "https://submitted-polls-frank-ports.trycloudflare.com/auth/callback", "https://submitted-polls-frank-ports.trycloudflare.com/auth/shopify/callback", "https://submitted-polls-frank-ports.trycloudflare.com/api/auth/callback" ]
+
+[webhooks]
+# Keep in sync with app/shopify.server.ts ApiVersion.October25
+api_version = "2025-10"
+
+  [[webhooks.subscriptions]]
+  topics = ["app/uninstalled"]
+  uri = "/webhooks/app/uninstalled"
+
+  [[webhooks.subscriptions]]
+  topics = ["products/update"]
+  uri = "/webhooks/products/update"
+
+  [[webhooks.subscriptions]]
+  topics = ["app/scopes_update"]
+  uri = "/webhooks/app/scopes_update"
+
+# Relative: CLI tunnel → Vite /api proxy → Express :3456
+# Base must be /api/proxy (not .../script.js) so /apps/ripspricex/script.js maps correctly
+[app_proxy]
+url = "/api/proxy"
+subpath = "ripspricex"
+prefix = "apps"
+
+[pos]
+embedded = false

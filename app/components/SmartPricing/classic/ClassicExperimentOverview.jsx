@@ -1,8 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
-import PageShell from '../../Shared/PageShell';
+import { useNavigate, useParams } from 'react-router';
+import PageShell from '../../shared/PageShell';
 import { ROUTES } from '../../../constants';
-import { apiPost, getShopDomain } from '../../../services';
+import { apiPost } from '../../../services';
+import useClassicShopDomain from '../../../hooks/useClassicShopDomain';
 import { useClassicExperimentDetails } from '../../../hooks/useClassicExperimentDetails';
 import { useSmartPricingWinnerRollout } from '../../../hooks/useSmartPricingWinnerRollout';
 import { patchServerInboxPlan } from '../smartPricingInboxPersistence';
@@ -40,9 +41,9 @@ const TABS = [
 ];
 
 export default function ClassicExperimentOverview() {
-  const { domain, planId } = useParams();
+  const { planId } = useParams();
   const navigate = useNavigate();
-  const shopDomain = domain || getShopDomain();
+  const shopDomain = useClassicShopDomain();
   const [tab, setTab] = useState('Overview');
   const [busyAction, setBusyAction] = useState('');
   const [moreOpen, setMoreOpen] = useState(false);

@@ -1,7 +1,8 @@
 # 02 — Parity matrix (Classic design / RipX SP → RipsPriceX)
 
-**Updated:** 2026-08-09  
-**Legend:** ✅ present · 🟡 partial · ❌ missing · 🔬 needs live verification
+**Updated:** 2026-08-10  
+**Legend:** ✅ present · 🟡 partial · ❌ missing · 🔬 needs live verification  
+**Deep RipX compare:** [RIPX_SMART_PRICING_PARITY.md](./RIPX_SMART_PRICING_PARITY.md)
 
 Use this matrix for further parity research. Update cells when closing gaps; do not rely on RipX docs alone.
 
@@ -26,7 +27,7 @@ Use this matrix for further parity research. Update cells when closing gaps; do 
 | Variations | Classic | ✅ |
 | Products / pricing modes + AI suggest | Classic | ✅ |
 | Product picker modal | Classic | ✅ |
-| Audience + goal picker | Classic | 🟡 Goals page stub → Settings |
+| Audience + goal picker | Classic | ✅ Catalog via `/api/goal-metrics` (builtins + custom); full Goals page → Settings by design |
 | Review + launch | Classic | ✅ |
 | Fix setup deep link | Store Settings installation | ✅ → `/app/settings?tab=installation` |
 | Fix price surfaces + automap | Store Settings surfaces | ✅ → `?tab=price-surfaces&automap=1` |
@@ -70,12 +71,14 @@ Use this matrix for further parity research. Update cells when closing gaps; do 
 | Theme app embed extension | ✅ `ripspricex-theme` |
 | App proxy script | ✅ `/apps/ripspricex/script.js` |
 | Storefront runtime config `apiUrl` | ✅ (acceptance) |
+| Runtime embeds goals + shop price surfaces | ✅ (restored 2026-08-10) |
 | Assignment + event track | ✅ slim track routes |
 | Cart transform extension | ✅ `ripspricex-cart-transform` |
 | Checkout readiness API | ✅ |
-| PDP paint E2E on live shop | 🔬 |
-| Checkout charged-price E2E | 🔬 Plus/dev required |
+| PDP paint E2E on live shop | 🔬 Needs theme embed Save on `ripx-plus` |
+| Checkout charged-price E2E | 🔬 CT installed on shop; Plus/dev required |
 | Winner publish to Shopify | ✅ service ported; 🔬 live |
+| Cart transform ensure (live) | ✅ Installed 2026-08-10 (`CartTransform/142475337`) |
 
 ---
 
@@ -85,7 +88,7 @@ Use this matrix for further parity research. Update cells when closing gaps; do 
 |------------|--------|
 | Locked Create when unpaid | ✅ UI + `402` |
 | Dev entitle helper | ✅ |
-| Shopify App Pricing plans | 🟡 Partner setup pending `config:link` |
+| Shopify App Pricing plans | 🟡 Partner app linked; real plans vs `DEV_ENTITLE_ALL` still to harden |
 | Uninstall pauses tests | ✅ |
 
 ---

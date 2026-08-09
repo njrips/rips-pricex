@@ -47,18 +47,38 @@ export default defineConfig({
       // See https://vitejs.dev/config/server-options.html#server-fs-allow for more information
       allow: ["app", "node_modules"],
     },
-    proxy: {
-      "/api": {
-        target: process.env.RIPSPRICEX_API_URL || "http://127.0.0.1:3456",
-        changeOrigin: true,
-      },
-    },
+    proxy: (() => {
+      const target = process.env.RIPSPRICEX_API_URL || "http://127.0.0.1:3456";
+      const configure = (proxy: {
+        on: (event: string, fn: (...args: unknown[]) => void) => void;
+      }) => {
+        proxy.on("proxyReq", (proxyReq: unknown, req: unknown) => {
+          const request = req as { headers?: Record<string, string | undefined> };
+          const outgoing = proxyReq as {
+            setHeader: (k: string, v: string) => void;
+          };
+          const host = request.headers?.host;
+          if (host) {
+            outgoing.setHeader("X-Forwarded-Host", String(host));
+          }
+          const proto = request.headers?.["x-forwarded-proto"] || "https";
+          outgoing.setHeader("X-Forwarded-Proto", String(proto));
+        });
+      };
+      return {
+        // Express health (tunnel / Cloudflare → Vite → API)
+        "/health": { target, changeOrigin: true, xfwd: true, configure },
+        // Admin + app-proxy /api → Express (keep public Host for storefront apiUrl)
+        "/api": { target, changeOrigin: true, xfwd: true, configure },
+      };
+    })(),
   },
   resolve: {
     alias: {
       // Classic RipX code imports react-router-dom; RR7 uses react-router
       "react-router-dom": "react-router",
     },
+    dedupe: ["react-router", "react", "react-dom"],
   },
   plugins: [
     reactRouter(),

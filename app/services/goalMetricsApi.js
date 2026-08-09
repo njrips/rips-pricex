@@ -1,19 +1,17 @@
-/** Goals & Metrics slim stub — Classic goal picker works with local/empty defs. */
-import { apiGet, apiPost, unwrapData } from './api';
+import { apiDelete, apiGet, apiPost, unwrapData } from './api';
 
 export async function getGoalMetricDefinitions(domain) {
-  try {
-    const res = await apiGet('/smart-pricing/status', domain ? { domain } : {});
-    unwrapData(res);
-  } catch {
-    // ignore
-  }
-  return [];
+  const res = await apiGet('/goal-metrics', domain ? { domain } : {});
+  const data = unwrapData(res);
+  return data?.definitions || res.data?.definitions || [];
 }
 
-export async function saveGoalMetricDefinition(domain, body) {
-  return {
-    id: body?.id || `goal_${Date.now()}`,
-    ...body,
-  };
+export async function saveGoalMetricDefinition(domain, definition) {
+  const res = await apiPost('/goal-metrics', definition, domain ? { params: { domain } } : {});
+  const data = unwrapData(res);
+  return data?.definition || res.data?.definition;
+}
+
+export function deleteGoalMetricDefinition(domain, id) {
+  return apiDelete('/goal-metrics/' + encodeURIComponent(id), domain ? { params: { domain } } : {});
 }

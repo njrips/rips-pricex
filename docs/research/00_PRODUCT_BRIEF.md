@@ -34,7 +34,7 @@
 | 6 | Cart line attributes | Keep `_ripx_*` for MVP (rebrand later) |
 | 7 | Admin + API | React Router Admin + sibling Express API |
 | 8 | Unpaid open | List visible + locked Create |
-| 9 | Goals & Metrics | Picker only; no full Goals app in MVP |
+| 9 | Goals & Metrics | Picker only (`/api/goal-metrics` + builtins); no full Goals app in MVP |
 | 10 | Sidebar labels | Experiments, Create, Setup, Billing, Settings |
 | 11 | Create entry points | Sidebar + TitleBar |
 
@@ -81,11 +81,12 @@
 | Item | Value |
 |------|-------|
 | App name | RipsPriceX |
-| Handle | `ripspricex` |
+| Handle | Partner-assigned (do not force a taken handle in TOML) |
 | App proxy subpath | `ripspricex` → `/apps/ripspricex/script.js` |
 | Theme extension | `extensions/ripspricex-theme` |
 | Cart transform | `extensions/ripspricex-cart-transform` |
 | Express service name | `ripspricex-api` |
 | Default API port | `3456` |
+| Core scopes | products R/W, orders R, inventory+locations R, cart_transforms R/W, themes R, content/pages R, markets R, reports R |
 
-Do **not** reuse RipX `client_id`, proxy subpath `ripx`, or extension UIDs.
+Do **not** reuse RipX `client_id`, proxy subpath `ripx`, or extension UIDs. Request `read_all_orders` separately for >60d order history.

@@ -6,6 +6,21 @@ import type { AppOutletContext } from "../lib/api.client";
 import { rpxApi } from "../lib/api.client";
 import { apiGet, apiPost } from "../services/api";
 
+function themeEmbedActivateUrl(shop: string | undefined | null) {
+  const domain = String(shop || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\.myshopify\.com$/, "");
+  if (!domain) return null;
+  // Shopify deep link: merchant only needs to Save in the theme editor.
+  // https://shopify.dev/docs/apps/build/online-store/theme-app-extensions/configuration#deep-linking
+  const apiKey =
+    (typeof import.meta !== "undefined" && import.meta.env?.VITE_SHOPIFY_API_KEY) ||
+    "4c6899f56aea53cbee6e22893c179fa4";
+  const blockHandle = "ripspricex-app-embed";
+  return `https://admin.shopify.com/store/${domain}/themes/current/editor?context=apps&activateAppId=${apiKey}/${blockHandle}`;
+}
+
 export default function SetupPage() {
   const ctx = useOutletContext<AppOutletContext>();
   const [ready, setReady] = useState<boolean | null>(null);
@@ -13,6 +28,7 @@ export default function SetupPage() {
   const [cartStatus, setCartStatus] = useState("Checking cart transform…");
   const [cartBusy, setCartBusy] = useState(false);
   const [cartError, setCartError] = useState<string | null>(null);
+  const embedUrl = themeEmbedActivateUrl(ctx.shop);
 
   const refreshCart = () => {
     apiGet("/settings/cart-transform/status")
@@ -81,10 +97,16 @@ export default function SetupPage() {
                 {ready == null ? "Checking…" : ready ? "Ready" : "Needs attention"}
               </Banner>
               <Text as="p" variant="bodySm">
-                1. Enable the RipsPriceX theme app embed in Online Store → Themes → Customize
+                1. Enable the RipsPriceX theme app embed (required for PDP paint). Shopify does not
+                allow apps to toggle embeds via API — open the theme editor and Save.
               </Text>
+              {embedUrl ? (
+                <Button variant="primary" url={embedUrl} target="_top">
+                  Enable theme app embed
+                </Button>
+              ) : null}
               <Text as="p" variant="bodySm">
-                2. Deploy cart transform (`ripspricex-cart-transform`). lineUpdate needs Plus or a
+                2. Ensure cart transform is installed (below). Charged-price override needs Plus or a
                 development store.
               </Text>
               <Text as="p" variant="bodySm">

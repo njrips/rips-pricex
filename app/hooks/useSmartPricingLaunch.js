@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 import { ROUTES } from '../constants';
 import { launchSmartPricingPlan } from '../services/smartPricingApi';
 import { updateInboxPlan } from '../components/SmartPricing/smartPricingConstants';

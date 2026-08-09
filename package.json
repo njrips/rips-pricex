@@ -23,7 +23,8 @@
     "graphql-codegen": "graphql-codegen",
     "vite": "vite",
     "typecheck": "react-router typegen && tsc --noEmit",
-    "accept": "node scripts/acceptance-check.js"
+    "accept": "node scripts/acceptance-check.js",
+    "tunnel:sync": "node scripts/sync-tunnel-env.js"
   },
   "type": "module",
   "engines": {
@@ -77,6 +78,7 @@
     "@shopify/plugin-cloudflare"
   ],
   "overrides": {
-    "p-map": "^4.0.0"
+    "p-map": "^4.0.0",
+    "graphql": "16.11.0"
   }
 }

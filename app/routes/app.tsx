@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
 import { Link, Outlet, useLoaderData, useRouteError } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
@@ -36,8 +37,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const apiBase = process.env.RIPSPRICEX_API_URL || "http://127.0.0.1:3456";
 
   // Sync install + offline access token into Express Postgres shop_sessions
+  // (required for catalog / cart-transform / Admin GraphQL from the API)
   try {
-    await fetch(`${apiBase}/api/shops/install`, {
+    const installRes = await fetch(`${apiBase}/api/shops/install`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -48,10 +50,21 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         access_token: accessToken || undefined,
         scope: process.env.SCOPES || process.env.SHOPIFY_SCOPES || undefined,
       }),
-    }).catch(() => null);
+    });
+    if (!installRes.ok) {
+      console.warn(
+        "[ripspricex] shops/install sync failed",
+        installRes.status,
+        await installRes.text().catch(() => ""),
+      );
+    } else if (!accessToken) {
+      console.warn(
+        "[ripspricex] shops/install: no offline access token on session — Admin API calls will fail until re-auth",
+      );
+    }
 
     if (entitled) {
-      await fetch(`${apiBase}/api/billing/dev-entitle`, {
+      const entitleRes = await fetch(`${apiBase}/api/billing/dev-entitle`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -61,10 +74,16 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           status: "ACTIVE",
           planHandle: planHandle || "smart_pricing",
         }),
-      }).catch(() => null);
+      });
+      if (!entitleRes.ok) {
+        console.warn("[ripspricex] dev-entitle failed", entitleRes.status);
+      }
     }
-  } catch {
-    // ignore
+  } catch (err) {
+    console.warn(
+      "[ripspricex] API sync error (is Express running on RIPSPRICEX_API_URL?)",
+      err instanceof Error ? err.message : err,
+    );
   }
 
   return {
@@ -80,7 +99,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 export default function App() {
   const data = useLoaderData<typeof loader>();
 
-  setShopContext(data.shop, "/api");
+  useEffect(() => {
+    setShopContext(data.shop, "/api");
+  }, [data.shop]);
 
   return (
     <AppProvider embedded apiKey={data.apiKey}>

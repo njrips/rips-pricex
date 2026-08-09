@@ -176,11 +176,13 @@ Started from `server/src/app.js` via `jobs/backgroundJobs.js` (inbox refresh, ca
 
 | Area | State |
 |------|-------|
-| Partner `client_id` | Empty until `npm run config:link` |
-| Goals & Metrics page | Routes to Settings; picker only |
+| Partner `client_id` | Linked (M.A.K. Ripon / RipsPriceX) |
+| Goals & Metrics page | Routes to Settings; picker uses `/api/goal-metrics` |
 | Full Polaris redesign of Classic body | Deferred — Classic CSS kept |
-| Live E2E on Partner store | Not fully proven — see roadmap |
+| Live E2E on Partner store | Not fully proven — enable theme embed + see roadmap |
 | Attribute rebrand | Still `_ripx_*` |
+| Self-QA runs | Soft stub (empty runs) |
+| Command Center UI | Not ported (by design) |
 
 ---
 
