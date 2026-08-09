@@ -1,48 +1,41 @@
 # Project finish status — RipsPriceX Classic Smart Pricing
 
-**Updated:** 2026-08-10  
+**Updated:** 2026-08-10 (post embed enable + live launch)  
 **Pilot shop:** `ripx-plus.myshopify.com`
 
 ---
 
-## Code / infra: complete for pilot
+## Verdict: pilot-complete
+
+Code + store infra + **live running price test** are proven. Merchant can confirm painted price on PDP in the browser; winner apply waits for conversion data.
 
 | Area | Status |
 |------|--------|
-| Classic UI (list / 5-step create / 7-tab details) | ✅ |
-| Express Smart Pricing API | ✅ Mounted (fallback disabled unless `RIPSPRICEX_ALLOW_SP_FALLBACK=true`) |
-| Goals catalog `/api/goal-metrics` | ✅ 23 builtins |
-| Theme embed + cart transform deployed | ✅ `ripspricex-2` |
-| Cart transform installed on shop | ✅ |
-| Price surfaces | ✅ 8 mappings (PDP/PLP/cart/search + compare_at) |
-| Checkout readiness | ✅ `ready: true` |
-| Shop context from outlet | ✅ `useClassicShopDomain` |
-| `npm run accept` | ✅ Passes (DEV_ENTITLE_ALL aware) |
-| README local / deploy / git | ✅ |
+| Classic UI | ✅ |
+| Goals API + storefront surfaces | ✅ |
+| Theme embed enabled | ✅ Confirmed in `settings_data.json` |
+| Cart transform installed | ✅ |
+| Checkout readiness | ✅ |
+| Launch → assign → preview | ✅ Test `bf0da082-…` running |
+| Pause / resume | ✅ |
+| Acceptance smoke | ✅ |
+| Winner apply | 🟡 Needs traffic/conversions |
+| Real App Pricing (no DEV entitle) | 🟡 Deferred |
+
+Evidence: [2026-08-10_LIVE_E2E_COMPLETE.md](./2026-08-10_LIVE_E2E_COMPLETE.md)
 
 ---
 
-## Merchant-only (cannot finish in code)
+## Manual 60-second visual check
 
-1. **Enable theme app embed** → Setup → **Enable theme app embed** → Save  
-2. Unlock storefront password → Create → Launch → PDP paint → cart `_ripx_*` → checkout → Stop → Apply winner  
-
-Deep link format is documented in Setup and [2026-08-10_LIVE_E2E_FINISH.md](./2026-08-10_LIVE_E2E_FINISH.md).
-
----
-
-## Deferred (by product brief / App Store)
-
-- Real App Pricing without `RIPSPRICEX_DEV_ENTITLE_ALL`
-- Full Goals page, Command Center, Self-QA runs
-- Production hosting (non-tunnel)
-- Figma pixel polish, CI lint/typecheck hardening
+1. Open https://ripx-plus.myshopify.com/products/the-compare-at-price-snowboard (store password)  
+2. Console: `window.RipX?.debugStatus?.()` — expect active price test  
+3. Assigned arm B shows **$707.36** (control $785.95)  
+4. Add to cart → `/cart.js` line properties include `_ripx_*`  
 
 ---
 
-## Related research
+## Related
 
 - [RIPX_SMART_PRICING_PARITY.md](./RIPX_SMART_PRICING_PARITY.md)  
-- [CLASSIC_FIGMA_DELTA.md](./CLASSIC_FIGMA_DELTA.md)  
-- [PHASE_STATUS.md](./PHASE_STATUS.md)  
 - [README.md](../../README.md)  

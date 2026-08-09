@@ -11,7 +11,7 @@ const router = express.Router();
 router.get(
   '/:id',
   asyncHandler(async (req, res) => {
-    const test = await getTestById(req.params.id);
+    const test = await getTestById(req.params.id, req.shopDomain);
     if (!test || test.shop_domain !== req.shopDomain) {
       return res.status(404).json({ error: 'Test not found' });
     }
@@ -23,13 +23,13 @@ router.post(
   '/:id/start',
   requireEntitlement('launch'),
   asyncHandler(async (req, res) => {
-    const test = await getTestById(req.params.id);
+    const test = await getTestById(req.params.id, req.shopDomain);
     if (!test || test.shop_domain !== req.shopDomain) {
       return res.status(404).json({ error: 'Test not found' });
     }
-    await updateTestStatus(req.params.id, 'running');
-    scheduleSmartPricingInboxSync(req.shopDomain, 'manual_start').catch(() => {});
-    const updated = await getTestById(req.params.id);
+    await updateTestStatus(req.params.id, req.shopDomain, 'running');
+    scheduleSmartPricingInboxSync(req.shopDomain, req.params.id, { reason: 'manual_start' });
+    const updated = await getTestById(req.params.id, req.shopDomain);
     res.json({ test: updated });
   })
 );
@@ -38,13 +38,14 @@ router.post(
   '/:id/stop',
   requireEntitlement('launch'),
   asyncHandler(async (req, res) => {
-    const test = await getTestById(req.params.id);
+    const test = await getTestById(req.params.id, req.shopDomain);
     if (!test || test.shop_domain !== req.shopDomain) {
       return res.status(404).json({ error: 'Test not found' });
     }
-    await updateTestStatus(req.params.id, 'stopped');
-    scheduleSmartPricingInboxSync(req.shopDomain, 'manual_stop').catch(() => {});
-    const updated = await getTestById(req.params.id);
+    await updateTestStatus(req.params.id, req.shopDomain, 'stopped');
+    // Classic Pause maps to stop — keep inbox as paused, not winner_ready.
+    scheduleSmartPricingInboxSync(req.shopDomain, req.params.id, { reason: 'merchant_stop' });
+    const updated = await getTestById(req.params.id, req.shopDomain);
     res.json({ test: updated });
   })
 );
@@ -53,11 +54,11 @@ router.delete(
   '/:id',
   requireEntitlement('create'),
   asyncHandler(async (req, res) => {
-    const test = await getTestById(req.params.id);
+    const test = await getTestById(req.params.id, req.shopDomain);
     if (!test || test.shop_domain !== req.shopDomain) {
       return res.status(404).json({ error: 'Test not found' });
     }
-    await updateTestStatus(req.params.id, 'archived');
+    await updateTestStatus(req.params.id, req.shopDomain, 'archived');
     res.json({ ok: true });
   })
 );

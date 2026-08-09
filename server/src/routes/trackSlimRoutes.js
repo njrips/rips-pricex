@@ -152,7 +152,7 @@ router.get('/preview', async (req, res) => {
     if (!shop || !testId) {
       return res.status(400).json({ error: 'shop and test_id required' });
     }
-    const test = await getTestById(testId);
+    const test = await getTestById(testId, shop);
     if (!test || test.shop_domain !== shop) {
       return res.status(404).json({ error: 'Test not found' });
     }

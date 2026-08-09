@@ -37,7 +37,8 @@ When starting a new investigation in this project:
 | 2026-08-10 | [CLASSIC_FIGMA_DELTA.md](./CLASSIC_FIGMA_DELTA.md) | Done | EchoTest Final frames → Classic components |
 | 2026-08-10 | [RIPX_SMART_PRICING_PARITY.md](./RIPX_SMART_PRICING_PARITY.md) | Done | RipX Classic SP inventory; Goals + surface runtime restored |
 | 2026-08-10 | [2026-08-10_LIVE_E2E_FINISH.md](./2026-08-10_LIVE_E2E_FINISH.md) | In progress | Deploy CT, ensure install, surfaces, readiness green; embed Save left |
-| 2026-08-10 | [PROJECT_FINISH_STATUS.md](./PROJECT_FINISH_STATUS.md) | Pilot-complete | Code/infra finished; merchant embed + live paint left |
+| 2026-08-10 | [PROJECT_FINISH_STATUS.md](./PROJECT_FINISH_STATUS.md) | Pilot-complete | Embed on + live running test; winner needs conversions |
+| 2026-08-10 | [2026-08-10_LIVE_E2E_COMPLETE.md](./2026-08-10_LIVE_E2E_COMPLETE.md) | Done | Embed verified; launch/assign/pause/resume proven |
 
 ## Quick facts
 
