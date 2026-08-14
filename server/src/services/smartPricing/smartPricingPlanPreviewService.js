@@ -81,14 +81,33 @@ function buildMergedByProductForArm(plans, armId, armIndex) {
     if (!Number.isFinite(Number(price))) {
       return;
     }
-    if (!byProduct[productId]) {
-      byProduct[productId] = { byVariant: {} };
-    }
-    byProduct[productId].byVariant[variantId] = {
+    const row = {
       priceMode: 'fixed',
       price: Number(price),
       priceApplicationMethod: 'direct_price_override',
     };
+    // Write both GID + numeric keys so storefront PDPs (numeric meta) always hit.
+    const productKeys = new Set([productId]);
+    const productNumeric = productId.match(/Product\/(\d+)/i)?.[1] || productId.replace(/\D/g, '');
+    if (productNumeric) {
+      productKeys.add(productNumeric);
+      productKeys.add(`gid://shopify/Product/${productNumeric}`);
+    }
+    const variantKeys = new Set([variantId]);
+    const variantNumeric =
+      variantId.match(/ProductVariant\/(\d+)/i)?.[1] || variantId.replace(/\D/g, '');
+    if (variantNumeric) {
+      variantKeys.add(variantNumeric);
+      variantKeys.add(`gid://shopify/ProductVariant/${variantNumeric}`);
+    }
+    productKeys.forEach(pidKey => {
+      if (!byProduct[pidKey]) {
+        byProduct[pidKey] = { byVariant: {} };
+      }
+      variantKeys.forEach(vidKey => {
+        byProduct[pidKey].byVariant[vidKey] = row;
+      });
+    });
   });
   return byProduct;
 }
@@ -132,13 +151,21 @@ function buildExperimentSkuPriceKeys(plans) {
       return;
     }
     const arms = Array.isArray(plan?.price_arms) ? plan.price_arms : [];
+    const productNumeric =
+      productId.match(/Product\/(\d+)/i)?.[1] || (/^\d+$/.test(productId) ? productId : '');
+    const variantNumeric =
+      variantId.match(/ProductVariant\/(\d+)/i)?.[1] || (/^\d+$/.test(variantId) ? variantId : '');
     arms.forEach((arm, index) => {
       const armKey = shortArmVariantName(arm, index).toLowerCase();
       const price = isControlArm(arm) ? Number(plan.current_price) : Number(arm?.price);
       if (!Number.isFinite(price)) {
         return;
       }
+      // Accept either GID or numeric coverage (dual-write matrices).
       keys.add(`${productId}|${variantId}|${armKey}|${price}`);
+      if (productNumeric && variantNumeric) {
+        keys.add(`${productNumeric}|${variantNumeric}|${armKey}|${price}`);
+      }
     });
   });
   return keys;
@@ -147,6 +174,7 @@ function buildExperimentSkuPriceKeys(plans) {
 /**
  * True when the draft preview matrix includes every experiment SKU + arm price.
  * Product-id-only checks miss new sibling variants and price edits on the same product.
+ * Coverage is soft: GID and numeric aliases both count.
  */
 function testCoversExperimentProducts(test, plans) {
   const needed = buildExperimentSkuPriceKeys(plans);
@@ -157,12 +185,46 @@ function testCoversExperimentProducts(test, plans) {
   if (!covered.size) {
     return false;
   }
+  const coveredSoft = new Set();
+  covered.forEach(key => {
+    coveredSoft.add(key);
+    const parts = String(key).split('|');
+    if (parts.length === 4) {
+      const [pid, vid, armKey, price] = parts;
+      const pNum = pid.match(/Product\/(\d+)/i)?.[1] || (/^\d+$/.test(pid) ? pid : '');
+      const vNum = vid.match(/ProductVariant\/(\d+)/i)?.[1] || (/^\d+$/.test(vid) ? vid : '');
+      if (pNum && vNum) {
+        coveredSoft.add(`${pNum}|${vNum}|${armKey}|${price}`);
+        coveredSoft.add(`gid://shopify/Product/${pNum}|gid://shopify/ProductVariant/${vNum}|${armKey}|${price}`);
+      }
+    }
+  });
   for (const key of needed) {
-    if (!covered.has(key)) {
+    if (!coveredSoft.has(key)) {
       return false;
     }
   }
   return true;
+}
+
+/**
+ * Old preview drafts often store only GID matrix keys. Storefront PDP meta is numeric —
+ * soft resolve helps, but refresh the matrix so numeric aliases exist too.
+ */
+function testNeedsNumericMatrixUpgrade(test) {
+  const variants = Array.isArray(test?.variants) ? test.variants : [];
+  for (const variant of variants) {
+    const byProduct = variant?.config?.byProduct;
+    if (!byProduct || typeof byProduct !== 'object') continue;
+    const keys = Object.keys(byProduct);
+    if (!keys.length) continue;
+    const hasBareNumeric = keys.some(k => /^\d+$/.test(String(k).trim()));
+    const hasGid = keys.some(k => /gid:\/\/shopify\/Product\//i.test(String(k)));
+    if (hasGid && !hasBareNumeric) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /** In-flight ensure promises keyed by shop + experiment (prevents duplicate drafts). */
@@ -204,34 +266,18 @@ async function resolveProductHandleForPlan(shopDomain, plan) {
 }
 
 function mapArmPreviewVariants(plan, test) {
+  const { findVariantForPreviewQuery } = require('../../utils/previewVariantMatch');
   const currency = String(plan?.currency || 'USD').trim() || 'USD';
   const arms = Array.isArray(plan?.price_arms) ? plan.price_arms : [];
   const testVariants = Array.isArray(test?.variants) ? test.variants : [];
   return arms.map((arm, index) => {
     const expectedName = formatArmVariantName(arm, currency);
     const shortName = shortArmVariantName(arm, index);
-    const byExact = testVariants.find(
-      row =>
-        row &&
-        String(row.name || '')
-          .trim()
-          .toLowerCase() ===
-          String(expectedName || '')
-            .trim()
-            .toLowerCase()
-    );
-    const byShort = testVariants.find(
-      row =>
-        row &&
-        String(row.name || '')
-          .trim()
-          .toLowerCase() ===
-          String(shortName || '')
-            .trim()
-            .toLowerCase()
-    );
+    const bySoft =
+      findVariantForPreviewQuery(testVariants, { variant_name: expectedName }) ||
+      findVariantForPreviewQuery(testVariants, { variant_name: shortName });
     const byIndex = testVariants[index] || null;
-    const variant = byExact || byShort || byIndex;
+    const variant = bySoft || byIndex;
     return {
       armId: arm?.id || `arm_${index}`,
       label: arm?.label || null,
@@ -272,16 +318,26 @@ function buildExperimentPreviewPayload(primaryPlan, experimentPlans, guardrails,
     smart_pricing_plan_id: primaryPlan.id || null,
     smart_pricing_preview_product_count: productIds.length,
   };
-  payload.variants = arms.map((arm, index) => ({
-    name: shortArmVariantName(arm, index),
-    allocation: Number(arm.allocation_percent) || Math.floor(100 / Math.max(1, arms.length)),
-    config: {
-      priceMode: 'fixed',
-      price: null,
-      priceApplicationMethod: 'direct_price_override',
-      byProduct: buildMergedByProductForArm(experimentPlans, arm?.id, index),
-    },
-  }));
+  payload.variants = arms.map((arm, index) => {
+    const control = isControlArm(arm);
+    return {
+      name: shortArmVariantName(arm, index),
+      allocation: Number(arm.allocation_percent) || Math.floor(100 / Math.max(1, arms.length)),
+      config: control
+        ? {
+            // Explicit control — storefront skips paint (catalog stays visible).
+            priceMode: 'control',
+            priceApplicationMethod: 'direct_price_override',
+            byProduct: buildMergedByProductForArm(experimentPlans, arm?.id, index),
+          }
+        : {
+            priceMode: 'fixed',
+            price: null,
+            priceApplicationMethod: 'direct_price_override',
+            byProduct: buildMergedByProductForArm(experimentPlans, arm?.id, index),
+          },
+    };
+  });
 
   const allocationTotal = payload.variants.reduce(
     (sum, row) => sum + (Number(row.allocation) || 0),
@@ -329,7 +385,10 @@ async function ensureExperimentPreviewTest(domain, primaryPlan, experimentPlans)
     let test = cachedId ? await getTestById(cachedId, domain).catch(() => null) : null;
     let created = false;
 
-    const needsRebuild = !test || !testCoversExperimentProducts(test, experimentPlans);
+    const needsRebuild =
+      !test ||
+      !testCoversExperimentProducts(test, experimentPlans) ||
+      testNeedsNumericMatrixUpgrade(test);
     if (needsRebuild) {
       const guardrails = await getShopSmartPricingGuardrails(domain).catch(() => ({}));
       const payload = buildExperimentPreviewPayload(
@@ -514,5 +573,6 @@ module.exports = {
   shortArmVariantName,
   getExperimentId,
   testCoversExperimentProducts,
+  testNeedsNumericMatrixUpgrade,
   buildExperimentSkuPriceKeys,
 };

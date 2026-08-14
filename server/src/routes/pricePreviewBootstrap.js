@@ -24,6 +24,7 @@ const {
   fetchStorefrontPreviewHtml,
   resolveStorefrontPasswordForPreviewRequest,
 } = require('../utils/storefrontPasswordPreview');
+const { resolvePublicAppUrl } = require('../utils/storefrontScriptRuntime');
 
 function buildPreviewContextScript(targetUrl) {
   return `
@@ -470,20 +471,47 @@ function buildPricePreviewHtml({
           (document.head || document.body || document.documentElement).appendChild(nextScript);
         }
 
+        function isRipxStorefrontScriptSrc(src) {
+          var value = String(src || '').toLowerCase();
+          if (!value) return false;
+          return (
+            value.indexOf('/apps/ripspricex/script.js') !== -1 ||
+            value.indexOf('/apps/ripx/script.js') !== -1 ||
+            value.indexOf('/api/track/script.js') !== -1 ||
+            value.indexOf('ripspricex-app-embed-loader') !== -1 ||
+            value.indexOf('ripx-app-embed-loader') !== -1
+          );
+        }
+
+        function filterThemeScriptsWithoutRipx(scriptNodes) {
+          return (scriptNodes || []).filter(function (scriptEl) {
+            try {
+              var src = scriptEl && scriptEl.getAttribute ? scriptEl.getAttribute('src') : '';
+              return !isRipxStorefrontScriptSrc(src);
+            } catch (_eFilter) {
+              return true;
+            }
+          });
+        }
+
         function injectRipxRuntimeThenScripts(scriptNodes) {
           injectionAttempt += 1;
           persistPreviewCtx(window);
+          var themeScripts = filterThemeScriptsWithoutRipx(scriptNodes);
 
           if (hasRipxRuntime()) {
             mirrorRuntimeForConsole();
             setStatus('RipX price preview ready', true);
+            try {
+              themeScripts.forEach(appendScriptFromParsed);
+            } catch (_eScriptsReady) {}
             return;
           }
 
           try {
             window.__RIPX_PRICE_PREVIEW_FRAME__ = true;
             var existing = Array.prototype.slice.call(document.scripts || []).some(function (script) {
-              return script && script.src && (script.src.indexOf('/apps/ripspricex/script.js') !== -1 || script.src.indexOf('/api/track/script.js') !== -1);
+              return script && script.src && isRipxStorefrontScriptSrc(script.src);
             });
             if (!existing || hasRipxVersionOnly()) {
               if (existing && hasRipxVersionOnly()) {
@@ -492,8 +520,7 @@ function buildPricePreviewHtml({
                     if (
                       scriptNode &&
                       scriptNode.src &&
-                      (scriptNode.src.indexOf('/apps/ripspricex/script.js') !== -1 ||
-                        scriptNode.src.indexOf('/api/track/script.js') !== -1) &&
+                      isRipxStorefrontScriptSrc(scriptNode.src) &&
                       scriptNode.parentNode
                     ) {
                       scriptNode.parentNode.removeChild(scriptNode);
@@ -501,27 +528,36 @@ function buildPricePreviewHtml({
                   });
                 } catch (_eRemoveScript) {}
               }
+              // Prefer direct public script when available — app proxy often hits the
+              // storefront password wall and can serve a stale embedded apiUrl.
+              var primarySrc = directScriptUrl
+                ? directScriptUrl + '&price_preview_frame=1'
+                : appProxyScriptUrl + '&price_preview_frame=1';
+              var secondarySrc =
+                directScriptUrl && appProxyScriptUrl
+                  ? appProxyScriptUrl + '&price_preview_frame=1'
+                  : '';
               var script = document.createElement('script');
-              script.src = appProxyScriptUrl + '&price_preview_frame=1';
+              script.src = primarySrc;
               script.async = false;
               script.onload = function () {
                 mirrorRuntimeForConsole();
                 setStatus('RipX price preview ready', true);
                 cleanSimplePreviewAddressBar();
                 try {
-                  (scriptNodes || []).forEach(appendScriptFromParsed);
+                  themeScripts.forEach(appendScriptFromParsed);
                 } catch (_eScriptsAfterRipx) {}
               };
               script.onerror = function () {
-                if (directScriptUrl && script.src !== directScriptUrl + '&price_preview_frame=1') {
-                  lastError = 'app_proxy_script_failed_trying_direct';
-                  setStatus('App proxy script failed; trying direct RipX runtime...', false, true);
+                if (secondarySrc && script.src !== secondarySrc) {
+                  lastError = 'direct_script_failed_trying_app_proxy';
+                  setStatus('Direct RipX script failed; trying app proxy...', false, true);
                   var fallback = document.createElement('script');
-                  fallback.src = directScriptUrl + '&price_preview_frame=1';
+                  fallback.src = secondarySrc;
                   fallback.async = false;
                   fallback.onload = script.onload;
                   fallback.onerror = function () {
-                    lastError = 'direct_ripx_script_failed';
+                    lastError = 'ripx_script_failed';
                     setStatus('RipX runtime failed to load', false, true);
                   };
                   (document.head || document.documentElement || document.body).appendChild(fallback);
@@ -686,8 +722,10 @@ function createPricePreviewBootstrapHandlers({ validatePreviewBootstrapRequest, 
     const appProxyScriptUrl =
       `https://${normalizedShop}/apps/ripspricex/script.js?v=${SCRIPT_VERSION}` +
       `&ripx_preview_bust=${previewScriptBust}`;
-    const directScriptUrl = process.env.APP_URL
-      ? `${String(process.env.APP_URL).replace(/\/+$/, '')}/api/track/script.js?shop=${encodeURIComponent(
+    // Prefer the host this bootstrap request arrived on (live tunnel), not a stale APP_URL.
+    const publicAppUrl = resolvePublicAppUrl(req);
+    const directScriptUrl = publicAppUrl
+      ? `${String(publicAppUrl).replace(/\/+$/, '')}/api/track/script.js?shop=${encodeURIComponent(
           normalizedShop
         )}&v=${SCRIPT_VERSION}&ripx_preview_bust=${previewScriptBust}`
       : '';

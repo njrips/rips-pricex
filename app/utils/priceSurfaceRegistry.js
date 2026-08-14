@@ -105,7 +105,9 @@ export function normalizePriceSurfaceMapping(raw, index = 0, options = {}) {
     matchStrategy: matchStrategyRaw || MATCH_STRATEGY_BY_SURFACE[surface] || 'global_unique',
     productBinding: productBindingRaw || PRODUCT_BINDING_BY_SURFACE[surface] || 'data_product_id',
     priority: Number.isFinite(priorityRaw) ? priorityRaw : 0,
-    source: ['visual', 'theme_pack', 'heuristic', 'merchant'].includes(sourceRaw)
+    source: ['visual', 'theme_pack', 'theme_file', 'heuristic', 'openai', 'merchant'].includes(
+      sourceRaw
+    )
       ? sourceRaw
       : 'merchant',
     enabled: raw.enabled === false ? false : true,

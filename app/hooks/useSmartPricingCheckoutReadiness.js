@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { getSmartPricingCheckoutReadiness } from '../services/smartPricingApi';
+import { unwrapCheckoutReadiness } from '../utils/checkoutReadinessClient';
 
 export function useSmartPricingCheckoutReadiness(domain) {
   const [readiness, setReadiness] = useState(null);
@@ -15,7 +16,7 @@ export function useSmartPricingCheckoutReadiness(domain) {
     setError('');
     try {
       const data = await getSmartPricingCheckoutReadiness(domain);
-      const next = data?.readiness || data || null;
+      const next = unwrapCheckoutReadiness(data);
       setReadiness(next);
       return next;
     } catch (err) {
@@ -36,6 +37,7 @@ export function useSmartPricingCheckoutReadiness(domain) {
     loading,
     error,
     refresh,
-    checkoutReady: readiness?.ready !== false,
+    // Strict: null / loading / error must not green-light Launch.
+    checkoutReady: readiness?.ready === true,
   };
 }

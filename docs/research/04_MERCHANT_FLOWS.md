@@ -1,6 +1,6 @@
 # 04 — Merchant flows
 
-**Updated:** 2026-08-09  
+**Updated:** 2026-08-11  
 Design target: all screens open in Shopify Admin **main content**; navigation via **App Nav**.
 
 ---
@@ -12,8 +12,10 @@ Install app
   → OAuth / embedded session
   → /app Experiment List (empty or demo empty state)
   → Create (nav or TitleBar) → locked
+  → Open Plan → Settings → Plan (`/app/settings?tab=plan`)
   → Upgrade → Shopify plan selection (_top)
-  → return entitled → Create unlocked
+  → Welcome `/app/welcome?plan_handle=…` (Partner welcome URL)
+  → entitled → Setup → Create unlocked
 ```
 
 **Acceptance:** unpaid merchant can open the app and understand the product without being force-redirected away from the list.
@@ -24,12 +26,12 @@ Install app
 
 ```text
 Create (/app/experiments/new)
-  1 Setup (name, hypothesis, type)
+  1 Basics (name, hypothesis, type)
   2 Variations (arms / prices)
   3 Products (manual / all / AI)
   4 Audience + success metric
   5 Review
-       ├─ Fix setup → /app/settings?tab=installation
+       ├─ Fix setup → /app/setup
        └─ Fix price surfaces → /app/settings?tab=price-surfaces&automap=1
   → Save draft and/or Launch
        → plan → price test
@@ -46,9 +48,10 @@ Create (/app/experiments/new)
   → Enable theme app embed
   → Ensure cart transform (Plus/dev)
   → Jump to Price surfaces auto-map
+  → Plan deep link → Settings → Plan when unpaid
 ```
 
-Parallel: Settings → Installation for snippet + ensure.
+Parallel: Settings → Installation for snippet + ensure (advanced install details).
 
 ---
 
@@ -110,8 +113,9 @@ RIPSPRICEX_DEV_ENTITLE_ALL=true
 | New experiment | Create `/app/experiments/new` |
 | Drill into one | `/app/experiments/:planId` |
 | Theme / cart health | Setup `/app/setup` |
-| Pay | Billing `/app/billing` |
-| Guardrails + surfaces | Settings `/app/settings` |
+| Pay / manage plan | Settings → Plan `/app/settings?tab=plan` (legacy `/app/billing` redirects here) |
+| After plan approval | Welcome `/app/welcome` (`plan_handle` from Shopify) → Setup |
+| Guardrails + surfaces + install | Settings `/app/settings` (tabs: Plan · Guardrails · Installation · Price surfaces) |
 
 ---
 

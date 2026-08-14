@@ -35,7 +35,7 @@
 | 7 | Admin + API | React Router Admin + sibling Express API |
 | 8 | Unpaid open | List visible + locked Create |
 | 9 | Goals & Metrics | Picker only (`/api/goal-metrics` + builtins); no full Goals app in MVP |
-| 10 | Sidebar labels | Experiments, Create, Setup, Billing, Settings |
+| 10 | Sidebar labels | Experiments, Create, Setup, Settings (Plan under Settings) |
 | 11 | Create entry points | Sidebar + TitleBar |
 
 ---

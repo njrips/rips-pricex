@@ -580,39 +580,33 @@ export function isShopifyPreviewUrl(previewUrl) {
 
 const STOREFRONT_PASSWORD_STORAGE_PREFIX = 'ripx_storefront_password:';
 
-/** @deprecated Not auto-injected; use VITE_RIPX_DEV_STOREFRONT_PASSWORD or the local password field. */
+/** @deprecated Legacy session default — prefer RIPX_DEV_STOREFRONT_PASSWORD / VITE_RIPX_DEV_STOREFRONT_PASSWORD in .env. */
 export const DEV_STOREFRONT_PASSWORD_FALLBACK = 'sp';
 
 function readViteDevFlag() {
   try {
-    // Avoid a bare `import.meta` token so Jest (CJS) can parse this module.
-    // eslint-disable-next-line no-new-func
-    return Boolean(
-      // eslint-disable-next-line no-new-func
-      Function(
-        'try { return !!(import.meta && import.meta.env && import.meta.env.DEV); } catch (e) { return false; }'
-      )()
-    );
+    return Boolean(import.meta.env?.DEV);
   } catch {
     return false;
   }
 }
 
+/**
+ * Must use a static `import.meta.env.VITE_*` reference so Vite injects the value.
+ * A `new Function('import.meta…')` string is never rewritten and always returns empty in the browser.
+ */
 function readViteDevStorefrontPassword() {
   try {
-    // eslint-disable-next-line no-new-func
-    const fromMeta = String(
-      // eslint-disable-next-line no-new-func
-      Function(
-        'try { return (import.meta && import.meta.env && import.meta.env.VITE_RIPX_DEV_STOREFRONT_PASSWORD) || ""; } catch (e) { return ""; }'
-      )() || ''
-    ).trim();
+    const fromMeta = String(import.meta.env?.VITE_RIPX_DEV_STOREFRONT_PASSWORD || '').trim();
     if (fromMeta) return fromMeta;
   } catch {
-    // ignore
+    // ignore (non-Vite hosts)
   }
-  if (typeof process !== 'undefined' && process.env?.VITE_RIPX_DEV_STOREFRONT_PASSWORD) {
-    return String(process.env.VITE_RIPX_DEV_STOREFRONT_PASSWORD).trim();
+  if (typeof process !== 'undefined') {
+    const fromVite = String(process.env?.VITE_RIPX_DEV_STOREFRONT_PASSWORD || '').trim();
+    if (fromVite) return fromVite;
+    const fromServer = String(process.env?.RIPX_DEV_STOREFRONT_PASSWORD || '').trim();
+    if (fromServer) return fromServer;
   }
   return '';
 }
@@ -646,7 +640,8 @@ export function isLocalDevStorefrontPasswordUiEnabled() {
 }
 
 /**
- * Optional local-dev default from Vite env only (never hardcode a shared password).
+ * Optional local-dev default from `.env` (VITE_RIPX_DEV_STOREFRONT_PASSWORD or
+ * RIPX_DEV_STOREFRONT_PASSWORD). Never hardcode a shared password in the UI.
  * Production merchant installs do not use this.
  *
  * @returns {string}

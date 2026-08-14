@@ -15,7 +15,7 @@ import {
 import { ChevronDownIcon } from '@shopify/polaris-icons';
 import { Icon } from '@shopify/polaris';
 import { apiGet, apiPost, apiPut, unwrapData } from '../../services/api';
-import { TooltipWrapper } from '../Shared';
+import { TooltipWrapper } from '../shared';
 import {
   MAX_PRICE_SURFACE_MAPPINGS,
   PRICE_SURFACE_ROLES,
@@ -35,6 +35,7 @@ import {
 } from '../../utils/priceSurfaceThemePacks';
 import { isShopifyStoreDomain } from '../../utils/shopifyAdmin';
 import {
+  getDevStorefrontPasswordDefault,
   isLocalDevStorefrontPasswordUiEnabled,
   resolveStorefrontPasswordForPreview,
 } from '../../utils/previewUrl';
@@ -196,6 +197,8 @@ export default function PriceSurfaceMappingsPanel({
   visualEditorSelector = '',
   shopDomain = '',
   storefrontPassword = '',
+  /** When set (from .env / loader), the password TextField is hidden. */
+  envStorefrontPassword = '',
   onStorefrontPasswordChange,
   pickerLaunchUrl = '',
   getPickerLaunchUrl,
@@ -554,13 +557,19 @@ export default function PriceSurfaceMappingsPanel({
   const visualSelector = String(visualEditorSelector || '').trim();
   const defaultPickerReady = Boolean(resolvePickerLaunchUrl('pdp'));
   const shopHost = String(shopDomain || '').trim();
-  const showStorefrontPasswordField =
+  const localDevPasswordUi =
     isLocalDevStorefrontPasswordUiEnabled() && shopHost ? isShopifyStoreDomain(shopHost) : false;
-  const resolvedStorefrontPassword = showStorefrontPasswordField
-    ? resolveStorefrontPasswordForPreview(shopHost, storefrontPassword)
-    : '';
+  const envPassword = String(
+    envStorefrontPassword || getDevStorefrontPasswordDefault() || ''
+  ).trim();
+  // Prefer `.env` / loader — never show a password field when that value is present.
+  const showStorefrontPasswordField =
+    localDevPasswordUi && !envPassword && typeof onStorefrontPasswordChange === 'function';
+  const resolvedStorefrontPassword = localDevPasswordUi
+    ? resolveStorefrontPasswordForPreview(shopHost, envPassword || storefrontPassword)
+    : envPassword || '';
   const needsStorefrontPassword =
-    showStorefrontPasswordField && defaultPickerReady && !resolvedStorefrontPassword;
+    localDevPasswordUi && defaultPickerReady && !resolvedStorefrontPassword;
   const hasIssues = Boolean(error || coverageGaps.length > 0 || validationWarnings.length > 0);
   const activeRows = activeScopeTab === 'test' ? testRows : shopRows;
   const settingsLink = String(settingsHref || '').trim();
@@ -572,7 +581,7 @@ export default function PriceSurfaceMappingsPanel({
   const startQuickPick = async (scope, surface) => {
     if (needsStorefrontPassword) {
       setPreviewPickError(
-        'Enter your Shopify storefront password below, then pick again. It is stored for this browser session only.'
+        'Set RIPX_DEV_STOREFRONT_PASSWORD (and VITE_RIPX_DEV_STOREFRONT_PASSWORD) in .env for local/dev, restart the app, then pick again.'
       );
       setExpanded(true);
       return;
@@ -820,7 +829,12 @@ export default function PriceSurfaceMappingsPanel({
             surface: row.surface,
             role: row.role,
             selector: row.selector,
-            source: row.source === 'theme_pack' ? 'theme_pack' : 'heuristic',
+            source:
+              row.source === 'theme_pack' ||
+              row.source === 'theme_file' ||
+              row.source === 'openai'
+                ? row.source
+                : 'heuristic',
             priority: 20,
             enabled: true,
           })
@@ -897,7 +911,7 @@ export default function PriceSurfaceMappingsPanel({
                 </Badge>
               ) : null}
             </span>
-            <TooltipWrapper content="Map where RipX paints test prices on PDP and listing cards. Test overrides run before shop defaults.">
+            <TooltipWrapper content="Map where RipsPriceX paints test prices on PDP and listing cards. Test overrides run before shop defaults.">
               <span className={styles.priceSurfaceHeaderHint}>{registryStatus.hint}</span>
             </TooltipWrapper>
             <span className={styles.priceSurfaceHeaderChevron} aria-hidden>
@@ -932,7 +946,7 @@ export default function PriceSurfaceMappingsPanel({
               </Badge>
             ) : null}
           </span>
-          <TooltipWrapper content="Shop defaults apply to every price test. When a visitor is bucketed, RipX paints these selectors on the storefront.">
+          <TooltipWrapper content="Shop defaults apply to every price test. When a visitor is bucketed, RipsPriceX paints these selectors on the storefront.">
             <span className={styles.priceSurfaceHeaderHint}>{registryStatus.hint}</span>
           </TooltipWrapper>
         </div>
@@ -972,7 +986,7 @@ export default function PriceSurfaceMappingsPanel({
               Connect a shop or set a preview URL to use the visual picker.
             </Text>
           ) : null}
-          {showStorefrontPasswordField && onStorefrontPasswordChange ? (
+          {showStorefrontPasswordField ? (
             <TextField
               label="Storefront password"
               type="password"
@@ -982,14 +996,16 @@ export default function PriceSurfaceMappingsPanel({
                 onStorefrontPasswordChange(value);
               }}
               autoComplete="off"
-              helpText="Dev/tunnel only. Use the Online Store → Preferences storefront password (not your Shopify admin login). Saved for this browser session."
+              helpText="Dev/tunnel only — prefer RIPX_DEV_STOREFRONT_PASSWORD in .env. Fallback: Online Store → Preferences password (not admin login), saved for this browser session."
             />
           ) : null}
           {needsStorefrontPassword ? (
             <Banner tone="warning" title="Storefront password required">
               <p>
-                This shop is behind Shopify&apos;s storefront password. Enter it above, then use
-                Pick PDP or Pick PLP again.
+                This shop is behind Shopify&apos;s storefront password. Set{' '}
+                <code>RIPX_DEV_STOREFRONT_PASSWORD</code> in <code>.env</code> (dev only), restart
+                the app, then use Pick PDP or Pick PLP again
+                {showStorefrontPasswordField ? ' — or enter it above for this session' : ''}.
               </p>
             </Banner>
           ) : null}
@@ -1046,7 +1062,7 @@ export default function PriceSurfaceMappingsPanel({
                   Smart selector coverage
                 </Text>
                 <Text as="p" variant="bodySm" tone="subdued">
-                  Pick only the surfaces you want RipX to paint. Missing surfaces stay untouched.
+                  Pick only the surfaces you want RipsPriceX to paint. Missing surfaces stay untouched.
                 </Text>
               </div>
               <Badge tone={activeScopeTab === 'test' ? 'info' : undefined} size="small">
@@ -1218,6 +1234,13 @@ export default function PriceSurfaceMappingsPanel({
                 <Button
                   size="slim"
                   variant="plain"
+                  onClick={() => applyThemePack('shop', 'horizon')}
+                >
+                  Horizon pack
+                </Button>
+                <Button
+                  size="slim"
+                  variant="plain"
                   onClick={() => applyThemePack('shop', 'legacy')}
                 >
                   Legacy pack
@@ -1272,7 +1295,12 @@ export default function PriceSurfaceMappingsPanel({
                 ? `Detected “${autoMapResult.theme.name}” (${autoMapResult.confidence || 'unknown'} confidence). `
                 : ''}
               {autoMapResult?.rationale ||
-                'Live pages were probed. Accept matched selectors, then save.'}
+                'Live pages and theme files were scanned. Accept matched selectors, then save.'}
+              {autoMapResult?.theme_files?.scanned
+                ? ` Scanned ${autoMapResult.theme_files.scanned} theme file${
+                    autoMapResult.theme_files.scanned === 1 ? '' : 's'
+                  }.`
+                : ''}
               {autoMapResult?.ai_enabled ? ' AI ranking is available for this shop.' : ''}
             </Text>
             {autoMapResult?.theme_drift?.detected ? (
@@ -1335,6 +1363,8 @@ export default function PriceSurfaceMappingsPanel({
                       <>
                         Selector: <code>{row.selector}</code>
                         {row.sample_text ? ` · Sample: ${row.sample_text}` : ''}
+                        {row.source ? ` · ${String(row.source).replace(/_/g, ' ')}` : ''}
+                        {row.file_hint ? ` · ${row.file_hint}` : ''}
                       </>
                     ) : (
                       row.rationale || 'No selector found on the live page.'
@@ -1397,7 +1427,7 @@ export default function PriceSurfaceMappingsPanel({
           </Text>
           {pickerModalUrl ? (
             <iframe
-              title="RipX price surface picker"
+              title="RipsPriceX price surface picker"
               src={pickerModalUrl}
               className={styles.priceSurfacePickerIframe}
             />

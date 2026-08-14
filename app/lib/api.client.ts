@@ -7,6 +7,12 @@ export type AppOutletContext = {
   upgradeUrl: string;
   apiBase: string;
   planHandle: string | null;
+  /** Shopify app client id (loader) — used for theme embed deep links */
+  apiKey?: string;
+  /** True when RIPSPRICEX_DEV_ENTITLE_ALL unlocked Create locally */
+  devEntitleAll?: boolean;
+  /** Dev-only storefront password from .env (never shown in the Settings UI) */
+  devStorefrontPassword?: string;
 };
 
 function apiRoot(ctx: AppOutletContext) {
@@ -43,10 +49,15 @@ async function api<T = unknown>(
 
 export const rpxApi = {
   billingStatus: (ctx: AppOutletContext) =>
-    api<{ entitled: boolean; upgradeUrl: string; planHandle: string | null }>(
-      ctx,
-      "/billing/status",
-    ),
+    api<{
+      entitled: boolean;
+      upgradeUrl?: string;
+      planHandle: string | null;
+      status?: string;
+      shop?: string;
+      checkedAt?: string;
+      success?: boolean;
+    }>(ctx, "/billing/status"),
   inboxPlans: (ctx: AppOutletContext) =>
     api<{ plans: unknown[]; success?: boolean }>(ctx, "/smart-pricing/inbox/plans"),
   inboxSummary: (ctx: AppOutletContext) =>
@@ -61,7 +72,23 @@ export const rpxApi = {
       method: "DELETE",
     }),
   checkoutReadiness: (ctx: AppOutletContext) =>
-    api<{ ready: boolean; hints?: string[] }>(ctx, "/smart-pricing/checkout-readiness"),
+    api<{
+      success?: boolean;
+      ready?: boolean;
+      hints?: string[];
+      readiness?: {
+        ready?: boolean;
+        hints?: string[];
+        failed_checks?: string[];
+        checks?: unknown[];
+        message?: string;
+        price_surface?: Record<string, unknown>;
+      };
+      failed_checks?: string[];
+      checks?: unknown[];
+      message?: string;
+      price_surface?: Record<string, unknown>;
+    }>(ctx, "/smart-pricing/checkout-readiness"),
   status: (ctx: AppOutletContext) =>
     api<{ entitled?: boolean; capabilities?: Record<string, boolean> }>(
       ctx,
@@ -98,4 +125,26 @@ export const rpxApi = {
     }),
   markUninstall: (ctx: AppOutletContext) =>
     api(ctx, "/shops/uninstall", { method: "POST", body: "{}" }),
+  settingsInstallation: (ctx: AppOutletContext) =>
+    api<{
+      success?: boolean;
+      platform?: string;
+      scriptUrl?: string;
+      directUrl?: string;
+      snippetHtml?: string;
+      mainTheme?: {
+        id?: string | null;
+        numericId?: string | null;
+        name?: string | null;
+        role?: string | null;
+      } | null;
+      themeEmbed?: {
+        blockHandle?: string;
+        activateAppId?: string | null;
+        shopifyUrl?: string | null;
+        httpsUrl?: string | null;
+        themeSegment?: string;
+      };
+      instructions?: Record<string, unknown>;
+    }>(ctx, "/settings/installation"),
 };

@@ -94,7 +94,6 @@ This section answers: *how RipsPriceX feels like a Shopify app, not a RipX clone
 │ │  · Experiments│                                              │ │
 │ │  · Create*   │                                              │ │
 │ │  · Setup     │                                              │ │
-│ │  · Billing   │                                              │ │
 │ │  · Settings  │                                              │ │
 │ └──────────────┴──────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────────┘
@@ -127,6 +126,8 @@ References:
 
 ### 3.3 Recommended Shopify sidebar information architecture
 
+> **IA revision (2026-08-11):** Billing is no longer a top-level nav item. Plan lives under **Settings → Plan** (`?tab=plan`). Legacy `/app/billing` redirects there. Setup remains a first-class nav item (readiness checklist). Create wizard step 1 label is **Basics** (not “Setup”) to avoid colliding with nav Setup.
+
 Shopify App Nav is **single-level only** (no nested submenu items). Keep the list short (Shopify guidance: concise nouns, most-used first).
 
 | Sidebar label | Route | Role |
@@ -135,8 +136,7 @@ Shopify App Nav is **single-level only** (no nested submenu items). Keep the lis
 | Experiments | `/app` *(or omit if home covers it)* | Same list — usually home is enough; optional duplicate only if you want a visible “Experiments” label |
 | Create | `/app/experiments/new` | Create wizard (**lock when unpaid** — still show item; clicking opens upgrade modal or locked screen) |
 | Setup | `/app/setup` | Theme embed + cart transform + checkout readiness checklist |
-| Billing | `/app/billing` | Plan status + Upgrade |
-| Settings | `/app/settings` | Guardrails, COGS, surfaces |
+| Settings | `/app/settings` | Tabs: **Plan** · Guardrails · Installation · Price surfaces (default tab Guardrails when no `?tab=`) |
 
 **Recommended MVP sidebar (visible items):**
 
@@ -145,7 +145,6 @@ RipsPriceX
   Experiments     → /app                 (home)
   Create          → /app/experiments/new (gated)
   Setup           → /app/setup
-  Billing         → /app/billing
   Settings        → /app/settings
 ```
 
@@ -154,6 +153,7 @@ RipsPriceX
 - Experiment details `/app/experiments/:id` (with TitleBar breadcrumb → Experiments)
 - Wizard steps (same Create route; step UI inside content)
 - Winner apply modal (Polaris/App Bridge modal over content)
+- Plan / upgrade chrome (`/app/settings?tab=plan`; legacy `/app/billing` redirects)
 
 ### 3.4 Implementation pattern (React Router template)
 
@@ -171,7 +171,6 @@ export default function App() {
         <Link to="/app" rel="home">Experiments</Link>
         <Link to="/app/experiments/new">Create</Link>
         <Link to="/app/setup">Setup</Link>
-        <Link to="/app/billing">Billing</Link>
         <Link to="/app/settings">Settings</Link>
       </NavMenu>
       {/* NO custom <Sidebar /> */}
@@ -188,7 +187,6 @@ Equivalent web-component form:
   <s-link href="/app" rel="home">Experiments</s-link>
   <s-link href="/app/experiments/new">Create</s-link>
   <s-link href="/app/setup">Setup</s-link>
-  <s-link href="/app/billing">Billing</s-link>
   <s-link href="/app/settings">Settings</s-link>
 </s-app-nav>
 ```
@@ -211,8 +209,7 @@ Use native title bar for page-level CTAs so merchants recognize Shopify patterns
 | Create | New experiment | Launch / Save draft (step-aware) | Cancel → Experiments |
 | Experiment detail | Experiment name | Pause / Resume / Apply winner | Breadcrumb → Experiments |
 | Setup | Setup | — | — |
-| Billing | Billing | Upgrade / Manage plan | — |
-| Settings | Settings | Save | — |
+| Settings | Settings | Tab-aware (Save / Ensure / Upgrade) | Plan tab = Manage plan |
 
 Example mental model for Experiment List:
 
@@ -253,7 +250,7 @@ On Shopify mobile Admin:
 
 ### 3.8 Client-facing UX statement (shareable)
 
-> After installing RipsPriceX, merchants stay inside Shopify Admin. The left sidebar under the app name shows Experiments, Create, Setup, Billing, and Settings. Clicking any item opens that screen in the main Shopify content area. There is no separate RipX login screen and no custom app sidebar — navigation is Shopify-native.
+> After installing RipsPriceX, merchants stay inside Shopify Admin. The left sidebar under the app name shows Experiments, Create, Setup, and Settings. Plan / upgrade lives under Settings → Plan. Clicking any item opens that screen in the main Shopify content area. There is no separate RipX login screen and no custom app sidebar — navigation is Shopify-native.
 
 ### 3.9 Acceptance criteria (shell)
 
@@ -319,7 +316,7 @@ RipsPriceX/                          # NEW REPO (sibling of RipX)
 │   │   ├── app.experiments.$id.tsx  # Details (drill-in, TitleBar breadcrumb)
 │   │   ├── app.setup.tsx            # Theme embed / cart transform checklist
 │   │   ├── app.settings.tsx         # Guardrails / COGS / surfaces
-│   │   ├── app.billing.tsx          # Status + Upgrade CTA
+│   │   ├── app.billing.tsx          # Redirect → Settings?tab=plan
 │   │   └── api.*.tsx                # or proxy to services/
 │   └── shopify.server.ts
 ├── services/                        # Ported RipX SP + price-test core
@@ -594,8 +591,8 @@ All UI routes render inside the Shopify Admin **main content iframe** via `<Outl
 | `/app/experiments/new` | Create | Create wizard (gated) |
 | `/app/experiments/:id` | — (drill-in) | Details + TitleBar breadcrumb |
 | `/app/setup` | Setup | Embed + cart transform readiness |
-| `/app/settings` | Settings | Guardrails, COGS, surfaces |
-| `/app/billing` | Billing | Plan status / Upgrade |
+| `/app/settings` | Settings | Plan · Guardrails · Installation · Price surfaces |
+| `/app/billing` | — (compat redirect) | → `/app/settings?tab=plan` |
 
 | API (keep shapes close to RipX) | Notes |
 |----------------------------------|-------|
@@ -653,8 +650,7 @@ Redirect with App Bridge / `redirect(..., { target: "_top" })`.
 | Create wizard | `/app/experiments/new` | Create | Launch / Save draft |
 | Experiment details | `/app/experiments/:id` | No (drill-in) | Pause / Apply winner |
 | Setup | `/app/setup` | Setup | — |
-| Billing | `/app/billing` | Billing | Upgrade |
-| Settings | `/app/settings` | Settings | Save |
+| Settings | `/app/settings` | Settings | Tab-aware (Save / Ensure / Upgrade on Plan) |
 
 Port UI bodies from Classic (`ClassicExperimentsList`, create wizard, details tabs). Strip Classic’s dependence on RipX `PageShell` store switcher if any; keep toast/content patterns.
 
@@ -744,7 +740,7 @@ Confirm with client (§18). Create Partner app, pricing plans, empty repo, Postg
 ### Phase 1 — Scaffold + identity + billing gate (2–4 days)
 
 - Shopify React Router scaffold (`embedded = true`)  
-- **App Bridge `NavMenu`**: Experiments, Create, Setup, Billing, Settings (Shopify left sidebar)  
+- **App Bridge `NavMenu`**: Experiments, Create, Setup, Settings (Shopify left sidebar; Plan under Settings)  
 - **No custom Sidebar** — all routes render in Admin main content `<Outlet />`  
 - OAuth + `shop_sessions` / session storage  
 - Experiment List **shell** (empty state) + TitleBar “Create experiment”  
@@ -873,7 +869,7 @@ getShopContext(request) → { shopDomain, accessToken }
 | 7 | Admin shell: RR+Express vs RR-only | **RR + Express API for MVP** |
 | 8 | Unpaid app open: force pricing redirect? | **No** — list + locked Create |
 | 9 | Goals & Metrics page? | Picker only; no full Goals app |
-| 10 | Sidebar labels (Experiments vs Home only)? | Visible: Experiments, Create, Setup, Billing, Settings |
+| 10 | Sidebar labels (Experiments vs Home only)? | Visible: Experiments, Create, Setup, Settings (Plan = Settings tab) |
 | 11 | Create in sidebar vs TitleBar-only? | Both; sidebar item + TitleBar primary |
 
 ---
@@ -898,7 +894,7 @@ getShopContext(request) → { shopDomain, accessToken }
 ### Ship in MVP
 
 - Install → Experiment List **in Shopify main content**  
-- **Shopify App Nav sidebar** (Experiments, Create, Setup, Billing, Settings) — no RipX custom sidebar  
+- **Shopify App Nav sidebar** (Experiments, Create, Setup, Settings) — Plan under Settings; no RipX custom sidebar  
 - Shopify TitleBar CTAs (Create / Launch / Upgrade)  
 - Shopify identity (no email login)  
 - App Pricing entitlement + locked Create  

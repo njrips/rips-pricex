@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { resolveCountryToCode } from '../../../utils/iso3166CountryDisplay';
 import { useNavigate, useSearchParams } from 'react-router';
 import PageShell from '../../shared/PageShell';
@@ -138,7 +138,8 @@ export default function ClassicCreateWizard() {
   const [messageType, setMessageType] = useState('error');
   const [busy, setBusy] = useState(false);
   const [savingDraft, setSavingDraft] = useState(false);
-  const [experimentId, setExperimentId] = useState(createExperimentId);
+  // Stable on SSR + first client paint; assign a real id after mount (avoids hydration mismatch).
+  const [experimentId, setExperimentId] = useState('');
   const [draftHydrated, setDraftHydrated] = useState(false);
 
   const [name, setName] = useState('');
@@ -168,6 +169,7 @@ export default function ClassicCreateWizard() {
     summary: null,
     busy: false,
   });
+  const aiSuggestRequestId = useRef(0);
 
   const activeArmId = variations[activeArmIndex]?.id || 'control';
   const activePricing = pricingByArm[activeArmId] || {};
@@ -230,13 +232,13 @@ export default function ClassicCreateWizard() {
   const {
     readiness: checkoutReadiness,
     checkoutReady,
+    loading: checkoutLoading,
     refresh: refreshCheckoutReadiness,
   } = useSmartPricingCheckoutReadiness(shopDomain);
 
   const backToList = () => navigate(ROUTES.appSmartPricing(shopDomain));
   const openCheckoutSetup = () => {
-    const path = `${ROUTES.appSettings(shopDomain)}?tab=installation`;
-    // Prefer in-admin navigation so App Bridge keeps session context.
+    const path = ROUTES.appSetup(shopDomain);
     if (typeof navigate === 'function') {
       navigate(path);
       return;
@@ -437,6 +439,11 @@ export default function ClassicCreateWizard() {
     }
     setDraftHydrated(true);
   }, [shopDomain, resumeId, draftHydrated, applyWizardSnapshot]);
+
+  useEffect(() => {
+    if (!draftHydrated) return;
+    setExperimentId(prev => (prev ? prev : createExperimentId()));
+  }, [draftHydrated]);
 
   const loadGuardrails = useCallback(async () => {
     try {
@@ -738,7 +745,17 @@ export default function ClassicCreateWizard() {
         pickMode,
         maxSelection,
       });
-      if (!rows.length || !targetArms.length) return;
+      if (!rows.length || !targetArms.length) {
+        setAiPriceMeta(prev => ({
+          ...prev,
+          source: null,
+          summary: !rows.length
+            ? 'Select products first, then re-suggest prices.'
+            : 'Add a test variation before requesting AI prices.',
+          busy: false,
+        }));
+        return false;
+      }
       setPriceOverrides(prev => {
         const next = { ...prev };
         rows.forEach((row, index) => {
@@ -760,6 +777,7 @@ export default function ClassicCreateWizard() {
             : 'Local band fallback (AI unavailable).',
         busy: false,
       });
+      return true;
     },
     [
       aiMinPct,
@@ -822,7 +840,13 @@ export default function ClassicCreateWizard() {
         }
       }
 
-      setAiPriceMeta(prev => ({ ...prev, busy: true }));
+      const requestId = ++aiSuggestRequestId.current;
+      setAiPriceMeta(prev => ({
+        ...prev,
+        busy: true,
+        summary: prev.summary || 'Suggesting prices…',
+      }));
+      let settled = false;
       try {
         const result = await suggestSmartPricingPrices(shopDomain, {
           variants: rows.map(row => ({
@@ -846,9 +870,15 @@ export default function ClassicCreateWizard() {
           guardrails: shopGuardrails,
           use_ai: true,
         });
+        if (requestId !== aiSuggestRequestId.current) return;
+        const suggestions = Array.isArray(result?.suggestions)
+          ? result.suggestions
+          : Array.isArray(result?.data?.suggestions)
+            ? result.data.suggestions
+            : [];
         setPriceOverrides(prev => {
           const next = { ...prev };
-          (result?.suggestions || []).forEach(item => {
+          suggestions.forEach(item => {
             if (!item?.variant_id || !item?.arm_id) return;
             if (!Number.isFinite(Number(item.price))) return;
             next[`${item.variant_id}::${item.arm_id}`] = Number(item.price).toFixed(2);
@@ -856,12 +886,25 @@ export default function ClassicCreateWizard() {
           return next;
         });
         setAiPriceMeta({
-          source: result?.source || 'deterministic',
-          summary: result?.summary || 'AI price suggestions applied.',
+          source: result?.source || result?.data?.source || 'deterministic',
+          summary:
+            result?.summary ||
+            result?.data?.summary ||
+            (suggestions.length
+              ? 'AI price suggestions applied.'
+              : 'No AI prices returned — try Re-suggest or adjust the band.'),
           busy: false,
         });
+        settled = true;
       } catch {
+        if (requestId !== aiSuggestRequestId.current) return;
         applyLocalAiBandFallback({ unit });
+        settled = true;
+      } finally {
+        // Safety net: never leave the Re-suggest button stuck in Suggesting…
+        if (!settled && requestId === aiSuggestRequestId.current) {
+          setAiPriceMeta(prev => (prev.busy ? { ...prev, busy: false } : prev));
+        }
       }
     },
     [
@@ -1054,6 +1097,11 @@ export default function ClassicCreateWizard() {
       return;
     }
     if (step === 4) {
+      if (checkoutLoading) {
+        setMessageType('error');
+        setMessage('Still checking checkout readiness. Try again in a moment.');
+        return;
+      }
       if (!checkoutReady) {
         setMessageType('error');
         const detail =
@@ -1231,7 +1279,8 @@ export default function ClassicCreateWizard() {
             pricingByArm={pricingByArm}
             audience={audience}
             estimatedDays={estimatedDays}
-            checkoutReady={checkoutReady !== false}
+            checkoutReady={checkoutReady}
+            checkoutLoading={checkoutLoading}
             checkoutReadiness={checkoutReadiness}
             shopDomain={shopDomain}
             onFixSetup={openCheckoutSetup}

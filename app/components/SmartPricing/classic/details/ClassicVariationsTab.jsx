@@ -256,12 +256,15 @@ function armPreviewUrl(arm, product, shopDomain, fallbackTestId) {
   if (!testId) return null;
   const rawVariantId =
     arm.variantId !== null && arm.variantId !== undefined ? String(arm.variantId).trim() : '';
-  const sameTest =
-    Boolean(rawVariantId) && testId && fallbackTestId && String(testId) === String(fallbackTestId);
-  // Prefer UUID only when it belongs to this product's test (multi-test batches
-  // each have their own variant UUIDs; cross-test UUIDs break preview matching).
-  const safeVariantId =
-    sameTest && TEST_VARIANT_UUID_RE.test(rawVariantId) ? rawVariantId : undefined;
+  // UUID is safe when:
+  // - this product row already has its own preview testId (from ensure), or
+  // - UUID belongs to the same fallback test (single-test experiments).
+  // Cross-plan UUIDs without a product testId are omitted — name matching covers those.
+  const uuidOk = TEST_VARIANT_UUID_RE.test(rawVariantId);
+  const productOwnsTest = Boolean(productTestId);
+  const sameFallbackTest =
+    Boolean(fallbackTestId) && testId && String(testId) === String(fallbackTestId);
+  const safeVariantId = uuidOk && (productOwnsTest || sameFallbackTest) ? rawVariantId : undefined;
   const productForName = product || arm?.products?.[0] || null;
   return buildVariationPreviewUrl({
     shopDomain,

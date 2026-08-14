@@ -2288,9 +2288,12 @@
     if (!d || !params) return params;
     var dom = String(d).toLowerCase();
     if (dom.indexOf('.myshopify.com') !== -1) {
+      // Dual-write: server resolveShop historically only read `shop` / header.
       params.set('shop_domain', d);
+      params.set('shop', d);
     } else {
       params.set('site', d);
+      params.set('shop_domain', d);
     }
     return params;
   }
@@ -2354,7 +2357,9 @@
     if (!variant || !variant.config || typeof variant.config !== 'object') return;
     var key = String(testId || '');
     if (!key) return;
-    var payload = { variant: variant, persistedAtMs: Date.now() };
+    var payload = { variant: variant, persistedAtMs: Date.now(), scope: getPreviewVariantScopeKey() };
+    // Memory key must include arm scope — otherwise Variation A paints from a Control cache.
+    _previewVariantCacheByTestId[key + '\u0001' + getPreviewVariantScopeKey()] = payload;
     _previewVariantCacheByTestId[key] = payload;
     try {
       if (window.sessionStorage) {
@@ -2368,10 +2373,15 @@
   function readPreviewVariantCache(testId) {
     var key = String(testId || '');
     if (!key) return null;
+    var scope = getPreviewVariantScopeKey();
+    var scopedKey = key + '\u0001' + scope;
     var inMemory =
-      _previewVariantCacheByTestId && _previewVariantCacheByTestId[key]
+      (_previewVariantCacheByTestId && _previewVariantCacheByTestId[scopedKey]) ||
+      (_previewVariantCacheByTestId &&
+      _previewVariantCacheByTestId[key] &&
+      String(_previewVariantCacheByTestId[key].scope || '') === scope
         ? _previewVariantCacheByTestId[key]
-        : null;
+        : null);
     if (
       inMemory &&
       inMemory.variant &&
@@ -2380,7 +2390,15 @@
     ) {
       return inMemory.variant;
     }
-    if (inMemory) delete _previewVariantCacheByTestId[key];
+    if (_previewVariantCacheByTestId) {
+      if (_previewVariantCacheByTestId[scopedKey]) delete _previewVariantCacheByTestId[scopedKey];
+      if (
+        _previewVariantCacheByTestId[key] &&
+        String(_previewVariantCacheByTestId[key].scope || '') === scope
+      ) {
+        delete _previewVariantCacheByTestId[key];
+      }
+    }
     try {
       if (window.sessionStorage) {
         var raw = window.sessionStorage.getItem(getPreviewVariantCacheStorageKey(key));
@@ -2393,6 +2411,8 @@
                 parsed.variant.config &&
                 typeof parsed.variant.config === 'object'
               ) {
+                parsed.scope = scope;
+                _previewVariantCacheByTestId[scopedKey] = parsed;
                 _previewVariantCacheByTestId[key] = parsed;
                 return parsed.variant;
               }
@@ -7005,6 +7025,54 @@
     return s;
   }
 
+  /** Soft-match a byProduct map entry across numeric / GID / string keys. */
+  function resolveByProductEntry(byProduct, productId) {
+    if (!byProduct || typeof byProduct !== 'object') return null;
+    if (productId == null || productId === '') return null;
+    var pid = toNumericProductId(productId);
+    var gid = pid ? 'gid://shopify/Product/' + pid : '';
+    var direct =
+      byProduct[productId] ||
+      (pid ? byProduct[pid] : null) ||
+      (gid ? byProduct[gid] : null) ||
+      null;
+    if (direct && typeof direct === 'object') return direct;
+    if (!pid) return null;
+    var keys = Object.keys(byProduct);
+    for (var i = 0; i < keys.length; i++) {
+      var key = keys[i];
+      if (toNumericProductId(key) === pid) {
+        var hit = byProduct[key];
+        if (hit && typeof hit === 'object') return hit;
+      }
+    }
+    return null;
+  }
+
+  /** Soft-match a byVariant map entry across numeric / GID / string keys. */
+  function resolveByVariantEntry(byVariant, currentVariantId) {
+    if (!byVariant || typeof byVariant !== 'object') return null;
+    if (currentVariantId == null || currentVariantId === '') return null;
+    var vkey = toVariantIdKey(currentVariantId);
+    var gid = vkey ? 'gid://shopify/ProductVariant/' + vkey : '';
+    var direct =
+      (vkey ? byVariant[vkey] : null) ||
+      byVariant[currentVariantId] ||
+      (gid ? byVariant[gid] : null) ||
+      null;
+    if (direct && typeof direct === 'object') return direct;
+    if (!vkey) return null;
+    var keys = Object.keys(byVariant);
+    for (var i = 0; i < keys.length; i++) {
+      var key = keys[i];
+      if (toVariantIdKey(key) === vkey) {
+        var hit = byVariant[key];
+        if (hit && typeof hit === 'object') return hit;
+      }
+    }
+    return null;
+  }
+
   function getAssignmentProofFromVariant(variant) {
     if (!variant || typeof variant !== 'object') return null;
     var sig = variant.assignment_sig || variant.assignmentSig;
@@ -7054,6 +7122,34 @@
     if (!variant.config) return variant;
     var normalizedConfig = normalizePriceConfigKeys(variant.config);
     normalizedConfig = normalizeThemeConfigKeys(normalizedConfig);
+    // Recurse into byProduct / byVariant so nested snake_case / modes resolve.
+    if (normalizedConfig.byProduct && typeof normalizedConfig.byProduct === 'object') {
+      var nextByProduct = {};
+      Object.keys(normalizedConfig.byProduct).forEach(function (pid) {
+        var productCfg = normalizedConfig.byProduct[pid];
+        if (!productCfg || typeof productCfg !== 'object') {
+          nextByProduct[pid] = productCfg;
+          return;
+        }
+        var nextProduct = normalizePriceConfigKeys(productCfg);
+        if (productCfg.byVariant && typeof productCfg.byVariant === 'object') {
+          var nextByVariant = {};
+          Object.keys(productCfg.byVariant).forEach(function (vid) {
+            nextByVariant[vid] = normalizePriceConfigKeys(productCfg.byVariant[vid]);
+          });
+          nextProduct.byVariant = nextByVariant;
+        }
+        nextByProduct[pid] = nextProduct;
+      });
+      normalizedConfig.byProduct = nextByProduct;
+    }
+    if (normalizedConfig.byVariant && typeof normalizedConfig.byVariant === 'object') {
+      var nextRootByVariant = {};
+      Object.keys(normalizedConfig.byVariant).forEach(function (vid) {
+        nextRootByVariant[vid] = normalizePriceConfigKeys(normalizedConfig.byVariant[vid]);
+      });
+      normalizedConfig.byVariant = nextRootByVariant;
+    }
     return Object.assign({}, variant, { config: normalizedConfig });
   }
 
@@ -7377,7 +7473,7 @@
   /**
    * Resolve matrix pricing for the current PDP selection.
    *
-   * Precedence is intentionally identical to `backend/src/services/priceTestCheckoutResolve.js`:
+   * Precedence is intentionally identical to checkout resolve:
    * base config -> root byVariant -> byProduct -> byProduct.byVariant. Keep both paths in sync.
    */
   function getEffectivePriceConfig(cfg, productId, currentVariantId) {
@@ -7400,12 +7496,7 @@
       rootByVariant &&
       typeof rootByVariant === 'object'
     ) {
-      var rootVkey = toVariantIdKey(currentVariantId);
-      var rootVariantOverride = rootVkey
-        ? rootByVariant[rootVkey] ||
-          rootByVariant[currentVariantId] ||
-          rootByVariant['gid://shopify/ProductVariant/' + rootVkey]
-        : null;
+      var rootVariantOverride = resolveByVariantEntry(rootByVariant, currentVariantId);
       if (rootVariantOverride && typeof rootVariantOverride === 'object') {
         for (var rootVariantKey in rootVariantOverride) {
           if (Object.prototype.hasOwnProperty.call(rootVariantOverride, rootVariantKey)) {
@@ -7417,29 +7508,31 @@
 
     var byProduct = cfg.byProduct;
     if (!byProduct || typeof byProduct !== 'object') return normalizeMergedPriceConfig(cfg, merged);
-    var pid = toNumericProductId(productId);
-    var gid = pid ? 'gid://shopify/Product/' + pid : '';
-    var override = byProduct[productId] || byProduct[pid] || (gid ? byProduct[gid] : null);
+    var override = resolveByProductEntry(byProduct, productId);
     if (!override || typeof override !== 'object') return normalizeMergedPriceConfig(cfg, merged);
     for (var j in override)
       if (j !== 'byVariant' && Object.prototype.hasOwnProperty.call(override, j))
         merged[j] = override[j];
     var byVariant = override.byVariant;
     if (byVariant && typeof byVariant === 'object') {
-      var variantOverride = null;
-      if (currentVariantId != null && currentVariantId !== '') {
-        var vkey = toVariantIdKey(currentVariantId);
-        variantOverride = vkey
-          ? byVariant[vkey] ||
-            byVariant[currentVariantId] ||
-            byVariant['gid://shopify/ProductVariant/' + vkey]
-          : null;
-      }
-      // Unmatched Shopify variant ids must not fall through to a root arm price
-      // (that paints one price on every SKU). Prefer the matrix row for this product.
+      var variantOverride = resolveByVariantEntry(byVariant, currentVariantId);
+      // Single-SKU fallback only. Multiple keys + unmatched Shopify variant → refuse wrong price.
       if (!variantOverride || typeof variantOverride !== 'object') {
         var fallbackVariantKeys = Object.keys(byVariant);
-        variantOverride = fallbackVariantKeys.length > 0 ? byVariant[fallbackVariantKeys[0]] : null;
+        variantOverride =
+          fallbackVariantKeys.length === 1 ? byVariant[fallbackVariantKeys[0]] : null;
+        if (!variantOverride && fallbackVariantKeys.length > 1) {
+          ripxTrace(
+            'S7',
+            'byVariant matrix miss — multi-SKU, no safe fallback',
+            {
+              productId: productId,
+              shopifyVariantId: currentVariantId,
+              matrixKeys: fallbackVariantKeys.slice(0, 8),
+            },
+            'warn'
+          );
+        }
       }
       if (variantOverride && typeof variantOverride === 'object') {
         for (var v in variantOverride)
@@ -8926,6 +9019,11 @@
       test.previewSynthetic = false;
       rememberPreviewFocusProductId(curProductId);
       return true;
+    }
+    // Product id often arrives after bootstrap mount (ShopifyAnalytics). Do not treat
+    // "not ready yet" as a matrix miss — that falsely banners + rewrites targetIds to all keys.
+    if (!curProductId) {
+      return false;
     }
     test.targetIds = keys.slice();
     test.targetId = keys[0] || null;

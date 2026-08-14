@@ -20,7 +20,7 @@
 
   var config = readConfig();
   var shopHost = String(config.shopHost || window.location.hostname || '').trim();
-  var version = String(config.version || '').trim() || '1.0.47';
+  var version = String(config.version || '').trim() || '1.0.49';
   var directScriptBaseUrl = String(config.directScriptBaseUrl || '').trim();
 
   function hasRuntimeConfig() {

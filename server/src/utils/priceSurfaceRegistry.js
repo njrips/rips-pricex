@@ -36,7 +36,14 @@ const PRICE_PRODUCT_BINDINGS = Object.freeze([
   'page_product',
 ]);
 
-const PRICE_MAPPING_SOURCES = Object.freeze(['visual', 'theme_pack', 'heuristic', 'merchant']);
+const PRICE_MAPPING_SOURCES = Object.freeze([
+  'visual',
+  'theme_pack',
+  'theme_file',
+  'heuristic',
+  'openai',
+  'merchant',
+]);
 
 const PRICE_SURFACE_READINESS_TARGETS = Object.freeze([
   { surface: 'pdp', role: 'regular', severity: 'high' },

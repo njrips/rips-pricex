@@ -118,7 +118,7 @@ export function resolveClassicExperimentMenuActions(experiment, { checkoutReady 
   }
 
   if (testIds.length === 1) {
-    actions.push({ id: 'open_test', label: 'Open RipX test' });
+    actions.push({ id: 'open_test', label: 'Open price test' });
   } else if (testIds.length > 1) {
     actions.push({ id: 'open_test', label: 'Open first test' });
   }

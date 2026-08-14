@@ -5,7 +5,7 @@
     "build": "react-router build",
     "dev": "shopify app dev",
     "dev:api": "npm --prefix server run dev",
-    "dev:all": "npx concurrently -k \"npm run dev:api\" \"npm run dev\"",
+    "dev:all": "npm run dev",
     "config:link": "shopify app config link",
     "generate": "shopify app generate",
     "deploy": "shopify app deploy",

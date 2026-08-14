@@ -1,156 +1,331 @@
-import { useEffect, useState } from "react";
-import { Link, useOutletContext } from "react-router";
-import { TitleBar } from "@shopify/app-bridge-react";
-import { Banner, BlockStack, Box, Button, Card, InlineStack, Text } from "@shopify/polaris";
-import type { AppOutletContext } from "../lib/api.client";
-import { rpxApi } from "../lib/api.client";
-import { apiGet, apiPost } from "../services/api";
+import { useCallback, useEffect, useState } from 'react';
+import { Link, useNavigate, useOutletContext } from 'react-router';
+import type { AppOutletContext } from '../lib/api.client';
+import { rpxApi } from '../lib/api.client';
+import { useThemeEmbedRedirect } from '../lib/useThemeEmbedRedirect';
+import useCartTransformStatus from '../hooks/useCartTransformStatus';
+import {
+  checkoutReadinessHintLines,
+  isCheckoutReady,
+  priceSurfaceSummary,
+  themeEmbedStatus,
+  unwrapCheckoutReadiness,
+} from '../utils/checkoutReadinessClient';
+import ClassicAdminShell from '../components/SmartPricing/classic/ClassicAdminShell';
+import { IconSparkles } from '../components/SmartPricing/classic/classicIcons';
+import styles from '../components/SmartPricing/classic/SmartPricingClassic.module.css';
 
-function themeEmbedActivateUrl(shop: string | undefined | null) {
-  const domain = String(shop || "")
-    .trim()
-    .toLowerCase()
-    .replace(/\.myshopify\.com$/, "");
-  if (!domain) return null;
-  // Shopify deep link: merchant only needs to Save in the theme editor.
-  // https://shopify.dev/docs/apps/build/online-store/theme-app-extensions/configuration#deep-linking
-  const apiKey =
-    (typeof import.meta !== "undefined" && import.meta.env?.VITE_SHOPIFY_API_KEY) ||
-    "4c6899f56aea53cbee6e22893c179fa4";
-  const blockHandle = "ripspricex-app-embed";
-  return `https://admin.shopify.com/store/${domain}/themes/current/editor?context=apps&activateAppId=${apiKey}/${blockHandle}`;
+function embedBadgeClass(status: 'enabled' | 'disabled' | 'unknown', stylesMap: typeof styles) {
+  if (status === 'enabled') return stylesMap.adminBadgeOk;
+  if (status === 'disabled') return stylesMap.adminBadgeWarn;
+  return stylesMap.adminBadgeNeutral;
+}
+
+function embedBadgeLabel(status: 'enabled' | 'disabled' | 'unknown', hasDeepLink: boolean) {
+  if (status === 'enabled') return 'Enabled';
+  if (status === 'disabled') return 'Not enabled';
+  return hasDeepLink ? 'Confirm in theme editor' : 'API key missing';
 }
 
 export default function SetupPage() {
   const ctx = useOutletContext<AppOutletContext>();
+  const navigate = useNavigate();
   const [ready, setReady] = useState<boolean | null>(null);
   const [hints, setHints] = useState<string[]>([]);
-  const [cartStatus, setCartStatus] = useState("Checking cart transform…");
-  const [cartBusy, setCartBusy] = useState(false);
-  const [cartError, setCartError] = useState<string | null>(null);
-  const embedUrl = themeEmbedActivateUrl(ctx.shop);
+  const [surface, setSurface] = useState({ ready: false, configured: 0, message: '' });
+  const [embedStatus, setEmbedStatus] = useState<'enabled' | 'disabled' | 'unknown'>('unknown');
+  const [readinessBusy, setReadinessBusy] = useState(false);
+  const { open: openEmbed, embedUrl, themeName } = useThemeEmbedRedirect(ctx);
+  const cart = useCartTransformStatus(ctx.shop);
 
-  const refreshCart = () => {
-    apiGet("/settings/cart-transform/status")
-      .then((res) => {
-        const data = res?.data || {};
-        if (data.installedForRipxFunction) {
-          setCartStatus("Cart transform installed for this app");
-        } else if (data.function?.id) {
-          setCartStatus("Function found — click Ensure to install");
-        } else {
-          setCartStatus("Deploy ripspricex-cart-transform, then Ensure");
-        }
-      })
-      .catch((e) => {
-        setCartStatus("Could not load cart transform status");
-        setCartError(e?.response?.data?.error || e?.message || "Status failed");
-      });
-  };
+  const refreshReadiness = useCallback(async () => {
+    if (!ctx.shop) return;
+    setReadinessBusy(true);
+    try {
+      const data = await rpxApi.checkoutReadiness(ctx);
+      const readiness = unwrapCheckoutReadiness(data);
+      setReady(isCheckoutReady(readiness));
+      setHints(checkoutReadinessHintLines(readiness));
+      setSurface(priceSurfaceSummary(readiness));
+      setEmbedStatus(themeEmbedStatus(readiness));
+    } catch {
+      setReady(false);
+      setHints(['Could not load checkout readiness']);
+      setSurface({ ready: false, configured: 0, message: '' });
+      setEmbedStatus('unknown');
+    } finally {
+      setReadinessBusy(false);
+    }
+  }, [ctx.shop, ctx.apiBase]);
 
   useEffect(() => {
-    rpxApi
-      .checkoutReadiness(ctx)
-      .then((data) => {
-        setReady(Boolean(data.ready));
-        setHints(data.hints || []);
-      })
-      .catch(() => {
-        setReady(false);
-        setHints(["Could not load checkout readiness"]);
-      });
-    refreshCart();
-  }, [ctx.shop]);
+    void refreshReadiness();
+  }, [refreshReadiness]);
 
-  const ensureCartTransform = async () => {
-    setCartBusy(true);
-    setCartError(null);
-    try {
-      const res = await apiPost("/settings/cart-transform/ensure", {});
-      const data = res?.data || {};
-      setCartStatus(
-        data.created
-          ? "Cart transform installed"
-          : "Cart transform already installed",
-      );
-      refreshCart();
-    } catch (e: unknown) {
-      const err = e as { response?: { data?: { error?: string } }; message?: string };
-      setCartError(err?.response?.data?.error || err?.message || "Ensure failed");
-    } finally {
-      setCartBusy(false);
-    }
+  const ensureAndRecheck = async () => {
+    await cart.ensure();
+    await refreshReadiness();
   };
 
-  return (
-    <s-page heading="Setup">
-      <TitleBar title="Setup" />
-      <BlockStack gap="400">
-        <Card>
-          <Box padding="400">
-            <BlockStack gap="300">
-              <Text as="h2" variant="headingMd">
-                Storefront & checkout
-              </Text>
-              <Banner tone={ready ? "success" : "warning"}>
-                Checkout readiness:{" "}
-                {ready == null ? "Checking…" : ready ? "Ready" : "Needs attention"}
-              </Banner>
-              <Text as="p" variant="bodySm">
-                1. Enable the RipsPriceX theme app embed (required for PDP paint). Shopify does not
-                allow apps to toggle embeds via API — open the theme editor and Save.
-              </Text>
-              {embedUrl ? (
-                <Button variant="primary" url={embedUrl} target="_top">
-                  Enable theme app embed
-                </Button>
-              ) : null}
-              <Text as="p" variant="bodySm">
-                2. Ensure cart transform is installed (below). Charged-price override needs Plus or a
-                development store.
-              </Text>
-              <Text as="p" variant="bodySm">
-                3. App proxy path: <code>/apps/ripspricex/script.js</code>
-              </Text>
-              {hints.length ? (
-                <BlockStack gap="100">
-                  {hints.map((h) => (
-                    <Text key={h} as="p" variant="bodySm" tone="subdued">
-                      {h}
-                    </Text>
-                  ))}
-                </BlockStack>
-              ) : null}
-            </BlockStack>
-          </Box>
-        </Card>
+  const overallReady = ready === true && ctx.entitled;
+  const calloutTitle =
+    ready == null || readinessBusy
+      ? 'Checking checkout readiness…'
+      : overallReady
+        ? 'Ready to launch price tests'
+        : ready
+          ? 'Checkout ready — unlock Create under Settings → Plan'
+          : 'Checkout needs attention';
 
-        <Card>
-          <Box padding="400">
-            <BlockStack gap="300">
-              <Text as="h2" variant="headingMd">
-                Cart transform
-              </Text>
-              <Banner tone="info">{cartStatus}</Banner>
-              {cartError ? <Banner tone="critical">{cartError}</Banner> : null}
-              <InlineStack gap="200">
-                <Button variant="primary" loading={cartBusy} onClick={ensureCartTransform}>
-                  Ensure cart transform
-                </Button>
-                <Button url="/app/settings?tab=installation">Installation settings</Button>
-                <Button url="/app/settings?tab=price-surfaces&automap=1">
-                  Auto-map price surfaces
-                </Button>
-              </InlineStack>
-              <Text as="p" variant="bodySm" tone="subdued">
-                Classic create Review uses the same Installation and Price surfaces tabs when Fix
-                setup / Fix price surfaces is clicked.
-              </Text>
-              <Link to="/app/settings?tab=price-surfaces">Open theme price selectors →</Link>
-            </BlockStack>
-          </Box>
-        </Card>
-      </BlockStack>
-    </s-page>
+  return (
+    <ClassicAdminShell
+      titleBar="Setup"
+      meta="Store readiness"
+      title="Set up your shop for price tests"
+      subtitle="Enable the theme embed, confirm cart transform, and map price selectors so Launch can unlock."
+      footerPrimary={
+        overallReady
+          ? {
+              label: 'Create experiment',
+              onClick: () => navigate('/app/experiments/new'),
+            }
+          : {
+              label: readinessBusy ? 'Checking…' : 'Re-check readiness',
+              onClick: () => {
+                void refreshReadiness();
+                void cart.refresh();
+              },
+              busy: readinessBusy,
+              busyLabel: 'Checking…',
+            }
+      }
+      footerSecondary={
+        embedUrl
+          ? {
+              label: 'Enable theme app embed',
+              href: embedUrl,
+              target: '_top',
+              onClick: () => {
+                void openEmbed();
+              },
+            }
+          : !ctx.entitled
+            ? {
+                label: 'Open Plan',
+                onClick: () => navigate('/app/settings?tab=plan'),
+              }
+            : undefined
+      }
+    >
+      <div
+        className={ready === false ? styles.error : styles.callout}
+        role="status"
+        style={{ marginBottom: 20 }}
+      >
+        {ready !== false ? (
+          <span className={styles.calloutIcon} aria-hidden>
+            <IconSparkles size={16} />
+          </span>
+        ) : null}
+        <span className={ready === false ? undefined : styles.calloutBody}>
+          {ready === false ? (
+            <>
+              <strong>{calloutTitle}</strong>
+              <div style={{ marginTop: 6 }}>
+                Fix the steps below, then re-check. Launch stays blocked until checkout readiness is
+                green.
+              </div>
+              <div className={styles.errorActions}>
+                <button
+                  type="button"
+                  className={styles.editLink}
+                  onClick={() => {
+                    void refreshReadiness();
+                    void cart.refresh();
+                  }}
+                >
+                  Re-check
+                </button>
+                {!ctx.entitled ? (
+                  <button
+                    type="button"
+                    className={styles.editLink}
+                    onClick={() => navigate('/app/settings?tab=plan')}
+                  >
+                    Open Plan
+                  </button>
+                ) : null}
+              </div>
+            </>
+          ) : (
+            <>
+              <span className={styles.calloutStrong}>{calloutTitle}</span>
+              <span className={styles.calloutMeta}>
+                Setup covers storefront paint, cart transform, and theme price selectors.
+              </span>
+            </>
+          )}
+        </span>
+      </div>
+
+      <div className={styles.adminStack}>
+        <div className={styles.adminRow}>
+          <div className={styles.adminRowHead}>
+            <p className={styles.adminRowTitle}>1. Theme app embed</p>
+            <span className={`${styles.adminBadge} ${embedBadgeClass(embedStatus, styles)}`}>
+              {embedBadgeLabel(embedStatus, Boolean(embedUrl))}
+            </span>
+          </div>
+          <p className={styles.adminRowBody}>
+            Required for PDP price paint. Apps cannot turn the embed on for you — open the theme
+            editor, enable RipsPriceX, and Save. Status updates after we re-check (when reported).
+            {themeName ? (
+              <>
+                {' '}
+                Deep link targets live theme <strong>{themeName}</strong>.
+              </>
+            ) : null}
+          </p>
+          <div className={styles.adminRowActions}>
+            {embedUrl ? (
+              <a
+                className={styles.primaryBtn}
+                href={embedUrl}
+                target="_top"
+                rel="noopener"
+                onClick={event => {
+                  event.preventDefault();
+                  void openEmbed();
+                }}
+              >
+                Enable theme app embed
+              </a>
+            ) : (
+              <p className={styles.help}>
+                Set <code>SHOPIFY_API_KEY</code> so the embed deep link can be built.
+              </p>
+            )}
+            <button
+              type="button"
+              className={styles.ghostBtn}
+              onClick={() => navigate('/app/settings?tab=installation')}
+            >
+              Settings → Installation
+            </button>
+          </div>
+        </div>
+
+        <div className={styles.adminRow}>
+          <div className={styles.adminRowHead}>
+            <p className={styles.adminRowTitle}>2. Cart transform</p>
+            <span
+              className={`${styles.adminBadge} ${
+                cart.installed ? styles.adminBadgeOk : styles.adminBadgeWarn
+              }`}
+            >
+              {cart.installed ? 'Installed' : 'Needs ensure'}
+            </span>
+          </div>
+          <p className={styles.adminRowBody}>{cart.status}</p>
+          {cart.error ? <p className={styles.error}>{cart.error}</p> : null}
+          <div className={styles.adminRowActions}>
+            <button
+              type="button"
+              className={styles.primaryBtn}
+              disabled={cart.busy}
+              onClick={() => void ensureAndRecheck()}
+            >
+              {cart.busy ? 'Ensuring…' : 'Ensure cart transform'}
+            </button>
+            <button type="button" className={styles.ghostBtn} onClick={() => void cart.refresh()}>
+              Refresh status
+            </button>
+          </div>
+        </div>
+
+        <div className={styles.adminRow}>
+          <div className={styles.adminRowHead}>
+            <p className={styles.adminRowTitle}>3. Theme price selectors</p>
+            <span
+              className={`${styles.adminBadge} ${
+                surface.ready ? styles.adminBadgeOk : styles.adminBadgeWarn
+              }`}
+            >
+              {surface.ready
+                ? surface.configured > 0
+                  ? `${surface.configured} mapping${surface.configured === 1 ? '' : 's'}`
+                  : 'Ready'
+                : surface.configured > 0
+                  ? `${surface.configured} mapped · needs verify`
+                  : 'Not mapped'}
+            </span>
+          </div>
+          <p className={styles.adminRowBody}>
+            {surface.message ||
+              'Map PDP / listing selectors so bucketed visitors see test prices on the storefront.'}
+          </p>
+          <div className={styles.adminRowActions}>
+            <button
+              type="button"
+              className={styles.primaryBtn}
+              onClick={() => navigate('/app/settings?tab=price-surfaces&automap=1')}
+            >
+              Auto-map price surfaces
+            </button>
+            <button
+              type="button"
+              className={styles.ghostBtn}
+              onClick={() => navigate('/app/settings?tab=price-surfaces')}
+            >
+              Open Price surfaces
+            </button>
+          </div>
+        </div>
+
+        <div className={styles.adminRow}>
+          <div className={styles.adminRowHead}>
+            <p className={styles.adminRowTitle}>4. Plan entitlement</p>
+            <span
+              className={`${styles.adminBadge} ${
+                ctx.entitled ? styles.adminBadgeOk : styles.adminBadgeWarn
+              }`}
+            >
+              {ctx.entitled ? 'Entitled' : 'Locked'}
+            </span>
+          </div>
+          <p className={styles.adminRowBody}>
+            Create and Launch unlock when this shop has an active Smart Pricing plan (or local
+            dev entitle). Manage the plan under Settings → Plan.
+          </p>
+          <div className={styles.adminRowActions}>
+            <button
+              type="button"
+              className={styles.primaryBtn}
+              onClick={() => navigate('/app/settings?tab=plan')}
+            >
+              {ctx.entitled ? 'Manage plan' : 'Open Plan'}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {hints.length ? (
+        <div style={{ marginTop: 20 }}>
+          <div className={styles.sectionLabel}>Readiness hints</div>
+          <ul className={styles.adminHintList}>
+            {hints.map(h => (
+              <li key={h}>{h}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      <p className={styles.help} style={{ marginTop: 20 }}>
+        App proxy: <code>/apps/ripspricex/script.js</code> ·{' '}
+        <Link to="/app/settings?tab=plan">Plan</Link> ·{' '}
+        <Link to="/app/settings?tab=installation">Installation</Link> ·{' '}
+        <Link to="/app/settings?tab=price-surfaces">Price surfaces</Link>
+      </p>
+    </ClassicAdminShell>
   );
 }

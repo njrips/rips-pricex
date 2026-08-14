@@ -88,6 +88,10 @@ Use this matrix for further parity research. Update cells when closing gaps; do 
 |------------|--------|
 | Locked Create when unpaid | ✅ UI + `402` |
 | Dev entitle helper | ✅ |
+| Plan under Settings (no Billing nav) | ✅ `/app/settings?tab=plan`; `/app/billing` redirects |
+| Welcome after charge | ✅ `/app/welcome` (+ `plan_handle`) |
+| Upgrade `_top` → `pricing_plans` | ✅ `useAdminExternalRedirect` (intents → top assign) |
+| Express entitlement sync | ✅ `POST /api/billing/sync-entitlement` from app loader |
 | Shopify App Pricing plans | 🟡 Partner app linked; real plans vs `DEV_ENTITLE_ALL` still to harden |
 | Uninstall pauses tests | ✅ |
 

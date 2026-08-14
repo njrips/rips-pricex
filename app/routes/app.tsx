@@ -10,7 +10,47 @@ import "@shopify/polaris/build/esm/styles.css";
 
 import { authenticate } from "../shopify.server";
 import { setShopContext } from "../services/api";
+import ClassicRouteLoading from "../components/shared/ClassicRouteLoading";
+import ClientOnly from "../components/shared/ClientOnly";
+import ShopifyReady from "../components/shared/ShopifyReady";
+import { buildPricingPlansUrl } from "../utils/pricingPlansUrl";
 import "../styles/classic-theme.css";
+
+function AppBootSplash() {
+  return (
+    <div
+      className="rpx-boot-splash"
+      style={{
+        minHeight: "100vh",
+        margin: 0,
+        background: "#FAF7F2",
+        color: "#231814",
+        fontFamily: '"DM Sans", "Inter", system-ui, sans-serif',
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+      aria-busy="true"
+      aria-live="polite"
+    >
+      <div style={{ textAlign: "center", padding: 24 }}>
+        <div
+          style={{
+            width: 28,
+            height: 28,
+            margin: "0 auto 12px",
+            borderRadius: "50%",
+            border: "2.5px solid rgba(241, 106, 26, 0.2)",
+            borderTopColor: "#f16a1a",
+            animation: "rpx-boot-spin 0.7s linear infinite",
+          }}
+        />
+        <p style={{ margin: 0, fontSize: 14, fontWeight: 500 }}>Loading RipsPriceX…</p>
+        <style>{`@keyframes rpx-boot-spin { to { transform: rotate(360deg); } }`}</style>
+      </div>
+    </div>
+  );
+}
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session, billing } = await authenticate.admin(request);
@@ -19,19 +59,52 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   let planHandle: string | null = null;
   const shop = session.shop;
   const accessToken = session.accessToken || "";
-  const storeHandle = shop.replace(/\.myshopify\.com$/i, "");
   const appHandle = process.env.SHOPIFY_APP_HANDLE || "ripspricex";
-  const upgradeUrl = `https://admin.shopify.com/store/${storeHandle}/charges/${appHandle}/pricing_plans`;
+  const upgradeUrl = buildPricingPlansUrl(shop, appHandle);
+  const devEntitleAll = process.env.RIPSPRICEX_DEV_ENTITLE_ALL === "true";
+
+  // Shopify App Pricing welcome / redirect appends plan_handle (charge_id retired after 2026-04-28).
+  const requestUrl = new URL(request.url);
+  const planHandleFromQuery = (
+    requestUrl.searchParams.get("plan_handle") ||
+    requestUrl.searchParams.get("planHandle") ||
+    ""
+  ).trim();
 
   try {
     if (billing && typeof billing.check === "function") {
       const check = await billing.check({ isTest: true }).catch(() => null);
       if (check && (check as { hasActivePayment?: boolean }).hasActivePayment) {
         entitled = true;
+        const subscriptions = (
+          check as {
+            appSubscriptions?: Array<{ name?: string; status?: string }>;
+          }
+        ).appSubscriptions;
+        const active = Array.isArray(subscriptions)
+          ? subscriptions.find((sub) =>
+              ["ACTIVE", "active", "PENDING", "pending"].includes(
+                String(sub?.status || ""),
+              ),
+            ) || subscriptions[0]
+          : null;
+        if (active?.name) {
+          planHandle = String(active.name);
+        } else {
+          planHandle = "smart_pricing";
+        }
       }
     }
   } catch {
     // Partner App Pricing may not be linked yet
+  }
+
+  if (planHandleFromQuery) {
+    planHandle = planHandleFromQuery;
+  }
+
+  if (devEntitleAll && !planHandle) {
+    planHandle = "dev_entitle_all";
   }
 
   const apiBase = process.env.RIPSPRICEX_API_URL || "http://127.0.0.1:3456";
@@ -64,19 +137,20 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     }
 
     if (entitled) {
-      const entitleRes = await fetch(`${apiBase}/api/billing/dev-entitle`, {
+      const entitleRes = await fetch(`${apiBase}/api/billing/sync-entitlement`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           "X-Shopify-Shop-Domain": shop,
         },
         body: JSON.stringify({
+          entitled: true,
           status: "ACTIVE",
           planHandle: planHandle || "smart_pricing",
         }),
       });
       if (!entitleRes.ok) {
-        console.warn("[ripspricex] dev-entitle failed", entitleRes.status);
+        console.warn("[ripspricex] sync-entitlement failed", entitleRes.status);
       }
     }
   } catch (err) {
@@ -93,6 +167,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     planHandle,
     upgradeUrl,
     apiBase: "/api",
+    devEntitleAll,
+    // Dev-only; empty in production. Powers price-surface unlock without showing a password field.
+    devStorefrontPassword: String(
+      process.env.VITE_RIPX_DEV_STOREFRONT_PASSWORD ||
+        process.env.RIPX_DEV_STOREFRONT_PASSWORD ||
+        "",
+    ).trim(),
   };
 };
 
@@ -103,22 +184,28 @@ export default function App() {
     setShopContext(data.shop, "/api");
   }, [data.shop]);
 
+  // AppProvider must stay outside ClientOnly so the App Bridge <script> is in the
+  // SSR HTML and window.shopify exists before TitleBar / NavMenu / redirects run.
   return (
     <AppProvider embedded apiKey={data.apiKey}>
-      <PolarisAppProvider i18n={enTranslations}>
-        <NavMenu>
-          <Link to="/app" rel="home">
-            Experiments
-          </Link>
-          <Link to="/app/experiments/new">Create</Link>
-          <Link to="/app/setup">Setup</Link>
-          <Link to="/app/billing">Billing</Link>
-          <Link to="/app/settings">Settings</Link>
-        </NavMenu>
-        <div data-palette="orange-classic">
-          <Outlet context={data} />
-        </div>
-      </PolarisAppProvider>
+      <ClientOnly fallback={<AppBootSplash />}>
+        <ShopifyReady fallback={<AppBootSplash />}>
+          <PolarisAppProvider i18n={enTranslations}>
+            <NavMenu>
+              <Link to="/app" rel="home">
+                Experiments
+              </Link>
+              <Link to="/app/experiments/new">Create</Link>
+              <Link to="/app/setup">Setup</Link>
+              <Link to="/app/settings">Settings</Link>
+            </NavMenu>
+            <div data-palette="orange-classic">
+              <ClassicRouteLoading />
+              <Outlet context={data} />
+            </div>
+          </PolarisAppProvider>
+        </ShopifyReady>
+      </ClientOnly>
     </AppProvider>
   );
 }

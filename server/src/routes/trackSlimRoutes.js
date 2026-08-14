@@ -27,11 +27,17 @@ function loadScriptBody() {
 }
 
 function resolveShop(req) {
+  // Storefront appendTrackTenantParams uses shop_domain= (Shopify) or site= (standalone).
+  // Older clients / App Proxy use shop=. Accept all aliases.
   return String(
     req.query.shop ||
+      req.query.shop_domain ||
       req.query.domain ||
+      req.query.site ||
       req.get('X-Shopify-Shop-Domain') ||
       req.body?.shop ||
+      req.body?.shop_domain ||
+      req.body?.site ||
       ''
   )
     .toLowerCase()
@@ -68,13 +74,8 @@ async function serveScript(req, res) {
       runtimeSource: 'ripspricex-track',
     }
   );
-  // Prefer public API base when set (tunnel / production)
-  if (process.env.RIPSPRICEX_PUBLIC_API_BASE) {
-    config.apiUrl = String(process.env.RIPSPRICEX_PUBLIC_API_BASE).replace(/\/+$/, '');
-    if (!config.apiUrl.endsWith('/api')) {
-      config.apiUrl = `${config.apiUrl}/api`;
-    }
-  }
+  // apiUrl comes from resolvePublicAppUrl(req) inside buildStorefrontRuntimeConfig —
+  // do not re-stamp RIPSPRICEX_PUBLIC_API_BASE here (stale after tunnel rotation).
 
   const early = buildEarlyStorefrontAntiFlickerBootstrap
     ? buildEarlyStorefrontAntiFlickerBootstrap(config)
@@ -145,8 +146,10 @@ router.get('/variant', async (req, res) => {
   }
 });
 
-router.get('/preview', async (req, res) => {
+router.get(['/preview', '/preview-storefront-test'], async (req, res) => {
   try {
+    const { findVariantForPreviewQuery } = require('../utils/previewVariantMatch');
+    const { signPriceAssignment } = require('../utils/priceAssignmentSignature');
     const shop = resolveShop(req);
     const testId = String(req.query.test_id || '').trim();
     if (!shop || !testId) {
@@ -157,25 +160,91 @@ router.get('/preview', async (req, res) => {
       return res.status(404).json({ error: 'Test not found' });
     }
     const variants = Array.isArray(test.variants) ? test.variants : [];
+    const variantId = String(
+      req.query.variant_id || req.query.variantId || req.query.variant || ''
+    ).trim();
+    const variantName = String(
+      req.query.variant_name || req.query.variantName || ''
+    ).trim();
+    const userId = String(req.query.user_id || req.query.userId || '').trim() ||
+      `ripx_preview_${crypto.randomUUID().slice(0, 12)}`;
+    // Prefer soft match (UUID + "$884.94 Variation A" ↔ "Variation A"). Never silently
+    // fall through to variants[0] (usually Control) when the client asked for a name/id.
     const forced =
-      variants.find((v) => String(v.id) === String(req.query.variant_id)) ||
-      variants.find((v) => String(v.name) === String(req.query.variant)) ||
-      variants[0] ||
+      findVariantForPreviewQuery(variants, {
+        variant_id: variantId || undefined,
+        variant_name: variantName || undefined,
+      }) ||
+      (!variantId && !variantName ? variants[0] : null) ||
       null;
+    if ((variantId || variantName) && !forced) {
+      logger.warn('preview variant unmatched', {
+        shop,
+        testId,
+        variantId: variantId || null,
+        variantName: variantName || null,
+        available: variants.map((v) => ({ id: v?.id, name: v?.name })),
+      });
+    }
+
+    let variantOut = forced;
+    if (forced) {
+      const forcedId =
+        forced.id !== undefined && forced.id !== null ? String(forced.id).trim() : '';
+      const issuedAtMs = Date.now();
+      const hmac = forcedId
+        ? signPriceAssignment({
+            testId,
+            variantId: forcedId,
+            userId,
+            shopDomain: shop,
+            issuedAtMs,
+          })
+        : null;
+      // Cart Transform only checks presence of proof attrs; HMAC is preferred when secret exists.
+      variantOut = {
+        ...forced,
+        assignment_sig: hmac || `preview:${testId}:${forcedId || 'arm'}`,
+        assignment_ts: String(issuedAtMs),
+        assignment_user: userId,
+      };
+    }
+
     res.json({
       success: true,
       test: mapTestToStorefrontPayload(test),
-      variant: forced,
+      variant: variantOut,
       preview: true,
+      matched: Boolean(forced),
+      user_id: userId,
+      match_query: {
+        variant_id: variantId || null,
+        variant_name: variantName || null,
+      },
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-router.get('/preview-storefront-test', async (req, res) => {
-  req.url = '/preview';
-  return router.handle(req, res);
+router.get(['/preview-document', '/preview-document/'], async (req, res) => {
+  try {
+    const { servePreviewDocument } = require('./previewDocument');
+    return servePreviewDocument(req, res);
+  } catch (err) {
+    logger.error('preview-document failed', { message: err.message, stack: err.stack });
+    res.status(500).type('html').send(`<!-- preview-document error: ${err.message} -->`);
+  }
+});
+
+router.get(['/preview-launch', '/preview-launch/'], async (req, res) => {
+  try {
+    const { servePreviewLaunch } = require('./previewDocument');
+    return servePreviewLaunch(req, res);
+  } catch (err) {
+    logger.error('preview-launch failed', { message: err.message, stack: err.stack });
+    res.status(500).type('html').send(`<!-- preview-launch error: ${err.message} -->`);
+  }
 });
 
 router.post('/catalog-product-view', async (req, res) => {

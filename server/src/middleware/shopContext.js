@@ -7,7 +7,9 @@ function getShopDomain(req) {
     req.get('X-Shopify-Shop-Domain') ||
     req.get('X-RipPriceX-Shop') ||
     req.query.shop ||
-    req.query.domain;
+    req.query.shop_domain ||
+    req.query.domain ||
+    req.query.site;
   const shop = String(fromHeader || '')
     .trim()
     .toLowerCase()

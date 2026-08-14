@@ -81,22 +81,24 @@ function findVariantForPreviewQuery(variants, q) {
   const variant_name =
     q?.variant_name !== undefined && q?.variant_name !== null ? String(q.variant_name).trim() : '';
 
-  const exact = list.find(item => {
-    if (variant_id && previewQueryMatchesVariant(variant_id, item)) {
-      return true;
+  // Prefer id first — never let a conflicting label (e.g. stale "Control") beat a UUID.
+  if (variant_id) {
+    const byId = list.find(item => previewQueryMatchesVariant(variant_id, item));
+    if (byId) {
+      return byId;
     }
-    if (
-      variant_name &&
-      item?.name !== undefined &&
-      item?.name !== null &&
-      previewLabelEquals(variant_name, item.name)
-    ) {
-      return true;
+  }
+
+  if (variant_name) {
+    const byName = list.find(
+      item =>
+        item?.name !== undefined &&
+        item?.name !== null &&
+        previewLabelEquals(variant_name, item.name)
+    );
+    if (byName) {
+      return byName;
     }
-    return false;
-  });
-  if (exact) {
-    return exact;
   }
 
   // Last resort: unique suffix match when UI sends a short arm label.

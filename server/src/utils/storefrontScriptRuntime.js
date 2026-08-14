@@ -4,7 +4,7 @@
  */
 
 /** Bump when embedded runtime config or script contract changes. Keep ?v= in sync: extensions/ripx-theme/blocks/ripx-app-embed.liquid + frontend RIPX_STOREFRONT_SCRIPT_VERSION. */
-const SCRIPT_VERSION = '1.0.47';
+const SCRIPT_VERSION = '1.0.49';
 
 /**
  * DB/API may use "pricing"; storefront logic expects "price".
@@ -161,39 +161,44 @@ function getHeatmapCollectionRuntimeConfig() {
  * @param {object[]} tests
  * @param {import('express').Request} req
  */
+function isLocalHost(value) {
+  return /^(https?:\/\/)?(localhost|127\.0\.0\.1)(:|\/|$)/i.test(String(value || '').trim());
+}
+
 /**
- * Public origin browsers can call for /api (storefront). Prefer explicit public base,
- * then Shopify tunnel / forwarded host when APP_URL is localhost (local `shopify app dev`).
+ * Public origin browsers can call for /api (storefront).
+ * Prefer the host this request arrived on (current Shopify/Cloudflare tunnel) so a stale
+ * RIPSPRICEX_PUBLIC_API_BASE after tunnel rotation does not embed a dead apiUrl.
+ * Fall back to env (PUBLIC_API_BASE → APP_URL → SHOPIFY_APP_URL).
  */
 function resolvePublicAppUrl(req) {
-  const explicit = String(process.env.RIPSPRICEX_PUBLIC_API_BASE || '').trim();
-  if (explicit) {
-    return explicit.replace(/\/+$/, '').replace(/\/api$/i, '');
-  }
-
-  const configured = String(process.env.APP_URL || process.env.SHOPIFY_APP_URL || '')
-    .trim()
-    .replace(/\/+$/, '');
-  const configuredIsLocal =
-    !configured || /^(https?:\/\/)?(localhost|127\.0\.0\.1)(:|\/|$)/i.test(configured);
-
-  if (!configuredIsLocal) {
-    return configured;
-  }
-
   const forwardedHost = String(req?.get?.('x-forwarded-host') || '').split(',')[0].trim();
   const host = forwardedHost || String(req?.get?.('host') || '').trim();
-  const hostIsLocal = !host || /^(localhost|127\.0\.0\.1)(:|$)/i.test(host);
-  if (host && !hostIsLocal) {
+  if (host && !isLocalHost(host)) {
     const proto = String(
       req?.get?.('x-forwarded-proto') || (req?.secure ? 'https' : req?.protocol) || 'https'
     )
       .split(',')[0]
       .trim();
-    return `${proto}://${host}`.replace(/\/+$/, '');
+    return `${proto}://${host}`.replace(/\/+$/, '').replace(/\/api$/i, '');
   }
 
-  if (configured) return configured;
+  const explicit = String(process.env.RIPSPRICEX_PUBLIC_API_BASE || '')
+    .trim()
+    .replace(/\/+$/, '')
+    .replace(/\/api$/i, '');
+  if (explicit) {
+    return explicit;
+  }
+
+  const configured = String(process.env.APP_URL || process.env.SHOPIFY_APP_URL || '')
+    .trim()
+    .replace(/\/+$/, '')
+    .replace(/\/api$/i, '');
+  if (configured) {
+    return configured;
+  }
+
   return `${req?.protocol || 'http'}://${req?.get?.('host') || '127.0.0.1'}`.replace(/\/+$/, '');
 }
 
@@ -369,4 +374,5 @@ module.exports = {
   normalizeTestTypeForStorefront,
   normalizeTargetTypeForStorefront,
   mapTestToStorefrontPayload,
+  resolvePublicAppUrl,
 };

@@ -2,8 +2,8 @@
  * Actionable hints appended to checkout readiness messages.
  */
 
-const SETTINGS_INSTALLATION_TAB = 'Store settings → Store setup';
-const SETTINGS_PRICE_SURFACES_TAB = 'Store settings → Theme price selectors';
+const SETTINGS_INSTALLATION_TAB = 'Settings → Installation';
+const SETTINGS_PRICE_SURFACES_TAB = 'Settings → Price surfaces';
 
 function withHint(message, hint) {
   const base = String(message || '').trim();
@@ -23,10 +23,14 @@ function enrichCheckoutReadinessCheck(check = {}) {
   let actionPath = null;
 
   if (id === 'pricing_direct_price_override_ready' && check.ok === false) {
-    actionPath = `${SETTINGS_INSTALLATION_TAB} → Direct price override → Install`;
-    message = withHint(message, `Fix in RipX: open ${actionPath}, then re-run preflight.`);
+    actionPath = `${SETTINGS_INSTALLATION_TAB} → Cart transform → Ensure`;
+    message = withHint(
+      message,
+      `Fix in RipsPriceX: open ${actionPath}, then re-run Setup or Review.`
+    );
   } else if (id === 'pricing_assignment_signing_ready' && check.ok === false) {
-    actionPath = 'Server env: RIPX_PRICE_ASSIGNMENT_SIGNATURE_SECRET or RIPX_CHECKOUT_PRICE_SECRET';
+    actionPath =
+      'Server env: RIPX_PRICE_ASSIGNMENT_SIGNATURE_SECRET or RIPX_CHECKOUT_PRICE_SECRET';
     message = withHint(message, `Set ${actionPath} on the API host and redeploy.`);
   } else if (id === 'pricing_shopify_plus_required' && check.ok === false) {
     actionPath = 'Shopify Admin → upgrade to Plus, or use a partner development store for testing';
@@ -41,13 +45,13 @@ function enrichCheckoutReadinessCheck(check = {}) {
     actionPath = SETTINGS_PRICE_SURFACES_TAB;
     message = withHint(message, `Complete missing selector mappings under ${actionPath}.`);
   } else if (id === 'shopify_access_token_present' && check.ok === false) {
-    actionPath = 'Domains → install link (incognito) or Shopify Admin → Apps → RipX';
+    actionPath = 'Shopify Admin → Apps → RipsPriceX (re-open the app to refresh the offline token)';
     message = withHint(message, `Reconnect via ${actionPath}.`);
   } else if (id === 'storefront_runtime_ready' && check.ok === false) {
-    actionPath = `${SETTINGS_INSTALLATION_TAB} → App Proxy and theme embed`;
-    message = withHint(message, `Verify storefront setup under ${actionPath}.`);
+    actionPath = `${SETTINGS_INSTALLATION_TAB} → theme app embed and app proxy`;
+    message = withHint(message, `Verify storefront setup under ${actionPath} or open Setup.`);
   } else if (id === 'shopify_oauth_health' && check.ok === false) {
-    actionPath = 'Domains → Copy install link (private/incognito window)';
+    actionPath = 'Shopify Admin → Apps → RipsPriceX (open in a fresh session)';
     message = withHint(message, `Reconnect the store via ${actionPath}.`);
   }
 

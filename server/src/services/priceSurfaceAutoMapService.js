@@ -10,15 +10,21 @@ const {
   unlockShopifyStorefrontSession,
 } = require('../utils/storefrontPasswordPreview');
 const { evaluateSelector, discoverPriceCandidates } = require('../utils/priceSurfaceHtmlProbe');
+const { filterThemeFileCandidatesForTarget } = require('../utils/priceSurfaceThemeExtract');
+const { scanThemePriceFiles } = require('./priceSurfaceThemeFileService');
 const { chatJson, hasOpenAiKey } = require('./smartPricing/smartPricingAiProvider');
 const { query } = require('../utils/database');
 const logger = require('../utils/logger');
 
 const AUTO_MAP_TARGETS = Object.freeze([
   { surface: 'pdp', role: 'regular', pathHint: 'product' },
+  { surface: 'pdp', role: 'compare_at', pathHint: 'product' },
   { surface: 'plp', role: 'regular', pathHint: 'collection' },
+  { surface: 'plp', role: 'compare_at', pathHint: 'collection' },
   { surface: 'cart', role: 'regular', pathHint: 'cart' },
+  { surface: 'cart', role: 'cart_line', pathHint: 'cart' },
   { surface: 'home', role: 'regular', pathHint: 'home' },
+  { surface: 'search', role: 'regular', pathHint: 'search' },
 ]);
 
 function shopOrigin(shopDomain) {
@@ -143,6 +149,39 @@ async function probePage(url, storefrontPassword, signal, cookie = '') {
   };
 }
 
+function persistAutoMapSource(source) {
+  const key = String(source || '')
+    .trim()
+    .toLowerCase();
+  if (key === 'theme_pack' || key === 'theme_file' || key === 'openai' || key === 'heuristic') {
+    return key;
+  }
+  return 'heuristic';
+}
+
+function rejectClonedCompareAt(surfaces) {
+  const list = Array.isArray(surfaces) ? surfaces : [];
+  const regularBySurface = new Map();
+  list.forEach(row => {
+    if (row.role === 'regular' && row.status === 'matched') {
+      regularBySurface.set(row.surface, String(row.selector || '').trim());
+    }
+  });
+  list.forEach(row => {
+    if (row.role !== 'compare_at' || row.status !== 'matched') return;
+    const selector = String(row.selector || '').trim();
+    const regular = regularBySurface.get(row.surface) || '';
+    const distinct =
+      /compare|was-price|old-price/i.test(selector) || /^(s|del|strike)\./i.test(selector);
+    if (selector && selector === regular && !distinct) {
+      row.status = 'missing';
+      row.rationale =
+        'Compare-at selector matched the regular price node. Use visual pick or a strikethrough/compare class.';
+    }
+  });
+  return list;
+}
+
 function packMappingForTarget(packMappings, surface, role) {
   return (Array.isArray(packMappings) ? packMappings : []).find(
     row => row.surface === surface && row.role === role && String(row.selector || '').trim()
@@ -181,6 +220,8 @@ async function maybeRankAllSurfacesWithOpenAi({ themeName, surfaceBuckets }) {
         selector: c.selector,
         sample_text: String(c.sample_text || '').slice(0, 60),
         score: c.score,
+        source: c.source || 'heuristic',
+        file_hint: c.file_hint || null,
       })),
     }));
   if (!compactBuckets.length) {
@@ -189,7 +230,7 @@ async function maybeRankAllSurfacesWithOpenAi({ themeName, surfaceBuckets }) {
 
   const parsed = await chatJson({
     systemPrompt:
-      'You help merchants map Shopify theme price CSS selectors. For each surface, choose only from that surface\'s candidates by index. Return JSON: { "picks": { "<surface>:<role>": { "index": number, "rationale": string } } }. Never invent selectors.',
+      'You help merchants map Shopify theme price CSS selectors. For each surface, choose only from that surface\'s candidates by index. Prefer source theme_file or theme_pack over generic .price when sample_text looks like money. Return JSON: { "picks": { "<surface>:<role>": { "index": number, "rationale": string } } }. Never invent selectors.',
     userPrompt: JSON.stringify({
       theme: themeName || null,
       surfaces: compactBuckets,
@@ -262,6 +303,17 @@ async function autoMapShopPriceSurfaces(shopDomain, options = {}) {
   ]);
   const packMappings = suggestion.mappings || [];
   const themeDrift = buildThemeDrift(previousThemeMeta, suggestion.theme);
+  const themeScanPromise =
+    accessToken && suggestion.theme?.id
+      ? scanThemePriceFiles(domain, accessToken, suggestion.theme.id)
+      : Promise.resolve({
+          ok: false,
+          reason: accessToken ? 'missing_theme' : 'no_token',
+          scanned: 0,
+          candidateCount: 0,
+          files: [],
+          candidates: [],
+        });
 
   const productPath = await resolveSampleProductPath(domain, accessToken, options.productPath);
   const collectionPath = normalizeProductPath(options.collectionPath) || '/collections/all';
@@ -289,6 +341,7 @@ async function autoMapShopPriceSurfaces(shopDomain, options = {}) {
     plp: `${origin}${collectionPath}`,
     cart: `${origin}/cart`,
     home: `${origin}/`,
+    search: `${origin}/search?q=a`,
   };
 
   const probeEntries = await Promise.all(
@@ -333,6 +386,17 @@ async function autoMapShopPriceSurfaces(shopDomain, options = {}) {
     })
   );
   const probes = Object.fromEntries(probeEntries);
+  const scannedThemeFiles = await themeScanPromise.catch(() => ({
+    ok: false,
+    reason: 'theme_files_failed',
+    scanned: 0,
+    candidateCount: 0,
+    files: [],
+    candidates: [],
+  }));
+  const themeFileCandidates = Array.isArray(scannedThemeFiles.candidates)
+    ? scannedThemeFiles.candidates
+    : [];
 
   const surfaceBuckets = [];
   for (const target of AUTO_MAP_TARGETS) {
@@ -380,6 +444,36 @@ async function autoMapShopPriceSurfaces(shopDomain, options = {}) {
         source: 'heuristic',
       });
     });
+
+    filterThemeFileCandidatesForTarget(themeFileCandidates, target.surface, target.role).forEach(
+      row => {
+        if (candidatePool.some(c => c.selector === row.selector)) {
+          const existing = candidatePool.find(c => c.selector === row.selector);
+          if (existing) {
+            existing.file_hint = existing.file_hint || row.file;
+            if (existing.source === 'heuristic') {
+              existing.source = 'theme_file';
+              existing.score += 40;
+            } else if (existing.source === 'theme_pack') {
+              existing.score += 12;
+            }
+          }
+          return;
+        }
+        const evaluated = evaluateSelector(html, row.selector);
+        if (evaluated.status === 'missing') {
+          return;
+        }
+        candidatePool.push({
+          selector: row.selector,
+          sample_text: evaluated.sample_text || '',
+          score: evaluated.score + 90,
+          status: evaluated.status,
+          source: 'theme_file',
+          file_hint: row.file,
+        });
+      }
+    );
     candidatePool.sort((a, b) => b.score - a.score);
 
     surfaceBuckets.push({
@@ -463,13 +557,16 @@ async function autoMapShopPriceSurfaces(shopDomain, options = {}) {
         selector: chosen.selector,
         sample_text: chosen.sample_text || '',
         source: chosen.source,
+        file_hint: chosen.file_hint || null,
         score: chosen.score,
         alternatives: buildAlternatives(html, chosen.selector, 4),
         rationale:
           rationale ||
-          (chosen.source === 'theme_pack'
-            ? 'Matched the suggested theme-pack selector on the live page.'
-            : 'Selected the strongest price-like selector found on the live page.'),
+          (chosen.source === 'theme_file'
+            ? `Matched a selector from theme file ${chosen.file_hint || 'source'} on the live page.`
+            : chosen.source === 'theme_pack'
+              ? 'Matched the suggested theme-pack selector on the live page.'
+              : 'Selected the strongest price-like selector found on the live page.'),
         probe: {
           ok: true,
           url: probes[target.surface]?.url || null,
@@ -496,13 +593,24 @@ async function autoMapShopPriceSurfaces(shopDomain, options = {}) {
     }
   }
 
+  rejectClonedCompareAt(surfaces);
+
   const pdpRegular = surfaces.find(s => s.surface === 'pdp' && s.role === 'regular');
-  // Plan: never auto-persist when confidence is low or PDP regular is missing.
+  const themeFileVerifiedPdp = Boolean(
+    pdpRegular &&
+      pdpRegular.status === 'matched' &&
+      (pdpRegular.source === 'theme_file' ||
+        (pdpRegular.source === 'openai' && pdpRegular.file_hint))
+  );
+  // Never auto-persist when PDP regular is missing. Theme-file verification can
+  // raise a renamed/custom theme from low pack confidence to save-ready.
   const ready_to_save = Boolean(
     pdpRegular &&
-    pdpRegular.status === 'matched' &&
-    String(pdpRegular.selector || '').trim() &&
-    (suggestion.confidence === 'high' || suggestion.confidence === 'medium')
+      pdpRegular.status === 'matched' &&
+      String(pdpRegular.selector || '').trim() &&
+      (suggestion.confidence === 'high' ||
+        suggestion.confidence === 'medium' ||
+        themeFileVerifiedPdp)
   );
 
   const proposed_mappings = surfaces
@@ -513,7 +621,7 @@ async function autoMapShopPriceSurfaces(shopDomain, options = {}) {
       role: s.role,
       selector: s.selector,
       priority: 20 - index,
-      source: s.source === 'theme_pack' ? 'theme_pack' : 'heuristic',
+      source: persistAutoMapSource(s.source),
       enabled: true,
     }));
 
@@ -559,6 +667,15 @@ async function autoMapShopPriceSurfaces(shopDomain, options = {}) {
         : { ok: true, reason: null },
     password_gate: Boolean(passwordGate),
     ai_enabled: hasOpenAiKey(),
+    theme_files: {
+      ok: Boolean(scannedThemeFiles.ok),
+      reason: scannedThemeFiles.reason || null,
+      scanned: scannedThemeFiles.scanned || 0,
+      requested: scannedThemeFiles.requested || 0,
+      discovered: scannedThemeFiles.discovered || 0,
+      candidate_count: scannedThemeFiles.candidateCount || 0,
+      files: Array.isArray(scannedThemeFiles.files) ? scannedThemeFiles.files.slice(0, 24) : [],
+    },
     source: 'auto_map',
   };
 }
@@ -571,4 +688,5 @@ module.exports = {
   getPriceSurfaceThemeMeta,
   savePriceSurfaceThemeMeta,
   buildThemeDrift,
+  persistAutoMapSource,
 };

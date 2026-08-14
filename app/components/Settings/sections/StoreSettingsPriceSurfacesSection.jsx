@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useOutletContext } from 'react-router';
 import { Banner, BlockStack, Box, Card, Text, TextField } from '@shopify/polaris';
 import { ProductIcon } from '@shopify/polaris-icons';
 import PriceSurfaceMappingsPanel from '../../TestWizard/PriceSurfaceMappingsPanel';
@@ -12,12 +13,14 @@ import {
 } from '../../../utils/priceSurfaceRegistry';
 import {
   buildVisualPickerLaunchUrl,
+  getDevStorefrontPasswordDefault,
   isLocalDevStorefrontPasswordUiEnabled,
   persistStorefrontPassword,
   resolvePreviewBaseUrl,
   resolveStorefrontPasswordForPreview,
 } from '../../../utils/previewUrl';
 import { apiGet, getApiBaseUrl } from '../../../services';
+import classicStyles from '../../SmartPricing/classic/SmartPricingClassic.module.css';
 import styles from '../Settings.module.css';
 
 function productPathFromResource(product) {
@@ -32,9 +35,14 @@ export function StoreSettingsPriceSurfacesSection({
   showAllAppSections,
   shopDomain = '',
   autoMapRequestToken = 0,
+  bare = false,
 }) {
+  const outletCtx = useOutletContext() || {};
+  const envPassword = String(
+    outletCtx.devStorefrontPassword || getDevStorefrontPasswordDefault() || ''
+  ).trim();
   const [storefrontPassword, setStorefrontPassword] = useState(() =>
-    resolveStorefrontPasswordForPreview(shopDomain || '', '')
+    envPassword || resolveStorefrontPasswordForPreview(shopDomain || '', '')
   );
   const [pickTarget, setPickTarget] = useState(null);
   const [pickerProductPath, setPickerProductPath] = useState('');
@@ -52,11 +60,15 @@ export function StoreSettingsPriceSurfacesSection({
   );
 
   useEffect(() => {
+    if (envPassword) {
+      setStorefrontPassword(envPassword);
+      return;
+    }
     const resolved = resolveStorefrontPasswordForPreview(shopDomain || '', '');
     if (resolved) {
       setStorefrontPassword(prev => (String(prev || '').trim() ? prev : resolved));
     }
-  }, [shopDomain]);
+  }, [shopDomain, envPassword]);
 
   useEffect(() => {
     pickTargetRef.current = pickTarget;
@@ -107,6 +119,8 @@ export function StoreSettingsPriceSurfacesSection({
   }, [manualProductPath, pickerProductPath]);
 
   const localDevPasswordUi = isLocalDevStorefrontPasswordUiEnabled();
+  // When .env provides the password, never render the Settings password field.
+  const allowPasswordField = localDevPasswordUi && !envPassword;
 
   const getPickerLaunchUrl = useCallback(
     (surface = 'pdp') => {
@@ -114,11 +128,9 @@ export function StoreSettingsPriceSurfacesSection({
       if (!domain) {
         return '';
       }
-      // Always resolve (field / session / Vite env). Backend can also fall back to
-      // RIPX_DEV_STOREFRONT_PASSWORD when the query param is absent.
       const password = resolveStorefrontPasswordForPreview(
         domain,
-        localDevPasswordUi ? storefrontPassword : ''
+        envPassword || (allowPasswordField ? storefrontPassword : '')
       );
       const path = buildPriceSurfacePickerPath(surface, {
         productPath: resolvedProductPath || undefined,
@@ -154,7 +166,7 @@ export function StoreSettingsPriceSurfacesSection({
         }) || ''
       );
     },
-    [shopDomain, storefrontPassword, resolvedProductPath, localDevPasswordUi]
+    [shopDomain, storefrontPassword, resolvedProductPath, allowPasswordField, envPassword]
   );
 
   useEffect(() => {
@@ -258,11 +270,75 @@ export function StoreSettingsPriceSurfacesSection({
     [resolvedProductPath]
   );
 
-  return (
-    <Card
-      className={`${styles.settingsPanelCard} ${showAllAppSections ? styles.settingsPanelCardFull : ''}`}
-    >
-      <Box padding="500">
+  const body = bare ? (
+    <div className={classicStyles.adminStackTight}>
+      <p className={classicStyles.help}>{sectionSummary}</p>
+      <div className={classicStyles.callout} role="status">
+        <span className={classicStyles.calloutBody}>
+          <span className={classicStyles.calloutStrong}>One mapping for all price tests</span>
+          <span className={classicStyles.calloutMeta}>
+            Suggest from theme or Auto-map (scans theme files + live pages), then verify with
+            visual pick on a real product page. Test Wizard can still add per-test overrides
+            when needed.
+          </span>
+        </span>
+      </div>
+      {shopDomain ? (
+        <div className={classicStyles.field}>
+          <label className={classicStyles.label} htmlFor="price-surface-product-path">
+            Product path for visual pick
+          </label>
+          <input
+            id="price-surface-product-path"
+            className={classicStyles.input}
+            value={manualProductPath}
+            onChange={e => setManualProductPath(e.target.value)}
+            autoComplete="off"
+            placeholder={
+              pickerProductLoading
+                ? 'Loading a sample product…'
+                : resolvedProductPath || '/products/your-product-handle'
+            }
+          />
+          <p className={classicStyles.help}>
+            {resolvedProductPath
+              ? `Pick PDP opens ${resolvedProductPath}. Override with a handle or /products/… path if needed.`
+              : 'Enter a product handle so Pick PDP opens a real product page (not the homepage).'}
+          </p>
+        </div>
+      ) : (
+        <p className={classicStyles.help}>
+          Open Settings from a connected shop to edit theme price selectors.
+        </p>
+      )}
+      {shopDomain ? (
+        <PriceSurfaceMappingsPanel
+          mode="shop"
+          styles={targetingStyles}
+          testMappings={[]}
+          shopDomain={shopDomain}
+          storefrontPassword={envPassword || storefrontPassword}
+          envStorefrontPassword={envPassword}
+          onStorefrontPasswordChange={
+            allowPasswordField ? handleStorefrontPasswordChange : undefined
+          }
+          productPath={resolvedProductPath}
+          autoMapRequestToken={autoMapRequestToken}
+          getPickerLaunchUrl={getPickerLaunchUrl}
+          pickTarget={pickTarget}
+          onBeginVisualPick={beginVisualPick}
+          onCancelVisualPick={() => {
+            pickTargetRef.current = null;
+            setPickTarget(null);
+          }}
+          onRegisterShopPickHandler={handler => {
+            shopPickHandlerRef.current = handler;
+          }}
+          onTestMappingsChange={() => {}}
+        />
+      ) : null}
+    </div>
+  ) : (
         <BlockStack gap="400">
           <div className={styles.sectionHeader}>
             <div className={styles.sectionHeaderIcon}>
@@ -282,8 +358,8 @@ export function StoreSettingsPriceSurfacesSection({
           <Banner tone="info" title="One mapping for all price tests">
             <p>
               Configure selectors once here. Test Wizard can still add per-test overrides when a
-              theme needs a one-off. Use Suggest from theme to start from Dawn or Legacy packs, then
-              verify with visual pick on a real product page.
+              theme needs a one-off. Auto-map scans theme files and live pages; visual pick is
+              the fallback for custom blocks.
             </p>
           </Banner>
 
@@ -308,7 +384,7 @@ export function StoreSettingsPriceSurfacesSection({
 
           {!shopDomain ? (
             <Text as="p" variant="bodySm" tone="caution">
-              Open Store settings from a connected shop to edit theme price selectors.
+              Open Settings from a connected shop to edit theme price selectors.
             </Text>
           ) : (
             <PriceSurfaceMappingsPanel
@@ -316,13 +392,10 @@ export function StoreSettingsPriceSurfacesSection({
               styles={targetingStyles}
               testMappings={[]}
               shopDomain={shopDomain}
-              storefrontPassword={
-                localDevPasswordUi
-                  ? storefrontPassword
-                  : resolveStorefrontPasswordForPreview(shopDomain, storefrontPassword)
-              }
+              storefrontPassword={envPassword || storefrontPassword}
+              envStorefrontPassword={envPassword}
               onStorefrontPasswordChange={
-                localDevPasswordUi ? handleStorefrontPasswordChange : undefined
+                allowPasswordField ? handleStorefrontPasswordChange : undefined
               }
               productPath={resolvedProductPath}
               autoMapRequestToken={autoMapRequestToken}
@@ -340,7 +413,17 @@ export function StoreSettingsPriceSurfacesSection({
             />
           )}
         </BlockStack>
-      </Box>
+  );
+
+  if (bare) {
+    return body;
+  }
+
+  return (
+    <Card
+      className={`${styles.settingsPanelCard} ${showAllAppSections ? styles.settingsPanelCardFull : ''}`}
+    >
+      <Box padding="500">{body}</Box>
     </Card>
   );
 }

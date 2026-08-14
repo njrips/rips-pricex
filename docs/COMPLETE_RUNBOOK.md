@@ -6,7 +6,7 @@ Research & plans for this product: **[docs/README.md](./README.md)** · **[resea
 
 - Shopify-embedded, **Classic Smart Pricing only** (Figma UI from RipX)
 - No RipX Domains / email login / other test types
-- App Nav: Experiments · Create · Setup · Billing · Settings
+- App Nav: Experiments · Create · Setup · Settings (Plan under Settings → Plan)
 
 ## Architecture
 

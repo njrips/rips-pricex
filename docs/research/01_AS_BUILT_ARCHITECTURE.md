@@ -1,6 +1,6 @@
 # 01 — As-built architecture
 
-**Status:** Living document (reflects repo as of 2026-08-09)  
+**Status:** Living document (reflects repo as of 2026-08-11)  
 **Scope:** What is implemented in `Desktop/RipsPriceX` today — not the aspirational blueprint alone.
 
 ---
@@ -10,7 +10,7 @@
 ```text
 ┌──────────────────────────────────────────────────────────────────┐
 │ Shopify Admin                                                    │
-│  App Nav: Experiments · Create · Setup · Billing · Settings      │
+│  App Nav: Experiments · Create · Setup · Settings                │
 │  ┌────────────────────────────────────────────────────────────┐  │
 │  │ Embedded iframe (React Router `app/`)                      │  │
 │  │  Classic list / wizard / details / settings UI             │  │
@@ -81,11 +81,12 @@ RipsPriceX/
 | Experiments (home) | `/app` | `ClassicExperimentsList` |
 | Create | `/app/experiments/new` | `ClassicCreateWizard` (entitlement-gated) |
 | Details | `/app/experiments/:planId` | `ClassicExperimentOverview` + 7 tabs |
-| Setup | `/app/setup` | Readiness + cart-transform ensure |
-| Billing | `/app/billing` | Plan status / upgrade |
-| Settings | `/app/settings` | Tabs: Guardrails · Installation · Price surfaces |
+| Setup | `/app/setup` | Readiness checklist + ensure CTAs |
+| Welcome | `/app/welcome` | Post–App Pricing approval (plan_handle) |
+| Settings | `/app/settings` | Tabs: Plan · Guardrails · Installation · Price surfaces (default tab Guardrails) |
+| (compat) | `/app/billing` | Redirect → `/app/settings?tab=plan` |
 
-Registered in `app/routes/app.tsx` via App Bridge `NavMenu`.
+Registered in `app/routes/app.tsx` via App Bridge `NavMenu` (4 items; Billing folded into Settings → Plan).
 
 ---
 

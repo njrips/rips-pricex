@@ -22,7 +22,9 @@ Wired routes:
 | Experiments | `/app` | `ClassicExperimentsList` |
 | Create | `/app/experiments/new` | `ClassicCreateWizard` (locked if unpaid) |
 | (drill-in) | `/app/experiments/:planId` | `ClassicExperimentOverview` |
-| Setup / Billing / Settings | respective routes | readiness, plan, guardrails |
+| Setup | `/app/setup` | Readiness checklist |
+| Settings | `/app/settings` | Plan · Guardrails · Installation · Price surfaces |
+| (compat) | `/app/billing` → Plan tab | Legacy billing URL |
 
 ## Runtime still required for full shop parity
 

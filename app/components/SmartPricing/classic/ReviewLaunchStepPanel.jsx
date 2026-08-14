@@ -57,6 +57,7 @@ export default function ReviewLaunchStepPanel({
   audience,
   estimatedDays = 7,
   checkoutReady = true,
+  checkoutLoading = false,
   checkoutReadiness = null,
   shopDomain = '',
   onFixSetup,
@@ -123,7 +124,16 @@ export default function ReviewLaunchStepPanel({
         </span>
       </div>
 
-      {!checkoutReady ? (
+      {checkoutLoading ? (
+        <div className={styles.callout} role="status">
+          <span className={styles.calloutBody}>
+            <span className={styles.calloutStrong}>Checking checkout readiness…</span>
+            <span className={styles.calloutMeta}>
+              Confirming cart transform and pricing infra before launch.
+            </span>
+          </span>
+        </div>
+      ) : !checkoutReady ? (
         <div className={styles.error} role="alert">
           <div>
             <strong>Checkout is not ready for price tests.</strong>{' '}
@@ -139,7 +149,7 @@ export default function ReviewLaunchStepPanel({
           <div className={styles.errorActions}>
             {typeof onFixSetup === 'function' ? (
               <button type="button" className={styles.editLink} onClick={onFixSetup}>
-                Open Store settings
+                Open Setup checklist
               </button>
             ) : null}
             {typeof onRefreshCheckout === 'function' ? (
@@ -163,7 +173,7 @@ export default function ReviewLaunchStepPanel({
           <div className={styles.errorActions}>
             {typeof onFixPriceSurfaces === 'function' ? (
               <button type="button" className={styles.editLink} onClick={onFixPriceSurfaces}>
-                Auto-map theme prices
+                Open Settings → Price surfaces
               </button>
             ) : shopDomain ? (
               <a
@@ -172,7 +182,7 @@ export default function ReviewLaunchStepPanel({
                 target="_blank"
                 rel="noopener noreferrer"
               >
-                Auto-map theme prices
+                Open Settings → Price surfaces
               </a>
             ) : null}
             {typeof onRefreshCheckout === 'function' ? (
@@ -186,7 +196,7 @@ export default function ReviewLaunchStepPanel({
 
       <section className={styles.reviewSection}>
         <div className={styles.reviewHead}>
-          <h3>Setup</h3>
+          <h3>Basics</h3>
           <button type="button" className={styles.editLink} onClick={() => onEditStep(0)}>
             Edit
           </button>

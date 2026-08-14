@@ -1,6 +1,6 @@
 # 05 — Further research roadmap
 
-**Updated:** 2026-08-10  
+**Updated:** 2026-08-13  
 **Purpose:** backlog of research tracks that should be pursued **inside this repo’s `docs/research/`**, independent of RipX.
 
 When a track finishes, add a dated research note and update [02_PARITY_MATRIX.md](./02_PARITY_MATRIX.md) + the research log in [README.md](./README.md).
@@ -22,12 +22,16 @@ When a track finishes, add a dated research note and update [02_PARITY_MATRIX.md
 
 **Question:** Can a development store complete Install → Paid → Create → Launch without local entitle hacks?
 
+**IA note (2026-08-11):** In-app plan chrome is **Settings → Plan** (not App Nav). See [2026-08-11_SETUP_BILLING_SETTINGS_IA.md](./2026-08-11_SETUP_BILLING_SETTINGS_IA.md). Upgrade still uses `_top` → `pricing_plans`.
+
 **Research tasks:**
 
 1. Document exact Partner Dashboard pricing plan handles vs `billing.check` in Admin.  
-2. Capture screenshots / notes for plan selection `_top` return path.  
+2. Capture screenshots / notes for plan selection `_top` return path (from Settings → Plan).  
 3. Decide trial vs free-list-only vs paid-only.  
-4. Write `docs/research/YYYY-MM-DD_billing_e2e.md` with results.
+4. Write `docs/research/YYYY-MM-DD_billing_e2e.md` with results.  
+5. Plan Partner API subscription reconciliation before App Pricing webhook/`charge_id` sunset (after 2026-04-28).  
+6. Configure plan **Welcome URL** = `/app/welcome` in Partner Dashboard; verify `plan_handle` return.
 
 **Exit:** `client_id` linked; pilot shop entitled via Shopify (not only `dev-entitle`).
 
@@ -77,7 +81,28 @@ When a track finishes, add a dated research note and update [02_PARITY_MATRIX.md
 3. Document failure modes (password wall, app blocks, shadow DOM).  
 4. Decide whether to ship “theme pack gallery” UX.
 
+**Progress (2026-08-13):** Theme-file scan is implemented in auto-map; Track D still needs a multi-theme benchmark. See [2026-08-13_AI_PRICE_MAPPING.md](./2026-08-13_AI_PRICE_MAPPING.md).
+
 **Exit:** Theme compatibility matrix doc; update readiness messaging copy.
+
+---
+
+## Track K — AI theme scan for price positions (P1/P2)
+
+**Question:** Can we use existing `read_themes` + `theme.files` + OpenAI to find all live price nodes without inventing CSS?
+
+**Research tasks:**
+
+1. ✅ Document as-built pack / HTML probe / OpenAI rank / visual pick.  
+2. ✅ Confirm Admin GraphQL `theme { files }` needs no new scope.  
+3. ✅ Implement Phase 1 indexer (allowlisted Liquid/CSS) merged into auto-map.  
+4. ✅ Expand auto-map targets (search, compare-at, cart_line).  
+5. Optional storefront unmapped-node coverage ping.  
+6. Theme-drift CTA after MAIN theme id change.
+
+**Hard rules:** AI ranks verified candidates only; never `themeFilesUpsert`; never send full theme/HTML to the model.
+
+**Exit:** Auto-map on a renamed Dawn theme still maps PDP regular from `snippets/price.liquid`; visual pick remains fallback.
 
 ---
 
@@ -173,7 +198,7 @@ When a track finishes, add a dated research note and update [02_PARITY_MATRIX.md
 | Week | Tracks |
 |------|--------|
 | Week 1 | A Partner/billing · B Live E2E · J CI smoke |
-| Week 2 | D Surfaces quality · E Analytics trust · C Figma delta |
+| Week 2 | D Surfaces quality · K AI theme scan Phase 1 · E Analytics trust |
 
 ---
 

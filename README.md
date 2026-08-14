@@ -90,7 +90,7 @@ npm run dev:api
 npm run dev -- --store YOUR-DEV-STORE.myshopify.com
 ```
 
-Or: `npm run dev:all` (concurrently API + `shopify app dev`).
+Or: `npm run dev:all` (alias of `npm run dev` — do **not** also run `dev:api` in another terminal; Shopify CLI already starts Express via `server/shopify.web.toml`).
 
 ### 4. After CLI says Ready
 
@@ -280,8 +280,10 @@ Configured in `app/routes/app.tsx` via App Bridge `NavMenu`:
 
 - **Experiments** (`/app`) — home after install  
 - **Create** (`/app/experiments/new`) — locked when unpaid  
-- **Setup** / **Billing** / **Settings**
-
+- **Setup** (`/app/setup`) — storefront readiness checklist  
+- **Settings** (`/app/settings`) — Plan · Guardrails · Installation · Price surfaces  
+  (legacy `/app/billing` redirects to Settings → Plan)  
+- **Welcome** (`/app/welcome`) — after Shopify App Pricing approval (set Partner welcome URL here)
 ---
 
 ## Documentation & research

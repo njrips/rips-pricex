@@ -1,0 +1,47 @@
+# RipsPriceX production — https://pricefy.echologyx.com
+# Same Partner app as shopify.app.ripspricex.toml (M.A.K. Ripon).
+# Deploy: shopify app deploy --config shopify.app.production.toml --allow-updates
+# Do not enable automatically_update_urls_on_dev here (would clobber this host).
+
+name = "RipsPriceX"
+client_id = "4c6899f56aea53cbee6e22893c179fa4"
+application_url = "https://pricefy.echologyx.com"
+embedded = true
+
+[build]
+automatically_update_urls_on_dev = false
+
+[access_scopes]
+scopes = "read_products,write_products,read_orders,read_inventory,read_locations,read_cart_transforms,write_cart_transforms,read_themes,read_content,read_online_store_pages,read_markets,read_reports"
+optional_scopes = []
+use_legacy_install_flow = false
+
+[auth]
+redirect_urls = [
+  "https://pricefy.echologyx.com/auth/callback",
+  "https://pricefy.echologyx.com/auth/shopify/callback",
+  "https://pricefy.echologyx.com/api/auth/callback"
+]
+
+[webhooks]
+api_version = "2025-10"
+
+  [[webhooks.subscriptions]]
+  topics = ["app/uninstalled"]
+  uri = "/webhooks/app/uninstalled"
+
+  [[webhooks.subscriptions]]
+  topics = ["products/update"]
+  uri = "/webhooks/products/update"
+
+  [[webhooks.subscriptions]]
+  topics = ["app/scopes_update"]
+  uri = "/webhooks/app/scopes_update"
+
+[app_proxy]
+url = "https://pricefy.echologyx.com/api/proxy"
+subpath = "ripspricex"
+prefix = "apps"
+
+[pos]
+embedded = false

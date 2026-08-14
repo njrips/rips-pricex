@@ -9,6 +9,30 @@ const { Pool } = require('pg');
 
 let pool = null;
 
+/**
+ * SSL for node-pg.
+ * Localhost Postgres (this box) typically presents a self-signed cert — skip SSL
+ * unless DATABASE_SSL=true. Managed/remote Postgres keeps production SSL on.
+ */
+function resolvePoolSsl(connectionString) {
+  const flag = String(process.env.DATABASE_SSL || '').toLowerCase();
+  if (flag === 'false' || flag === '0' || flag === 'off') return false;
+  const sslOn = {
+    rejectUnauthorized: process.env.DATABASE_SSL_REJECT_UNAUTHORIZED !== 'false',
+    ...(process.env.DATABASE_SSL_CA && { ca: process.env.DATABASE_SSL_CA }),
+  };
+  if (flag === 'true' || flag === '1' || flag === 'on') return sslOn;
+  if (process.env.NODE_ENV !== 'production') return false;
+  try {
+    const host = new URL(String(connectionString || '').replace(/^postgresql:/i, 'http:'))
+      .hostname;
+    if (host === 'localhost' || host === '127.0.0.1' || host === '::1') return false;
+  } catch {
+    /* ignore parse errors — fall through to production SSL */
+  }
+  return sslOn;
+}
+
 function getPoolMax() {
   const env = process.env.DATABASE_POOL_MAX;
   if (env !== null && env !== undefined && env !== '') {
@@ -39,17 +63,8 @@ function getStatementTimeoutMs() {
 function initDatabase() {
   if (process.env.DATABASE_URL) {
     // PostgreSQL
-    const sslConfig =
-      process.env.NODE_ENV === 'production'
-        ? {
-            // In production, verify SSL certificates for security
-            rejectUnauthorized: process.env.DATABASE_SSL_REJECT_UNAUTHORIZED !== 'false',
-            // Allow custom CA certificate if provided
-            ...(process.env.DATABASE_SSL_CA && { ca: process.env.DATABASE_SSL_CA }),
-          }
-        : false;
-
     const connectionString = process.env.DATABASE_URL;
+    const sslConfig = resolvePoolSsl(connectionString);
     const timeoutMs = getStatementTimeoutMs();
     if (process.env.NODE_ENV === 'production' && !timeoutMs) {
       const logger = require('./logger');

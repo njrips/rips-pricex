@@ -379,7 +379,10 @@ export default function ProductsPricingStepPanel({
 
   const activeArm = variations[activeArmIndex] || variations[0];
   const isControlArm = activeArmIndex === 0 || activeArm?.id === 'control';
-  const didAutoAi = useRef(false);
+  /** Per-arm auto-suggest latch — do not clear when briefly viewing Control (priceMode looks manual). */
+  const didAutoAiByArm = useRef({});
+  const onAiSuggestRef = useRef(onAiSuggest);
+  onAiSuggestRef.current = onAiSuggest;
 
   // Pricing table is product-grouped: include every catalog variant for selected products
   // (so accordion can show Size S/M/L…), and for All mode limit by product count not SKU count.
@@ -397,18 +400,32 @@ export default function ProductsPricingStepPanel({
     return allRows.filter(row => selectedProductKeys.has(productKey(row)));
   }, [pickMode, opportunities, selectedIds, maxSelection, selectedSet]);
 
+  // Reset latch only when this arm leaves AI mode (Manual/Bulk), not when switching tabs.
+  useEffect(() => {
+    const armKey = activeArm?.id;
+    if (!armKey || armKey === 'control') return;
+    if (priceMode !== 'ai') {
+      didAutoAiByArm.current[armKey] = false;
+    }
+  }, [priceMode, activeArm?.id]);
+
   // Seed AI suggestions when entering AI mode (per active variation).
   useEffect(() => {
-    if (priceMode !== 'ai') {
-      didAutoAi.current = null;
-      return;
-    }
-    const armKey = activeArm?.id || 'control';
-    if (didAutoAi.current === armKey) return;
-    if (!pricingSource.length) return;
-    didAutoAi.current = armKey;
-    onAiSuggest?.({ unit: aiUnit });
-  }, [priceMode, pricingSource.length, onAiSuggest, activeArm?.id, aiUnit]);
+    if (priceMode !== 'ai' || isControlArm) return;
+    const armKey = activeArm?.id;
+    if (!armKey) return;
+    if (didAutoAiByArm.current[armKey]) return;
+    if (!pricingSource.length || aiSuggestBusy) return;
+    didAutoAiByArm.current[armKey] = true;
+    onAiSuggestRef.current?.({ unit: aiUnit });
+  }, [
+    priceMode,
+    isControlArm,
+    pricingSource.length,
+    activeArm?.id,
+    aiUnit,
+    aiSuggestBusy,
+  ]);
 
   const pricingGroups = useMemo(() => {
     const q = tableFilter.trim().toLowerCase();
@@ -1184,8 +1201,10 @@ export default function ProductsPricingStepPanel({
             AI Price Suggestions
           </div>
           <p className={styles.aiSuggestBody}>
-            {aiSuggestSummary ||
-              'AI recommends test prices from sales, margin, opportunity score, and your min/max band — clamped to shop guardrails.'}
+            {!pricingSource.length
+              ? 'Select products above, then AI can suggest test prices within your min/max band.'
+              : aiSuggestSummary ||
+                'AI recommends test prices from sales, margin, opportunity score, and your min/max band — clamped to shop guardrails.'}
           </p>
           <div className={styles.aiBar}>
             <span className={styles.aiBarLabel}>
@@ -1254,7 +1273,7 @@ export default function ProductsPricingStepPanel({
                     : 'Regenerate AI price suggestions'
                 }
               >
-                {aiSuggestBusy ? 'Suggesting…' : 'Re-suggest'}
+                {aiSuggestBusy ? 'Suggesting…' : aiSuggestSummary ? 'Re-suggest' : 'Suggest'}
               </button>
             </div>
           </div>

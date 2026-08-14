@@ -4,7 +4,7 @@
 export const CLASSIC_CREATE_STEPS = [
   {
     id: 'setup',
-    label: 'Setup',
+    label: 'Basics',
     subtitle: 'Name & type',
     title: 'Set up your experiment',
     description: 'Give it a clear name, describe what you expect, and pick a type.',

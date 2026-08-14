@@ -161,11 +161,60 @@ router.get(
     const snippetHtml = `<!-- RipsPriceX - Shopify. Prefer Theme App Embed. -->
 ${resourceHints}<script src="${scriptUrl}" defer crossorigin="anonymous" fetchpriority="high"></script>`;
 
+    // Prefer live MAIN theme id for embed deep links (`/themes/current` can open a draft).
+    let mainTheme = null;
+    try {
+      const session = await getShopSession(shopDomain);
+      const accessToken = session?.access_token || session?.accessToken || null;
+      if (accessToken) {
+        const { fetchMainTheme } = require('../services/priceSurfaceSuggestService');
+        const theme = await fetchMainTheme(shopDomain, accessToken);
+        if (theme?.id || theme?.name) {
+          const gid = String(theme.id || '');
+          const numericMatch = gid.match(/\/(\d+)\s*$/);
+          mainTheme = {
+            id: theme.id || null,
+            numericId: numericMatch ? numericMatch[1] : null,
+            name: theme.name || null,
+            role: theme.role || null,
+          };
+        }
+      }
+    } catch {
+      mainTheme = null;
+    }
+
+    const apiKey = String(process.env.SHOPIFY_API_KEY || '').trim();
+    const blockHandle = 'ripspricex-app-embed';
+    const storeHandle = shopDomain.replace(/\.myshopify\.com$/i, '');
+    const themeSegment = mainTheme?.numericId || 'current';
+    const activateAppId = apiKey ? `${apiKey}/${blockHandle}` : null;
+    const query = activateAppId
+      ? `context=apps&activateAppId=${activateAppId}`
+      : 'context=apps';
+    const themeEmbed = activateAppId
+      ? {
+          blockHandle,
+          activateAppId,
+          themeSegment,
+          shopifyUrl: `shopify://admin/themes/${themeSegment}/editor?${query}`,
+          httpsUrl: `https://admin.shopify.com/store/${encodeURIComponent(storeHandle)}/themes/${themeSegment}/editor?${query}`,
+        }
+      : {
+          blockHandle,
+          activateAppId: null,
+          themeSegment,
+          shopifyUrl: null,
+          httpsUrl: null,
+        };
+
     return sendSuccess(res, HTTP_STATUS.OK, {
       platform: 'shopify',
       scriptUrl,
       directUrl,
       snippetHtml,
+      mainTheme,
+      themeEmbed,
       instructions: {
         method: 'App Proxy + App Embed (recommended)',
         steps: [

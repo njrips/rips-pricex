@@ -13,7 +13,11 @@ export const ROUTES = {
   appTestDetail: (_domain, testId) => `/app/experiments/${encodeURIComponent(testId)}`,
   appSettings: (_domain) => '/app/settings',
   appSetup: (_domain) => '/app/setup',
-  appBilling: (_domain) => '/app/billing',
+  /** @deprecated Prefer appPlan — Billing folded into Settings → Plan */
+  appBilling: (_domain) => '/app/settings?tab=plan',
+  appPlan: (_domain) => '/app/settings?tab=plan',
+  /** Shopify App Pricing welcome URL target (Partner Dashboard) */
+  appWelcome: (_domain) => '/app/welcome',
 };
 
 export default ROUTES;

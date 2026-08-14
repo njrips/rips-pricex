@@ -60,6 +60,67 @@ export const PRICE_SURFACE_THEME_PACKS = {
       },
     ],
   },
+  horizon: {
+    label: 'Horizon',
+    mappings: [
+      {
+        surface: 'pdp',
+        role: 'regular',
+        selector: '.price',
+        priority: 12,
+        source: 'theme_pack',
+      },
+      {
+        surface: 'pdp',
+        role: 'compare_at',
+        selector: '.compare-at-price',
+        priority: 11,
+        source: 'theme_pack',
+      },
+      {
+        surface: 'plp',
+        role: 'regular',
+        selector: '.price',
+        priority: 10,
+        source: 'theme_pack',
+      },
+      {
+        surface: 'plp',
+        role: 'compare_at',
+        selector: '.compare-at-price',
+        priority: 9,
+        source: 'theme_pack',
+      },
+      {
+        surface: 'cart',
+        role: 'regular',
+        selector: '.price',
+        priority: 9,
+        source: 'theme_pack',
+      },
+      {
+        surface: 'cart',
+        role: 'cart_line',
+        selector: '.price',
+        priority: 8,
+        source: 'theme_pack',
+      },
+      {
+        surface: 'search',
+        role: 'regular',
+        selector: '.price',
+        priority: 7,
+        source: 'theme_pack',
+      },
+      {
+        surface: 'home',
+        role: 'regular',
+        selector: '.price',
+        priority: 6,
+        source: 'theme_pack',
+      },
+    ],
+  },
   legacy: {
     label: 'Legacy Shopify',
     mappings: [

@@ -1,47 +1,7 @@
 import React from 'react';
+import { CLASSIC_CREATE_STEPS as CREATE_STEPS } from './classicCreateSteps';
 import { IconArrowLeft, IconArrowRight, IconCheck, IconRocket } from './classicIcons';
 import styles from './SmartPricingClassic.module.css';
-
-/** Inlined so create does not wait on the shared Smart Pricing helpers/analytics chunk. */
-const CREATE_STEPS = [
-  {
-    id: 'setup',
-    label: 'Setup',
-    subtitle: 'Name & type',
-    title: 'Set up your experiment',
-    description: 'Give it a clear name, describe what you expect, and pick a type.',
-  },
-  {
-    id: 'variations',
-    label: 'Variations',
-    subtitle: 'Traffic split',
-    title: 'Build your variations',
-    description:
-      'Each variation applies its price change to every selected product. Traffic must total 100%.',
-  },
-  {
-    id: 'products',
-    label: 'Products',
-    subtitle: 'Pick & price',
-    title: 'Choose products & pricing',
-    description: 'Pick which products are part of this experiment and set their test prices.',
-  },
-  {
-    id: 'audience',
-    label: 'Audience',
-    subtitle: 'Choose Audience',
-    title: 'Audience & success',
-    description:
-      "Decide who sees the experiment, how you'll measure success, and what must not break.",
-  },
-  {
-    id: 'review',
-    label: 'Review',
-    subtitle: 'Launch',
-    title: 'Review & launch',
-    description: 'A quick summary before your experiment goes live.',
-  },
-];
 
 export default function ClassicWizardShell({
   stepIndex = 0,

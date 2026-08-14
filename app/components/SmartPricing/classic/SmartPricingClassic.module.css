@@ -117,6 +117,7 @@
   font-weight: var(--classic-fw-regular); /* Back to experiments */
   line-height: 20px;
   cursor: pointer;
+  text-decoration: none;
   padding: 0;
 }
 
@@ -428,6 +429,7 @@
   font-weight: var(--classic-fw-medium);
   letter-spacing: 0;
   cursor: pointer;
+  text-decoration: none;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.1);
   -webkit-font-smoothing: antialiased;
 }
@@ -5543,3 +5545,138 @@
     gap: 4px;
   }
 }
+
+/* Classic admin pages (Setup / Settings) — checklist rows */
+.adminStack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.adminRow {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  border: 1px solid var(--classic-line);
+  border-radius: var(--classic-radius-sm);
+  background: var(--classic-panel-tint);
+}
+
+.adminRowHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.adminRowTitle {
+  margin: 0;
+  font-size: var(--classic-fs-label);
+  font-weight: var(--classic-fw-semibold);
+  color: var(--classic-ink);
+}
+
+.adminRowBody {
+  margin: 0;
+  font-size: var(--classic-fs-meta);
+  color: var(--classic-muted);
+  line-height: 1.45;
+}
+
+.adminRowActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.adminBadge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: var(--classic-fs-help);
+  font-weight: var(--classic-fw-medium);
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.adminBadgeOk {
+  background: var(--classic-success-bg);
+  color: var(--classic-success);
+}
+
+.adminBadgeWarn {
+  background: var(--classic-orange-soft);
+  color: var(--classic-orange-deep);
+}
+
+.adminBadgeNeutral {
+  background: var(--classic-wash);
+  color: var(--classic-muted);
+}
+
+.adminField {
+  display: flex;
+  flex-direction: column;
+  gap: var(--classic-space-label);
+  margin-bottom: var(--classic-space-field);
+}
+
+.adminField:last-child {
+  margin-bottom: 0;
+}
+
+.adminCheckRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.adminCheckRow input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--classic-orange);
+}
+
+.adminTabTrack {
+  max-width: 768px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.adminHintList {
+  margin: 8px 0 0;
+  padding-left: 1.15rem;
+  color: var(--classic-muted);
+  font-size: var(--classic-fs-help);
+  line-height: 1.45;
+}
+
+.adminHintList li + li {
+  margin-top: 4px;
+}
+
+.adminCodeBlock {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  padding: 12px;
+  border-radius: 12px;
+  background: var(--classic-wash);
+  border: 1px solid var(--classic-line);
+  color: var(--classic-muted);
+  font-size: var(--classic-fs-help);
+  line-height: 1.45;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.adminStackTight {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+

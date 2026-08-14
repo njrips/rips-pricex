@@ -70,6 +70,14 @@ async function main() {
   assert(billing.data.entitled === true, "dev entitle failed");
   results.push("entitle unlock ok");
 
+  const sync = await req("/api/billing/sync-entitlement", {
+    method: "POST",
+    body: { entitled: true, status: "ACTIVE", planHandle: "smart_pricing_sync" },
+  });
+  assert(sync.status === 200 && sync.data.synced === true, "sync-entitlement failed");
+  assert(sync.data.planHandle === "smart_pricing_sync", "sync-entitlement planHandle mismatch");
+  results.push("sync-entitlement ok");
+
   const save = await req("/api/smart-pricing/inbox/plans", {
     method: "PUT",
     body: {

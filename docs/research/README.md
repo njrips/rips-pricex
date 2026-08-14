@@ -1,6 +1,6 @@
 # RipsPriceX research index
 
-Updated: **2026-08-10**  
+Updated: **2026-08-14**  
 Purpose: enable **independent** research and planning for RipsPriceX without opening RipX.
 
 ## Read order (onboarding)
@@ -39,13 +39,18 @@ When starting a new investigation in this project:
 | 2026-08-10 | [2026-08-10_LIVE_E2E_FINISH.md](./2026-08-10_LIVE_E2E_FINISH.md) | In progress | Deploy CT, ensure install, surfaces, readiness green; embed Save left |
 | 2026-08-10 | [PROJECT_FINISH_STATUS.md](./PROJECT_FINISH_STATUS.md) | Pilot-complete | Embed on + live running test; winner needs conversions |
 | 2026-08-10 | [2026-08-10_LIVE_E2E_COMPLETE.md](./2026-08-10_LIVE_E2E_COMPLETE.md) | Done | Embed verified; launch/assign/pause/resume proven |
+| 2026-08-11 | [2026-08-11_SETUP_BILLING_SETTINGS_IA.md](./2026-08-11_SETUP_BILLING_SETTINGS_IA.md) | Done | Fold Billing → Settings Plan; welcome route; sync-entitlement |
+| 2026-08-12 | [2026-08-12_PREVIEW_PRICE_MISMATCH.md](./2026-08-12_PREVIEW_PRICE_MISMATCH.md) | Done | Classic Preview forced Control; fixed /track/preview matcher + matrix |
+| 2026-08-12 | [2026-08-12_THEME_EMBED_REFUSED_TO_CONNECT.md](./2026-08-12_THEME_EMBED_REFUSED_TO_CONNECT.md) | Done | Theme embed deep link broke out of iframe via shopify:// + _top |
+| 2026-08-13 | [2026-08-13_AI_PRICE_MAPPING.md](./2026-08-13_AI_PRICE_MAPPING.md) | In progress | Theme `files` indexer in auto-map; AI still rank-only |
+| 2026-08-14 | [2026-08-14_PUBLIC_LANDING.md](./2026-08-14_PUBLIC_LANDING.md) | Done | Fixed CSS-module `?url` SSR crash; robots/sitemap; public 404 |
 
 ## Quick facts
 
 - **UI:** Classic Smart Pricing only (`app/components/SmartPricing/classic/**`)  
-- **Shell:** Shopify App Bridge `NavMenu` — no custom RipX sidebar  
+- **Shell:** Shopify App Bridge `NavMenu` — Experiments · Create · Setup · Settings (Plan under Settings)  
 - **Identity:** Shopify shop session (no email / Domains)  
-- **Billing:** Shopify App Pricing; unpaid → Create/Launch `402`  
+- **Billing:** Shopify App Pricing; unpaid → Create/Launch `402`; Plan UI at Settings → Plan  
 - **Runtime:** theme embed `ripspricex` + cart transform + Express track/proxy  
 - **API default port:** `3456`  
 - **Smoke:** `npm run accept`  

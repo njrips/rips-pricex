@@ -11,6 +11,7 @@ const {
 } = require('../utils/priceSurfaceThemePacks');
 const { getShopPriceSurfaceMappings } = require('./priceSurfaceRegistryService');
 const { buildPriceSurfaceReadinessSummary } = require('../utils/priceSurfaceRegistry');
+const logger = require('../utils/logger');
 
 async function fetchMainTheme(shopDomain, accessToken) {
   if (!shopDomain || !accessToken) {
@@ -33,8 +34,11 @@ async function fetchMainTheme(shopDomain, accessToken) {
     if (Array.isArray(nodes) && nodes.length > 0) {
       return nodes[0];
     }
-  } catch (_graphqlError) {
-    // Theme read may be unavailable for this install; caller falls back to default pack.
+  } catch (graphqlError) {
+    logger.warn('Main theme lookup failed', {
+      shopDomain,
+      message: graphqlError?.message || String(graphqlError),
+    });
   }
   return null;
 }

@@ -10,6 +10,8 @@ const PRICE_TEXT_HINT =
   /(?:[$€£¥₹৳]|usd|eur|gbp|cad|aud|sale|from)\s*[-+]?\d|[-+]?\d[\d,]*(?:\.\d{2})?\s*(?:[$€£¥₹৳]|usd|eur|gbp|cad|aud)/i;
 
 const PREFERRED_CLASS_BONUS = Object.freeze({
+  'compare-at-price': 52,
+  'price-item--compare': 50,
   'price-item--regular': 55,
   'price-item__regular': 50,
   'price-item--sale': 28,
@@ -75,13 +77,43 @@ function attrPresent(html, name, value) {
   ).test(html);
 }
 
+function extractLeadingTag(part) {
+  const trimmed = String(part || '').trim();
+  const match = trimmed.match(/^([a-z][a-z0-9]*)(?=[.#\[:])/i);
+  return match ? match[1].toLowerCase() : '';
+}
+
+function tagAndClassPresent(html, tag, className) {
+  const escapedTag = String(tag).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const escapedClass = String(className).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(
+    `<${escapedTag}\\b[^>]*class\\s*=\\s*["'][^"']*\\b${escapedClass}\\b[^"']*["']`,
+    'i'
+  );
+  return re.test(html);
+}
+
+function countTagAndClassOccurrences(html, tag, className) {
+  const escapedTag = String(tag).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const escapedClass = String(className).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(
+    `<${escapedTag}\\b[^>]*class\\s*=\\s*["'][^"']*\\b${escapedClass}\\b[^"']*["']`,
+    'gi'
+  );
+  const matches = String(html || '').match(re);
+  return matches ? matches.length : 0;
+}
+
 function partMatchesHtml(html, part) {
   const classes = extractSimpleClasses(part);
   const attrs = extractAttrSelectors(part);
+  const tag = extractLeadingTag(part);
   if (!classes.length && !attrs.length) {
     return false;
   }
-  const classesOk = classes.every(cls => classTokenPresent(html, cls));
+  const classesOk = tag
+    ? classes.every(cls => tagAndClassPresent(html, tag, cls))
+    : classes.every(cls => classTokenPresent(html, cls));
   const attrsOk = attrs.every(attr => attrPresent(html, attr.name, attr.value));
   return classesOk && attrsOk;
 }
@@ -99,8 +131,12 @@ function scoreSelectorAgainstHtml(html, selector) {
   let occurrenceCount = 0;
   for (const part of matchedParts) {
     const classes = extractSimpleClasses(part);
+    const tag = extractLeadingTag(part);
     if (classes.length) {
-      occurrenceCount += Math.max(...classes.map(cls => countClassTokenOccurrences(raw, cls)), 0);
+      const counts = classes.map(cls =>
+        tag ? countTagAndClassOccurrences(raw, tag, cls) : countClassTokenOccurrences(raw, cls)
+      );
+      occurrenceCount += Math.max(...counts, 0);
     } else {
       occurrenceCount += 1;
     }
@@ -275,4 +311,5 @@ module.exports = {
   looksLikePriceSample,
   tokenizeCssSelector,
   countClassTokenOccurrences,
+  extractLeadingTag,
 };
