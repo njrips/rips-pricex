@@ -1,20 +1,26 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
+import { Badge, Button, Spinner, TextField } from '@shopify/polaris';
 import PageShell from '../../shared/PageShell';
 import { ROUTES } from '../../../constants';
 import useClassicShopDomain from '../../../hooks/useClassicShopDomain';
 import { readInboxPlans, setInboxPersistHandler, writeInboxPlans } from '../smartPricingConstants';
-import { filterPlansByQuery, groupInboxPlans } from '../smartPricingUiHelpers';
+import { filterPlansByQuery } from '../smartPricingUiHelpers';
 import { hydrateInboxFromServer, schedulePersistInboxPlans } from '../smartPricingInboxPersistence';
-import { getPlanProductTitle, groupPlansIntoExperiments } from './classicExperimentHelpers';
+import {
+  formatClassicStatusLabel,
+  getPlanProductTitle,
+  groupPlansIntoExperiments,
+} from './classicExperimentHelpers';
+import { formatOfferRule, isOfferExperimentType } from './offerSelection';
 import ClassicExperimentRowActions from './ClassicExperimentRowActions';
+import { filterClassicExperimentsByTab, listTabAfterClassicAction } from './classicExperimentListActions';
 import { useSmartPricingCheckoutReadiness } from '../../../hooks/useSmartPricingCheckoutReadiness';
 import {
+  ButtonIconPlus,
   IconChevron,
   IconBolt,
   IconPerson,
-  IconPlus,
-  IconSearch,
   IconTrendUp,
 } from './classicIcons';
 import styles from './SmartPricingClassic.module.css';
@@ -31,21 +37,30 @@ const FILTERS = [
 function statusVisual(experiment) {
   const status = experiment.status;
   if (status === 'archived' || experiment.archived) {
-    return { className: styles.statusDraft, text: 'Archived' };
+    return { tone: undefined, text: 'Archived' };
   }
   if (status === 'winner_ready' || status === 'applied' || status === 'completed') {
     return {
-      className: styles.statusCompleted,
-      text: status === 'winner_ready' ? 'Winner ready' : 'Completed',
+      tone: 'success',
+      text: formatClassicStatusLabel(status, experiment.experimentType),
     };
   }
   if (status === 'running') {
-    return { className: styles.statusRunning, text: 'Running' };
+    return { tone: 'info', text: 'Running' };
   }
   if (status === 'paused') {
-    return { className: styles.statusPaused, text: 'Paused' };
+    return { tone: 'warning', text: 'Paused' };
   }
-  return { className: styles.statusDraft, text: 'Draft' };
+  return { tone: undefined, text: 'Draft' };
+}
+
+function emptyFilterCopy(filter) {
+  if (filter === 'running') return 'No running experiments.';
+  if (filter === 'draft') return 'No draft experiments.';
+  if (filter === 'paused') return 'No paused experiments.';
+  if (filter === 'completed') return 'No completed experiments.';
+  if (filter === 'archived') return 'No archived experiments.';
+  return 'No experiments yet.';
 }
 
 function formatMetricLabel(metric) {
@@ -68,10 +83,14 @@ export default function ClassicExperimentsList() {
   const [plans, setPlans] = useState([]);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
+  const [gridBusy, setGridBusy] = useState('');
   const [message, setMessage] = useState('');
   const [messageType, setMessageType] = useState('error');
   const [expandedIds, setExpandedIds] = useState(() => new Set());
-  const { checkoutReady } = useSmartPricingCheckoutReadiness(shopDomain);
+  const {
+    checkoutReady,
+    offerCheckoutReady,
+  } = useSmartPricingCheckoutReadiness(shopDomain);
 
   useEffect(() => {
     setInboxPersistHandler((d, nextPlans) => {
@@ -80,11 +99,16 @@ export default function ClassicExperimentsList() {
     return () => setInboxPersistHandler(null);
   }, []);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (hydrateOptions = {}) => {
+    const quiet = Boolean(
+      hydrateOptions.quiet || hydrateOptions.preferLocalIds || hydrateOptions.omitIds
+    );
+    if (!quiet) setLoading(true);
     try {
       const local = readInboxPlans(shopDomain) || [];
-      const hydrated = await hydrateInboxFromServer(shopDomain, local).catch(() => null);
+      const hydrated = await hydrateInboxFromServer(shopDomain, local, hydrateOptions).catch(
+        () => null
+      );
       const next = Array.isArray(hydrated?.plans) ? hydrated.plans : local;
       setPlans(next);
       if (hydrated?.plans) {
@@ -95,6 +119,7 @@ export default function ClassicExperimentsList() {
       setPlans(readInboxPlans(shopDomain) || []);
     } finally {
       setLoading(false);
+      setGridBusy('');
     }
   }, [shopDomain]);
 
@@ -102,27 +127,10 @@ export default function ClassicExperimentsList() {
     load();
   }, [load]);
 
-  const grouped = useMemo(() => groupInboxPlans(plans), [plans]);
-
-  const filteredPlans = useMemo(() => {
-    let list = plans;
-    if (filter === 'running') list = grouped.runningTab || [];
-    else if (filter === 'draft') {
-      list = plans.filter(p => !p.archived && (p.status === 'queued' || p.status === 'draft'));
-    } else if (filter === 'archived') list = grouped.archived || [];
-    else if (filter === 'paused') {
-      list = plans.filter(p => p.status === 'paused');
-    } else if (filter === 'completed') {
-      list = plans.filter(
-        p => p.status === 'winner_ready' || p.status === 'applied' || p.status === 'completed'
-      );
-    } else {
-      list = plans.filter(p => !p.archived);
-    }
-    return filterPlansByQuery(list, search);
-  }, [plans, grouped, filter, search]);
-
-  const experiments = useMemo(() => groupPlansIntoExperiments(filteredPlans), [filteredPlans]);
+  const experiments = useMemo(() => {
+    const queried = filterPlansByQuery(plans, search);
+    return filterClassicExperimentsByTab(groupPlansIntoExperiments(queried), filter);
+  }, [plans, filter, search]);
 
   const stats = useMemo(() => {
     const allExperiments = groupPlansIntoExperiments(plans.filter(p => !p.archived));
@@ -164,24 +172,61 @@ export default function ClassicExperimentsList() {
     setMessage(text);
   };
 
+  const handleRowBusy = action => {
+    setGridBusy(action || '');
+  };
+
+  const handleRowRefresh = async hydrateOptions => {
+    await load(hydrateOptions || {});
+  };
+
+  const handleRowActionDone = (action, experiment) => {
+    const nextTab = listTabAfterClassicAction(action, experiment, filter);
+    if (nextTab && nextTab !== filter) {
+      setFilterAndUrl(nextTab);
+    }
+  };
+
+  const gridBusyLabel =
+    gridBusy === 'pause'
+      ? 'Pausing experiment…'
+      : gridBusy === 'resume'
+        ? 'Resuming experiment…'
+        : gridBusy === 'delete'
+          ? 'Deleting experiment…'
+          : gridBusy === 'launch'
+            ? 'Launching experiment…'
+            : gridBusy === 'archive'
+              ? 'Archiving experiment…'
+              : gridBusy === 'restore'
+                ? 'Restoring experiment…'
+                : gridBusy
+                  ? 'Updating experiments…'
+                  : 'Loading experiments…';
+
   return (
     <PageShell message={message} messageType={messageType} onCloseMessage={() => setMessage('')}>
       <div className={styles.listPage}>
         <div className={styles.listHeader}>
-          <div>
-            <p className={styles.eyebrow}>Workspace</p>
-            <h1 className={`${styles.listTitle} ripx-classic-sans`}>Experiments</h1>
-            <p className={styles.subtitle} style={{ marginBottom: 0 }}>
-              Ship better product decisions. Launch a test in under two minutes.
-            </p>
+          <p className={styles.eyebrow}>Workspace</p>
+          <div className={styles.listHeaderMain}>
+            <div>
+              <h1 className={`${styles.listTitle} ripx-classic-sans`}>Experiments</h1>
+              <p className={styles.subtitle} style={{ marginBottom: 0 }}>
+                Ship better product decisions. Launch a test in under two minutes.
+              </p>
+            </div>
+            <div className={styles.listHeaderActions}>
+              <Button
+                variant="primary"
+                icon={ButtonIconPlus}
+                disabled={loading || Boolean(gridBusy)}
+                onClick={() => navigate(ROUTES.appSmartPricingCreate(shopDomain))}
+              >
+                New experiment
+              </Button>
+            </div>
           </div>
-          <button
-            type="button"
-            className={styles.primaryBtn}
-            onClick={() => navigate(ROUTES.appSmartPricingCreate(shopDomain))}
-          >
-            <IconPlus /> New experiment
-          </button>
         </div>
 
         <div className={styles.statGrid}>
@@ -231,18 +276,25 @@ export default function ClassicExperimentsList() {
               </button>
             ))}
           </div>
-          <div className={`${styles.searchWrap} ${styles.searchWrapPill} ${styles.listSearch}`}>
-            <IconSearch size={16} />
-            <input
-              className={`${styles.input} ${styles.searchInputPill}`}
+          <div className={styles.listSearch}>
+            <TextField
+              label="Search experiments"
+              labelHidden
               value={search}
-              onChange={e => setSearch(e.target.value)}
+              onChange={setSearch}
+              autoComplete="off"
               placeholder="Search experiments"
             />
           </div>
         </div>
 
-        <div className={styles.expTableWrap}>
+        <div className={styles.expTableWrap} aria-busy={loading || Boolean(gridBusy)}>
+          {loading || gridBusy ? (
+            <div className={styles.expTableBusy} role="status" aria-live="polite">
+              <Spinner size="small" />
+              <span>{gridBusy ? gridBusyLabel : 'Loading experiments…'}</span>
+            </div>
+          ) : null}
           <table className={styles.table}>
             <thead>
               <tr>
@@ -256,25 +308,20 @@ export default function ClassicExperimentsList() {
               </tr>
             </thead>
             <tbody>
-              {loading ? (
-                <tr>
-                  <td colSpan={7} className={styles.help}>
-                    Loading experiments…
-                  </td>
-                </tr>
-              ) : null}
               {!loading && experiments.length === 0 ? (
                 <tr>
                   <td colSpan={7}>
                     <div className={styles.listEmptyState}>
-                      <p className={styles.subtitle}>No experiments yet.</p>
-                      <button
-                        type="button"
-                        className={styles.primaryBtn}
-                        onClick={() => navigate(ROUTES.appSmartPricingCreate(shopDomain))}
-                      >
-                        <IconPlus /> New experiment
-                      </button>
+                      <p className={styles.subtitle}>{emptyFilterCopy(filter)}</p>
+                      {filter === 'all' || filter === 'draft' ? (
+                        <Button
+                          variant="primary"
+                          icon={ButtonIconPlus}
+                          onClick={() => navigate(ROUTES.appSmartPricingCreate(shopDomain))}
+                        >
+                          New experiment
+                        </Button>
+                      ) : null}
                     </div>
                   </td>
                 </tr>
@@ -319,10 +366,7 @@ export default function ClassicExperimentsList() {
                           </div>
                         </td>
                         <td>
-                          <span className={`${styles.statusPill} ${status.className}`}>
-                            <span className={styles.statusDot} />
-                            {status.text}
-                          </span>
+                          <Badge tone={status.tone}>{status.text}</Badge>
                         </td>
                         <td>{formatMetricLabel(experiment.primaryMetric)}</td>
                         <td>
@@ -354,8 +398,15 @@ export default function ClassicExperimentsList() {
                           <ClassicExperimentRowActions
                             experiment={experiment}
                             shopDomain={shopDomain}
-                            checkoutReady={checkoutReady}
-                            onRefresh={load}
+                            checkoutReady={
+                              isOfferExperimentType(experiment.experimentType)
+                                ? offerCheckoutReady
+                                : checkoutReady
+                            }
+                            listBusy={Boolean(gridBusy) || loading}
+                            onBusy={handleRowBusy}
+                            onRefresh={handleRowRefresh}
+                            onActionDone={handleRowActionDone}
                             onMessage={handleListMessage}
                           />
                         </td>
@@ -363,6 +414,7 @@ export default function ClassicExperimentsList() {
                       {expanded
                         ? experiment.plans.map(plan => {
                             const arms = Array.isArray(plan.price_arms) ? plan.price_arms : [];
+                            const isOffer = isOfferExperimentType(experiment.experimentType);
                             const control = arms[0]?.price;
                             const variantCount =
                               Number(plan.variant_count) ||
@@ -418,13 +470,17 @@ export default function ClassicExperimentsList() {
                                           <span className={styles.armLetter}>
                                             {String.fromCharCode(65 + idx)}
                                           </span>
-                                          {arm.price !== null &&
-                                          arm.price !== undefined &&
-                                          Number.isFinite(Number(arm.price))
-                                            ? `$${Number(arm.price).toFixed(
-                                                Number(arm.price) % 1 === 0 ? 0 : 2
-                                              )}`
-                                            : '—'}
+                                          {isOffer
+                                            ? idx === 0 || arm.role === 'control'
+                                              ? 'No offer'
+                                              : formatOfferRule(arm.offer)
+                                            : arm.price !== null &&
+                                                arm.price !== undefined &&
+                                                Number.isFinite(Number(arm.price))
+                                              ? `$${Number(arm.price).toFixed(
+                                                  Number(arm.price) % 1 === 0 ? 0 : 2
+                                                )}`
+                                              : '—'}
                                         </span>
                                       ))}
                                     </div>
@@ -442,20 +498,12 @@ export default function ClassicExperimentsList() {
         </div>
 
         <div className={styles.listFooterLinks}>
-          <button
-            type="button"
-            className={styles.footerLink}
-            onClick={() => navigate(ROUTES.appSettings(shopDomain))}
-          >
+          <Button variant="plain" onClick={() => navigate(ROUTES.appSettings(shopDomain))}>
             Settings
-          </button>
-          <button
-            type="button"
-            className={styles.footerLink}
-            onClick={() => navigate(ROUTES.appSetup(shopDomain))}
-          >
+          </Button>
+          <Button variant="plain" onClick={() => navigate(ROUTES.appSetup(shopDomain))}>
             Setup
-          </button>
+          </Button>
         </div>
       </div>
     </PageShell>

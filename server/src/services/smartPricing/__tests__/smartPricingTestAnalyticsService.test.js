@@ -229,4 +229,64 @@ describe('smartPricingTestAnalyticsService', () => {
     expect(result.arms).toHaveLength(2);
     expect(result.summary.visitors).toBe(20);
   });
+
+  it('joins offer-test arms by identity, not shared catalog price', async () => {
+    getTestById.mockResolvedValue({
+      id: 'test-offer',
+      type: 'offer',
+      status: 'running',
+      metadata: { smart_pricing_source: 'smart_pricing', experiment_type: 'offer_test' },
+      variants: [
+        { id: 'v-control', name: 'Control', config: {} },
+        {
+          id: 'v-a',
+          name: '10% off Variation A',
+          config: { discount_type: 'percent', discount_value: 10 },
+        },
+      ],
+    });
+    findInboxPlanByTestId.mockResolvedValue({
+      id: 'SP-offer',
+      experiment_type: 'offer_test',
+      price_arms: [
+        { id: 'control', role: 'control', label: 'Control', price: 49 },
+        {
+          id: 'var_a',
+          role: 'challenger',
+          label: 'Variation A',
+          price: 49,
+          offer: { discount_type: 'percent', discount_value: 10 },
+        },
+      ],
+      arm_projections: [],
+    });
+    analyticsService.getTestAnalytics.mockResolvedValue({
+      variants: [
+        {
+          id: 'v-control',
+          name: 'Control',
+          visitors: 80,
+          conversions: 4,
+          conversionRate: 5,
+          revenuePerVisitor: 2.4,
+        },
+        {
+          id: 'v-a',
+          name: '10% off Variation A',
+          visitors: 90,
+          conversions: 8,
+          conversionRate: 8.9,
+          revenuePerVisitor: 2.1,
+        },
+      ],
+      summary: { totalVisitors: 170, totalConversions: 12 },
+      significance: { significant: false, confidence: 40, lift: -12 },
+    });
+
+    const result = await buildSmartPricingTestAnalytics('demo.myshopify.com', 'test-offer');
+    expect(result.arms[0].variant_id).toBe('v-control');
+    expect(result.arms[0].visitors).toBe(80);
+    expect(result.arms[1].variant_id).toBe('v-a');
+    expect(result.arms[1].visitors).toBe(90);
+  });
 });

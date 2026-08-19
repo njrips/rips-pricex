@@ -1,11 +1,17 @@
 import React from 'react';
-import { formatCountryCodesSummary } from '../../../utils/iso3166CountryDisplay';
+import { Badge, Banner, Button } from '@shopify/polaris';
+import { formatCountryAudienceLabel } from './countrySelection';
+import {
+  formatOfferRule,
+  formatOfferSummary,
+  getOfferCheckoutBlockReason,
+  isOfferExperimentType,
+} from './offerSelection';
 import {
   normalizeSecondaryEvents,
   primaryMetricLabel,
   secondaryMetricLabel,
 } from '../targeting/smartPricingAudienceHelpers';
-import { IconSparkles } from './classicIcons';
 import styles from './SmartPricingClassic.module.css';
 
 function formatMoney(value) {
@@ -46,6 +52,7 @@ function segmentLabel(segment) {
 export default function ReviewLaunchStepPanel({
   name,
   hypothesis: _hypothesis,
+  experimentType = 'price_test',
   experimentTypeLabel = 'Price test',
   variations = [],
   selectedCount = 0,
@@ -54,6 +61,7 @@ export default function ReviewLaunchStepPanel({
   bulkPercent = '10',
   bulkDirection = 'increase',
   pricingByArm = null,
+  offerByArm = {},
   audience,
   estimatedDays = 7,
   checkoutReady = true,
@@ -87,7 +95,14 @@ export default function ReviewLaunchStepPanel({
     ? checkoutReadiness.failed_checks.filter(Boolean)
     : [];
   const priceSurface = checkoutReadiness?.price_surface || null;
-  const priceSurfaceNeedsAttention = priceSurface && priceSurface.ready === false;
+  const priceSurfaceNeedsAttention =
+    !isOfferExperimentType(experimentType) && priceSurface && priceSurface.ready === false;
+  const isOfferTest = isOfferExperimentType(experimentType);
+  const offerDiscountMissing =
+    isOfferTest &&
+    checkoutReady &&
+    checkoutReadiness?.live_api_checked === true &&
+    checkoutReadiness?.automatic_discount_available !== true;
 
   const pricingLabel = (() => {
     if (pricingByArm && typeof pricingByArm === 'object') {
@@ -110,36 +125,31 @@ export default function ReviewLaunchStepPanel({
 
   return (
     <div className={styles.reviewStack}>
-      <div className={styles.callout}>
-        <span className={styles.calloutIcon} aria-hidden>
-          <IconSparkles size={16} />
-        </span>
-        <span className={styles.calloutBody}>
-          <span className={styles.calloutStrong}>
-            Estimated time to significance: ~{estimatedDays} days
-          </span>
-          <span className={styles.calloutMeta}>
-            Based on {audience?.trafficAllocation ?? 50}% traffic and typical visitor volume.
-          </span>
-        </span>
-      </div>
+      <Banner tone="info" title={`Estimated time to significance: ~${estimatedDays} days`}>
+        <p>Based on {audience?.trafficAllocation ?? 50}% traffic and typical visitor volume.</p>
+      </Banner>
 
       {checkoutLoading ? (
-        <div className={styles.callout} role="status">
-          <span className={styles.calloutBody}>
-            <span className={styles.calloutStrong}>Checking checkout readiness…</span>
-            <span className={styles.calloutMeta}>
-              Confirming cart transform and pricing infra before launch.
-            </span>
-          </span>
-        </div>
+        <Banner tone="info" title="Checking checkout readiness…">
+          <p>
+            {isOfferTest
+              ? 'Confirming the checkout discount function before launch.'
+              : 'Confirming cart transform and pricing infra before launch.'}
+          </p>
+        </Banner>
       ) : !checkoutReady ? (
         <div className={styles.error} role="alert">
           <div>
-            <strong>Checkout is not ready for price tests.</strong>{' '}
-            {checkoutReadiness?.message || 'Fix setup before launching.'}
+            <strong>
+              {isOfferTest
+                ? 'Checkout is not ready for offer tests.'
+                : 'Checkout is not ready for price tests.'}
+            </strong>{' '}
+            {isOfferTest
+              ? getOfferCheckoutBlockReason(checkoutReadiness)
+              : checkoutReadiness?.message || 'Fix setup before launching.'}
           </div>
-          {failedChecks.length > 0 ? (
+          {!isOfferTest && failedChecks.length > 0 ? (
             <ul className={styles.errorList}>
               {failedChecks.slice(0, 4).map(check => (
                 <li key={check}>{check}</li>
@@ -148,58 +158,70 @@ export default function ReviewLaunchStepPanel({
           ) : null}
           <div className={styles.errorActions}>
             {typeof onFixSetup === 'function' ? (
-              <button type="button" className={styles.editLink} onClick={onFixSetup}>
+              <Button variant="plain" onClick={onFixSetup}>
                 Open Setup checklist
-              </button>
+              </Button>
             ) : null}
             {typeof onRefreshCheckout === 'function' ? (
-              <button type="button" className={styles.editLink} onClick={onRefreshCheckout}>
+              <Button variant="plain" onClick={onRefreshCheckout}>
                 Re-check
-              </button>
+              </Button>
             ) : null}
           </div>
         </div>
       ) : null}
 
-      {priceSurfaceNeedsAttention ? (
-        <div className={styles.callout} role="status">
-          <span className={styles.calloutBody}>
-            <span className={styles.calloutStrong}>Theme price selectors recommended</span>
-            <span className={styles.calloutMeta}>
-              {priceSurface.message ||
-                'Map shop-wide PDP selectors so bucketed visitors see test prices on the product page.'}
-            </span>
-          </span>
+      {offerDiscountMissing ? (
+        <Banner tone="info" title="Automatic discount will attach on launch">
+          <p>
+            The function is deployed. Launch will create the automatic discount that applies the
+            offer at checkout. If that fails, re-approve write_discounts and use Ensure on Setup.
+          </p>
           <div className={styles.errorActions}>
-            {typeof onFixPriceSurfaces === 'function' ? (
-              <button type="button" className={styles.editLink} onClick={onFixPriceSurfaces}>
-                Open Settings → Price surfaces
-              </button>
-            ) : shopDomain ? (
-              <a
-                className={styles.editLink}
-                href={`/app/settings?tab=price-surfaces&automap=1`}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                Open Settings → Price surfaces
-              </a>
-            ) : null}
-            {typeof onRefreshCheckout === 'function' ? (
-              <button type="button" className={styles.editLink} onClick={onRefreshCheckout}>
-                Re-check
-              </button>
+            {typeof onFixSetup === 'function' ? (
+              <Button variant="plain" onClick={onFixSetup}>
+                Open Setup
+              </Button>
             ) : null}
           </div>
-        </div>
+        </Banner>
+      ) : null}
+
+      {priceSurfaceNeedsAttention ? (
+        <Banner tone="warning" title="Theme price selectors recommended">
+          <p>
+            {priceSurface.message ||
+              'Map shop-wide PDP selectors so bucketed visitors see test prices on the product page.'}
+          </p>
+          <div className={styles.errorActions}>
+            {typeof onFixPriceSurfaces === 'function' ? (
+              <Button variant="plain" onClick={onFixPriceSurfaces}>
+                Open Settings → Price surfaces
+              </Button>
+            ) : shopDomain ? (
+              <Button
+                variant="plain"
+                url="/app/settings?tab=price-surfaces&automap=1"
+                external
+              >
+                Open Settings → Price surfaces
+              </Button>
+            ) : null}
+            {typeof onRefreshCheckout === 'function' ? (
+              <Button variant="plain" onClick={onRefreshCheckout}>
+                Re-check
+              </Button>
+            ) : null}
+          </div>
+        </Banner>
       ) : null}
 
       <section className={styles.reviewSection}>
         <div className={styles.reviewHead}>
           <h3>Basics</h3>
-          <button type="button" className={styles.editLink} onClick={() => onEditStep(0)}>
+          <Button variant="plain" onClick={() => onEditStep(0)}>
             Edit
-          </button>
+          </Button>
         </div>
         <div className={styles.reviewRows}>
           <div className={styles.reviewRow}>
@@ -216,20 +238,22 @@ export default function ReviewLaunchStepPanel({
       <section className={styles.reviewSection}>
         <div className={styles.reviewHead}>
           <h3>Products</h3>
-          <button type="button" className={styles.editLink} onClick={() => onEditStep(2)}>
+          <Button variant="plain" onClick={() => onEditStep(2)}>
             Edit
-          </button>
+          </Button>
         </div>
         <div className={styles.badgeRow}>
-          <span className={styles.badge}>
-            Selection: <strong>{pickMode === 'all' ? 'All products' : 'Pick manually'}</strong>
-          </span>
-          <span className={styles.badge}>
-            Pricing: <strong>{pricingLabel}</strong>
-          </span>
-          <span className={`${styles.badge} ${styles.badgeAccent}`}>
-            {selectedCount || plans.length} products
-          </span>
+          <Badge>Selection: {pickMode === 'all' ? 'All products' : 'Pick manually'}</Badge>
+          <Badge>
+            {isOfferTest
+              ? `Offers: ${(variations || [])
+                  .filter((arm, i) => i > 0 && arm.id !== 'control')
+                  .map(arm => formatOfferRule(offerByArm[arm.id]))
+                  .filter(label => label && label !== 'No offer')
+                  .join(' · ') || 'Set on Products'}`
+              : `Pricing: ${pricingLabel}`}
+          </Badge>
+          <Badge tone="info">{selectedCount || plans.length} products</Badge>
         </div>
         {plans.length ? (
           <div className={styles.reviewProductList}>
@@ -268,8 +292,12 @@ export default function ReviewLaunchStepPanel({
                           className={`${styles.armChip} ${!isControl ? styles.armChipAlt : ''}`}
                         >
                           <span className={styles.armLetter}>{letter}</span>
-                          {formatMoney(arm.price)}
-                          {delta !== null ? (
+                          {isOfferTest
+                            ? isControl
+                              ? 'No offer'
+                              : formatOfferRule(arm.offer || offerByArm[arm.id])
+                            : formatMoney(arm.price)}
+                          {!isOfferTest && delta !== null ? (
                             <span className={delta >= 0 ? styles.deltaPos : styles.deltaNeg}>
                               {delta >= 0 ? '+' : ''}
                               {Math.round(delta)}%
@@ -285,7 +313,8 @@ export default function ReviewLaunchStepPanel({
           </div>
         ) : (
           <p className={styles.help}>
-            Products and prices will finalize when you continue from Products.
+            Products and {isOfferTest ? 'offers' : 'prices'} will finalize when you continue from
+            Products.
           </p>
         )}
       </section>
@@ -293,9 +322,9 @@ export default function ReviewLaunchStepPanel({
       <section className={styles.reviewSection}>
         <div className={styles.reviewHead}>
           <h3>Variations</h3>
-          <button type="button" className={styles.editLink} onClick={() => onEditStep(1)}>
+          <Button variant="plain" onClick={() => onEditStep(1)}>
             Edit
-          </button>
+          </Button>
         </div>
         <div className={styles.reviewRows}>
           {variations.map(arm => (
@@ -303,6 +332,9 @@ export default function ReviewLaunchStepPanel({
               <div className={styles.kvLabel}>{arm.letter}</div>
               <p className={styles.kvValue}>
                 {arm.name || arm.role} · {arm.traffic}% traffic
+                {isOfferTest && arm.id !== 'control'
+                  ? ` — ${formatOfferSummary(offerByArm[arm.id])}`
+                  : ''}
                 {arm.description ? ` — ${arm.description}` : ''}
               </p>
             </div>
@@ -313,9 +345,9 @@ export default function ReviewLaunchStepPanel({
       <section className={styles.reviewSection}>
         <div className={styles.reviewHead}>
           <h3>Audience & metrics</h3>
-          <button type="button" className={styles.editLink} onClick={() => onEditStep(3)}>
+          <Button variant="plain" onClick={() => onEditStep(3)}>
             Edit
-          </button>
+          </Button>
         </div>
         <div className={styles.reviewRows}>
           <div className={styles.reviewRow}>
@@ -338,7 +370,7 @@ export default function ReviewLaunchStepPanel({
             <div className={styles.kvLabel}>Guardrails</div>
             <p className={styles.kvValue}>
               {(audience?.guardrails || [])
-                .filter(g => g.on)
+                .filter(g => g.on || g.id === 'revenue')
                 .map(g => `${g.label} (${g.threshold})`)
                 .join(', ') || 'None'}
             </p>
@@ -358,12 +390,7 @@ export default function ReviewLaunchStepPanel({
           <div className={styles.reviewRow}>
             <div className={styles.kvLabel}>Countries</div>
             <p className={styles.kvValue}>
-              {(() => {
-                const summary = formatCountryCodesSummary(audience?.countries || []);
-                if (!summary) return 'Worldwide';
-                const mode = audience?.countryMode === 'exclude' ? 'Exclude' : 'Include';
-                return `${mode}: ${summary}`;
-              })()}
+              {formatCountryAudienceLabel(audience?.countries, audience?.countryMode)}
             </p>
           </div>
         </div>

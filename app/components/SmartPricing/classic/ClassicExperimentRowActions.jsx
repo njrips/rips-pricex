@@ -1,13 +1,16 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router';
+import { Button, Modal } from '@shopify/polaris';
 import { ROUTES } from '../../../constants';
 import { apiPost } from '../../../services';
 import { useSmartPricingLaunch } from '../../../hooks/useSmartPricingLaunch';
 import { readInboxPlans, writeInboxPlans } from '../smartPricingConstants';
-import { patchServerInboxPlan, persistInboxPlansNow } from '../smartPricingInboxPersistence';
-import { IconMore } from './classicIcons';
+import { persistInboxPlansNow } from '../smartPricingInboxPersistence';
+import { ButtonIconMore } from './classicIcons';
+import { enrichInboxPlansForLaunch, rollupExperimentStatus } from './classicExperimentHelpers';
 import {
+  buildClassicWizardResumePath,
   collectExperimentTestIds,
   getClassicExperimentResumeId,
   resolveClassicExperimentMenuActions,
@@ -17,6 +20,10 @@ import {
   deleteClassicExperimentSynchronized,
 } from './classicExperimentDelete';
 import styles from './SmartPricingClassic.module.css';
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
 
 function measureActionMenuBox(triggerEl) {
   if (!triggerEl || typeof window === 'undefined') return null;
@@ -56,8 +63,11 @@ export default function ClassicExperimentRowActions({
   experiment,
   shopDomain,
   checkoutReady = false,
+  listBusy = false,
+  onBusy,
   onRefresh,
   onMessage,
+  onActionDone,
 }) {
   const navigate = useNavigate();
   const triggerRef = useRef(null);
@@ -65,10 +75,12 @@ export default function ClassicExperimentRowActions({
   const [open, setOpen] = useState(false);
   const [menuBox, setMenuBox] = useState(null);
   const [busy, setBusy] = useState('');
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const { launching, launchMany } = useSmartPricingLaunch(shopDomain);
 
   const actions = resolveClassicExperimentMenuActions(experiment, { checkoutReady });
-  const planIds = new Set((experiment?.plans || []).map(p => p.id).filter(Boolean));
+  const planIds = (experiment?.plans || []).map(p => p.id).filter(Boolean);
+  const planIdSet = new Set(planIds);
 
   const updateMenuBox = useCallback(() => {
     if (!open || !triggerRef.current) {
@@ -119,9 +131,32 @@ export default function ClassicExperimentRowActions({
 
   const patchExperimentPlans = async patchFn => {
     const current = readInboxPlans(shopDomain) || [];
-    const next = current.map(plan => (planIds.has(plan.id) ? patchFn(plan) : plan));
+    const next = current.map(plan => (planIdSet.has(plan.id) ? patchFn(plan) : plan));
     writeInboxPlans(shopDomain, next, { persist: false });
     await persistInboxPlansNow(shopDomain, next).catch(() => null);
+    return next;
+  };
+
+  const refreshList = async (hydrateOptions = {}) => {
+    if (typeof onRefresh === 'function') {
+      await onRefresh(hydrateOptions);
+    }
+  };
+
+  const runBusy = async (action, fn) => {
+    if (busy || launching || listBusy) return;
+    setBusy(action);
+    onBusy?.(action);
+    setOpen(false);
+    try {
+      await fn();
+      onActionDone?.(action, experiment);
+    } catch (err) {
+      notify('error', err?.message || `Could not ${action} experiment.`);
+      onBusy?.('');
+    } finally {
+      setBusy('');
+    }
   };
 
   const openDetails = () => {
@@ -130,9 +165,8 @@ export default function ClassicExperimentRowActions({
     navigate(ROUTES.appSmartPricingPlan(shopDomain, plan.id));
   };
 
-  const handleLaunch = async () => {
-    setBusy('launch');
-    try {
+  const handleLaunch = () =>
+    runBusy('launch', async () => {
       const toLaunch = (experiment?.plans || []).filter(plan => {
         const status = String(plan.status || 'draft')
           .trim()
@@ -140,46 +174,33 @@ export default function ClassicExperimentRowActions({
         return status === 'draft' || status === 'queued';
       });
       if (!toLaunch.length) {
-        notify('error', 'Nothing to launch for this experiment.');
-        return;
+        throw new Error('Nothing to launch for this experiment.');
       }
-      await launchMany(toLaunch);
+      await launchMany(enrichInboxPlansForLaunch(toLaunch));
       await persistInboxPlansNow(shopDomain, readInboxPlans(shopDomain)).catch(() => null);
       notify('success', 'Experiment launched.');
-      onRefresh?.();
-    } catch (err) {
-      notify('error', err?.message || 'Could not launch experiment.');
-    } finally {
-      setBusy('');
-      setOpen(false);
-    }
-  };
+      await refreshList({ preferLocalIds: planIds, quiet: true });
+    });
 
-  const handlePause = async () => {
-    setBusy('pause');
-    try {
+  const handlePause = () =>
+    runBusy('pause', async () => {
       const testIds = collectExperimentTestIds(experiment?.plans);
+      if (!testIds.length) {
+        throw new Error('No linked test to pause.');
+      }
       await Promise.all(testIds.map(id => apiPost(`/tests/${encodeURIComponent(id)}/stop`, {})));
       await patchExperimentPlans(plan => ({ ...plan, status: 'paused' }));
-      for (const plan of experiment?.plans || []) {
-        if (plan?.id) {
-          await patchServerInboxPlan(shopDomain, plan.id, { status: 'paused' }).catch(() => null);
-        }
-      }
+      await sleep(450);
       notify('success', 'Experiment paused.');
-      onRefresh?.();
-    } catch (err) {
-      notify('error', err?.message || 'Could not pause experiment.');
-    } finally {
-      setBusy('');
-      setOpen(false);
-    }
-  };
+      await refreshList({ preferLocalIds: planIds, quiet: true });
+    });
 
-  const handleResume = async () => {
-    setBusy('resume');
-    try {
+  const handleResume = () =>
+    runBusy('resume', async () => {
       const testIds = collectExperimentTestIds(experiment?.plans);
+      if (!testIds.length) {
+        throw new Error('No linked test to resume.');
+      }
       await Promise.all(
         testIds.map(id =>
           apiPost(`/tests/${encodeURIComponent(id)}/start`, {
@@ -189,24 +210,12 @@ export default function ClassicExperimentRowActions({
         )
       );
       await patchExperimentPlans(plan => ({ ...plan, status: 'running' }));
-      for (const plan of experiment?.plans || []) {
-        if (plan?.id) {
-          await patchServerInboxPlan(shopDomain, plan.id, { status: 'running' }).catch(() => null);
-        }
-      }
       notify('success', 'Experiment resumed.');
-      onRefresh?.();
-    } catch (err) {
-      notify('error', err?.message || 'Could not resume experiment.');
-    } finally {
-      setBusy('');
-      setOpen(false);
-    }
-  };
+      await refreshList({ preferLocalIds: planIds, quiet: true });
+    });
 
-  const handleArchive = async () => {
-    setBusy('archive');
-    try {
+  const handleArchive = () =>
+    runBusy('archive', async () => {
       const at = new Date().toISOString();
       await patchExperimentPlans(plan => ({
         ...plan,
@@ -214,42 +223,35 @@ export default function ClassicExperimentRowActions({
         archived_at: at,
       }));
       notify('success', 'Experiment archived.');
-      onRefresh?.();
-    } catch (err) {
-      notify('error', err?.message || 'Could not archive experiment.');
-    } finally {
-      setBusy('');
-      setOpen(false);
-    }
-  };
+      await refreshList({ preferLocalIds: planIds, quiet: true });
+    });
 
-  const handleRestore = async () => {
-    setBusy('restore');
-    try {
+  const handleRestore = () =>
+    runBusy('restore', async () => {
       await patchExperimentPlans(plan => ({
         ...plan,
         archived: false,
         archived_at: null,
       }));
       notify('success', 'Experiment restored.');
-      onRefresh?.();
-    } catch (err) {
-      notify('error', err?.message || 'Could not restore experiment.');
-    } finally {
-      setBusy('');
-      setOpen(false);
-    }
-  };
+      await refreshList({ preferLocalIds: planIds, quiet: true });
+    });
 
-  const handleDelete = async () => {
-    if (!window.confirm(buildClassicExperimentDeleteConfirmMessage(experiment))) {
-      return;
-    }
-    setBusy('delete');
-    try {
+  const handleDelete = () =>
+    runBusy('delete', async () => {
+      const testIds = collectExperimentTestIds(experiment?.plans);
+      const running = rollupExperimentStatus(experiment?.plans) === 'running';
+      if (running && testIds.length) {
+        await Promise.all(
+          testIds.map(id => apiPost(`/tests/${encodeURIComponent(id)}/stop`, {}).catch(() => null))
+        );
+      }
       const result = await deleteClassicExperimentSynchronized(shopDomain, experiment, {
         deleteLinkedTests: true,
       });
+      if (!result.ok && !result.partial) {
+        throw new Error(result.errors[0] || 'Could not delete experiment.');
+      }
       if (result.ok) {
         const detail =
           result.deletedTestIds.length > 0
@@ -258,29 +260,18 @@ export default function ClassicExperimentRowActions({
               }.`
             : '';
         notify('success', `Experiment deleted.${detail}`);
-        onRefresh?.();
-        return;
-      }
-      if (result.partial) {
+      } else {
         notify(
           'error',
           result.errors[0] ||
             'Experiment was partially deleted. Refresh the list and retry if plans or tests remain.'
         );
-        onRefresh?.();
-        return;
       }
-      notify('error', result.errors[0] || 'Could not delete experiment.');
-    } catch (err) {
-      notify('error', err?.message || 'Could not delete experiment.');
-    } finally {
-      setBusy('');
-      setOpen(false);
-    }
-  };
+      await refreshList({ omitIds: planIds, quiet: true });
+    });
 
   const runAction = actionId => {
-    if (busy || launching) return;
+    if (busy || launching || listBusy) return;
     switch (actionId) {
       case 'view':
         setOpen(false);
@@ -288,11 +279,7 @@ export default function ClassicExperimentRowActions({
         break;
       case 'continue':
         setOpen(false);
-        navigate(
-          `${ROUTES.appSmartPricingCreate(shopDomain)}?resume=${encodeURIComponent(
-            getClassicExperimentResumeId(experiment)
-          )}`
-        );
+        navigate(buildClassicWizardResumePath(getClassicExperimentResumeId(experiment)));
         break;
       case 'launch':
         handleLaunch();
@@ -303,12 +290,6 @@ export default function ClassicExperimentRowActions({
       case 'resume':
         handleResume();
         break;
-      case 'open_test': {
-        const testId = collectExperimentTestIds(experiment?.plans)[0];
-        setOpen(false);
-        if (testId) navigate(ROUTES.appTestDetail(shopDomain, testId));
-        break;
-      }
       case 'archive':
         handleArchive();
         break;
@@ -316,14 +297,15 @@ export default function ClassicExperimentRowActions({
         handleRestore();
         break;
       case 'delete':
-        handleDelete();
+        setOpen(false);
+        setDeleteOpen(true);
         break;
       default:
         break;
     }
   };
 
-  const isBusy = Boolean(busy || launching);
+  const isBusy = Boolean(busy || launching || listBusy);
 
   const menuStyle =
     menuBox && typeof document !== 'undefined'
@@ -364,19 +346,45 @@ export default function ClassicExperimentRowActions({
       className={`${styles.moreMenuWrap} ${styles.expRowActions}`}
       onClick={event => event.stopPropagation()}
     >
-      <button
-        ref={triggerRef}
-        type="button"
-        className={styles.expRowOpen}
-        aria-label={`Actions for ${experiment?.title || 'experiment'}`}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        disabled={isBusy}
-        onClick={() => setOpen(value => !value)}
-      >
-        <IconMore size={16} />
-      </button>
+      <span ref={triggerRef}>
+        <Button
+          size="slim"
+          icon={ButtonIconMore}
+          accessibilityLabel={`Actions for ${experiment?.title || 'experiment'}`}
+          aria-haspopup="menu"
+          aria-expanded={open}
+          disabled={isBusy}
+          onClick={() => setOpen(value => !value)}
+        />
+      </span>
       {menu}
+      <Modal
+        open={deleteOpen}
+        onClose={() => {
+          if (!isBusy) setDeleteOpen(false);
+        }}
+        title="Delete experiment"
+        primaryAction={{
+          content: 'Delete',
+          destructive: true,
+          disabled: isBusy,
+          onAction: () => {
+            setDeleteOpen(false);
+            handleDelete();
+          },
+        }}
+        secondaryActions={[
+          {
+            content: 'Cancel',
+            disabled: isBusy,
+            onAction: () => setDeleteOpen(false),
+          },
+        ]}
+      >
+        <Modal.Section>
+          <p>{buildClassicExperimentDeleteConfirmMessage(experiment)}</p>
+        </Modal.Section>
+      </Modal>
     </div>
   );
 }

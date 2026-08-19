@@ -1,15 +1,15 @@
 import React from 'react';
 import { useNavigate } from 'react-router';
+import { Button } from '@shopify/polaris';
 import { TitleBar } from '@shopify/app-bridge-react';
 import PageShell from '../../shared/PageShell';
 import { ROUTES } from '../../../constants';
 import useClassicShopDomain from '../../../hooks/useClassicShopDomain';
-import { IconArrowLeft } from './classicIcons';
+import { ButtonIconArrowLeft } from './classicIcons';
 import styles from './SmartPricingClassic.module.css';
 
 /**
- * Shared chrome for Setup / Settings — matches Classic create card UX
- * (cream page, top back link, white card, title + subtitle). Plan is a Settings tab.
+ * Shared chrome for Setup / Settings — Classic layout, Admin / Polaris controls.
  */
 export default function ClassicAdminShell({
   titleBar = 'Settings',
@@ -31,12 +31,18 @@ export default function ClassicAdminShell({
 
   return (
     <PageShell>
-      <TitleBar title={titleBar} />
+      <TitleBar title={titleBar}>
+        <button type="button" variant="breadcrumb" onClick={() => navigate(backPath)}>
+          Experiments
+        </button>
+      </TitleBar>
       <div className={styles.page}>
         <div className={styles.topBar}>
-          <button type="button" className={styles.backLink} onClick={() => navigate(backPath)}>
-            <IconArrowLeft /> {backLabel}
-          </button>
+          <div className={styles.pageBack}>
+            <Button variant="plain" icon={ButtonIconArrowLeft} textAlign="start" onClick={() => navigate(backPath)}>
+              {backLabel}
+            </Button>
+          </div>
           {meta ? <span className={styles.stepOf}>{meta}</span> : <span />}
         </div>
 
@@ -74,43 +80,47 @@ export default function ClassicAdminShell({
           <div className={styles.footer}>
             {footerSecondary ? (
               footerSecondary.href ? (
-                <a
-                  className={styles.footerLink}
-                  href={footerSecondary.href}
-                  target={footerSecondary.target || '_top'}
-                  rel="noopener"
-                  onClick={event => {
-                    if (typeof footerSecondary.onClick === 'function') {
-                      event.preventDefault();
-                      footerSecondary.onClick(event);
-                    }
-                  }}
+                <Button
+                  variant="plain"
+                  url={footerSecondary.href}
+                  external={
+                    footerSecondary.target === '_top' || footerSecondary.target === '_blank'
+                  }
+                  onClick={
+                    typeof footerSecondary.onClick === 'function'
+                      ? event => {
+                          event.preventDefault();
+                          footerSecondary.onClick(event);
+                        }
+                      : undefined
+                  }
                 >
                   {footerSecondary.label}
-                </a>
+                </Button>
               ) : (
-                <button
-                  type="button"
-                  className={styles.footerLink}
+                <Button
+                  variant="plain"
                   onClick={footerSecondary.onClick}
                   disabled={footerSecondary.disabled}
                 >
                   {footerSecondary.label}
-                </button>
+                </Button>
               )
             ) : (
               <span />
             )}
             <div className={styles.footerActions}>
               {footerPrimary ? (
-                <button
-                  type="button"
-                  className={styles.primaryBtn}
+                <Button
+                  variant="primary"
                   onClick={footerPrimary.onClick}
                   disabled={footerPrimary.disabled || footerPrimary.busy}
+                  loading={Boolean(footerPrimary.busy)}
                 >
-                  {footerPrimary.busy ? footerPrimary.busyLabel || 'Working…' : footerPrimary.label}
-                </button>
+                  {footerPrimary.busy
+                    ? footerPrimary.busyLabel || 'Working…'
+                    : footerPrimary.label}
+                </Button>
               ) : null}
             </div>
           </div>

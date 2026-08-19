@@ -3,7 +3,12 @@ import { IconTrophy } from '../classicIcons';
 import { formatNumber, formatPct, formatRate } from '../classicExperimentDetailsHelpers';
 import styles from '../SmartPricingClassic.module.css';
 
-export default function ClassicOverviewTab({ kpis, conversionRows, analyticsLoading }) {
+export default function ClassicOverviewTab({
+  kpis,
+  conversionRows,
+  analyticsLoading,
+  isOfferTest = false,
+}) {
   return (
     <>
       <div className={styles.statGrid}>
@@ -63,7 +68,7 @@ export default function ClassicOverviewTab({ kpis, conversionRows, analyticsLoad
                     {row.isControl ? <span className={styles.controlBadge}>Control</span> : null}
                     {row.isWinner ? (
                       <span className={styles.winnerBadge}>
-                        <IconTrophy size={10} /> Winner
+                        <IconTrophy size={10} /> {isOfferTest ? 'Leading' : 'Winner'}
                       </span>
                     ) : null}
                   </span>

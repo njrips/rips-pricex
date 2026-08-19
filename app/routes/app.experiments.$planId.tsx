@@ -1,13 +1,16 @@
 import { TitleBar } from "@shopify/app-bridge-react";
-import { Link } from "react-router";
+import { useNavigate } from "react-router";
 import ClassicExperimentOverview from "../components/SmartPricing/classic/ClassicExperimentOverview";
 import "../styles/classic-theme.css";
 
 export default function ExperimentDetails() {
+  const navigate = useNavigate();
   return (
     <>
       <TitleBar title="Experiment">
-        <Link to="/app">Experiments</Link>
+        <button type="button" variant="breadcrumb" onClick={() => navigate("/app")}>
+          Experiments
+        </button>
       </TitleBar>
       <ClassicExperimentOverview />
     </>

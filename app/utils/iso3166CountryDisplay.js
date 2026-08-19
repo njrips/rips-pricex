@@ -86,6 +86,7 @@ export function getCountryDisplayLabel(code) {
 }
 
 /**
+ * Read-only country list as ISO alpha-2 codes (US, CA, GB).
  * @param {string[]} codes
  * @param {number} [maxVisible]
  */
@@ -96,11 +97,10 @@ export function formatCountryCodesSummary(codes, maxVisible = 3) {
   if (list.length === 0) {
     return '';
   }
-  const labels = list.map(c => getCountryDisplayName(c));
-  if (labels.length <= maxVisible) {
-    return labels.join(', ');
+  if (list.length <= maxVisible) {
+    return list.join(', ');
   }
-  return `${labels.slice(0, maxVisible).join(', ')} + ${labels.length - maxVisible} more`;
+  return `${list.slice(0, maxVisible).join(', ')} + ${list.length - maxVisible} more`;
 }
 
 export { ISO_COUNTRIES };

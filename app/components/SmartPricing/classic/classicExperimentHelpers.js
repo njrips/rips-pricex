@@ -2,6 +2,9 @@
  * Classic Smart Pricing: group per-SKU inbox plans into experiment rows.
  */
 
+import { classicAudienceToSegments } from '../targeting/smartPricingAudienceHelpers';
+import { isOfferExperimentType } from './offerSelection';
+
 export function classicWizardDraftKey(domain) {
   return `ripx_sp_classic_wizard_${String(domain || 'default')}`;
 }
@@ -58,26 +61,43 @@ export function getPlanProductTitle(plan) {
   );
 }
 
+export function normalizePlanStatus(plan = {}) {
+  if (plan?.archived) return 'archived';
+  const status = String(plan?.status || '')
+    .trim()
+    .toLowerCase();
+  if (status === 'running' || status === 'active') return 'running';
+  if (status === 'paused' || status === 'stopped') return 'paused';
+  if (status === 'winner_ready') return 'winner_ready';
+  if (status === 'applied' || status === 'completed' || status === 'complete' || status === 'ended') {
+    return 'completed';
+  }
+  if (status === 'queued' || status === 'draft') return status || 'draft';
+  return status || 'draft';
+}
+
 function statusRank(plan) {
-  if (plan?.archived) return 0;
-  if (plan?.status === 'running' || plan?.test_id) return 50;
-  if (plan?.status === 'winner_ready') return 40;
-  if (plan?.status === 'applied' || plan?.status === 'completed') return 35;
-  if (plan?.status === 'paused') return 30;
-  if (plan?.status === 'queued' || plan?.status === 'draft') return 20;
+  const status = normalizePlanStatus(plan);
+  if (status === 'archived') return 0;
+  if (status === 'running') return 50;
+  if (status === 'winner_ready') return 40;
+  if (status === 'completed') return 35;
+  if (status === 'paused') return 30;
+  if (status === 'queued' || status === 'draft') return 20;
   return 10;
 }
 
 export function rollupExperimentStatus(plans = []) {
   const rows = Array.isArray(plans) ? plans : [];
   if (!rows.length) return 'draft';
-  if (rows.every(p => p.archived)) return 'archived';
-  if (rows.some(p => p.status === 'running' || p.test_id)) return 'running';
-  if (rows.some(p => p.status === 'paused')) return 'paused';
-  if (rows.some(p => p.status === 'winner_ready')) return 'winner_ready';
-  if (rows.some(p => p.status === 'applied' || p.status === 'completed')) return 'completed';
-  if (rows.some(p => p.status === 'queued' || p.status === 'draft')) return 'draft';
-  return rows[0]?.status || 'draft';
+  if (rows.every(p => p.archived || normalizePlanStatus(p) === 'archived')) return 'archived';
+  const statuses = rows.map(normalizePlanStatus);
+  if (statuses.some(status => status === 'running')) return 'running';
+  if (statuses.some(status => status === 'paused')) return 'paused';
+  if (statuses.some(status => status === 'winner_ready')) return 'winner_ready';
+  if (statuses.some(status => status === 'completed')) return 'completed';
+  if (statuses.some(status => status === 'queued' || status === 'draft')) return 'draft';
+  return statuses[0] || 'draft';
 }
 
 /** Short type label for experiment list sublines (Figma: "AB · Owner"). */
@@ -95,6 +115,7 @@ export function formatExperimentTypeLabel(raw) {
     feature_flag: 'FEATURE FLAG',
     price_test: 'PRICE',
     offer_test: 'OFFER',
+    offer: 'OFFER',
     price: 'PRICE',
   };
   if (map[key]) return map[key];
@@ -177,6 +198,7 @@ export function groupPlansIntoExperiments(plans = []) {
         confidence,
         representative,
         typeLabel,
+        experimentType: typeRaw,
         owner:
           representative?.owner_name ||
           representative?.created_by_name ||
@@ -214,6 +236,72 @@ export function findPlanInCatalog(plans, planId) {
     list.find(p => String(p.test_id || '').trim() === needle) ||
     null
   );
+}
+
+/** Map stored Classic audience_ui onto launch payload if plan.audience was never enriched. */
+export function enrichInboxPlansForLaunch(plans = []) {
+  return (Array.isArray(plans) ? plans : []).map(plan => {
+    const existingAudience = plan.audience && typeof plan.audience === 'object' ? plan.audience : {};
+    const audienceUi =
+      plan.metadata?.audience_ui && typeof plan.metadata.audience_ui === 'object'
+        ? plan.metadata.audience_ui
+        : null;
+    const segments =
+      existingAudience.segments && typeof existingAudience.segments === 'object'
+        ? existingAudience.segments
+        : audienceUi
+          ? classicAudienceToSegments(audienceUi)
+          : existingAudience.segments;
+    const experimentType =
+      plan.experiment_type ||
+      plan.experimentType ||
+      plan.metadata?.experiment_type ||
+      null;
+    return {
+      ...plan,
+      ...(experimentType ? { experiment_type: experimentType } : {}),
+      audience: {
+        inherit_from_shop_defaults: false,
+        ...existingAudience,
+        ...(audienceUi
+          ? {
+              traffic_allocation:
+                audienceUi.trafficAllocation ?? existingAudience.traffic_allocation,
+              devices: audienceUi.devices ?? existingAudience.devices,
+              sources: audienceUi.sources ?? existingAudience.sources,
+              countries: audienceUi.countries ?? existingAudience.countries,
+              device_mode: audienceUi.deviceMode || existingAudience.device_mode || 'include',
+              source_mode: audienceUi.sourceMode || existingAudience.source_mode || 'include',
+              country_mode: audienceUi.countryMode || existingAudience.country_mode || 'include',
+            }
+          : {}),
+        segments: segments || existingAudience.segments,
+      },
+      launch_preferences: {
+        auto_round2: true,
+        ...(plan.launch_preferences && typeof plan.launch_preferences === 'object'
+          ? plan.launch_preferences
+          : {}),
+        auto_start: true,
+      },
+    };
+  });
+}
+
+export function formatClassicStatusLabel(status, experimentType) {
+  const key = String(status || '')
+    .trim()
+    .toLowerCase();
+  if (key === 'winner_ready') {
+    return isOfferExperimentType(experimentType) ? 'Result ready' : 'Winner ready';
+  }
+  if (key === 'applied' || key === 'completed' || key === 'complete' || key === 'ended') {
+    return 'Completed';
+  }
+  if (key === 'running') return 'Running';
+  if (key === 'paused') return 'Paused';
+  if (key === 'archived') return 'Archived';
+  return 'Draft';
 }
 
 export function stampClassicExperimentMetadata(

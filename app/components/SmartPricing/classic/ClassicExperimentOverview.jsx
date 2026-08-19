@@ -1,25 +1,26 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { useNavigate, useParams } from 'react-router';
+import { useNavigate, useParams, useSearchParams } from 'react-router';
+import { Badge, Button, Modal } from '@shopify/polaris';
 import PageShell from '../../shared/PageShell';
 import { ROUTES } from '../../../constants';
 import { apiPost } from '../../../services';
 import useClassicShopDomain from '../../../hooks/useClassicShopDomain';
 import { useClassicExperimentDetails } from '../../../hooks/useClassicExperimentDetails';
 import { useSmartPricingWinnerRollout } from '../../../hooks/useSmartPricingWinnerRollout';
-import { patchServerInboxPlan } from '../smartPricingInboxPersistence';
 import WinnerApplyModal from '../components/WinnerApplyModal';
 import {
-  IconArrowLeft,
+  ButtonIconArrowLeft,
+  ButtonIconMore,
+  ButtonIconPause,
+  ButtonIconPlay,
+  ButtonIconTrophy,
   IconChart,
   IconFlask,
   IconGear,
-  IconMore,
   IconOverview,
-  IconPause,
   IconPerson,
   IconPulse,
   IconTarget,
-  IconTrophy,
 } from './classicIcons';
 import ClassicOverviewTab from './details/ClassicOverviewTab';
 import ClassicPerformanceTab from './details/ClassicPerformanceTab';
@@ -28,7 +29,18 @@ import ClassicAudienceTab from './details/ClassicAudienceTab';
 import ClassicMetricsTab from './details/ClassicMetricsTab';
 import ClassicActivityTab from './details/ClassicActivityTab';
 import ClassicSettingsTab from './details/ClassicSettingsTab';
+import { formatClassicStatusLabel } from './classicExperimentHelpers';
+import {
+  buildClassicExperimentDeleteConfirmMessage,
+  deleteClassicExperimentSynchronized,
+} from './classicExperimentDelete';
+import { buildClassicWizardResumePath, getClassicExperimentResumeId, isClassicExperimentEnded, resolveClassicDetailsTab } from './classicExperimentListActions';
+import { isOfferExperimentType } from './offerSelection';
 import styles from './SmartPricingClassic.module.css';
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
 
 const TABS = [
   { id: 'Overview', icon: IconOverview },
@@ -43,11 +55,13 @@ const TABS = [
 export default function ClassicExperimentOverview() {
   const { planId } = useParams();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const shopDomain = useClassicShopDomain();
-  const [tab, setTab] = useState('Overview');
+  const [tab, setTab] = useState(() => resolveClassicDetailsTab(searchParams.get('tab')));
   const [busyAction, setBusyAction] = useState('');
   const [moreOpen, setMoreOpen] = useState(false);
   const [winnerModalOpen, setWinnerModalOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const moreRef = useRef(null);
 
   const details = useClassicExperimentDetails(shopDomain, planId);
@@ -72,8 +86,9 @@ export default function ClassicExperimentOverview() {
     messageType,
     setMessage,
     setMessageType,
+    experimentTestIds,
     refresh,
-    patchPlanLocal,
+    patchExperimentPlansLocal,
   } = details;
 
   const { applying, previewLoadingPlanId, preview, loadPreview, clearPreview, applyWinner } =
@@ -97,15 +112,42 @@ export default function ClassicExperimentOverview() {
     };
   }, [moreOpen]);
 
-  const isDraft = experiment?.status === 'draft' || experiment?.status === 'queued';
+  const tabParam = searchParams.get('tab');
+
+  useEffect(() => {
+    const next = resolveClassicDetailsTab(tabParam);
+    setTab(current => (current === next ? current : next));
+  }, [tabParam]);
+
   const status = resolveStatus(plan, test, experiment);
-  const isRunning = status === 'running';
-  const isPaused = status === 'paused' || status === 'stopped';
+  const isArchived = Boolean(experiment?.archived) || status === 'archived';
+  const isDraft = !isArchived && (status === 'draft' || status === 'queued');
+  const isRunning = !isArchived && status === 'running';
+  const isPaused = !isArchived && (status === 'paused' || status === 'stopped');
+  const isEnded = !isArchived && isClassicExperimentEnded(status);
+  const linkedTestIds = Array.isArray(experimentTestIds) && experimentTestIds.length
+    ? experimentTestIds
+    : testId
+      ? [testId]
+      : [];
   // Only enable when analytics declared a promoteable winner arm.
-  const canRollOut = Boolean(testId && analytics?.winner_arm_id);
+  const isOfferTest = isOfferExperimentType(
+    plan?.experiment_type || plan?.metadata?.experiment_type || test?.type
+  );
+  const canRollOut = Boolean(testId && analytics?.winner_arm_id) && !isOfferTest;
 
   const experimentTitle = experiment?.title || plan?.title || 'Experiment';
   const currency = plan?.currency || analytics?.currency || 'USD';
+  const resumeId = getClassicExperimentResumeId(experiment) || experiment?.id || planId;
+
+  const selectTab = nextTab => {
+    const resolved = resolveClassicDetailsTab(nextTab);
+    setTab(resolved);
+    const params = new URLSearchParams(searchParams);
+    if (resolved === 'Overview') params.delete('tab');
+    else params.set('tab', resolved.toLowerCase());
+    setSearchParams(params, { replace: true });
+  };
 
   const showError = (err, fallback) => {
     setMessageType('error');
@@ -118,15 +160,19 @@ export default function ClassicExperimentOverview() {
   };
 
   const handlePause = async () => {
-    if (!testId || busyAction || !plan?.id) return;
+    if (!linkedTestIds.length || busyAction) return;
     setBusyAction('pause');
     try {
-      await apiPost(`/tests/${encodeURIComponent(testId)}/stop`, {});
-      patchPlanLocal({ status: 'paused' });
-      await patchServerInboxPlan(shopDomain, plan.id, { status: 'paused' }).catch(() => null);
+      await Promise.all(
+        linkedTestIds.map(id => apiPost(`/tests/${encodeURIComponent(id)}/stop`, {}))
+      );
+      await patchExperimentPlansLocal({ status: 'paused' });
       showSuccess('Experiment paused.');
-      // Delay refresh so merchant_stop inbox sync can land as paused, not winner_ready.
-      setTimeout(() => refresh(), 400);
+      await sleep(450);
+      refresh({
+        quiet: true,
+        preferLocalIds: (experiment?.plans || []).map(row => row.id).filter(Boolean),
+      });
     } catch (err) {
       showError(err, 'Could not pause experiment.');
     } finally {
@@ -135,22 +181,94 @@ export default function ClassicExperimentOverview() {
   };
 
   const handleResume = async () => {
-    if (!testId || busyAction || !plan?.id) return;
+    if (!linkedTestIds.length || busyAction) return;
     setBusyAction('resume');
     setMoreOpen(false);
     try {
-      // Force skips Self-QA / preflight blocks that often fail on password-protected shops.
-      await apiPost(`/tests/${encodeURIComponent(testId)}/start`, {
-        force: true,
-        forceReason: 'classic_resume_after_pause',
-      });
-      patchPlanLocal({ status: 'running' });
-      await patchServerInboxPlan(shopDomain, plan.id, { status: 'running' }).catch(() => null);
+      await Promise.all(
+        linkedTestIds.map(id =>
+          apiPost(`/tests/${encodeURIComponent(id)}/start`, {
+            force: true,
+            forceReason: 'classic_resume_after_pause',
+          })
+        )
+      );
+      await patchExperimentPlansLocal({ status: 'running' });
       showSuccess('Experiment resumed.');
-      refresh();
+      refresh({
+        quiet: true,
+        preferLocalIds: (experiment?.plans || []).map(row => row.id).filter(Boolean),
+      });
     } catch (err) {
       showError(err, 'Could not resume experiment.');
     } finally {
+      setBusyAction('');
+    }
+  };
+
+  const handleArchive = async () => {
+    if (busyAction) return;
+    setBusyAction('archive');
+    setMoreOpen(false);
+    try {
+      await patchExperimentPlansLocal({
+        archived: true,
+        archived_at: new Date().toISOString(),
+      });
+      showSuccess('Experiment archived.');
+      navigate(`${ROUTES.appSmartPricing(shopDomain)}?tab=archived`);
+    } catch (err) {
+      showError(err, 'Could not archive experiment.');
+    } finally {
+      setBusyAction('');
+    }
+  };
+
+  const handleRestore = async () => {
+    if (busyAction) return;
+    setBusyAction('restore');
+    setMoreOpen(false);
+    try {
+      await patchExperimentPlansLocal({ archived: false, archived_at: null });
+      showSuccess('Experiment restored.');
+      refresh({
+        quiet: true,
+        preferLocalIds: (experiment?.plans || []).map(row => row.id).filter(Boolean),
+      });
+    } catch (err) {
+      showError(err, 'Could not restore experiment.');
+    } finally {
+      setBusyAction('');
+    }
+  };
+
+  const handleDelete = async () => {
+    if (busyAction) return;
+    setBusyAction('delete');
+    setDeleteOpen(false);
+    setMoreOpen(false);
+    try {
+      if (isRunning && linkedTestIds.length) {
+        await Promise.all(
+          linkedTestIds.map(id =>
+            apiPost(`/tests/${encodeURIComponent(id)}/stop`, {}).catch(() => null)
+          )
+        );
+      }
+      const result = await deleteClassicExperimentSynchronized(shopDomain, experiment, {
+        deleteLinkedTests: true,
+      });
+      if (!result.ok && !result.partial) {
+        throw new Error(result.errors[0] || 'Could not delete experiment.');
+      }
+      showSuccess(
+        result.ok
+          ? 'Experiment deleted.'
+          : result.errors[0] || 'Experiment was partially deleted.'
+      );
+      navigate(ROUTES.appSmartPricing(shopDomain));
+    } catch (err) {
+      showError(err, 'Could not delete experiment.');
       setBusyAction('');
     }
   };
@@ -180,11 +298,20 @@ export default function ClassicExperimentOverview() {
     }
   };
 
+  const handleEditAudienceOrMetrics = () => {
+    if (isDraft && resumeId) {
+      navigate(buildClassicWizardResumePath(resumeId, 'audience'));
+      return;
+    }
+    selectTab('Settings');
+  };
+
   const copyTestId = async () => {
     setMoreOpen(false);
-    if (!testId) return;
+    const ids = linkedTestIds.length ? linkedTestIds : testId ? [testId] : [];
+    if (!ids.length) return;
     try {
-      await navigator.clipboard.writeText(String(testId));
+      await navigator.clipboard.writeText(ids.join('\n'));
       showSuccess('Test ID copied.');
     } catch {
       showError(null, 'Could not copy test ID.');
@@ -195,20 +322,23 @@ export default function ClassicExperimentOverview() {
     return (
       <PageShell message={message || 'Experiment not found.'} messageType="error">
         <div className={styles.listPage}>
-          <button
-            type="button"
-            className={styles.backLink}
-            onClick={() => navigate(ROUTES.appSmartPricing(shopDomain))}
-          >
-            <IconArrowLeft /> Experiments
-          </button>
-          <p className={styles.help}>
-            That plan is missing from the Smart Pricing inbox. It may have been deleted, or this
-            browser is out of sync — try refreshing the experiments list.
-          </p>
-          <button type="button" className={styles.ghostBtn} onClick={refresh}>
-            Retry load
-          </button>
+          <div className={styles.pageLead}>
+            <div className={styles.pageBack}>
+              <Button
+                variant="plain"
+                textAlign="start"
+                icon={ButtonIconArrowLeft}
+                onClick={() => navigate(ROUTES.appSmartPricing(shopDomain))}
+              >
+                Experiments
+              </Button>
+            </div>
+            <p className={styles.help}>
+              That plan is missing from the Smart Pricing inbox. It may have been deleted, or this
+              browser is out of sync — try refreshing the experiments list.
+            </p>
+            <Button onClick={refresh}>Retry load</Button>
+          </div>
         </div>
       </PageShell>
     );
@@ -217,104 +347,97 @@ export default function ClassicExperimentOverview() {
   return (
     <PageShell message={message} messageType={messageType} onCloseMessage={() => setMessage('')}>
       <div className={styles.listPage}>
-        <button
-          type="button"
-          className={styles.backLink}
-          onClick={() => navigate(ROUTES.appSmartPricing(shopDomain))}
-        >
-          <IconArrowLeft /> Experiments
-        </button>
-
-        <div className={`${styles.listHeader} ${styles.overviewHeader}`}>
-          <div className={styles.overviewHeaderCopy}>
-            <div className={styles.overviewTitleRow}>
-              <h1 className={`${styles.overviewTitle} ripx-classic-sans`}>{experimentTitle}</h1>
-              <span className={`${styles.statusPill} ${statusPillClass(status, styles)}`}>
-                <span className={styles.statusDot} />
-                {statusLabel(status)}
-              </span>
-            </div>
-            <p className={styles.overviewHypothesis}>
-              {plan?.hypothesis ||
-                plan?.metadata?.hypothesis ||
-                experiment?.hypothesis ||
-                'Price test experiment overview.'}
-            </p>
-            <div className={styles.overviewMeta}>
-              <span>Owner · {plan?.owner_name || plan?.created_by_name || 'You'}</span>
-              <span>Type · Price test</span>
-              {plan?.created_at || test?.started_at || test?.created_at ? (
-                <span>
-                  Started ·{' '}
-                  {String(test?.started_at || test?.created_at || plan?.created_at).slice(0, 10)}
-                </span>
-              ) : null}
-            </div>
+        <div className={styles.pageLead}>
+          <div className={styles.pageBack}>
+            <Button
+              variant="plain"
+              textAlign="start"
+              icon={ButtonIconArrowLeft}
+              onClick={() => navigate(ROUTES.appSmartPricing(shopDomain))}
+            >
+              Experiments
+            </Button>
           </div>
+
+          <div className={`${styles.listHeader} ${styles.overviewHeader}`}>
+            <div className={styles.overviewHeaderCopy}>
+              <div className={styles.overviewTitleRow}>
+                <h1 className={`${styles.overviewTitle} ripx-classic-sans`}>{experimentTitle}</h1>
+                <Badge tone={statusBadgeTone(status)}>
+                  {statusLabel(status, isOfferTest ? 'offer_test' : 'price_test')}
+                </Badge>
+              </div>
+              <p className={styles.overviewHypothesis}>
+                {plan?.hypothesis ||
+                  plan?.metadata?.hypothesis ||
+                  experiment?.hypothesis ||
+                  (isOfferTest ? 'Offer test experiment overview.' : 'Price test experiment overview.')}
+              </p>
+              <div className={styles.overviewMeta}>
+                <span>Owner · {plan?.owner_name || plan?.created_by_name || 'You'}</span>
+                <span>Type · {isOfferTest ? 'Offer test' : 'Price test'}</span>
+                {plan?.created_at || test?.started_at || test?.created_at ? (
+                  <span>
+                    Started ·{' '}
+                    {String(test?.started_at || test?.created_at || plan?.created_at).slice(0, 10)}
+                  </span>
+                ) : null}
+              </div>
+            </div>
           <div className={styles.overviewActions}>
             {isDraft ? (
-              <button
-                type="button"
-                className={`${styles.primaryBtn} ${styles.overviewActionBtn}`}
-                onClick={() =>
-                  navigate(
-                    `${ROUTES.appSmartPricingCreate(shopDomain)}?resume=${encodeURIComponent(
-                      experiment?.id || planId
-                    )}`
-                  )
-                }
+              <Button
+                variant="primary"
+                onClick={() => navigate(buildClassicWizardResumePath(resumeId))}
               >
                 Continue editing
-              </button>
+              </Button>
             ) : (
               <>
                 {isRunning ? (
-                  <button
-                    type="button"
-                    className={`${styles.ghostBtn} ${styles.overviewActionBtn}`}
-                    disabled={Boolean(busyAction) || !testId}
+                  <Button
+                    icon={ButtonIconPause}
                     onClick={handlePause}
+                    disabled={Boolean(busyAction) || !linkedTestIds.length}
+                    loading={busyAction === 'pause'}
                   >
-                    <IconPause /> {busyAction === 'pause' ? 'Pausing…' : 'Pause'}
-                  </button>
+                    Pause
+                  </Button>
                 ) : null}
-                <button
-                  type="button"
-                  className={`${styles.primaryBtn} ${styles.overviewActionBtn}`}
-                  disabled={Boolean(busyAction) || !canRollOut}
-                  onClick={handleRollOut}
-                  title={
-                    canRollOut
-                      ? 'Apply winning price to Shopify'
-                      : 'Available when a winner is statistically ready'
-                  }
-                >
-                  <IconTrophy />{' '}
-                  {busyAction === 'winner' || previewLoadingPlanId === plan?.id
-                    ? 'Loading…'
-                    : 'Roll out winner'}
-                </button>
+                {isPaused ? (
+                  <Button
+                    icon={ButtonIconPlay}
+                    onClick={handleResume}
+                    disabled={Boolean(busyAction) || !linkedTestIds.length}
+                    loading={busyAction === 'resume'}
+                  >
+                    Resume
+                  </Button>
+                ) : null}
+                {isOfferTest || isArchived ? null : (
+                  <Button
+                    variant="primary"
+                    icon={ButtonIconTrophy}
+                    disabled={Boolean(busyAction) || !canRollOut}
+                    onClick={handleRollOut}
+                    loading={busyAction === 'winner' || previewLoadingPlanId === plan?.id}
+                  >
+                    Roll out winner
+                  </Button>
+                )}
               </>
             )}
             <div className={styles.moreMenuWrap} ref={moreRef}>
-              <button
-                type="button"
-                className={styles.iconGhostBtn}
-                aria-label="More actions"
+              <Button
+                icon={ButtonIconMore}
+                accessibilityLabel="More actions"
                 aria-haspopup="menu"
                 aria-expanded={moreOpen}
                 onClick={() => setMoreOpen(open => !open)}
-              >
-                <IconMore />
-              </button>
+              />
               {moreOpen ? (
                 <div className={styles.moreMenu} role="menu">
-                  {isPaused && testId ? (
-                    <button type="button" role="menuitem" onClick={handleResume}>
-                      {busyAction === 'resume' ? 'Resuming…' : 'Resume experiment'}
-                    </button>
-                  ) : null}
-                  {testId ? (
+                  {linkedTestIds.length ? (
                     <button type="button" role="menuitem" onClick={copyTestId}>
                       Copy test ID
                     </button>
@@ -329,10 +452,31 @@ export default function ClassicExperimentOverview() {
                   >
                     Refresh data
                   </button>
+                  {isArchived ? (
+                    <button type="button" role="menuitem" onClick={handleRestore}>
+                      {busyAction === 'restore' ? 'Restoring…' : 'Restore'}
+                    </button>
+                  ) : isPaused || isEnded ? (
+                    <button type="button" role="menuitem" onClick={handleArchive}>
+                      {busyAction === 'archive' ? 'Archiving…' : 'Archive'}
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className={styles.menuItemDanger}
+                    onClick={() => {
+                      setMoreOpen(false);
+                      setDeleteOpen(true);
+                    }}
+                  >
+                    Delete
+                  </button>
                 </div>
               ) : null}
             </div>
           </div>
+        </div>
         </div>
 
         <div
@@ -344,16 +488,16 @@ export default function ClassicExperimentOverview() {
             const index = ids.indexOf(tab);
             if (event.key === 'ArrowRight') {
               event.preventDefault();
-              setTab(ids[(index + 1) % ids.length]);
+              selectTab(ids[(index + 1) % ids.length]);
             } else if (event.key === 'ArrowLeft') {
               event.preventDefault();
-              setTab(ids[(index - 1 + ids.length) % ids.length]);
+              selectTab(ids[(index - 1 + ids.length) % ids.length]);
             } else if (event.key === 'Home') {
               event.preventDefault();
-              setTab(ids[0]);
+              selectTab(ids[0]);
             } else if (event.key === 'End') {
               event.preventDefault();
-              setTab(ids[ids.length - 1]);
+              selectTab(ids[ids.length - 1]);
             }
           }}
         >
@@ -370,7 +514,7 @@ export default function ClassicExperimentOverview() {
                 aria-controls={`classic-panel-${item.id}`}
                 tabIndex={selected ? 0 : -1}
                 className={`${styles.overviewTab} ${selected ? styles.overviewTabActive : ''}`}
-                onClick={() => setTab(item.id)}
+                onClick={() => selectTab(item.id)}
               >
                 <Icon />
                 {item.id}
@@ -390,6 +534,7 @@ export default function ClassicExperimentOverview() {
               kpis={kpis}
               conversionRows={conversionRows}
               analyticsLoading={analyticsLoading}
+              isOfferTest={isOfferTest}
             />
           ) : null}
           {tab === 'Performance' ? (
@@ -400,6 +545,7 @@ export default function ClassicExperimentOverview() {
               variationAverages={variationAverages}
               productPerformanceRows={productPerformanceRows}
               variations={variations}
+              isOfferTest={isOfferTest}
             />
           ) : null}
           {tab === 'Variations' ? (
@@ -408,12 +554,19 @@ export default function ClassicExperimentOverview() {
               currency={currency}
               shopDomain={shopDomain}
               testId={testId}
+              isOfferTest={isOfferTest}
             />
           ) : null}
-          {tab === 'Audience' ? <ClassicAudienceTab audience={audience} /> : null}
-          {tab === 'Metrics' ? <ClassicMetricsTab metrics={metrics} /> : null}
+          {tab === 'Audience' ? (
+            <ClassicAudienceTab audience={audience} onEdit={handleEditAudienceOrMetrics} />
+          ) : null}
+          {tab === 'Metrics' ? (
+            <ClassicMetricsTab metrics={metrics} onEdit={handleEditAudienceOrMetrics} />
+          ) : null}
           {tab === 'Activity' ? <ClassicActivityTab activity={activity} /> : null}
-          {tab === 'Settings' ? <ClassicSettingsTab settings={settings} /> : null}
+          {tab === 'Settings' ? (
+            <ClassicSettingsTab settings={settings} audience={audience} metrics={metrics} />
+          ) : null}
         </div>
       </div>
 
@@ -429,11 +582,36 @@ export default function ClassicExperimentOverview() {
         }}
         onConfirm={handleConfirmWinner}
       />
+      <Modal
+        open={deleteOpen}
+        onClose={() => {
+          if (!busyAction) setDeleteOpen(false);
+        }}
+        title="Delete experiment"
+        primaryAction={{
+          content: 'Delete',
+          destructive: true,
+          disabled: Boolean(busyAction),
+          onAction: handleDelete,
+        }}
+        secondaryActions={[
+          {
+            content: 'Cancel',
+            disabled: Boolean(busyAction),
+            onAction: () => setDeleteOpen(false),
+          },
+        ]}
+      >
+        <Modal.Section>
+          <p>{buildClassicExperimentDeleteConfirmMessage(experiment)}</p>
+        </Modal.Section>
+      </Modal>
     </PageShell>
   );
 }
 
 function resolveStatus(plan, test, experiment) {
+  if (experiment?.archived || plan?.archived) return 'archived';
   const planStatus = String(plan?.status || experiment?.status || '')
     .trim()
     .toLowerCase();
@@ -449,23 +627,23 @@ function resolveStatus(plan, test, experiment) {
     return 'running';
   }
   if (testStatus === 'stopped' || testStatus === 'paused') return 'paused';
-  if (plan?.test_id && !planStatus && !testStatus) return 'running';
   if (planStatus === 'queued') return 'queued';
   return planStatus || testStatus || 'draft';
 }
 
-function statusLabel(status) {
+function statusLabel(status, experimentType) {
+  if (status === 'archived') return 'Archived';
   if (status === 'running') return 'Running';
   if (status === 'paused' || status === 'stopped') return 'Paused';
-  if (status === 'winner_ready') return 'Winner ready';
+  if (status === 'winner_ready') return formatClassicStatusLabel(status, experimentType);
   if (status === 'applied') return 'Applied';
   if (status === 'queued') return 'Queued';
   return 'Draft';
 }
 
-function statusPillClass(status, styles) {
-  if (status === 'running') return styles.statusRunning;
-  if (status === 'paused' || status === 'stopped') return styles.statusPaused;
-  if (status === 'winner_ready' || status === 'applied') return styles.statusCompleted;
-  return styles.statusDraft;
+function statusBadgeTone(status) {
+  if (status === 'running') return 'info';
+  if (status === 'paused' || status === 'stopped') return 'warning';
+  if (status === 'winner_ready' || status === 'applied' || status === 'completed') return 'success';
+  return undefined;
 }

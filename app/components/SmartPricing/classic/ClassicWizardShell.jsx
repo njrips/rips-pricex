@@ -1,10 +1,17 @@
 import React from 'react';
-import { CLASSIC_CREATE_STEPS as CREATE_STEPS } from './classicCreateSteps';
-import { IconArrowLeft, IconArrowRight, IconCheck, IconRocket } from './classicIcons';
+import { Button } from '@shopify/polaris';
+import { CLASSIC_CREATE_STEPS, getClassicCreateSteps } from './classicCreateSteps';
+import {
+  ButtonIconArrowLeft,
+  ButtonIconArrowRight,
+  ButtonIconRocket,
+  IconCheck,
+} from './classicIcons';
 import styles from './SmartPricingClassic.module.css';
 
 export default function ClassicWizardShell({
   stepIndex = 0,
+  experimentType = 'price_test',
   title,
   subtitle,
   onBackToList,
@@ -12,6 +19,7 @@ export default function ClassicWizardShell({
   onContinue,
   continueLabel = 'Continue',
   continueDisabled = false,
+  continueDisabledReason = '',
   backLabel = 'Back',
   showCancel = false,
   onCancel,
@@ -21,27 +29,30 @@ export default function ClassicWizardShell({
   children,
   continueBusy = false,
 }) {
-  const step = CREATE_STEPS[stepIndex] || CREATE_STEPS[0];
+  const steps = getClassicCreateSteps(experimentType);
+  const step = steps[stepIndex] || steps[0] || CLASSIC_CREATE_STEPS[0];
   const heading = title || step.title;
   const sub = subtitle || step.description;
   const isLaunch = String(continueLabel || '')
     .toLowerCase()
     .includes('launch');
-  const lastIndex = CREATE_STEPS.length - 1;
+  const lastIndex = steps.length - 1;
 
   return (
     <div className={styles.page}>
       <div className={styles.topBar}>
-        <button type="button" className={styles.backLink} onClick={onBackToList}>
-          <IconArrowLeft /> Back to experiments
-        </button>
+        <div className={styles.pageBack}>
+          <Button variant="plain" icon={ButtonIconArrowLeft} textAlign="start" onClick={onBackToList}>
+            Back to experiments
+          </Button>
+        </div>
         <span className={styles.stepOf}>
-          Step {stepIndex + 1} of {CREATE_STEPS.length}
+          Step {stepIndex + 1} of {steps.length}
         </span>
       </div>
 
       <div className={styles.stepper} role="list" aria-label="Experiment setup progress">
-        {CREATE_STEPS.map((item, index) => {
+        {steps.map((item, index) => {
           const done = index < stepIndex;
           const active = index === stepIndex;
           const connectorComplete = index < stepIndex;
@@ -82,48 +93,56 @@ export default function ClassicWizardShell({
 
       <div className={styles.footer}>
         {showCancel ? (
-          <button type="button" className={styles.footerLink} onClick={onCancel || onBackToList}>
-            <IconArrowLeft /> Cancel
-          </button>
+          <div className={styles.pageBack}>
+            <Button
+              variant="plain"
+              textAlign="start"
+              icon={ButtonIconArrowLeft}
+              onClick={onCancel || onBackToList}
+            >
+              Cancel
+            </Button>
+          </div>
         ) : (
-          <button
-            type="button"
-            className={styles.footerLink}
-            onClick={onBack}
-            disabled={stepIndex === 0}
-          >
-            <IconArrowLeft /> {backLabel}
-          </button>
+          <div className={styles.pageBack}>
+            <Button
+              variant="plain"
+              textAlign="start"
+              icon={ButtonIconArrowLeft}
+              onClick={onBack}
+              disabled={stepIndex === 0}
+            >
+              {backLabel}
+            </Button>
+          </div>
         )}
         <div className={styles.footerActions}>
           {typeof onSaveDraft === 'function' ? (
-            <button
-              type="button"
-              className={styles.saveDraftLink}
+            <Button
+              variant="tertiary"
               onClick={onSaveDraft}
               disabled={saveDraftBusy || continueBusy}
+              loading={saveDraftBusy}
             >
-              {saveDraftBusy ? 'Saving…' : saveDraftLabel}
-            </button>
+              {saveDraftLabel}
+            </Button>
           ) : null}
-          <button
-            type="button"
-            className={styles.primaryBtn}
-            onClick={onContinue}
-            disabled={continueDisabled || continueBusy}
-          >
-            {continueBusy ? (
-              'Working…'
-            ) : isLaunch ? (
-              <>
-                <IconRocket /> {continueLabel}
-              </>
-            ) : (
-              <>
-                {continueLabel} <IconArrowRight />
-              </>
-            )}
-          </button>
+          <span className={isLaunch ? undefined : styles.iconTrailingBtn}>
+            <Button
+              variant="primary"
+              icon={isLaunch ? ButtonIconRocket : ButtonIconArrowRight}
+              onClick={onContinue}
+              disabled={continueDisabled || continueBusy}
+              loading={continueBusy}
+              accessibilityLabel={
+                continueDisabled && continueDisabledReason
+                  ? `${continueLabel}. ${continueDisabledReason}`
+                  : undefined
+              }
+            >
+              {continueLabel}
+            </Button>
+          </span>
         </div>
       </div>
     </div>

@@ -114,12 +114,24 @@ export async function launchSmartPricingPlan(
   plan,
   { status = 'draft', autoStart = false } = {}
 ) {
-  const res = await apiPost(
-    '/smart-pricing/plans/launch',
-    { plan, status, auto_start: autoStart },
-    domain ? { params: { domain } } : {}
-  );
-  return unwrapData(res);
+  try {
+    const res = await apiPost(
+      '/smart-pricing/plans/launch',
+      { plan, status, auto_start: autoStart },
+      domain ? { params: { domain }, timeout: 45000 } : { timeout: 45000 }
+    );
+    return unwrapData(res);
+  } catch (err) {
+    const code = String(err?.code || err?.name || '').toUpperCase();
+    if (
+      !err?.response &&
+      (code === 'ECONNABORTED' || code === 'ERR_CANCELED' || /timeout/i.test(String(err?.message || '')))
+    ) {
+      err.message =
+        'Launch timed out while starting the test. Open Setup, tap Ensure on the checkout discount, then try again.';
+    }
+    throw err;
+  }
 }
 
 export async function previewSmartPricingScenario(domain, body) {

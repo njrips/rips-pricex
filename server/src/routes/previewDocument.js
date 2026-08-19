@@ -84,10 +84,10 @@ function buildErrorPage({ title, message, parentOrigin, reason }) {
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>${safeTitle.replace(/</g, '&lt;')}</title>
     <style>
-      body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #faf7f2; color: #231814; }
-      main { max-width: 480px; margin: 12vh auto; padding: 24px; background: #fff; border: 1px solid #e9e3df; border-radius: 16px; box-shadow: 0 8px 28px rgba(35,24,20,.08); }
+      body { margin: 0; font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f1f1f1; color: #303030; }
+      main { max-width: 480px; margin: 12vh auto; padding: 24px; background: #fff; border: 1px solid #e3e3e3; border-radius: 8px; box-shadow: 0 1px 0 rgba(0,0,0,.05); }
       h1 { font-size: 1.15rem; margin: 0 0 10px; }
-      p { margin: 0; line-height: 1.5; color: #6e605a; font-size: .9375rem; }
+      p { margin: 0; line-height: 1.5; color: #616161; font-size: .9375rem; }
     </style>
   </head>
   <body>

@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { Banner, Button, Select, TextField } from '@shopify/polaris';
 import {
   getGoalMetricDefinitions,
   saveGoalMetricDefinition,
@@ -16,7 +17,7 @@ import {
   normalizeCustomGoals,
   validateCustomGoalDraft,
 } from '../targeting/smartPricingAudienceHelpers';
-import { IconPlus, IconSearch } from './classicIcons';
+import { ButtonIconPlus } from './classicIcons';
 import styles from './SmartPricingClassic.module.css';
 
 function slugEventKey(raw) {
@@ -236,9 +237,7 @@ export default function ClassicGoalPickerModal({
               {description}
             </p>
           </div>
-          <button type="button" className={styles.iconClose} onClick={onClose} aria-label="Close">
-            ×
-          </button>
+          <Button onClick={onClose}>Close</Button>
         </div>
 
         <div className={styles.goalPickerTabs} role="tablist" aria-label="Goal picker mode">
@@ -267,13 +266,13 @@ export default function ClassicGoalPickerModal({
             <div className={styles.goalPickerBrowse}>
               <div className={styles.goalPickerToolbar}>
                 <div className={`${styles.searchWrap} ${styles.modalSearch}`}>
-                  <IconSearch size={14} />
-                  <input
-                    className={`${styles.input} ${styles.modalSearchInput}`}
+                  <TextField
+                    label="Search goals"
+                    labelHidden
                     value={search}
-                    onChange={e => setSearch(e.target.value)}
+                    onChange={setSearch}
                     placeholder="Search goals…"
-                    aria-label="Search goals"
+                    autoComplete="off"
                   />
                 </div>
                 <div
@@ -300,7 +299,7 @@ export default function ClassicGoalPickerModal({
                 </div>
               </div>
 
-              {loadError ? <p className={styles.customGoalError}>{loadError}</p> : null}
+              {loadError ? <Banner tone="critical" title={loadError} /> : null}
 
               <div className={styles.goalPickerPanes}>
                 <section className={styles.goalPickerPane} aria-label="Selected goals">
@@ -320,13 +319,7 @@ export default function ClassicGoalPickerModal({
                               {goal.event_name} · {catalogGoalTriggerSummary(goal)}
                             </span>
                           </div>
-                          <button
-                            type="button"
-                            className={styles.ghostBtn}
-                            onClick={() => handleRemove(goal.event_name)}
-                          >
-                            Remove
-                          </button>
+                          <Button onClick={() => handleRemove(goal.event_name)}>Remove</Button>
                         </div>
                       ))
                     )}
@@ -348,23 +341,13 @@ export default function ClassicGoalPickerModal({
                           &amp; Metrics.
                         </p>
                         <div className={styles.goalPickerEmptyActions}>
-                          <button
-                            type="button"
-                            className={styles.ghostBtn}
-                            onClick={() => setTab('create')}
-                          >
-                            <IconPlus size={14} />
+                          <Button icon={ButtonIconPlus} onClick={() => setTab('create')}>
                             Create new
-                          </button>
+                          </Button>
                           {goalsPageHref ? (
-                            <a
-                              className={styles.editLink}
-                              href={goalsPageHref}
-                              target="_blank"
-                              rel="noreferrer"
-                            >
+                            <Button variant="plain" url={goalsPageHref} external>
                               Open Goals &amp; Metrics
-                            </a>
+                            </Button>
                           ) : null}
                         </div>
                       </div>
@@ -378,13 +361,7 @@ export default function ClassicGoalPickerModal({
                               {row.source === 'catalog_builtin' ? ' · Built-in' : ' · Custom'}
                             </span>
                           </div>
-                          <button
-                            type="button"
-                            className={styles.ghostBtn}
-                            onClick={() => handleAdd(row)}
-                          >
-                            Add
-                          </button>
+                          <Button onClick={() => handleAdd(row)}>Add</Button>
                         </div>
                       ))
                     )}
@@ -400,115 +377,110 @@ export default function ClassicGoalPickerModal({
               </p>
 
               <div className={styles.customGoalGrid}>
-                <label className={styles.customGoalField}>
-                  <span>Display name</span>
-                  <input
-                    className={styles.input}
+                <div className={styles.customGoalField}>
+                  <TextField
+                    label="Display name"
                     value={draft.name}
-                    onChange={e => {
-                      const name = e.target.value;
+                    onChange={name =>
                       patchDraft({
                         name,
                         event_name: draft.event_name || slugEventKey(name),
-                      });
-                    }}
+                      })
+                    }
                     placeholder="e.g. Add to cart"
+                    autoComplete="off"
                   />
-                </label>
-                <label className={styles.customGoalField}>
-                  <span>Event key</span>
-                  <input
-                    className={styles.input}
+                </div>
+                <div className={styles.customGoalField}>
+                  <TextField
+                    label="Event key"
                     value={draft.event_name}
-                    onChange={e => patchDraft({ event_name: slugEventKey(e.target.value) })}
+                    onChange={value => patchDraft({ event_name: slugEventKey(value) })}
                     placeholder="add_to_cart"
+                    autoComplete="off"
                   />
-                </label>
-                <label className={styles.customGoalField}>
-                  <span>How it fires</span>
-                  <select
-                    className={styles.select}
+                </div>
+                <div className={styles.customGoalField}>
+                  <Select
+                    label="How it fires"
+                    options={CUSTOM_GOAL_TRIGGER_OPTIONS.map(opt => ({
+                      label: opt.label,
+                      value: opt.value,
+                    }))}
                     value={draft.trigger_type}
-                    onChange={e => patchDraft({ trigger_type: e.target.value })}
-                  >
-                    {CUSTOM_GOAL_TRIGGER_OPTIONS.map(opt => (
-                      <option key={opt.value} value={opt.value}>
-                        {opt.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className={styles.customGoalField}>
-                  <span>Aggregation</span>
-                  <select
-                    className={styles.select}
+                    onChange={value => patchDraft({ trigger_type: value })}
+                  />
+                </div>
+                <div className={styles.customGoalField}>
+                  <Select
+                    label="Aggregation"
+                    options={[
+                      { label: 'Count unique users', value: 'count' },
+                      { label: 'Sum event value', value: 'sum' },
+                    ]}
                     value={draft.aggregation}
-                    onChange={e =>
+                    onChange={value =>
                       patchDraft({
-                        aggregation: e.target.value,
+                        aggregation: value,
                         trigger_config: {
                           ...draft.trigger_config,
                           parameter_name:
-                            e.target.value === 'count'
+                            value === 'count'
                               ? ''
                               : draft.trigger_config?.parameter_name || 'amount',
                         },
                       })
                     }
-                  >
-                    <option value="count">Count unique users</option>
-                    <option value="sum">Sum event value</option>
-                  </select>
-                </label>
-                <label className={styles.customGoalField}>
-                  <span>Direction</span>
-                  <select
-                    className={styles.select}
+                  />
+                </div>
+                <div className={styles.customGoalField}>
+                  <Select
+                    label="Direction"
+                    options={[
+                      { label: 'Higher is better', value: 'increase' },
+                      { label: 'Lower is better', value: 'decrease' },
+                    ]}
                     value={draft.direction}
-                    onChange={e => patchDraft({ direction: e.target.value })}
-                  >
-                    <option value="increase">Higher is better</option>
-                    <option value="decrease">Lower is better</option>
-                  </select>
-                </label>
+                    onChange={value => patchDraft({ direction: value })}
+                  />
+                </div>
                 {draft.aggregation === 'sum' ? (
-                  <label className={styles.customGoalField}>
-                    <span>Value parameter</span>
-                    <input
-                      className={styles.input}
+                  <div className={styles.customGoalField}>
+                    <TextField
+                      label="Value parameter"
                       value={draft.trigger_config?.parameter_name || ''}
-                      onChange={e => patchTriggerConfig({ parameter_name: e.target.value })}
+                      onChange={value => patchTriggerConfig({ parameter_name: value })}
                       placeholder="amount"
+                      autoComplete="off"
                     />
-                  </label>
+                  </div>
                 ) : null}
               </div>
 
               {draft.trigger_type === 'url_match' ? (
-                <label className={styles.customGoalField}>
-                  <span>URL pattern</span>
-                  <input
-                    className={styles.input}
+                <div className={styles.customGoalField}>
+                  <TextField
+                    label="URL pattern"
                     value={draft.trigger_config?.url_pattern || ''}
-                    onChange={e => patchTriggerConfig({ url_pattern: e.target.value })}
+                    onChange={value => patchTriggerConfig({ url_pattern: value })}
                     placeholder="/cart or /collections/*"
+                    autoComplete="off"
                   />
-                </label>
+                </div>
               ) : null}
 
               {triggerNeedsSelector ? (
-                <label className={styles.customGoalField}>
-                  <span>
-                    {draft.trigger_type === 'element_visibility'
-                      ? 'Element selector'
-                      : draft.trigger_type === 'css_click'
-                        ? 'Click selector'
-                        : 'Form selector'}
-                  </span>
-                  <input
-                    className={styles.input}
+                <div className={styles.customGoalField}>
+                  <TextField
+                    label={
+                      draft.trigger_type === 'element_visibility'
+                        ? 'Element selector'
+                        : draft.trigger_type === 'css_click'
+                          ? 'Click selector'
+                          : 'Form selector'
+                    }
                     value={draft.trigger_config?.selector || ''}
-                    onChange={e => patchTriggerConfig({ selector: e.target.value })}
+                    onChange={value => patchTriggerConfig({ selector: value })}
                     placeholder={
                       draft.trigger_type === 'form_submit'
                         ? 'form.newsletter'
@@ -516,37 +488,38 @@ export default function ClassicGoalPickerModal({
                           ? '.hero-banner'
                           : '.add-to-cart-button'
                     }
+                    autoComplete="off"
                   />
-                </label>
+                </div>
               ) : null}
 
               {draft.trigger_type === 'element_visibility' ? (
-                <label className={styles.customGoalField}>
-                  <span>Visibility threshold (%)</span>
-                  <input
-                    className={styles.input}
+                <div className={styles.customGoalField}>
+                  <TextField
+                    label="Visibility threshold (%)"
                     type="number"
                     min={1}
                     max={100}
-                    value={draft.trigger_config?.visibility_threshold ?? 50}
-                    onChange={e =>
-                      patchTriggerConfig({ visibility_threshold: Number(e.target.value) || 50 })
+                    value={String(draft.trigger_config?.visibility_threshold ?? 50)}
+                    onChange={value =>
+                      patchTriggerConfig({ visibility_threshold: Number(value) || 50 })
                     }
+                    autoComplete="off"
                   />
-                </label>
+                </div>
               ) : null}
 
               {draft.trigger_type === 'custom_javascript' ? (
-                <label className={styles.customGoalField}>
-                  <span>JavaScript rule</span>
-                  <textarea
-                    className={styles.textarea}
-                    rows={4}
+                <div className={styles.customGoalField}>
+                  <TextField
+                    label="JavaScript rule"
                     value={draft.trigger_config?.custom_javascript || ''}
-                    onChange={e => patchTriggerConfig({ custom_javascript: e.target.value })}
+                    onChange={value => patchTriggerConfig({ custom_javascript: value })}
                     placeholder="return document.querySelector('.promo-banner') !== null;"
+                    multiline={4}
+                    autoComplete="off"
                   />
-                </label>
+                </div>
               ) : null}
 
               <p className={styles.customGoalHint}>
@@ -559,17 +532,17 @@ export default function ClassicGoalPickerModal({
                   definition without overwriting it.
                 </p>
               ) : null}
-              {createError ? <p className={styles.customGoalError}>{createError}</p> : null}
+              {createError ? <Banner tone="critical" title={createError} /> : null}
 
               <div className={styles.customGoalActions}>
-                <button
-                  type="button"
-                  className={styles.primaryBtn}
+                <Button
+                  variant="primary"
                   onClick={handleCreateOrAddExisting}
                   disabled={createSaving || draftAlreadySelected}
+                  loading={createSaving}
                 >
-                  {createSaving ? 'Saving…' : draftCatalogMatch ? 'Add existing' : 'Create & add'}
-                </button>
+                  {draftCatalogMatch ? 'Add existing' : 'Create & add'}
+                </Button>
               </div>
             </div>
           )}
@@ -581,20 +554,15 @@ export default function ClassicGoalPickerModal({
             {goalsPageHref ? (
               <>
                 {' · '}
-                <a
-                  className={styles.editLink}
-                  href={goalsPageHref}
-                  target="_blank"
-                  rel="noreferrer"
-                >
+                <Button variant="plain" url={goalsPageHref} external>
                   Manage Goals library
-                </a>
+                </Button>
               </>
             ) : null}
           </span>
-          <button type="button" className={styles.primaryBtn} onClick={onClose}>
+          <Button variant="primary" onClick={onClose}>
             Done
-          </button>
+          </Button>
         </div>
       </div>
     </div>,

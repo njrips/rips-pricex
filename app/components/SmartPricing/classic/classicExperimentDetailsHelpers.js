@@ -1,4 +1,6 @@
+import { collapseCountrySelection } from './countrySelection';
 import { getPlanProductTitle } from './classicExperimentHelpers';
+import { isOfferExperimentType } from './offerSelection';
 import {
   buildPreviewUrl,
   buildShopifyPricePreviewBootstrapUrl,
@@ -26,6 +28,86 @@ export function formatPrimaryMetricLabel(metric) {
     .filter(Boolean)
     .map(part => part.charAt(0).toUpperCase() + part.slice(1))
     .join(' ');
+}
+
+export function formatAudienceSegmentLabel(segment) {
+  const key = String(segment || '')
+    .trim()
+    .toLowerCase();
+  if (key === 'new' || key === 'new_visitors') return 'New visitors';
+  if (key === 'returning' || key === 'returning_visitors') return 'Returning visitors';
+  if (key === 'all' || key === 'all_visitors' || !key) return 'All visitors';
+  return key
+    .split('_')
+    .filter(Boolean)
+    .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+}
+
+/** Comma-separated fact value for details cards (Devices, sources). */
+export function formatAudienceFactValue(items, fallback = 'All') {
+  const values = (Array.isArray(items) ? items : [items])
+    .flatMap(item => String(item || '').split(','))
+    .map(item =>
+      String(item || '')
+        .replace(/[_-]+/g, ' ')
+        .trim()
+    )
+    .filter(Boolean)
+    .filter((item, index, list) => list.findIndex(other => other.toLowerCase() === item.toLowerCase()) === index)
+    .map(item =>
+      item
+        .split(/\s+/)
+        .map(part => (part ? part.charAt(0).toUpperCase() + part.slice(1) : part))
+        .join(' ')
+    );
+  return values.length ? values.join(', ') : fallback;
+}
+
+export function formatActivityStamp(value) {
+  if (!value) return '';
+  try {
+    const stamp = new Date(value);
+    if (Number.isNaN(stamp.getTime())) return String(value);
+    return stamp.toLocaleString(undefined, {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    });
+  } catch {
+    return String(value);
+  }
+}
+
+export function formatActivityMeta(item) {
+  const when = formatActivityStamp(item?.at);
+  const actor = String(item?.actor || '').trim();
+  if (actor && when) return `${actor} · ${when}`;
+  return actor || when;
+}
+
+export function groupActivityByDay(items = []) {
+  const groups = [];
+  (Array.isArray(items) ? items : []).forEach(item => {
+    const stamp = item?.at ? new Date(item.at) : null;
+    const dayKey =
+      stamp && !Number.isNaN(stamp.getTime())
+        ? stamp.toLocaleDateString(undefined, {
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric',
+          })
+        : 'Earlier';
+    const last = groups[groups.length - 1];
+    if (last?.day === dayKey) {
+      last.items.push(item);
+      return;
+    }
+    groups.push({ day: dayKey, items: [item] });
+  });
+  return groups;
 }
 
 export function isControlArm(arm) {
@@ -277,6 +359,18 @@ export function buildVariationsSummary(plan = null, analytics = null, options = 
       };
     });
     const variant = resolveVariantForArm(test, arm, index);
+    const offerFromVariant =
+      variant?.config &&
+      typeof variant.config === 'object' &&
+      (variant.config.discount_type ||
+        variant.config.discount_value ||
+        variant.config.offer_message)
+        ? {
+            discount_type: variant.config.discount_type,
+            discount_value: variant.config.discount_value,
+            offer_message: variant.config.offer_message,
+          }
+        : null;
     return {
       id: arm.id || `arm_${index}`,
       label:
@@ -296,6 +390,7 @@ export function buildVariationsSummary(plan = null, analytics = null, options = 
       variantId: variant?.id || null,
       variantName: variant?.name || null,
       armIndex: index,
+      offer: arm.offer || offerFromVariant || null,
     };
   });
 }
@@ -1045,26 +1140,50 @@ export function productRowKey(product, fullListIndex = 0) {
 
 export function buildAudienceSummary(plan = null, test = null) {
   const audience = plan?.audience && typeof plan.audience === 'object' ? plan.audience : {};
+  const audienceUi =
+    plan?.metadata?.audience_ui && typeof plan.metadata.audience_ui === 'object'
+      ? plan.metadata.audience_ui
+      : {};
   const segments =
     (audience.segments && typeof audience.segments === 'object' && audience.segments) ||
     (test?.segments && typeof test.segments === 'object' && test.segments) ||
     {};
+  const customer = audienceUi.segment || segments.customer || 'all';
 
   return {
-    devices: Array.isArray(audience.devices) ? audience.devices : [],
-    deviceMode: audience.device_mode || 'include',
-    sources: Array.isArray(audience.sources) ? audience.sources : [],
-    sourceMode: audience.source_mode || 'include',
-    countries: Array.isArray(audience.countries)
-      ? audience.countries
-      : Array.isArray(segments.countries)
-        ? segments.countries
+    devices: Array.isArray(audience.devices)
+      ? audience.devices
+      : Array.isArray(audienceUi.devices)
+        ? audienceUi.devices
         : [],
-    countryMode: audience.country_mode || 'include',
-    trafficAllocation: audience.traffic_allocation ?? segments.traffic_ramp_percent ?? null,
+    deviceMode: audience.device_mode || audienceUi.deviceMode || 'include',
+    sources: Array.isArray(audience.sources)
+      ? audience.sources
+      : Array.isArray(audienceUi.sources)
+        ? audienceUi.sources
+        : [],
+    sourceMode: audience.source_mode || audienceUi.sourceMode || 'include',
+    countries: collapseCountrySelection(
+      Array.isArray(audience.countries)
+        ? audience.countries
+        : Array.isArray(segments.countries)
+          ? segments.countries
+          : Array.isArray(audienceUi.countries)
+            ? audienceUi.countries
+            : [],
+      audience.country_mode || audienceUi.countryMode || 'include'
+    ),
+    countryMode: audience.country_mode || audienceUi.countryMode || 'include',
+    trafficAllocation:
+      audience.traffic_allocation ??
+      audienceUi.trafficAllocation ??
+      segments.traffic_ramp_percent ??
+      null,
+    minSampleSize: audienceUi.minSampleSize ?? audience.min_sample_size ?? null,
     excludeBots: segments.exclude_bots !== false,
     excludeInternalIps: segments.exclude_internal_ips !== false,
-    customer: segments.customer || 'all',
+    customer,
+    segmentLabel: formatAudienceSegmentLabel(customer),
     trafficSource: segments.traffic_source || 'all',
     device: segments.device || 'all',
     inheritDefaults: audience.inherit_from_shop_defaults === true,
@@ -1097,6 +1216,16 @@ export function buildMetricsSummary(plan = null, test = null) {
     primaryMetricLabel: formatPrimaryMetricLabel(primary),
     secondary,
     secondaryEvents,
+    guardrails: Array.isArray(plan?.metadata?.audience_ui?.guardrails)
+      ? plan.metadata.audience_ui.guardrails
+      : Array.isArray(planGoal.guardrails)
+        ? planGoal.guardrails
+        : [],
+    minSampleSize:
+      plan?.metadata?.audience_ui?.minSampleSize ??
+      planGoal.min_sample_size ??
+      testGoal.min_sample_size ??
+      null,
     cogs: planGoal.cogs || testGoal.cogs || null,
     rationale: planGoal.rationale || null,
   };
@@ -1109,13 +1238,16 @@ export function buildActivityTimeline({
   qaRuns = [],
 } = {}) {
   const items = [];
+  const actor =
+    String(plan?.owner_name || plan?.created_by_name || '').trim() || 'You';
   const createdAt = plan?.created_at || test?.created_at;
   if (createdAt) {
     items.push({
       id: 'created',
       at: createdAt,
-      title: 'Experiment created',
-      detail: plan?.title || test?.name || 'Plan saved',
+      title: 'Created experiment',
+      kind: 'created',
+      actor,
     });
   }
   const startedAt = test?.started_at || test?.startedAt;
@@ -1123,8 +1255,9 @@ export function buildActivityTimeline({
     items.push({
       id: 'started',
       at: startedAt,
-      title: 'Test started',
-      detail: `Status · ${test?.status || analytics?.test_status || 'running'}`,
+      title: 'Launched experiment',
+      kind: 'started',
+      actor,
     });
   } else if (
     plan?.test_id &&
@@ -1134,6 +1267,8 @@ export function buildActivityTimeline({
       id: 'linked',
       at: plan?.updated_at || plan?.created_at || new Date().toISOString(),
       title: 'Linked to live price test',
+      kind: 'linked',
+      actor,
       detail: `Test ${plan.test_id}`,
     });
   }
@@ -1143,8 +1278,31 @@ export function buildActivityTimeline({
       id: `qa_${run.id || run.created_at}`,
       at: run.finished_at || run.created_at || run.started_at,
       title: `Self-QA ${run.status || 'run'}`,
+      kind: 'qa',
+      actor,
       detail:
         run.verdict_summary || run.verdict_json?.ai_summary?.headline || run.trigger || 'QA check',
+    });
+  }
+
+  const isOffer = isOfferExperimentType(
+    plan?.experiment_type || plan?.metadata?.experiment_type || test?.type
+  );
+
+  const guardrailBreach = test?.guardrail_config;
+  if (guardrailBreach?.breached_at) {
+    const observed = Number(guardrailBreach.observed_drop_percent);
+    const limit = Number(guardrailBreach.max_revenue_drop_percent);
+    items.push({
+      id: 'revenue_guardrail',
+      at: guardrailBreach.breached_at,
+      title: 'Paused by revenue guardrail',
+      kind: 'guardrail',
+      actor,
+      detail:
+        Number.isFinite(observed) && Number.isFinite(limit)
+          ? `Revenue per visitor dropped ${observed}% vs control (limit ${limit}%)`
+          : 'A variation dropped past the shop revenue limit versus control',
     });
   }
 
@@ -1152,8 +1310,12 @@ export function buildActivityTimeline({
     items.push({
       id: 'winner_applied',
       at: plan.winner_applied_at || plan.updated_at,
-      title: 'Winner rolled out',
-      detail: 'Winning price applied to Shopify',
+      title: isOffer ? 'Test completed' : 'Winner rolled out',
+      kind: 'complete',
+      actor,
+      detail: isOffer
+        ? 'Offer test finished — catalog prices were not changed'
+        : 'Winning price applied to Shopify',
     });
   }
 
@@ -1164,9 +1326,13 @@ export function buildActivityTimeline({
         id: 'paused',
         at: pausedAt,
         title: plan?.status === 'winner_ready' ? 'Test stopped' : 'Experiment paused',
+        kind: plan?.status === 'winner_ready' ? 'complete' : 'paused',
+        actor,
         detail:
           plan?.status === 'winner_ready'
-            ? 'Waiting for winner rollout decision'
+            ? isOffer
+              ? 'Leading variation identified'
+              : 'Waiting for winner rollout decision'
             : 'Traffic assignment stopped',
       });
     }
@@ -1188,11 +1354,27 @@ export function buildSettingsSummary(plan = null, test = null, shopGuardrails = 
     {};
 
   const notes = [];
+  const experimentType = String(
+    plan?.experiment_type || plan?.metadata?.experiment_type || test?.type || ''
+  )
+    .trim()
+    .toLowerCase();
+  const isOffer = experimentType === 'offer_test' || experimentType === 'offer';
+
   if (Number.isFinite(Number(guardrails.max_parallel_tests))) {
-    notes.push(`Max parallel price tests: ${guardrails.max_parallel_tests}`);
+    notes.push(`Max parallel tests: ${guardrails.max_parallel_tests}`);
   }
-  if (Number.isFinite(Number(guardrails.max_price_change_percent))) {
+  if (!isOffer && Number.isFinite(Number(guardrails.max_price_change_percent))) {
     notes.push(`Max price change: ±${guardrails.max_price_change_percent}%`);
+  }
+  const revenueDrop =
+    Number(
+      guardrails.max_revenue_drop_percent ??
+        test?.goal?.guardrails?.max_revenue_drop_percent ??
+        test?.guardrail_config?.max_revenue_drop_percent
+    ) || null;
+  if (Number.isFinite(revenueDrop)) {
+    notes.push(`Max revenue drop: ${revenueDrop}% vs control`);
   }
   if (Number.isFinite(Number(guardrails.min_margin_percent))) {
     notes.push(`Min margin: ${guardrails.min_margin_percent}%`);
@@ -1203,12 +1385,18 @@ export function buildSettingsSummary(plan = null, test = null, shopGuardrails = 
 
   return {
     trafficRampPercent: segments.traffic_ramp_percent ?? audience.traffic_allocation ?? null,
-    autoStopEnabled: goal?.guardrails?.auto_stop === true || goal?.auto_stop === true,
+    autoStopEnabled:
+      goal?.guardrails?.auto_stop === true ||
+      goal?.auto_stop === true ||
+      test?.auto_stop === true ||
+      test?.guardrail_config?.auto_stop === true,
     excludeBots: segments.exclude_bots !== false,
     excludeInternalIps: segments.exclude_internal_ips !== false,
     canaryDays: launchPrefs.canary_days ?? segments.canary_days ?? null,
-    priceApplicationMethod:
-      test?.variants?.[0]?.config?.priceApplicationMethod || 'direct_price_override',
+    priceApplicationMethod: isOffer
+      ? 'checkout_discount_function'
+      : test?.variants?.[0]?.config?.priceApplicationMethod || 'direct_price_override',
+    experimentType: experimentType || 'price_test',
     testStatus: test?.status || plan?.status || null,
     testId: plan?.test_id || test?.id || null,
     planId: plan?.id || null,

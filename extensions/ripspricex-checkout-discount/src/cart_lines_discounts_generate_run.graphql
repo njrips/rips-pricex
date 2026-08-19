@@ -1,0 +1,35 @@
+query RipspricexOfferCartLinesRun {
+  discount {
+    discountClasses
+  }
+  cart {
+    lines {
+      id
+      quantity
+      cost {
+        subtotalAmount {
+          amount
+          currencyCode
+        }
+      }
+      ripxTest: attribute(key: "_ripx_price_test") {
+        value
+      }
+      ripxPriceMethod: attribute(key: "_ripx_price_method") {
+        value
+      }
+      ripxOfferDiscountType: attribute(key: "_ripx_offer_discount_type") {
+        value
+      }
+      ripxOfferDiscountValue: attribute(key: "_ripx_offer_discount_value") {
+        value
+      }
+      ripxOfferCodeName: attribute(key: "_ripx_offer_code_name") {
+        value
+      }
+      ripxOfferMessage: attribute(key: "_ripx_offer_message") {
+        value
+      }
+    }
+  }
+}

@@ -19,8 +19,8 @@ export function useSmartPricingLaunch(shopDomain) {
           status: inboxPatch.status || 'running',
           test_id: inboxPatch.test_id || testId || null,
         });
-        if (openTest && testId) {
-          navigate(ROUTES.appTestDetail(shopDomain, testId));
+        if (openTest && plan?.id) {
+          navigate(ROUTES.appSmartPricingPlan(shopDomain, plan.id));
         }
         return { testId, started: true };
       } finally {
@@ -36,6 +36,9 @@ export function useSmartPricingLaunch(shopDomain) {
       let launched = 0;
       let stoppedEarly = false;
       const list = Array.isArray(plans) ? plans : [];
+      if (!list.length) {
+        throw new Error('Nothing to launch.');
+      }
       const limit = Number.isFinite(maxCount) && maxCount >= 0 ? maxCount : list.length;
 
       try {

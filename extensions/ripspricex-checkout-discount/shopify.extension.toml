@@ -1,0 +1,17 @@
+api_version = "2025-10"
+
+[[extensions]]
+name = "RipsPriceX checkout discount"
+handle = "ripspricex-checkout-discount"
+uid = "77ed6e98-2193-af5b-3d32-ced22d8aba22293d93dd"
+type = "function"
+description = "Apply Classic offer-test percent and fixed discounts from cart line attributes."
+
+[[extensions.targeting]]
+target = "cart.lines.discounts.generate.run"
+input_query = "src/cart_lines_discounts_generate_run.graphql"
+export = "cart-lines-discounts-generate-run"
+
+[extensions.build]
+command = ""
+path = "dist/function.wasm"

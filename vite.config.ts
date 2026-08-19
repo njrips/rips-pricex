@@ -89,9 +89,16 @@ export default defineConfig(({ mode }) => {
         };
         return {
           // Express health (tunnel / Cloudflare → Vite → API)
-          "/health": { target, changeOrigin: true, xfwd: true, configure },
+          "/health": { target, changeOrigin: true, xfwd: true, configure, timeout: 45000 },
           // Admin + app-proxy /api → Express (keep public Host for storefront apiUrl)
-          "/api": { target, changeOrigin: true, xfwd: true, configure },
+          "/api": {
+            target,
+            changeOrigin: true,
+            xfwd: true,
+            configure,
+            timeout: 45000,
+            proxyTimeout: 45000,
+          },
         };
       })(),
     },

@@ -5743,11 +5743,16 @@
 }
 
 .priceSurfaceTab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border: 0;
   border-radius: 999px;
-  padding: 3px 9px;
+  min-height: 28px;
+  padding: 4px 12px;
   font-size: 0.75rem;
-  font-weight: 600;
+  font-weight: 500;
+  line-height: 1;
   color: var(--text-secondary);
   background: transparent;
   cursor: pointer;
@@ -8438,15 +8443,41 @@
   opacity: 1;
 }
 
+:global([data-palette='admin']) .productScopeOptionsRow .scopeCard.scopeCardOption.scopeCardActive::after,
 :global([data-palette='orange-classic']) .productScopeOptionsRow .scopeCard.scopeCardOption.scopeCardActive::after {
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='%23E85D04' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 10l3 3 7-7'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='%23303030' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 10l3 3 7-7'/%3E%3C/svg%3E");
 }
 
+:global([data-theme='dark'][data-palette='admin'])
+  .productScopeOptionsRow
+  .scopeCard.scopeCardOption.scopeCardActive::after,
 :global([data-theme='dark'][data-palette='orange-classic'])
   .productScopeOptionsRow
   .scopeCard.scopeCardOption.scopeCardActive::after {
   background-color: rgba(var(--accent-primary-rgb), 0.28);
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='%23FB923C' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 10l3 3 7-7'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='%23E3E3E3' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 10l3 3 7-7'/%3E%3C/svg%3E");
+}
+
+:global([data-palette='admin']) .priceSurfacePanel,
+:global([data-palette='orange-classic']) .priceSurfacePanel {
+  border: 1px solid var(--p-color-border, #e3e3e3);
+  border-radius: 8px;
+  background: var(--p-color-bg-surface, #ffffff);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.05);
+}
+
+:global([data-palette='admin']) .priceSurfaceGuidePanel,
+:global([data-palette='orange-classic']) .priceSurfaceGuidePanel,
+:global([data-palette='admin']) .priceSurfaceEmptyState,
+:global([data-palette='orange-classic']) .priceSurfaceEmptyState,
+:global([data-palette='admin']) .priceSurfaceAutoMapCard,
+:global([data-palette='orange-classic']) .priceSurfaceAutoMapCard,
+:global([data-palette='admin']) .priceSurfaceInlineStatus,
+:global([data-palette='orange-classic']) .priceSurfaceInlineStatus {
+  border: 1px solid var(--p-color-border, #e3e3e3);
+  border-radius: 8px;
+  background: var(--p-color-bg-surface-secondary, #f7f7f7);
+  box-shadow: none;
 }
 
 .productScopeOptionsRow .scopeCard.scopeCardOption:focus-visible {

@@ -1,4 +1,15 @@
 import React from 'react';
+import {
+  ArrowLeftIcon,
+  ArrowRightIcon,
+  ExternalIcon,
+  MenuHorizontalIcon,
+  PauseCircleIcon,
+  PlayCircleIcon,
+  PlusIcon,
+  SearchIcon,
+  SelectIcon,
+} from '@shopify/polaris-icons';
 
 /**
  * Classic Smart Pricing icons — paths traced from EchoTest Figma
@@ -102,9 +113,9 @@ export function IconScales({ size = 16 }) {
 }
 
 /** Pick manually / Manual pricing — Lucide Box (Figma 60:9155 / 13:1139). */
-export function IconHandPick({ size = 16 }) {
+export function IconHandPick({ size = 16, className, ...rest }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 16 16" aria-hidden>
+    <svg width={size} height={size} viewBox="0 0 16 16" className={className} aria-hidden {...rest}>
       <path
         d="M7.333 14.487a1.333 1.333 0 0 0 1.334 0L13.333 11.82a1.333 1.333 0 0 0 .667-1.153V5.333a1.333 1.333 0 0 0-.667-1.153L8.667 1.513a1.333 1.333 0 0 0-1.334 0L2.667 4.18A1.333 1.333 0 0 0 2 5.333v5.334a1.333 1.333 0 0 0 .667 1.153l4.666 2.667Z"
         {...strokeProps}
@@ -170,9 +181,17 @@ export function IconShield({ size = 14 }) {
   );
 }
 
-export function IconRocket({ size = 16 }) {
+export function IconRocket({ size = 16, className, ...rest }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden>
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      className={className}
+      aria-hidden
+      {...rest}
+    >
       <path
         d="M14 4c3.5 0 6 2.5 6 6-4.5 5-9 7.5-13 8.5L5.5 17 7 14.5C8 10.5 10.5 6 14 4Z"
         stroke="currentColor"
@@ -252,9 +271,17 @@ export function IconPause({ size = 14 }) {
   );
 }
 
-export function IconTrophy({ size = 14 }) {
+export function IconTrophy({ size = 14, className, ...rest }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden>
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 16 16"
+      fill="none"
+      className={className}
+      aria-hidden
+      {...rest}
+    >
       <path d="M4.5 2.5h7v3.2a3.5 3.5 0 0 1-7 0V2.5Z" stroke="currentColor" strokeWidth="1.4" />
       <path
         d="M4.5 4H3a2 2 0 0 0 2 2.8M11.5 4H13a2 2 0 0 1-2 2.8M6.5 12.5h3M8 9v3.5"
@@ -412,9 +439,17 @@ export function IconGear({ size = 14 }) {
 }
 
 /** QR / scan affordance for variation preview. */
-export function IconQr({ size = 14 }) {
+export function IconQr({ size = 14, className, ...rest }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 14 14" fill="none" aria-hidden>
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 14 14"
+      fill="none"
+      className={className}
+      aria-hidden
+      {...rest}
+    >
       <path d="M2.333 2.333h3.5v3.5h-3.5V2.333Z" {...strokeProps} strokeWidth="1.167" />
       <path d="M8.167 2.333h3.5v3.5h-3.5V2.333Z" {...strokeProps} strokeWidth="1.167" />
       <path d="M2.333 8.167h3.5v3.5h-3.5V8.167Z" {...strokeProps} strokeWidth="1.167" />
@@ -579,3 +614,29 @@ export function IconPencil({ size = 18 }) {
     </svg>
   );
 }
+
+/**
+ * Polaris Button `icon` source. Forwards `className` onto the SVG so it
+ * fills the 20px Admin icon slot (no nested span / mixed baseline).
+ */
+export function buttonIcon(Icon, size = 20) {
+  function Source({ className, ...rest }) {
+    return <Icon size={size} className={className} {...rest} />;
+  }
+  Source.displayName = `${Icon.name || 'Icon'}ButtonSource`;
+  return Source;
+}
+
+export const ButtonIconPlus = PlusIcon;
+export const ButtonIconArrowLeft = ArrowLeftIcon;
+export const ButtonIconArrowRight = ArrowRightIcon;
+export const ButtonIconSearch = SearchIcon;
+export const ButtonIconSelect = SelectIcon;
+export const ButtonIconExternalLink = ExternalIcon;
+export const ButtonIconPause = PauseCircleIcon;
+export const ButtonIconPlay = PlayCircleIcon;
+export const ButtonIconMore = MenuHorizontalIcon;
+export const ButtonIconHandPick = buttonIcon(IconHandPick, 20);
+export const ButtonIconTrophy = buttonIcon(IconTrophy, 20);
+export const ButtonIconRocket = buttonIcon(IconRocket, 20);
+export const ButtonIconQr = buttonIcon(IconQr, 20);

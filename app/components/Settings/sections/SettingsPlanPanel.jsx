@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
+import { Badge, Banner, Button } from '@shopify/polaris';
 import { rpxApi } from '../../../lib/api.client';
 import { useUpgradeRedirect } from '../../../lib/useUpgradeRedirect';
 import {
-  isCheckoutReady,
+  describeSmartPricingLaunchReadiness,
   unwrapCheckoutReadiness,
 } from '../../../utils/checkoutReadinessClient';
-import { IconSparkles } from '../../SmartPricing/classic/classicIcons';
 import styles from '../../SmartPricing/classic/SmartPricingClassic.module.css';
 
 /**
@@ -17,12 +17,17 @@ export function usePlanBillingState(ctx, { enabled = true } = {}) {
   const [remote, setRemote] = useState(null);
   const [loadError, setLoadError] = useState(null);
   const [loading, setLoading] = useState(Boolean(enabled));
-  const [checkoutReady, setCheckoutReady] = useState(null);
+  const [launchSummary, setLaunchSummary] = useState(() =>
+    describeSmartPricingLaunchReadiness(null)
+  );
 
   const entitled = remote?.entitled ?? ctx.entitled;
   const planHandle = remote?.planHandle || ctx.planHandle || 'none';
   const upgradeUrl = remote?.upgradeUrl || ctx.upgradeUrl;
   const upgrade = useUpgradeRedirect(upgradeUrl);
+  const checkoutReady = launchSummary.anyReady;
+  const priceReady = launchSummary.priceReady;
+  const offerReady = launchSummary.offerReady;
   const needsSetup = entitled && checkoutReady !== true;
   const unlocked = entitled && checkoutReady === true;
   const canOpenPricing = Boolean(String(upgradeUrl || '').trim());
@@ -42,7 +47,7 @@ export function usePlanBillingState(ctx, { enabled = true } = {}) {
         upgradeUrl: bill.upgradeUrl,
       });
       const readiness = unwrapCheckoutReadiness(readinessPayload);
-      setCheckoutReady(readiness ? isCheckoutReady(readiness) : null);
+      setLaunchSummary(describeSmartPricingLaunchReadiness(readiness));
       setLoadError(null);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : 'Could not load billing status');
@@ -66,6 +71,9 @@ export function usePlanBillingState(ctx, { enabled = true } = {}) {
     planHandle,
     remote,
     checkoutReady,
+    priceReady,
+    offerReady,
+    launchSummary,
     needsSetup,
     unlocked,
     upgrade,
@@ -80,7 +88,7 @@ export function usePlanBillingState(ctx, { enabled = true } = {}) {
           ? 'Plan active — finish Setup before launch'
           : checkoutReady == null
             ? 'Plan active — confirm Setup next'
-            : 'Smart Pricing is unlocked',
+            : launchSummary.title || 'Smart Pricing is unlocked',
   };
 }
 
@@ -96,6 +104,8 @@ export default function SettingsPlanPanel({ ctx, planState }) {
     planHandle,
     remote,
     checkoutReady,
+    priceReady,
+    offerReady,
     unlocked,
     upgrade,
     refresh,
@@ -106,17 +116,16 @@ export default function SettingsPlanPanel({ ctx, planState }) {
 
   return (
     <div>
-      <div className={styles.callout} role="status" style={{ marginBottom: 20 }}>
-        <span className={styles.calloutIcon} aria-hidden>
-          <IconSparkles size={16} />
-        </span>
-        <span className={styles.calloutBody}>
-          <span className={styles.calloutStrong}>{calloutTitle}</span>
-          <span className={styles.calloutMeta}>
+      <div style={{ marginBottom: 20 }}>
+        <Banner
+          tone={unlocked ? 'success' : entitled ? 'info' : 'warning'}
+          title={calloutTitle}
+        >
+          <p>
             Subscriptions are managed by Shopify App Pricing. Plan selection opens outside the app
             iframe; status lives here under Settings.
-          </span>
-        </span>
+          </p>
+        </Banner>
       </div>
 
       {loadError ? <p className={styles.error}>{loadError}</p> : null}
@@ -125,17 +134,9 @@ export default function SettingsPlanPanel({ ctx, planState }) {
         <div className={styles.adminRow}>
           <div className={styles.adminRowHead}>
             <p className={styles.adminRowTitle}>Plan status</p>
-            <span
-              className={`${styles.adminBadge} ${
-                loading
-                  ? styles.adminBadgeNeutral
-                  : entitled
-                    ? styles.adminBadgeOk
-                    : styles.adminBadgeWarn
-              }`}
-            >
+            <Badge tone={loading ? undefined : entitled ? 'success' : 'warning'}>
               {loading ? 'Checking…' : entitled ? 'Active' : 'Locked'}
-            </span>
+            </Badge>
           </div>
           <p className={styles.adminRowBody}>
             Plan: <strong>{loading ? '…' : planHandle}</strong>
@@ -154,45 +155,36 @@ export default function SettingsPlanPanel({ ctx, planState }) {
             </p>
           ) : null}
           <div className={styles.adminRowActions}>
-            <button
-              type="button"
-              className={styles.primaryBtn}
-              onClick={upgrade}
-              disabled={!canOpenPricing}
-            >
+            <Button variant="primary" onClick={upgrade} disabled={!canOpenPricing}>
               {planCtaLabel}
-            </button>
-            <button type="button" className={styles.ghostBtn} onClick={() => void refresh()}>
-              Refresh status
-            </button>
+            </Button>
+            <Button onClick={() => void refresh()}>Refresh status</Button>
           </div>
         </div>
 
         <div className={styles.adminRow}>
           <div className={styles.adminRowHead}>
             <p className={styles.adminRowTitle}>What unlocks</p>
-            <span
-              className={`${styles.adminBadge} ${
-                unlocked
-                  ? styles.adminBadgeOk
-                  : entitled
-                    ? styles.adminBadgeNeutral
-                    : styles.adminBadgeWarn
-              }`}
-            >
+            <Badge tone={unlocked ? 'success' : entitled ? undefined : 'warning'}>
               {unlocked ? 'Unlocked' : entitled ? 'Plan ok · setup pending' : 'Locked'}
-            </span>
+            </Badge>
           </div>
           <p className={styles.adminRowBody}>• Create experiment wizard</p>
-          <p className={styles.adminRowBody}>• Launch / start price tests</p>
+          <p className={styles.adminRowBody}>• Launch price tests (cart transform)</p>
+          <p className={styles.adminRowBody}>• Launch offer tests (checkout discount)</p>
           <p className={styles.adminRowBody}>
-            After upgrading, complete <Link to="/app/setup">Setup</Link> (theme embed, cart
-            transform, price surfaces) before launching. Checkout readiness:{' '}
+            After upgrading, complete <Link to="/app/setup">Setup</Link>. Offer tests need the
+            checkout discount; price tests need cart transform and theme price selectors. Checkout
+            readiness:{' '}
             <strong>
               {loading
                 ? '…'
                 : checkoutReady === true
-                  ? 'ready'
+                  ? offerReady && !priceReady
+                    ? 'offer ready'
+                    : priceReady && !offerReady
+                      ? 'price ready'
+                      : 'ready'
                   : checkoutReady === false
                     ? 'needs attention'
                     : 'unknown'}
@@ -201,17 +193,11 @@ export default function SettingsPlanPanel({ ctx, planState }) {
           </p>
           <div className={styles.adminRowActions}>
             {unlocked ? (
-              <button
-                type="button"
-                className={styles.primaryBtn}
-                onClick={() => navigate('/app/experiments/new')}
-              >
+              <Button variant="primary" onClick={() => navigate('/app/experiments/new')}>
                 Create experiment
-              </button>
+              </Button>
             ) : null}
-            <button type="button" className={styles.ghostBtn} onClick={() => navigate('/app/setup')}>
-              Open Setup checklist
-            </button>
+            <Button onClick={() => navigate('/app/setup')}>Open Setup checklist</Button>
           </div>
         </div>
       </div>

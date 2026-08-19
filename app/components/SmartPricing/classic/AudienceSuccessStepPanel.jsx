@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Button, Select, TextField } from '@shopify/polaris';
 import {
   ALL_CLASSIC_METRIC_OPTIONS,
   CLASSIC_DEVICE_OPTIONS,
@@ -10,11 +11,14 @@ import {
   normalizeSecondaryEvents,
 } from '../targeting/smartPricingAudienceHelpers';
 import ClassicCountryMultiSelect from './ClassicCountryMultiSelect';
+import { getCountryFieldHelp } from './countrySelection';
 import ClassicGoalPickerModal from './ClassicGoalPickerModal';
 import { IconCheck, IconChevron, IconShield, IconWand } from './classicIcons';
+import { createRevenueGuardrailRow, ensureRevenueGuardrailRows } from './revenueGuardrail';
 import styles from './SmartPricingClassic.module.css';
 
 const DEFAULT_GUARDRAILS = [
+  createRevenueGuardrailRow(),
   {
     id: 'page_load',
     label: 'Page load time',
@@ -73,7 +77,7 @@ export function createDefaultAudienceState() {
     primaryCustomGoal: null,
     secondaryMetrics: [],
     customGoals: [],
-    guardrails: DEFAULT_GUARDRAILS,
+    guardrails: ensureRevenueGuardrailRows(DEFAULT_GUARDRAILS),
     minSampleSize: '5000',
     ...normalizeClassicAudienceTargeting({}),
   };
@@ -146,7 +150,7 @@ export default function AudienceSuccessStepPanel({
   const primaryCustomGoal = state.primaryCustomGoal
     ? normalizeCustomGoals([state.primaryCustomGoal])[0] || null
     : null;
-  const guardrails = state.guardrails || DEFAULT_GUARDRAILS;
+  const guardrails = ensureRevenueGuardrailRows(state.guardrails || DEFAULT_GUARDRAILS);
   const { devices, sources, countries, countryMode } = normalizeClassicAudienceTargeting(state);
   const trafficAllocation = Number(state.trafficAllocation) || 50;
   const primaryMetric = primaryCustomGoal?.event_name
@@ -201,15 +205,9 @@ export default function AudienceSuccessStepPanel({
               <IconWand size={16} />
               AI audience targeting
             </div>
-            <button
-              type="button"
-              className={styles.aiTextBtn}
-              onClick={onSuggestAi}
-              disabled={suggestBusy}
-            >
-              <IconWand size={14} />
-              {suggestBusy ? 'Suggesting…' : 'Suggest with AI'}
-            </button>
+            <Button variant="plain" onClick={onSuggestAi} disabled={suggestBusy} loading={suggestBusy}>
+              Suggest with AI
+            </Button>
           </div>
           <p className={styles.aiSuggestBody}>
             {state.aiRationale
@@ -220,19 +218,17 @@ export default function AudienceSuccessStepPanel({
       ) : null}
 
       <div className={styles.field}>
-        <label className={styles.label} htmlFor="classic-audience-segment">
-          Audience segment
-        </label>
-        <select
+        <Select
           id="classic-audience-segment"
-          className={styles.select}
+          label="Audience segment"
+          options={[
+            { label: 'All visitors', value: 'all_visitors' },
+            { label: 'New visitors', value: 'new_visitors' },
+            { label: 'Returning visitors', value: 'returning' },
+          ]}
           value={state.segment || 'all_visitors'}
-          onChange={e => patch({ segment: e.target.value })}
-        >
-          <option value="all_visitors">All visitors</option>
-          <option value="new_visitors">New visitors</option>
-          <option value="returning">Returning visitors</option>
-        </select>
+          onChange={value => patch({ segment: value })}
+        />
       </div>
 
       <div className={styles.field}>
@@ -410,7 +406,9 @@ export default function AudienceSuccessStepPanel({
                   type="button"
                   className={`${styles.toggle} ${row.on ? styles.toggleOn : ''}`}
                   aria-pressed={row.on}
+                  disabled={row.locked || row.id === 'revenue'}
                   onClick={() => {
+                    if (row.locked || row.id === 'revenue') return;
                     const next = guardrails.map((g, i) => (i === index ? { ...g, on: !g.on } : g));
                     patch({ guardrails: next });
                   }}
@@ -423,7 +421,8 @@ export default function AudienceSuccessStepPanel({
         </tbody>
       </table>
       <p className={styles.help}>
-        If any of these regress past its threshold, the experiment will alert or auto-stop.
+        Revenue per visitor is always on and pauses the test if any variation drops past the
+        limit versus control. Other rows alert when those metrics are available.
       </p>
 
       <details
@@ -437,18 +436,14 @@ export default function AudienceSuccessStepPanel({
         </summary>
         <div className={styles.advancedBody}>
           <div className={`${styles.field} ${styles.audienceMinSample}`}>
-            <label className={styles.label} htmlFor="classic-aud-min-sample">
-              Minimum sample size per variation
-            </label>
-            <input
+            <TextField
               id="classic-aud-min-sample"
-              className={styles.input}
-              value={state.minSampleSize ?? '5000'}
-              onChange={e => patch({ minSampleSize: e.target.value })}
+              label="Minimum sample size per variation"
+              value={String(state.minSampleSize ?? '5000')}
+              onChange={value => patch({ minSampleSize: value })}
+              autoComplete="off"
+              helpText="We'll wait for at least this many visitors per variation before calling results."
             />
-            <p className={styles.help}>
-              We&apos;ll wait for at least this many visitors per variation before calling results.
-            </p>
           </div>
 
           <div className={styles.modeRow}>
@@ -507,13 +502,10 @@ export default function AudienceSuccessStepPanel({
             </div>
             <ClassicCountryMultiSelect
               value={countries}
+              mode={countryMode}
               onChange={next => patch({ countries: next })}
             />
-            <p className={styles.help}>
-              {countryMode === 'exclude'
-                ? 'Visitors in these countries will be excluded.'
-                : 'Leave empty to target worldwide.'}
-            </p>
+            <p className={styles.help}>{getCountryFieldHelp(countries, countryMode)}</p>
           </div>
         </div>
       </details>

@@ -22,7 +22,7 @@ export default function PublicClassicShell({
   showNav = true,
 }) {
   return (
-    <div className="rpx-public" data-palette="orange-classic">
+    <div className="rpx-public" data-palette="admin">
       <a className={styles.skip} href="#public-main" style={SKIP_HIDDEN}>
         Skip to content
       </a>

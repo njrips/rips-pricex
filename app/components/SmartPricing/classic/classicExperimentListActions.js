@@ -1,4 +1,9 @@
-import { getPlanExperimentId, getPlanExperimentTitle } from './classicExperimentHelpers';
+import { getPlanExperimentId, getPlanExperimentTitle, rollupExperimentStatus } from './classicExperimentHelpers';
+import {
+  isActionableOfferConfig,
+  isOfferExperimentType,
+  resolveExperimentType,
+} from './offerSelection';
 
 /**
  * Classic wizard completion checks for list-row Launch action.
@@ -21,8 +26,18 @@ export function getClassicExperimentLaunchReadiness(experiment) {
       missing.add('products');
     }
     const arms = Array.isArray(plan.price_arms) ? plan.price_arms : [];
+    const offerExperiment = isOfferExperimentType(resolveExperimentType(experiment) || resolveExperimentType(plan));
     if (arms.length < 2) {
-      missing.add('pricing');
+      missing.add(offerExperiment ? 'offers' : 'pricing');
+    } else if (offerExperiment) {
+      const hasOffer = arms.some(
+        (arm, index) =>
+          index > 0 &&
+          arm?.role !== 'control' &&
+          arm?.id !== 'control' &&
+          isActionableOfferConfig(arm.offer)
+      );
+      if (!hasOffer) missing.add('offers');
     } else if (!arms.every(arm => Number.isFinite(Number(arm?.price)) && Number(arm.price) > 0)) {
       missing.add('pricing');
     }
@@ -56,82 +71,71 @@ export function getClassicExperimentLaunchReadiness(experiment) {
 export function collectExperimentTestIds(plans = []) {
   const ids = new Set();
   (Array.isArray(plans) ? plans : []).forEach(plan => {
-    const id = String(plan?.test_id || '').trim();
+    const id = String(plan?.test_id || plan?.metadata?.test_id || '').trim();
     if (id) ids.add(id);
   });
   return [...ids];
 }
 
+export function isClassicExperimentEnded(status) {
+  const key = String(status || '')
+    .trim()
+    .toLowerCase();
+  return (
+    key === 'winner_ready' ||
+    key === 'applied' ||
+    key === 'completed' ||
+    key === 'complete' ||
+    key === 'ended'
+  );
+}
+
 export function resolveClassicExperimentMenuActions(experiment, { checkoutReady = false } = {}) {
   const plans = Array.isArray(experiment?.plans) ? experiment.plans : [];
-  const archived = Boolean(experiment?.archived) || plans.every(p => p.archived === true);
-  const status = String(experiment?.status || '')
+  const archived =
+    Boolean(experiment?.archived) ||
+    (plans.length > 0 && plans.every(p => p.archived === true)) ||
+    rollupExperimentStatus(plans) === 'archived';
+  const status = String(rollupExperimentStatus(plans) || experiment?.status || '')
     .trim()
     .toLowerCase();
   const launch = getClassicExperimentLaunchReadiness(experiment);
   const testIds = collectExperimentTestIds(plans);
 
-  const draftLike =
-    status === 'draft' ||
-    status === 'queued' ||
-    plans.some(p => {
-      const s = String(p.status || '')
-        .trim()
-        .toLowerCase();
-      return s === 'draft' || s === 'queued';
-    });
-  const running =
-    status === 'running' ||
-    plans.some(p => {
-      const s = String(p.status || '')
-        .trim()
-        .toLowerCase();
-      return s === 'running' || (p.test_id && s !== 'paused' && s !== 'draft' && s !== 'queued');
-    });
-  const paused =
-    status === 'paused' ||
-    plans.some(
-      p =>
-        String(p.status || '')
-          .trim()
-          .toLowerCase() === 'paused'
-    );
-  const winnerReady = status === 'winner_ready';
-  const completed = status === 'applied' || status === 'completed';
+  const isDraft = !archived && (status === 'draft' || status === 'queued');
+  const isRunning = !archived && status === 'running';
+  const isPaused = !archived && (status === 'paused' || status === 'stopped');
+  const isEnded = !archived && isClassicExperimentEnded(status);
 
   const actions = [{ id: 'view', label: 'View details' }];
 
-  if (!archived && draftLike && !launch.ready) {
+  if (isDraft && !launch.ready) {
     actions.push({ id: 'continue', label: 'Continue setup' });
   }
 
-  if (!archived && draftLike && launch.ready && checkoutReady) {
+  if (isDraft && launch.ready && checkoutReady) {
     actions.push({ id: 'launch', label: 'Launch experiment' });
   }
 
-  if (!archived && running && testIds.length) {
+  if (isRunning && testIds.length) {
     actions.push({ id: 'pause', label: 'Pause' });
-  }
-
-  if (!archived && paused && testIds.length) {
+  } else if (isPaused && testIds.length) {
     actions.push({ id: 'resume', label: 'Resume' });
   }
 
-  if (testIds.length === 1) {
-    actions.push({ id: 'open_test', label: 'Open price test' });
-  } else if (testIds.length > 1) {
-    actions.push({ id: 'open_test', label: 'Open first test' });
-  }
-
-  if (!archived && (running || paused || winnerReady || completed)) {
+  if (isPaused || isEnded) {
     actions.push({ id: 'archive', label: 'Archive' });
   }
 
   if (archived) {
     actions.push({ id: 'restore', label: 'Restore' });
     actions.push({ id: 'delete', label: 'Delete', destructive: true });
-  } else if (draftLike && !testIds.length) {
-    actions.push({ id: 'delete', label: 'Delete draft', destructive: true });
+  } else {
+    actions.push({
+      id: 'delete',
+      label: isDraft && !testIds.length ? 'Delete draft' : 'Delete',
+      destructive: true,
+    });
   }
 
   return actions;
@@ -141,4 +145,89 @@ export function getClassicExperimentResumeId(experiment) {
   const plans = Array.isArray(experiment?.plans) ? experiment.plans : [];
   const rep = experiment?.representative || plans[0];
   return getPlanExperimentId(rep) || experiment?.id || rep?.id || '';
+}
+
+export const CLASSIC_DETAILS_TABS = [
+  'Overview',
+  'Performance',
+  'Variations',
+  'Audience',
+  'Metrics',
+  'Activity',
+  'Settings',
+];
+
+export function resolveClassicDetailsTab(raw) {
+  const key = String(raw || '')
+    .trim()
+    .toLowerCase();
+  return CLASSIC_DETAILS_TABS.find(id => id.toLowerCase() === key) || 'Overview';
+}
+
+/** Resume the create wizard. `step` is a CLASSIC_CREATE_STEPS id (e.g. audience). */
+export function buildClassicWizardResumePath(resumeId, stepId) {
+  const params = new URLSearchParams();
+  const id = String(resumeId || '').trim();
+  if (id) params.set('resume', id);
+  const step = String(stepId || '')
+    .trim()
+    .toLowerCase();
+  if (step) params.set('step', step);
+  const query = params.toString();
+  return query ? `/app/experiments/new?${query}` : '/app/experiments/new';
+}
+
+/**
+ * Filter grouped experiment rows by the Classic list tab.
+ * Uses rollup status so a multi-product experiment stays one row.
+ */
+export function filterClassicExperimentsByTab(experiments = [], filter = 'all') {
+  const rows = Array.isArray(experiments) ? experiments : [];
+  const tab = String(filter || 'all')
+    .trim()
+    .toLowerCase();
+  const isArchived = experiment =>
+    Boolean(experiment?.archived) || String(experiment?.status || '') === 'archived';
+
+  if (tab === 'archived') {
+    return rows.filter(isArchived);
+  }
+
+  const live = rows.filter(experiment => !isArchived(experiment));
+  if (tab === 'running') return live.filter(experiment => experiment.status === 'running');
+  if (tab === 'draft') {
+    return live.filter(experiment => experiment.status === 'draft' || experiment.status === 'queued');
+  }
+  if (tab === 'paused') {
+    return live.filter(experiment => experiment.status === 'paused' || experiment.status === 'stopped');
+  }
+  if (tab === 'completed') {
+    return live.filter(experiment => isClassicExperimentEnded(experiment.status));
+  }
+  return live;
+}
+
+/** Which list tab should be selected after a row action so the experiment stays visible. */
+export function listTabAfterClassicAction(action, experiment, currentTab = 'all') {
+  const key = String(action || '')
+    .trim()
+    .toLowerCase();
+  if (key === 'pause') return 'paused';
+  if (key === 'resume' || key === 'launch') return 'running';
+  if (key === 'archive') return 'archived';
+  if (key === 'restore') {
+    const plans = (Array.isArray(experiment?.plans) ? experiment.plans : []).map(plan => ({
+      ...plan,
+      archived: false,
+    }));
+    const status = String(rollupExperimentStatus(plans) || experiment?.status || '')
+      .trim()
+      .toLowerCase();
+    if (status === 'running') return 'running';
+    if (status === 'paused' || status === 'stopped') return 'paused';
+    if (isClassicExperimentEnded(status)) return 'completed';
+    if (status === 'draft' || status === 'queued') return 'draft';
+    return 'all';
+  }
+  return currentTab || 'all';
 }

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { resolveCountryToCode } from '../../../utils/iso3166CountryDisplay';
+import { collapseCountrySelection } from './countrySelection';
 import { useNavigate, useSearchParams } from 'react-router';
 import PageShell from '../../shared/PageShell';
 import { ROUTES } from '../../../constants';
@@ -35,10 +35,13 @@ import {
   stripClassicAudienceTargetingFields,
 } from '../targeting/smartPricingAudienceHelpers';
 import ClassicWizardShell from './ClassicWizardShell';
-import SetupStepPanel from './SetupStepPanel';
+import { classicCreateStepIndex } from './classicCreateSteps';
+import SetupStepPanel, { EXPERIMENT_TYPES } from './SetupStepPanel';
 import VariationsStepPanel, { createDefaultVariations, trafficTotal } from './VariationsStepPanel';
+import { variationsFromPlanArms } from './variationsStepHelpers';
 import ProductsPricingStepPanel from './ProductsPricingStepPanel';
 import AudienceSuccessStepPanel, { createDefaultAudienceState } from './AudienceSuccessStepPanel';
+import { ensureRevenueGuardrailRows } from './revenueGuardrail';
 import ReviewLaunchStepPanel from './ReviewLaunchStepPanel';
 import {
   clearClassicWizardDraft,
@@ -48,6 +51,18 @@ import {
   upsertExperimentPlansInInbox,
   writeClassicWizardDraft,
 } from './classicExperimentHelpers';
+import {
+  formatCatalogLoadError,
+  getProductsStepContinueState,
+  resolvePricingRows,
+} from './productsStepReadiness';
+import {
+  isActionableOfferConfig,
+  getOfferCheckoutBlockReason,
+  isOfferExperimentType,
+  normalizeOfferConfig,
+  offerByArmFromPlanArms,
+} from './offerSelection';
 import styles from './SmartPricingClassic.module.css';
 
 function createExperimentId() {
@@ -63,37 +78,6 @@ function segmentsFromClassicAudience(audienceState, baseSegments) {
   );
 }
 
-function productGroupKey(row) {
-  return (
-    row?.product_id || row?.product_gid || row?.product_title || row?.title || row?.variant_id || ''
-  );
-}
-
-/** Same SKU set the pricing table uses (all variants of selected products). */
-function resolvePricingRows({
-  opportunities = [],
-  selectedIds = [],
-  pickMode = 'manual',
-  maxSelection = 100,
-} = {}) {
-  const allRows = opportunities || [];
-  if (pickMode === 'all') {
-    const byProduct = new Map();
-    allRows.forEach(row => {
-      const key = productGroupKey(row);
-      if (!byProduct.has(key)) byProduct.set(key, []);
-      byProduct.get(key).push(row);
-    });
-    return Array.from(byProduct.values()).slice(0, maxSelection).flat();
-  }
-  const selected = new Set((selectedIds || []).map(id => String(id)));
-  const selectedProductKeys = new Set(
-    allRows.filter(row => selected.has(String(row.variant_id))).map(productGroupKey)
-  );
-  if (!selectedProductKeys.size) return [];
-  return allRows.filter(row => selectedProductKeys.has(productGroupKey(row)));
-}
-
 function roundMoney(value) {
   const n = Number(value);
   if (!Number.isFinite(n) || n < 0) return 0;
@@ -101,7 +85,12 @@ function roundMoney(value) {
 }
 
 /** Rebuild plan arms Control-first from wizard variations + overrides. */
-function rebuildPlanArmsFromVariations(plan, variations = [], priceOverrides = {}) {
+function rebuildPlanArmsFromVariations(
+  plan,
+  variations = [],
+  priceOverrides = {},
+  offerByArm = {}
+) {
   const base = Number(plan?.current_price) || 0;
   const variantId = plan?.variant_id;
   return (variations || []).map((variation, index) => {
@@ -115,6 +104,7 @@ function rebuildPlanArmsFromVariations(plan, variations = [], priceOverrides = {
       Number.isFinite(Number(raw));
     const price = isControl ? base : hasOverride ? Number(raw) : base;
     const delta = base > 0 ? ((price - base) / base) * 100 : 0;
+    const offer = isControl ? null : normalizeOfferConfig(offerByArm[variation.id]);
     return {
       id: variation.id || (isControl ? 'control' : `arm_${index + 1}`),
       role: isControl ? 'control' : 'challenger',
@@ -123,6 +113,7 @@ function rebuildPlanArmsFromVariations(plan, variations = [], priceOverrides = {
       delta_percent: roundMoney(delta),
       traffic_percent: Number(variation.traffic) || 0,
       allocation_percent: Number(variation.traffic) || 0,
+      offer: isControl || !isActionableOfferConfig(offer) ? null : offer,
     };
   });
 }
@@ -132,6 +123,7 @@ export default function ClassicCreateWizard() {
   const [searchParams] = useSearchParams();
   const shopDomain = useClassicShopDomain();
   const resumeId = String(searchParams.get('resume') || '').trim();
+  const stepParam = String(searchParams.get('step') || '').trim();
 
   const [step, setStep] = useState(0);
   const [message, setMessage] = useState('');
@@ -159,17 +151,20 @@ export default function ClassicCreateWizard() {
     { label: 'All products', value: '' },
   ]);
   const [loadingProducts, setLoadingProducts] = useState(false);
+  const [productsLoadError, setProductsLoadError] = useState('');
   // Default to first test variation so Manual price inputs are editable (Control is read-only).
   const [activeArmIndex, setActiveArmIndex] = useState(1);
   /** Per-variation pricing UI (mode + bulk/AI bands). Prices themselves live in priceOverrides keyed by variant::arm. */
   const [pricingByArm, setPricingByArm] = useState({});
   const [priceOverrides, setPriceOverrides] = useState({});
+  const [offerByArm, setOfferByArm] = useState({});
   const [aiPriceMeta, setAiPriceMeta] = useState({
     source: null,
     summary: null,
     busy: false,
   });
   const aiSuggestRequestId = useRef(0);
+  const productsLoadRequestId = useRef(0);
 
   const activeArmId = variations[activeArmIndex]?.id || 'control';
   const activePricing = pricingByArm[activeArmId] || {};
@@ -232,9 +227,14 @@ export default function ClassicCreateWizard() {
   const {
     readiness: checkoutReadiness,
     checkoutReady,
+    offerCheckoutReady,
     loading: checkoutLoading,
     refresh: refreshCheckoutReadiness,
   } = useSmartPricingCheckoutReadiness(shopDomain);
+  const isOfferTest = isOfferExperimentType(experimentType);
+  const launchCheckoutReady = isOfferTest ? offerCheckoutReady : checkoutReady;
+  const experimentTypeLabel =
+    EXPERIMENT_TYPES.find(type => type.id === experimentType)?.title || 'Price test';
 
   const backToList = () => navigate(ROUTES.appSmartPricing(shopDomain));
   const openCheckoutSetup = () => {
@@ -270,6 +270,7 @@ export default function ClassicCreateWizard() {
       activeArmIndex,
       pricingByArm,
       priceOverrides,
+      offerByArm,
       scenarioPreset,
       audience,
       globalAudience,
@@ -292,6 +293,7 @@ export default function ClassicCreateWizard() {
       activeArmIndex,
       pricingByArm,
       priceOverrides,
+      offerByArm,
       scenarioPreset,
       audience,
       globalAudience,
@@ -359,6 +361,9 @@ export default function ClassicCreateWizard() {
     if (snapshot.priceOverrides && typeof snapshot.priceOverrides === 'object') {
       setPriceOverrides(snapshot.priceOverrides);
     }
+    if (snapshot.offerByArm && typeof snapshot.offerByArm === 'object') {
+      setOfferByArm(snapshot.offerByArm);
+    }
     if (snapshot.scenarioPreset) setScenarioPreset(snapshot.scenarioPreset);
     if (snapshot.audience) {
       const nextAudience = {
@@ -371,6 +376,7 @@ export default function ClassicCreateWizard() {
         primaryCustomGoal: snapshot.audience.primaryCustomGoal
           ? normalizeCustomGoals([snapshot.audience.primaryCustomGoal])[0] || null
           : null,
+        guardrails: ensureRevenueGuardrailRows(snapshot.audience.guardrails),
       };
       setAudience(nextAudience);
       setGlobalAudience(segmentsFromClassicAudience(nextAudience, snapshot.globalAudience));
@@ -401,6 +407,16 @@ export default function ClassicCreateWizard() {
             first.metadata?.experiment_title || String(first.title || '').split(' · ')[0] || ''
           );
           setHypothesis(first.hypothesis || first.metadata?.hypothesis || '');
+          const restoredType =
+            first.experiment_type || first.metadata?.experiment_type || 'price_test';
+          setExperimentType(restoredType);
+          const restoredArms = Array.isArray(first.price_arms) ? first.price_arms : [];
+          if (restoredArms.length >= 2) {
+            setVariations(variationsFromPlanArms(restoredArms, restoredType));
+            setOfferByArm(offerByArmFromPlanArms(restoredArms));
+          }
+          const restoredIds = inboxPlans.map(plan => plan.variant_id).filter(Boolean);
+          if (restoredIds.length) setSelectedIds(restoredIds);
           setPlans(inboxPlans);
           if (first.metadata?.audience_ui) {
             const nextAudience = {
@@ -415,6 +431,7 @@ export default function ClassicCreateWizard() {
               primaryCustomGoal: first.metadata.audience_ui.primaryCustomGoal
                 ? normalizeCustomGoals([first.metadata.audience_ui.primaryCustomGoal])[0] || null
                 : null,
+              guardrails: ensureRevenueGuardrailRows(first.metadata.audience_ui.guardrails),
             };
             setAudience(nextAudience);
             setGlobalAudience(
@@ -442,6 +459,13 @@ export default function ClassicCreateWizard() {
 
   useEffect(() => {
     if (!draftHydrated) return;
+    const index = classicCreateStepIndex(stepParam);
+    if (index == null) return;
+    setStep(index);
+  }, [draftHydrated, stepParam]);
+
+  useEffect(() => {
+    if (!draftHydrated) return;
     setExperimentId(prev => (prev ? prev : createExperimentId()));
   }, [draftHydrated]);
 
@@ -450,6 +474,15 @@ export default function ClassicCreateWizard() {
       const data = await getSmartPricingGuardrails(shopDomain);
       const g = data?.guardrails || data || {};
       setShopGuardrails(g && typeof g === 'object' ? g : {});
+      if (Number.isFinite(Number(g.max_revenue_drop_percent))) {
+        setAudience(prev => ({
+          ...prev,
+          guardrails: ensureRevenueGuardrailRows(
+            prev?.guardrails,
+            Number(g.max_revenue_drop_percent)
+          ),
+        }));
+      }
       if (g.default_scenario_preset) setScenarioPreset(g.default_scenario_preset);
       if (g.default_audience_template) {
         setGlobalAudience(normalizeAudienceSegments(g.default_audience_template));
@@ -460,7 +493,12 @@ export default function ClassicCreateWizard() {
     }
   }, [shopDomain]);
 
+  const pickModeRef = useRef(pickMode);
+  pickModeRef.current = pickMode;
+
   const loadOpportunities = useCallback(async () => {
+    const requestId = productsLoadRequestId.current + 1;
+    productsLoadRequestId.current = requestId;
     setLoadingProducts(true);
     try {
       // Classic wizard product picker needs the full catalog.
@@ -469,23 +507,29 @@ export default function ClassicCreateWizard() {
         filter: 'all',
         refresh: false,
       });
-      const rows = data?.opportunities || [];
+      if (productsLoadRequestId.current !== requestId) return;
+      const rows = Array.isArray(data?.opportunities) ? data.opportunities : [];
+      if (data?.error && !rows.length) {
+        throw new Error(String(data.error));
+      }
       setOpportunities(rows);
+      setProductsLoadError('');
       setSelectedIds(prev => {
         if (prev.length > 0) return prev;
-        if (pickMode !== 'all') return prev;
+        if (pickModeRef.current !== 'all') return prev;
         const defaults =
           data?.default_selected_variant_ids || rows.map(r => r.variant_id).filter(Boolean);
         return defaults.length ? defaults.slice(0, maxSelection) : prev;
       });
     } catch (err) {
-      setMessageType('error');
-      setMessage(err.message || 'Could not load products.');
-      setOpportunities([]);
+      if (productsLoadRequestId.current !== requestId) return;
+      setProductsLoadError(formatCatalogLoadError(err));
     } finally {
-      setLoadingProducts(false);
+      if (productsLoadRequestId.current === requestId) {
+        setLoadingProducts(false);
+      }
     }
-  }, [shopDomain, pickMode, maxSelection]);
+  }, [shopDomain, maxSelection]);
 
   useEffect(() => {
     loadGuardrails();
@@ -535,7 +579,12 @@ export default function ClassicCreateWizard() {
           .map(row => [String(row.variant_id), row])
       );
       nextPlans = nextPlans.map(plan => {
-        const rebuiltArms = rebuildPlanArmsFromVariations(plan, variations, priceOverrides);
+        const rebuiltArms = rebuildPlanArmsFromVariations(
+          plan,
+          variations,
+          priceOverrides,
+          offerByArm
+        );
         const opp = opportunityByVariant.get(String(plan.variant_id || '')) || null;
         const productHandle = String(
           plan.handle || plan.product_handle || opp?.handle || opp?.product_handle || ''
@@ -625,6 +674,7 @@ export default function ClassicCreateWizard() {
     name,
     hypothesis,
     priceOverrides,
+    offerByArm,
     audience,
     experimentId,
     experimentType,
@@ -661,9 +711,10 @@ export default function ClassicCreateWizard() {
             traffic_allocation: audienceState.trafficAllocation,
             devices: audienceState.devices,
             sources: audienceState.sources,
-            countries: (audienceState.countries || [])
-              .map(c => resolveCountryToCode(c))
-              .filter(Boolean),
+            countries: collapseCountrySelection(
+              audienceState.countries,
+              audienceState.countryMode || 'include'
+            ),
             device_mode: audienceState.deviceMode || 'include',
             source_mode: audienceState.sourceMode || 'include',
             country_mode: audienceState.countryMode || 'include',
@@ -1057,9 +1108,9 @@ export default function ClassicCreateWizard() {
         setMessage('Experiment name is required.');
         return;
       }
-      if (experimentType !== 'price_test') {
+      if (experimentType !== 'price_test' && experimentType !== 'offer_test') {
         setMessageType('error');
-        setMessage('Smart Pricing currently supports Price test experiments.');
+        setMessage('Smart Pricing currently supports Price test and Offer test experiments.');
         return;
       }
       setStep(1);
@@ -1071,21 +1122,45 @@ export default function ClassicCreateWizard() {
         setMessage('Traffic must total 100%.');
         return;
       }
+      setLoadingProducts(true);
+      setProductsLoadError('');
       setStep(2);
       return;
     }
     if (step === 2) {
+      const gate = getProductsStepContinueState({
+        loadingProducts,
+        productsLoadError,
+        pickMode,
+        opportunities,
+        selectedIds,
+        maxSelection,
+        variations,
+        priceOverrides,
+        experimentType,
+        offerByArm,
+      });
+      if (gate.disabled) {
+        setMessageType('error');
+        setMessage(
+          gate.hint ||
+            (gate.reason === 'load_error'
+              ? productsLoadError || 'Could not load products.'
+              : gate.reason === 'no_offer'
+                ? 'Set a percent or amount-off offer on at least one test variation.'
+                : 'Finish selecting a product and a test price before continuing.')
+        );
+        return;
+      }
       try {
-        if (pickMode === 'manual' && !selectedIds.length) {
-          setMessageType('error');
-          setMessage('Select at least one product.');
-          return;
-        }
         await buildBatch();
         setStep(3);
       } catch (err) {
         setMessageType('error');
-        setMessage(err.message || 'Could not build price plans.');
+        setMessage(
+          err.message ||
+            (isOfferTest ? 'Could not build offer plans.' : 'Could not build price plans.')
+        );
       }
       return;
     }
@@ -1097,21 +1172,33 @@ export default function ClassicCreateWizard() {
       return;
     }
     if (step === 4) {
+      if (busy || launching) {
+        return;
+      }
       if (checkoutLoading) {
         setMessageType('error');
         setMessage('Still checking checkout readiness. Try again in a moment.');
         return;
       }
-      if (!checkoutReady) {
+      if (!launchCheckoutReady) {
         setMessageType('error');
         const detail =
           checkoutReadiness?.message ||
           (Array.isArray(checkoutReadiness?.failed_checks) && checkoutReadiness.failed_checks[0]) ||
           'Fix Setup before launching.';
-        setMessage(`Checkout is not ready. ${detail}`);
+        setMessage(
+          isOfferTest
+            ? `Offer checkout is not ready. ${getOfferCheckoutBlockReason(checkoutReadiness)}`
+            : `Checkout is not ready. ${detail}`
+        );
         return;
       }
       const enriched = enrichPlansForLaunch();
+      if (!enriched.length) {
+        setMessageType('error');
+        setMessage('No products to launch. Go back to Products and select at least one.');
+        return;
+      }
       const merged = upsertExperimentPlansInInbox(
         readInboxPlans(shopDomain),
         enriched,
@@ -1142,6 +1229,33 @@ export default function ClassicCreateWizard() {
   };
 
   const continueLabel = step === 4 ? 'Launch experiment' : 'Continue';
+  const productsStepGate = useMemo(
+    () =>
+      getProductsStepContinueState({
+        loadingProducts,
+        productsLoadError,
+        pickMode,
+        opportunities,
+        selectedIds,
+        maxSelection,
+        variations,
+        priceOverrides,
+        experimentType,
+        offerByArm,
+      }),
+    [
+      loadingProducts,
+      productsLoadError,
+      pickMode,
+      opportunities,
+      selectedIds,
+      maxSelection,
+      variations,
+      priceOverrides,
+      experimentType,
+      offerByArm,
+    ]
+  );
 
   const estimatedDays =
     plans[0]?.statistical_design?.estimated_duration_days ||
@@ -1151,10 +1265,13 @@ export default function ClassicCreateWizard() {
     <PageShell message={message} messageType={messageType} onCloseMessage={() => setMessage('')}>
       <ClassicWizardShell
         stepIndex={step}
+        experimentType={experimentType}
         onBackToList={backToList}
         onBack={() => setStep(s => Math.max(0, s - 1))}
         onContinue={goNext}
         continueLabel={continueLabel}
+        continueDisabled={step === 2 && productsStepGate.disabled}
+        continueDisabledReason={step === 2 ? productsStepGate.hint : ''}
         continueBusy={busy || launching}
         showCancel={step === 0}
         onCancel={backToList}
@@ -1176,14 +1293,44 @@ export default function ClassicCreateWizard() {
             onGenerateHypothesis={generateHypothesisWithAi}
             hypothesisBusy={hypothesisBusy}
             experimentType={experimentType}
-            onExperimentTypeChange={setExperimentType}
+            onExperimentTypeChange={nextType => {
+              const nextOffer = isOfferExperimentType(nextType);
+              setExperimentType(nextType);
+              setPlans([]);
+              if (nextOffer) {
+                setPriceOverrides({});
+              } else {
+                setOfferByArm({});
+              }
+              setVariations(prev =>
+                prev.map((row, index) => {
+                  if (index !== 0 && row.id !== 'control') return row;
+                  const desc = String(row.description || '');
+                  if (
+                    !desc ||
+                    desc === 'Current price' ||
+                    desc === 'No offer (baseline)'
+                  ) {
+                    return {
+                      ...row,
+                      description: nextOffer ? 'No offer (baseline)' : 'Current price',
+                    };
+                  }
+                  return row;
+                })
+              );
+            }}
             minSampleSize={minSampleSize}
             onMinSampleSizeChange={setMinSampleSize}
           />
         ) : null}
 
         {step === 1 ? (
-          <VariationsStepPanel variations={variations} onChange={setVariations} />
+          <VariationsStepPanel
+            variations={variations}
+            onChange={setVariations}
+            experimentType={experimentType}
+          />
         ) : null}
 
         {step === 2 ? (
@@ -1253,6 +1400,12 @@ export default function ClassicCreateWizard() {
             onAiMinPctChange={setAiMinPct}
             onAiMaxPctChange={setAiMaxPct}
             loading={loadingProducts}
+            loadError={productsLoadError}
+            onRetryLoad={loadOpportunities}
+            continueHint={productsStepGate.hint}
+            experimentType={experimentType}
+            offerByArm={offerByArm}
+            onOfferByArmChange={setOfferByArm}
           />
         ) : null}
 
@@ -1270,6 +1423,8 @@ export default function ClassicCreateWizard() {
           <ReviewLaunchStepPanel
             name={name}
             hypothesis={hypothesis}
+            experimentType={experimentType}
+            experimentTypeLabel={experimentTypeLabel}
             variations={variations}
             selectedCount={selectedIds.length}
             pickMode={pickMode}
@@ -1277,9 +1432,10 @@ export default function ClassicCreateWizard() {
             bulkPercent={bulkPercent}
             bulkDirection={bulkDirection}
             pricingByArm={pricingByArm}
+            offerByArm={offerByArm}
             audience={audience}
             estimatedDays={estimatedDays}
-            checkoutReady={checkoutReady}
+            checkoutReady={launchCheckoutReady}
             checkoutLoading={checkoutLoading}
             checkoutReadiness={checkoutReadiness}
             shopDomain={shopDomain}

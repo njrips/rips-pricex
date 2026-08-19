@@ -14,14 +14,15 @@ describe('smartPricingLaunchGuardService', () => {
     getTestsByShop.mockReset();
   });
 
-  it('counts only running price tests', async () => {
+  it('counts running price and offer tests, not other types', async () => {
     getTestsByShop.mockResolvedValue([
       { id: 1, type: 'price', status: 'running' },
       { id: 2, type: 'checkout', status: 'running' },
       { id: 3, type: 'pricing', status: 'running' },
+      { id: 4, type: 'offer', status: 'running' },
     ]);
 
-    await expect(countRunningPriceTests('demo.myshopify.com')).resolves.toBe(2);
+    await expect(countRunningPriceTests('demo.myshopify.com')).resolves.toBe(3);
   });
 
   it('allows launch when under parallel limit', async () => {

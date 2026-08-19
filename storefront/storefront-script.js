@@ -4257,6 +4257,12 @@
         out._ripx_offer_code_name = offerCodeName;
       }
     }
+    if (offerProof && offerProof.message) {
+      var offerMessage = String(offerProof.message || '').trim();
+      if (offerMessage) {
+        out._ripx_offer_message = offerMessage.slice(0, 120);
+      }
+    }
     return out;
   }
 
@@ -4273,6 +4279,7 @@
     '_ripx_offer_discount_type',
     '_ripx_offer_discount_value',
     '_ripx_offer_code_name',
+    '_ripx_offer_message',
   ];
   var RIPX_LEGACY_BUYER_VISIBLE_PROPERTY_KEY = 'RipX';
   var RIPX_BUYER_VISIBLE_PROPERTY_KEY = '_ripx_summary';
@@ -4284,7 +4291,9 @@
   }
   function getRipxBuyerVisibleLineSummary(payload) {
     var variant = payload && payload._ripx_variant ? String(payload._ripx_variant).trim() : '';
-    var label = payload && payload.__ripx_shipping_test ? 'Shipping Test' : 'Price Test';
+    var label = 'Price Test';
+    if (payload && payload.__ripx_shipping_test) label = 'Shipping Test';
+    else if (payload && payload._ripx_offer_discount_type) label = 'Offer Test';
     return variant ? label + ': ' + variant : label + ' Applied';
   }
   function forEachRipxLineProperty(payload, callback) {
@@ -4450,6 +4459,12 @@
       payload._ripx_offer_code_name,
       preserveExisting
     );
+    setRipxAttrValueOnFormData(
+      formData,
+      'properties[_ripx_offer_message]',
+      payload._ripx_offer_message,
+      preserveExisting
+    );
     forEachRipxLineProperty(payload, function (propKey, value) {
       setRipxAttrValueOnFormData(formData, 'properties[' + propKey + ']', value, preserveExisting);
     });
@@ -4601,6 +4616,12 @@
       params,
       'properties[_ripx_offer_code_name]',
       payload._ripx_offer_code_name,
+      preserveExisting
+    );
+    setRipxAttrValueOnSearchParams(
+      params,
+      'properties[_ripx_offer_message]',
+      payload._ripx_offer_message,
       preserveExisting
     );
     forEachRipxLineProperty(payload, function (propKey, value) {
@@ -4924,6 +4945,7 @@
                 propsPayload._ripx_offer_discount_value
               );
               setPropIfMissing('_ripx_offer_code_name', propsPayload._ripx_offer_code_name);
+              setPropIfMissing('_ripx_offer_message', propsPayload._ripx_offer_message);
               forEachRipxLineProperty(propsPayload, setPropIfMissing);
               return nextProps;
             }
@@ -6654,6 +6676,9 @@
       if (state._ripx_offer_code_name) {
         setProperty('_ripx_offer_code_name', state._ripx_offer_code_name);
       }
+      if (state._ripx_offer_message) {
+        setProperty('_ripx_offer_message', state._ripx_offer_message);
+      }
       forEachRipxLineProperty(state, setProperty);
       var swapState = getRipxNativeVariantSwapState(state);
       if (swapState) {
@@ -6845,6 +6870,9 @@
       if (!nextState._ripx_offer_code_name && _ripxCartAttributeState._ripx_offer_code_name) {
         nextState._ripx_offer_code_name = _ripxCartAttributeState._ripx_offer_code_name;
       }
+      if (!nextState._ripx_offer_message && _ripxCartAttributeState._ripx_offer_message) {
+        nextState._ripx_offer_message = _ripxCartAttributeState._ripx_offer_message;
+      }
     }
     _ripxCartAttributeState = nextState;
     if (PREVIEW_MODE && testId != null && variantId != null) {
@@ -6969,6 +6997,10 @@
       config.zone_countries ||
       config.zoneCountries
     );
+  }
+  function configLooksLikeOffer(config) {
+    if (!config || typeof config !== 'object') return false;
+    return isActionableOfferConfig(config);
   }
 
   function makeSyntheticPreviewShippingTest() {
@@ -7376,6 +7408,17 @@
         previewSynthetic: true,
       };
     }
+    function makeSyntheticPreviewOfferTest() {
+      if (!(PREVIEW_MODE && PREVIEW_TEST_ID)) return null;
+      return {
+        id: PREVIEW_TEST_ID,
+        type: 'offer',
+        targetType: 'product',
+        targetIds: null,
+        targetId: null,
+        previewSynthetic: true,
+      };
+    }
     function tryHydratePreviewCartAddState() {
       if (!(PREVIEW_MODE && PREVIEW_TEST_ID)) return Promise.resolve(null);
       return getVariant(PREVIEW_TEST_ID)
@@ -7385,7 +7428,9 @@
           if (!test && variant.config) {
             test = configLooksLikeShipping(variant.config)
               ? makeSyntheticPreviewShippingTest()
-              : makeSyntheticPreviewPriceTest();
+              : configLooksLikeOffer(variant.config)
+                ? makeSyntheticPreviewOfferTest()
+                : makeSyntheticPreviewPriceTest();
           }
           if (test && testTypeIsPrice(test)) {
             seedFixedPriceCartAttributesWithoutProductId(
@@ -7399,6 +7444,8 @@
             } else {
               injectPreviewCartAttributesWhenConfigMissing(PREVIEW_TEST_ID, variant);
             }
+          } else if (test && testTypeIsOffer(test)) {
+            injectOfferTestCartAttributes(test, variant);
           } else if (test && testTypeIsShipping(test)) {
             if (_ripxShippingPreviewHandoffDeferred) {
               finalizeShippingPreviewCartHandoff(test, variant, reason || 'cart_add_preview');
@@ -7450,9 +7497,14 @@
         var tests = Array.isArray(CONFIG.activeTests) ? CONFIG.activeTests : [];
         for (var i = 0; i < tests.length; i += 1) {
           var test = tests[i];
-          if (!testTypeIsPrice(test)) continue;
           var variant = cache && (cache[test.id] || cache[String(test.id)]);
           if (!variant) continue;
+          if (testTypeIsOffer(test)) {
+            injectOfferTestCartAttributes(test, variant);
+            if (isRipxCartAddStateReady(_ripxCartAttributeState)) return _ripxCartAttributeState;
+            continue;
+          }
+          if (!testTypeIsPrice(test)) continue;
           if (seedFixedPriceCartAttributesWithoutProductId(test, variant, reason || 'cart_add')) {
             return _ripxCartAttributeState;
           }
@@ -11204,6 +11256,12 @@
     var numericValue = parseOfferDiscountValue(config);
     return isFinite(numericValue) && numericValue > 0;
   }
+  function resolveOfferMessageFromConfig(config) {
+    var cfg = config && typeof config === 'object' ? config : {};
+    var raw = cfg.offer_message || cfg.offerMessage || cfg.message || '';
+    var text = String(raw || '').trim();
+    return text ? text.slice(0, 120) : '';
+  }
   function getOfferTargetProductIdsForCartAttrs(test) {
     var tt = getNormalizedTargetType(test);
     if (tt !== 'product') return null;
@@ -11218,9 +11276,17 @@
     var tt = getNormalizedTargetType(test);
     if (!isProductScopeTargetType(tt)) return;
     var cfg = variant && variant.config && typeof variant.config === 'object' ? variant.config : {};
-    if (!isActionableOfferConfig(cfg)) return;
     var variantIdForCart = variant.variantId != null ? variant.variantId : variant.id;
     if (variantIdForCart == null || String(variantIdForCart).trim() === '') return;
+    var offerProof = null;
+    if (isActionableOfferConfig(cfg)) {
+      offerProof = {
+        discountType: normalizeOfferDiscountType(cfg),
+        discountValue: parseOfferDiscountValue(cfg),
+        codeName: resolveOfferCodeForVariant(test, variant).codeName,
+        message: resolveOfferMessageFromConfig(cfg),
+      };
+    }
     injectPriceTestCartAttributes(
       test.id,
       variantIdForCart,
@@ -11228,11 +11294,7 @@
       getOfferTargetProductIdsForCartAttrs(test),
       null,
       { applicationMethod: 'discounted_checkout_price' },
-      {
-        discountType: normalizeOfferDiscountType(cfg),
-        discountValue: parseOfferDiscountValue(cfg),
-        codeName: resolveOfferCodeForVariant(test, variant).codeName,
-      }
+      offerProof
     );
   }
   function getShippingTargetProductIdsForCartAttrs(test) {
@@ -11635,7 +11697,8 @@
     if (!isActionableOfferConfig(variant.config)) return;
     var codeInfo = resolveOfferCodeForVariant(test, variant);
     var codeName = codeInfo.codeName;
-    if (!codeName) return;
+    var offerMessage = resolveOfferMessageFromConfig(variant && variant.config);
+    if (!codeName && !offerMessage) return;
 
     var container = getOfferCodeNoticeContainer();
     if (!container) return;
@@ -11663,8 +11726,9 @@
       container.appendChild(row);
     }
 
-    var label =
-      'Offer code (' + String(variant.variantName || variant.name || 'Variant').trim() + '):';
+    var label = offerMessage
+      ? String(variant.variantName || variant.name || 'Offer').trim() + ':'
+      : 'Offer code (' + String(variant.variantName || variant.name || 'Variant').trim() + '):';
     row.textContent = '';
     row.style.alignItems = 'flex-start';
     var left = document.createElement('span');
@@ -11679,7 +11743,7 @@
     var right = document.createElement('strong');
     right.style.fontSize = '12px';
     right.style.letterSpacing = '0.04em';
-    right.textContent = codeName;
+    right.textContent = offerMessage || codeName;
     rightWrap.appendChild(right);
     var sourceBadge = document.createElement('span');
     sourceBadge.style.fontSize = '10px';
@@ -11691,7 +11755,9 @@
     sourceBadge.textContent =
       'src: ' + String(codeInfo.sourceKey === 'auto' ? 'auto' : codeInfo.sourceKey);
     sourceBadge.title = 'Code source: ' + String(codeInfo.sourceLabel || 'auto-generated');
-    rightWrap.appendChild(sourceBadge);
+    if (!offerMessage) {
+      rightWrap.appendChild(sourceBadge);
+    }
     var diag = getOfferCodeDiagnostics(codeName);
     var parseMeta = getOfferRuntimeParseMeta(variant.config);
     var diagStyle = getOfferCodeStatusStyles(diag.status);
@@ -13063,6 +13129,8 @@
                       reason: 'preview_focus',
                     });
                   }
+                } else if (previewTestForCart && testTypeIsOffer(previewTestForCart)) {
+                  injectOfferTestCartAttributes(previewTestForCart, variant);
                 } else {
                   injectPriceTestCartAttributes(
                     PREVIEW_TEST_ID,
@@ -13127,6 +13195,13 @@
           }
           if (!hasValidConfig || !CONFIG.activeTests || CONFIG.activeTests.length === 0) return;
           CONFIG.activeTests.forEach(function (test) {
+            if (testTypeIsOffer(test)) {
+              getVariant(test.id).then(function (offerVariant) {
+                if (!offerVariant) return;
+                injectOfferTestCartAttributes(test, offerVariant);
+              });
+              return;
+            }
             if (!testTypeIsPrice(test)) return;
             if (!shouldRunPriceTestOnCurrentPage(test)) return;
             var tt = getNormalizedTargetType(test);

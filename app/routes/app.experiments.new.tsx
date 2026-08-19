@@ -1,8 +1,8 @@
 import { TitleBar } from '@shopify/app-bridge-react';
+import { Banner, Button } from '@shopify/polaris';
 import { useNavigate, useOutletContext } from 'react-router';
 import ClassicCreateWizard from '../components/SmartPricing/classic/ClassicCreateWizard';
 import ClassicAdminShell from '../components/SmartPricing/classic/ClassicAdminShell';
-import { IconSparkles } from '../components/SmartPricing/classic/classicIcons';
 import styles from '../components/SmartPricing/classic/SmartPricingClassic.module.css';
 import { useUpgradeRedirect } from '../lib/useUpgradeRedirect';
 import type { AppOutletContext } from '../lib/api.client';
@@ -29,25 +29,19 @@ export default function CreateExperiment() {
           onClick: () => navigate('/app/settings?tab=plan'),
         }}
       >
-        <div className={styles.callout} role="status" style={{ marginBottom: 16 }}>
-          <span className={styles.calloutIcon} aria-hidden>
-            <IconSparkles size={16} />
-          </span>
-          <span className={styles.calloutBody}>
-            <span className={styles.calloutStrong}>Active plan required</span>
-            <span className={styles.calloutMeta}>
+        <div style={{ marginBottom: 16 }}>
+          <Banner tone="warning" title="Active plan required">
+            <p>
               Plan selection opens in Shopify Admin (`pricing_plans`). After approval, welcome
               returns here so you can finish Setup.
-            </span>
-          </span>
+            </p>
+          </Banner>
         </div>
         <div className={styles.adminRowActions}>
-          <button type="button" className={styles.ghostBtn} onClick={() => navigate('/app')}>
+          <Button variant="plain" onClick={() => navigate('/app')}>
             Back to experiments
-          </button>
-          <button type="button" className={styles.ghostBtn} onClick={() => navigate('/app/setup')}>
-            Open Setup
-          </button>
+          </Button>
+          <Button onClick={() => navigate('/app/setup')}>Open Setup</Button>
         </div>
       </ClassicAdminShell>
     );
@@ -55,7 +49,11 @@ export default function CreateExperiment() {
 
   return (
     <>
-      <TitleBar title="New experiment" />
+      <TitleBar title="New experiment">
+        <button type="button" variant="breadcrumb" onClick={() => navigate('/app')}>
+          Experiments
+        </button>
+      </TitleBar>
       <ClassicCreateWizard />
     </>
   );

@@ -1,13 +1,17 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Banner, Button, Select, TextField } from '@shopify/polaris';
 import ClassicProductPickerModal from './ClassicProductPickerModal';
+import OfferArmsEditor from './OfferArmsEditor';
+import { isOfferExperimentType } from './offerSelection';
 import {
+  ButtonIconSearch,
+  ButtonIconSelect,
   IconCheck,
   IconCheckCircle,
   IconChevron,
   IconChevronRight,
   IconHandPick,
   IconPlusCircle,
-  IconSearch,
   IconWand,
 } from './classicIcons';
 import styles from './SmartPricingClassic.module.css';
@@ -167,6 +171,22 @@ function variantLabel(row) {
   return row.sku || 'Variant';
 }
 
+function ProductListSkeleton({ count = 6 }) {
+  return (
+    <div className={styles.productGrid} aria-hidden>
+      {Array.from({ length: count }, (_, index) => (
+        <div key={`product-skeleton-${index}`} className={`${styles.productCard} ${styles.productCardSkeleton}`}>
+          <div className={`${styles.thumb} ${styles.skeletonThumb}`} />
+          <div className={styles.productMeta}>
+            <div className={styles.skeletonLine} />
+            <div className={`${styles.skeletonLine} ${styles.skeletonLineMuted}`} />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function ProductsPricingStepPanel({
   opportunities = [],
   selectedIds = [],
@@ -200,9 +220,15 @@ export default function ProductsPricingStepPanel({
   onAiMinPctChange,
   onAiMaxPctChange,
   loading = false,
+  loadError = '',
+  onRetryLoad,
+  continueHint = '',
   currency = 'USD',
   bulkAppliedMessage = '',
   onDismissBulkMessage,
+  experimentType = 'price_test',
+  offerByArm = {},
+  onOfferByArmChange,
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [tableFilter, setTableFilter] = useState('');
@@ -757,6 +783,7 @@ export default function ProductsPricingStepPanel({
     pickMode === 'all'
       ? Math.min(catalogProductCount, maxSelection) || catalogProductCount
       : catalogProductCount || maxSelection;
+  const isOfferTest = isOfferExperimentType(experimentType);
 
   return (
     <div className={styles.productsStep}>
@@ -806,20 +833,34 @@ export default function ProductsPricingStepPanel({
         })}
       </div>
 
+      {loadError ? (
+        <div className={styles.productsStatus}>
+          <Banner
+            tone="critical"
+            title="Couldn’t load products"
+            action={
+              typeof onRetryLoad === 'function' && !loading
+                ? { content: 'Try again', onAction: onRetryLoad }
+                : undefined
+            }
+          >
+            <p>{loading ? 'Retrying…' : loadError}</p>
+          </Banner>
+        </div>
+      ) : null}
+
       {pickMode === 'manual' ? (
         <>
           <div className={styles.compactSearch}>
-            <label className={styles.label}>Search products</label>
-            <div className={`${styles.searchWrap} ${styles.searchWrapPill}`}>
-              <IconSearch size={16} />
-              <input
-                className={`${styles.input} ${styles.searchInputPill}`}
-                value={productSearch}
-                onChange={e => onProductSearchChange(e.target.value)}
-                placeholder="e.g. sneakers, ELC-, apparel…"
-              />
-            </div>
-            <p className={styles.help}>Search by name, SKU or category, then tap to add.</p>
+            <TextField
+              label="Search products"
+              value={productSearch}
+              onChange={onProductSearchChange}
+              autoComplete="off"
+              placeholder="e.g. sneakers, ELC-, apparel…"
+              helpText="Search by name, SKU or category, then tap to add."
+              disabled={loading}
+            />
 
             {collectionOptions.filter(opt => opt.value).length || categoryOptions.length ? (
               <>
@@ -929,13 +970,15 @@ export default function ProductsPricingStepPanel({
                   </>
                 ) : null}
 
-                <button
-                  type="button"
-                  className={`${styles.ghostBtn} ${styles.browseBtn}`}
-                  onClick={() => setPickerOpen(true)}
-                >
-                  <IconSearch size={14} /> Browse collections &amp; products
-                </button>
+                <div className={styles.compactAction}>
+                  <Button
+                    icon={ButtonIconSearch}
+                    onClick={() => setPickerOpen(true)}
+                    disabled={loading}
+                  >
+                    Browse collections &amp; products
+                  </Button>
+                </div>
                 <p className={styles.help}>
                   Tap a collection or category to select that whole group. Use Select all for the
                   visible list, or browse for a full picker.
@@ -944,42 +987,55 @@ export default function ProductsPricingStepPanel({
             ) : null}
           </div>
 
-          {loading ? <p className={styles.help}>Loading products…</p> : null}
-
           <div className={styles.productsHeaderRow}>
             <div className={styles.sectionLabel} style={{ margin: 0 }}>
               Products
             </div>
             <div className={styles.productsHeaderActions}>
-              <button
-                type="button"
-                className={styles.selectAllLink}
+              <Button
+                variant="plain"
                 onClick={allVisibleSelected ? deselectVisible : selectAllVisible}
                 disabled={!visibleVariantIds.length || loading}
               >
                 {allVisibleSelected
                   ? `Deselect ${visibleVariantIds.length}`
                   : `Select all ${Math.min(visibleVariantIds.length, maxSelection)}`}
-              </button>
+              </Button>
             </div>
           </div>
-          {!loading && !productCards.length ? (
+          {loading && !productCards.length ? (
+            <div
+              className={styles.productGridShell}
+              aria-busy="true"
+              aria-live="polite"
+              aria-label="Loading products"
+            >
+              <ProductListSkeleton />
+            </div>
+          ) : !productCards.length ? (
             <div className={styles.emptyProducts}>
               <p className={styles.help} style={{ marginTop: 0 }}>
-                {opportunities.length
-                  ? 'No products match this search. Clear the search or browse the full catalog.'
-                  : 'No catalog products loaded yet. Open the picker or refresh and try again.'}
+                {loadError
+                  ? 'Products will appear here after a successful load.'
+                  : opportunities.length
+                    ? 'No products match this search. Clear the search or browse the full catalog.'
+                    : 'No catalog products loaded yet. Open the picker or refresh and try again.'}
               </p>
-              <button
-                type="button"
-                className={`${styles.ghostBtn} ${styles.showAllBtn}`}
-                onClick={() => setPickerOpen(true)}
-              >
-                <IconHandPick size={14} /> Browse collections &amp; products
-              </button>
+              <div className={styles.compactAction}>
+                <Button
+                  icon={ButtonIconSelect}
+                  onClick={() => setPickerOpen(true)}
+                  disabled={Boolean(loadError) || loading}
+                >
+                  Browse collections &amp; products
+                </Button>
+              </div>
             </div>
           ) : (
-            <div className={styles.productGridShell}>
+            <div
+              className={styles.productGridShell}
+              aria-busy={loading || undefined}
+            >
               <div className={styles.productGrid}>
                 {productCards.map(group => {
                   const ids = group.variants.map(v => v.variant_id).filter(Boolean);
@@ -1019,14 +1075,11 @@ export default function ProductsPricingStepPanel({
                   );
                 })}
               </div>
-              <button
-                type="button"
-                className={`${styles.ghostBtn} ${styles.showAllBtn}`}
-                onClick={() => setPickerOpen(true)}
-              >
-                <IconHandPick size={14} /> Show all {catalogProductCount || opportunities.length}{' '}
-                products
-              </button>
+              <div className={styles.compactAction}>
+                <Button icon={ButtonIconSelect} onClick={() => setPickerOpen(true)}>
+                  Show all {catalogProductCount || opportunities.length} products
+                </Button>
+              </div>
             </div>
           )}
 
@@ -1035,41 +1088,52 @@ export default function ProductsPricingStepPanel({
               <span>
                 {selectedProductCount} of {selectionTotal} selected
               </span>
-              <button
-                type="button"
-                className={styles.clearSelectionLink}
+              <Button
+                variant="plain"
                 onClick={() => onSelectedIdsChange([])}
                 disabled={!selectedIds.length}
               >
                 Clear selection
-              </button>
+              </Button>
             </div>
           </div>
         </>
       ) : (
         <>
           <div className={styles.compactSearch}>
-            <label className={styles.label}>Search products</label>
-            <div className={`${styles.searchWrap} ${styles.searchWrapPill}`}>
-              <IconSearch size={16} />
-              <input
-                className={`${styles.input} ${styles.searchInputPill}`}
-                value={productSearch}
-                onChange={e => onProductSearchChange(e.target.value)}
-                placeholder="e.g. sneakers, ELC-, apparel…"
-              />
-            </div>
-            <p className={styles.help}>Search by name, SKU or category, then tap to add.</p>
+            <TextField
+              label="Search products"
+              value={productSearch}
+              onChange={onProductSearchChange}
+              autoComplete="off"
+              placeholder="e.g. sneakers, ELC-, apparel…"
+              helpText="Search by name, SKU or category, then tap to add."
+              disabled={loading}
+            />
           </div>
 
+          {loading && !catalogProductCount ? (
+            <div
+              className={styles.allProductsBox}
+              aria-busy="true"
+              aria-live="polite"
+              aria-label="Loading catalog"
+            >
+              <p className={styles.help} style={{ margin: 0 }}>
+                Loading catalog…
+              </p>
+              <ProductListSkeleton count={4} />
+            </div>
+          ) : (
           <div className={styles.allProductsBox}>
             <div className={styles.allProductsHeader}>
               <span className={styles.allProductsCheck} aria-hidden>
                 <IconCheck size={14} />
               </span>
               <span>
-                All {catalogProductCount || opportunities.length || 0} products from your catalog
-                are included.
+                {loadError
+                  ? 'Catalog will appear here after a successful load.'
+                  : `All ${catalogProductCount || opportunities.length || 0} products from your catalog are included.`}
               </span>
             </div>
             <div className={styles.chipGrid}>
@@ -1089,15 +1153,17 @@ export default function ProductsPricingStepPanel({
                 </div>
               ) : null}
             </div>
-            <button
-              type="button"
-              className={`${styles.ghostBtn} ${styles.showAllBtn}`}
-              onClick={() => setPickerOpen(true)}
-            >
-              <IconHandPick size={14} /> Show all {catalogProductCount || opportunities.length}{' '}
-              products
-            </button>
+            <div className={styles.compactAction}>
+              <Button
+                icon={ButtonIconSelect}
+                onClick={() => setPickerOpen(true)}
+                disabled={loading || Boolean(loadError)}
+              >
+                Show all {catalogProductCount || opportunities.length} products
+              </Button>
+            </div>
           </div>
+          )}
           <div className={styles.selectionBar}>
             <span>
               {Math.min(catalogProductCount, maxSelection)} of {catalogProductCount || maxSelection}{' '}
@@ -1120,6 +1186,17 @@ export default function ProductsPricingStepPanel({
 
       <hr className={styles.productsDivider} />
 
+      {continueHint ? <p className={styles.productsContinueHint}>{continueHint}</p> : null}
+
+      {isOfferTest ? (
+        <OfferArmsEditor
+          variations={variations}
+          offerByArm={offerByArm}
+          onChange={onOfferByArmChange}
+          currency={currency}
+        />
+      ) : (
+        <>
       <div className={styles.sectionLabel}>Set prices for</div>
       <div className={styles.priceTabs} role="tablist" aria-label="Variation prices">
         {variations.map((arm, index) => (
@@ -1262,19 +1339,14 @@ export default function ProductsPricingStepPanel({
                   $
                 </button>
               </div>
-              <button
-                type="button"
-                className={`${styles.primaryBtn} ${styles.aiBarAction}`}
+              <Button
+                variant="primary"
                 onClick={() => onAiSuggest?.({ unit: aiUnit })}
-                disabled={aiSuggestBusy || !pricingSource.length}
-                title={
-                  !pricingSource.length
-                    ? 'Select products before requesting AI prices'
-                    : 'Regenerate AI price suggestions'
-                }
+                disabled={aiSuggestBusy || loading || !pricingSource.length}
+                loading={aiSuggestBusy}
               >
                 {aiSuggestBusy ? 'Suggesting…' : aiSuggestSummary ? 'Re-suggest' : 'Suggest'}
-              </button>
+              </Button>
             </div>
           </div>
         </div>
@@ -1338,14 +1410,17 @@ export default function ProductsPricingStepPanel({
                 $
               </button>
             </div>
-            <button
-              type="button"
-              className={`${styles.primaryBtn} ${styles.bulkBarAction}`}
+            <Button
+              variant="primary"
               onClick={handleApplyBulk}
-              disabled={!variations.some((row, i) => i > 0 && row.id !== 'control')}
+              disabled={
+                loading ||
+                !pricingSource.length ||
+                !variations.some((row, i) => i > 0 && row.id !== 'control')
+              }
             >
               Apply
-            </button>
+            </Button>
           </div>
           {bulkNotice ? (
             <div
@@ -1369,34 +1444,34 @@ export default function ProductsPricingStepPanel({
       ) : null}
 
       <div className={styles.tableToolbar}>
-        <div className={`${styles.searchWrap} ${styles.searchWrapPill} ${styles.tableSearch}`}>
-          <IconSearch size={14} />
-          <input
-            className={`${styles.input} ${styles.searchInputPill}`}
+        <div className={styles.tableSearch}>
+          <TextField
+            label="Filter selected products"
+            labelHidden
             value={tableFilter}
-            onChange={e => setTableFilter(e.target.value)}
+            onChange={setTableFilter}
+            autoComplete="off"
             placeholder="Filter selected products..."
           />
         </div>
-        <select
-          className={`${styles.select} ${styles.tableCategorySelect}`}
-          value={tableCategory}
-          onChange={e => setTableCategory(e.target.value)}
-          aria-label="Filter by category"
-        >
-          <option value="">All categories</option>
-          {categoryOptions.map(opt => (
-            <option key={opt.value} value={opt.value}>
-              {opt.label}
-            </option>
-          ))}
-        </select>
-        <button type="button" className={styles.tableToolBtn} onClick={expandAll}>
+        <div className={styles.tableCategorySelect}>
+          <Select
+            label="Filter by category"
+            labelHidden
+            value={tableCategory}
+            onChange={setTableCategory}
+            options={[
+              { label: 'All categories', value: '' },
+              ...categoryOptions.map(opt => ({ label: opt.label, value: opt.value })),
+            ]}
+          />
+        </div>
+        <Button size="slim" onClick={expandAll}>
           Expand
-        </button>
-        <button type="button" className={styles.tableToolBtn} onClick={collapseAll}>
+        </Button>
+        <Button size="slim" onClick={collapseAll}>
           Collapse
-        </button>
+        </Button>
         <span className={styles.tableCount}>{pricingRangeLabel}</span>
       </div>
 
@@ -1431,44 +1506,41 @@ export default function ProductsPricingStepPanel({
       {pricingPageCount > 1 ? (
         <div className={styles.tableFooter}>
           <div className={styles.tablePager}>
-            <label className={styles.tablePageSize}>
-              <span>Rows</span>
-              <select
-                className={`${styles.select} ${styles.tablePageSizeSelect}`}
-                value={pricingPageSize}
-                onChange={e => setPricingPageSize(Number(e.target.value))}
-                aria-label="Rows per page"
-              >
-                {PRICING_TABLE_PAGE_SIZES.map(size => (
-                  <option key={size} value={size}>
-                    {size}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <button
-              type="button"
-              className={styles.tablePagerBtn}
-              aria-label="Previous page"
+            <div className={styles.tablePageSize}>
+              <Select
+                label="Rows per page"
+                labelHidden
+                value={String(pricingPageSize)}
+                onChange={value => setPricingPageSize(Number(value))}
+                options={PRICING_TABLE_PAGE_SIZES.map(size => ({
+                  label: String(size),
+                  value: String(size),
+                }))}
+              />
+            </div>
+            <Button
+              size="slim"
+              accessibilityLabel="Previous page"
               disabled={safePricingPage <= 0 || !pricingGroups.length}
               onClick={() => setPricingPage(page => Math.max(0, page - 1))}
             >
               <span className={styles.tablePagerChevronPrev} aria-hidden>
                 <IconChevronRight size={14} />
               </span>
-            </button>
-            <button
-              type="button"
-              className={styles.tablePagerBtn}
-              aria-label="Next page"
+            </Button>
+            <Button
+              size="slim"
+              accessibilityLabel="Next page"
               disabled={safePricingPage >= pricingPageCount - 1 || !pricingGroups.length}
               onClick={() => setPricingPage(page => Math.min(pricingPageCount - 1, page + 1))}
             >
               <IconChevronRight size={14} />
-            </button>
+            </Button>
           </div>
         </div>
       ) : null}
+        </>
+      )}
 
       {pickerOpen ? (
         <ClassicProductPickerModal

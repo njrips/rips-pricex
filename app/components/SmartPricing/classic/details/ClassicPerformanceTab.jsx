@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { Banner, Button, Select, TextField } from '@shopify/polaris';
 import { formatCurrency } from '../../smartPricingConstants';
+import { formatOfferRule } from '../offerSelection';
 import {
   VARIATION_PRODUCTS_PAGE_SIZE,
   VARIATION_PRODUCTS_PAGE_SIZES,
@@ -8,7 +10,7 @@ import {
   formatRate,
   paginateVariationProducts,
 } from '../classicExperimentDetailsHelpers';
-import { IconSearch, IconTrophy } from '../classicIcons';
+import { IconTrophy } from '../classicIcons';
 import styles from '../SmartPricingClassic.module.css';
 
 function formatPpv(value, currency) {
@@ -17,7 +19,15 @@ function formatPpv(value, currency) {
   return formatCurrency(n, currency);
 }
 
-function AverageMetricChart({ title, subtitle, rows, valueKey, barWidthKey, formatValue }) {
+function AverageMetricChart({
+  title,
+  subtitle,
+  rows,
+  valueKey,
+  barWidthKey,
+  formatValue,
+  leadingLabel = 'Winner',
+}) {
   return (
     <div className={styles.statCard}>
       <div className={styles.reviewHead}>
@@ -33,7 +43,7 @@ function AverageMetricChart({ title, subtitle, rows, valueKey, barWidthKey, form
                 {row.isControl ? <span className={styles.controlBadge}>Control</span> : null}
                 {row.isWinner ? (
                   <span className={styles.winnerBadge}>
-                    <IconTrophy size={10} /> Winner
+                    <IconTrophy size={10} /> {leadingLabel}
                   </span>
                 ) : null}
               </span>
@@ -61,6 +71,7 @@ export default function ClassicPerformanceTab({
   variationAverages = [],
   productPerformanceRows = [],
   variations = [],
+  isOfferTest = false,
 }) {
   const arms = Array.isArray(analytics?.arms) ? analytics.arms : [];
   const averages = Array.isArray(variationAverages) ? variationAverages : [];
@@ -128,8 +139,23 @@ export default function ClassicPerformanceTab({
   const testCount = Number(analytics?.test_count) || uniqueTestIds.size || (arms.length ? 1 : 0);
   const sharedNote = productPerformanceRows.some(row => row.sharedTest);
 
+  const revenueRail = analytics?.revenue_guardrail;
+
   return (
     <div className={styles.detailStack}>
+      {revenueRail?.breached || revenueRail?.enforced ? (
+        <Banner tone="warning" title="Paused by revenue guardrail">
+          <p>
+            Revenue per visitor dropped {revenueRail.observed_drop_percent}% vs control (limit{' '}
+            {revenueRail.threshold_percent}%). Traffic assignment stopped.
+          </p>
+        </Banner>
+      ) : revenueRail?.ready && Number.isFinite(Number(revenueRail.observed_drop_percent)) ? (
+        <p className={styles.help}>
+          Largest revenue drop vs control: {revenueRail.observed_drop_percent}% (limit{' '}
+          {revenueRail.threshold_percent}%).
+        </p>
+      ) : null}
       <div className={styles.statCard}>
         <div className={styles.reviewHead}>
           <h3 className={styles.panelTitle}>Average performance by variation</h3>
@@ -155,6 +181,7 @@ export default function ClassicPerformanceTab({
           valueKey="avg_conversion_rate"
           barWidthKey="conversionBarWidth"
           formatValue={formatRate}
+          leadingLabel={isOfferTest ? 'Leading' : 'Winner'}
         />
         <AverageMetricChart
           title="Avg visitors"
@@ -163,6 +190,7 @@ export default function ClassicPerformanceTab({
           valueKey="avg_visitors"
           barWidthKey="visitorsBarWidth"
           formatValue={formatNumber}
+          leadingLabel={isOfferTest ? 'Leading' : 'Winner'}
         />
       </div>
 
@@ -174,6 +202,7 @@ export default function ClassicPerformanceTab({
           valueKey="avg_profit_per_visitor"
           barWidthKey="ppvBarWidth"
           formatValue={value => formatPpv(value, resolvedCurrency)}
+          leadingLabel={isOfferTest ? 'Leading' : 'Winner'}
         />
         <div className={styles.statCard}>
           <div className={styles.reviewHead}>
@@ -215,7 +244,7 @@ export default function ClassicPerformanceTab({
               <thead>
                 <tr>
                   <th>Variation</th>
-                  <th>Price</th>
+                  <th>{isOfferTest ? 'Offer' : 'Price'}</th>
                   <th>Visitors</th>
                   <th>Conversion</th>
                   <th>PPV</th>
@@ -235,7 +264,20 @@ export default function ClassicPerformanceTab({
                           <span className={styles.controlBadge}>Control</span>
                         ) : null}
                       </td>
-                      <td>{formatCurrency(arm.price, resolvedCurrency)}</td>
+                      <td>
+                        {isOfferTest
+                          ? arm.role === 'control' || arm.isControl
+                            ? 'No offer'
+                            : formatOfferRule(
+                                (variations || []).find(
+                                  row =>
+                                    String(row.id) === String(arm.arm_id || arm.id) ||
+                                    String(row.label) === String(arm.label)
+                                )?.offer,
+                                resolvedCurrency
+                              )
+                          : formatCurrency(arm.price, resolvedCurrency)}
+                      </td>
                       <td>{formatNumber(arm.visitors)}</td>
                       <td>{formatRate(arm.conversion_rate)}</td>
                       <td>{formatPpv(arm.profit_per_visitor, resolvedCurrency)}</td>
@@ -277,52 +319,51 @@ export default function ClassicPerformanceTab({
         </div>
 
         <div className={styles.variationsProductsToolbar}>
-          <div className={`${styles.searchWrap} ${styles.variationsProductsSearch}`}>
-            <IconSearch size={14} />
-            <input
-              className={`${styles.input} ${styles.modalSearchInput}`}
+          <div className={styles.variationsProductsSearch}>
+            <TextField
+              label="Search product performance"
+              labelHidden
               value={query}
-              onChange={event => {
-                setQuery(event.target.value);
+              onChange={value => {
+                setQuery(value);
                 setPage(1);
               }}
+              autoComplete="off"
               placeholder="Search products, variants, or handle"
-              aria-label="Search product performance"
             />
           </div>
-          <label className={styles.tablePageSize}>
-            Sort
-            <select
-              className={`${styles.input} ${styles.tablePageSizeSelect}`}
+          <div className={styles.tablePageSize}>
+            <Select
+              label="Sort"
+              labelHidden
               value={sort}
-              onChange={event => {
-                setSort(event.target.value);
+              onChange={value => {
+                setSort(value);
                 setPage(1);
               }}
-            >
-              <option value="title">Name A–Z</option>
-              <option value="visitors_desc">Visitors (high → low)</option>
-              <option value="conversion_desc">Conversion (high → low)</option>
-              <option value="ppv_desc">PPV (high → low)</option>
-            </select>
-          </label>
-          <label className={styles.tablePageSize}>
-            Rows
-            <select
-              className={`${styles.input} ${styles.tablePageSizeSelect}`}
+              options={[
+                { label: 'Name A–Z', value: 'title' },
+                { label: 'Visitors (high → low)', value: 'visitors_desc' },
+                { label: 'Conversion (high → low)', value: 'conversion_desc' },
+                { label: 'PPV (high → low)', value: 'ppv_desc' },
+              ]}
+            />
+          </div>
+          <div className={styles.tablePageSize}>
+            <Select
+              label="Rows"
+              labelHidden
               value={String(pageSize)}
-              onChange={event => {
-                setPageSize(Number(event.target.value) || VARIATION_PRODUCTS_PAGE_SIZE);
+              onChange={value => {
+                setPageSize(Number(value) || VARIATION_PRODUCTS_PAGE_SIZE);
                 setPage(1);
               }}
-            >
-              {VARIATION_PRODUCTS_PAGE_SIZES.map(size => (
-                <option key={size} value={String(size)}>
-                  {size}
-                </option>
-              ))}
-            </select>
-          </label>
+              options={VARIATION_PRODUCTS_PAGE_SIZES.map(size => ({
+                label: String(size),
+                value: String(size),
+              }))}
+            />
+          </div>
         </div>
 
         <div className={`${styles.tableScroll} ${styles.variationsProductsTableScroll}`}>
@@ -376,9 +417,13 @@ export default function ClassicPerformanceTab({
                             PPV
                           </div>
                           <div className={styles.productSub}>
-                            {metrics?.price !== null && metrics?.price !== undefined
-                              ? formatCurrency(metrics.price, row.currency || resolvedCurrency)
-                              : '—'}
+                            {isOfferTest
+                              ? arm.isControl || arm.role === 'control'
+                                ? 'No offer'
+                                : formatOfferRule(arm.offer, row.currency || resolvedCurrency)
+                              : metrics?.price !== null && metrics?.price !== undefined
+                                ? formatCurrency(metrics.price, row.currency || resolvedCurrency)
+                                : '—'}
                           </div>
                         </td>
                       );
@@ -403,25 +448,21 @@ export default function ClassicPerformanceTab({
                 : '0 products'}
             </span>
             <div className={styles.tablePager}>
-              <button
-                type="button"
-                className={styles.ghostBtn}
+              <Button
                 disabled={pageData.page <= 1}
                 onClick={() => setPage(p => Math.max(1, p - 1))}
               >
                 Previous
-              </button>
+              </Button>
               <span className={styles.productSub}>
                 Page {pageData.page} / {pageData.totalPages}
               </span>
-              <button
-                type="button"
-                className={styles.ghostBtn}
+              <Button
                 disabled={pageData.page >= pageData.totalPages}
                 onClick={() => setPage(p => Math.min(pageData.totalPages, p + 1))}
               >
                 Next
-              </button>
+              </Button>
             </div>
           </div>
         )}

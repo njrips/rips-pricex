@@ -23,9 +23,10 @@ function AppBootSplash() {
       style={{
         minHeight: "100vh",
         margin: 0,
-        background: "#FAF7F2",
-        color: "#231814",
-        fontFamily: '"DM Sans", "Inter", system-ui, sans-serif',
+        background: "#f1f1f1",
+        color: "#303030",
+        fontFamily:
+          '"Inter", -apple-system, BlinkMacSystemFont, "San Francisco", "Segoe UI", Roboto, sans-serif',
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
@@ -40,8 +41,8 @@ function AppBootSplash() {
             height: 28,
             margin: "0 auto 12px",
             borderRadius: "50%",
-            border: "2.5px solid rgba(241, 106, 26, 0.2)",
-            borderTopColor: "#f16a1a",
+            border: "2.5px solid rgba(48, 48, 48, 0.15)",
+            borderTopColor: "#303030",
             animation: "rpx-boot-spin 0.7s linear infinite",
           }}
         />
@@ -121,7 +122,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       },
       body: JSON.stringify({
         access_token: accessToken || undefined,
-        scope: process.env.SCOPES || process.env.SHOPIFY_SCOPES || undefined,
+        scope: session.scope || process.env.SCOPES || process.env.SHOPIFY_SCOPES || undefined,
+        refresh_scopes: !String(session.scope || "").includes("write_discounts"),
       }),
     });
     if (!installRes.ok) {
@@ -199,7 +201,7 @@ export default function App() {
               <Link to="/app/setup">Setup</Link>
               <Link to="/app/settings">Settings</Link>
             </NavMenu>
-            <div data-palette="orange-classic">
+            <div data-palette="admin">
               <ClassicRouteLoading />
               <Outlet context={data} />
             </div>

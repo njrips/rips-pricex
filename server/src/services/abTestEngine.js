@@ -1365,7 +1365,11 @@ class ABTestEngine {
           const discountCodeName = String(
             cfg.discount_code_name ?? cfg.discountCodeName ?? ''
           ).trim();
+          const offerMessage = String(cfg.offer_message ?? cfg.offerMessage ?? '').trim();
           const isControl = isLikelyControlVariant(variant, index);
+          if (offerMessage.length > 120) {
+            errors.push(`Variant ${index + 1}: offer message must be 120 characters or fewer`);
+          }
           if (
             discountCodeName &&
             (discountCodeName.length > 48 || !/^[A-Za-z0-9_-]+$/.test(discountCodeName))

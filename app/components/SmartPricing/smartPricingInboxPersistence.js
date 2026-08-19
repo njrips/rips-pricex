@@ -43,16 +43,35 @@ function extractConflictPayload(err) {
   };
 }
 
-export function mergeServerAndLocalInbox(serverPlans = [], localPlans = []) {
+export function mergeServerAndLocalInbox(serverPlans = [], localPlans = [], options = {}) {
+  const preferLocalIds = new Set(
+    (Array.isArray(options.preferLocalIds) ? options.preferLocalIds : []).map(id => String(id))
+  );
+  const omitIds = new Set(
+    (Array.isArray(options.omitIds) ? options.omitIds : []).map(id => String(id))
+  );
   const byId = new Map(
     (Array.isArray(serverPlans) ? serverPlans : [])
-      .filter(plan => plan?.id)
+      .filter(plan => plan?.id && !omitIds.has(String(plan.id)))
       .map(plan => [plan.id, plan])
   );
 
   (Array.isArray(localPlans) ? localPlans : []).forEach(local => {
-    if (local?.id && !byId.has(local.id)) {
+    if (!local?.id || omitIds.has(String(local.id))) return;
+    if (!byId.has(local.id)) {
       byId.set(local.id, local);
+      return;
+    }
+    if (preferLocalIds.has(String(local.id))) {
+      const server = byId.get(local.id) || {};
+      byId.set(local.id, {
+        ...server,
+        ...local,
+        status: local.status ?? server.status,
+        archived: local.archived,
+        archived_at: local.archived_at,
+        test_id: local.test_id || server.test_id,
+      });
     }
   });
 
@@ -71,7 +90,7 @@ export async function refreshInboxRevision(domain) {
   }
 }
 
-export async function hydrateInboxFromServer(domain, localPlans = []) {
+export async function hydrateInboxFromServer(domain, localPlans = [], options = {}) {
   try {
     const data = await getSmartPricingInboxPlans(domain);
     const serverPlans = Array.isArray(data?.plans) ? data.plans : [];
@@ -79,7 +98,7 @@ export async function hydrateInboxFromServer(domain, localPlans = []) {
       setInboxServerRevision(domain, data.revision);
     }
     if (serverPlans.length) {
-      const merged = mergeServerAndLocalInbox(serverPlans, localPlans);
+      const merged = mergeServerAndLocalInbox(serverPlans, localPlans, options);
       return {
         plans: merged,
         source: localPlans.length > serverPlans.length ? 'server_merged_local' : 'server',

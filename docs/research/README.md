@@ -1,6 +1,6 @@
 # RipsPriceX research index
 
-Updated: **2026-08-14**  
+Updated: **2026-08-17**  
 Purpose: enable **independent** research and planning for RipsPriceX without opening RipX.
 
 ## Read order (onboarding)
@@ -44,13 +44,17 @@ When starting a new investigation in this project:
 | 2026-08-12 | [2026-08-12_THEME_EMBED_REFUSED_TO_CONNECT.md](./2026-08-12_THEME_EMBED_REFUSED_TO_CONNECT.md) | Done | Theme embed deep link broke out of iframe via shopify:// + _top |
 | 2026-08-13 | [2026-08-13_AI_PRICE_MAPPING.md](./2026-08-13_AI_PRICE_MAPPING.md) | In progress | Theme `files` indexer in auto-map; AI still rank-only |
 | 2026-08-14 | [2026-08-14_PUBLIC_LANDING.md](./2026-08-14_PUBLIC_LANDING.md) | Done | Fixed CSS-module `?url` SSR crash; robots/sitemap; public 404 |
+| 2026-08-17 | [2026-08-17_ADMIN_POLARIS_SKIN.md](./2026-08-17_ADMIN_POLARIS_SKIN.md) | Done | Classic layout; Admin/Polaris tokens + controls on all product UI |
+| 2026-08-18 | [2026-08-18_OFFER_TEST.md](./2026-08-18_OFFER_TEST.md) | Done | Classic Offer Test: 5-step wizard, checkout Discount Function, automatic discount, scope sync |
+| 2026-08-18 | [2026-08-18_REVENUE_GUARDRAIL.md](./2026-08-18_REVENUE_GUARDRAIL.md) | Done | Always-on max revenue drop %; runtime pause vs control RPV |
 
 ## Quick facts
 
-- **UI:** Classic Smart Pricing only (`app/components/SmartPricing/classic/**`)  
+- **UI:** Classic Smart Pricing layout (`app/components/SmartPricing/classic/**`) with Admin / Polaris visual tokens  
 - **Shell:** Shopify App Bridge `NavMenu` — Experiments · Create · Setup · Settings (Plan under Settings)  
+- **Visual:** `data-palette="admin"`; Inter; near-black primary (`#303030`); gray canvas `#f1f1f1`  
 - **Identity:** Shopify shop session (no email / Domains)  
 - **Billing:** Shopify App Pricing; unpaid → Create/Launch `402`; Plan UI at Settings → Plan  
-- **Runtime:** theme embed `ripspricex` + cart transform + Express track/proxy  
+- **Runtime:** theme embed `ripspricex` + cart transform + checkout discount function + Express track/proxy  
 - **API default port:** `3456`  
 - **Smoke:** `npm run accept`  

@@ -1,6 +1,6 @@
 # 05 — Further research roadmap
 
-**Updated:** 2026-08-13  
+**Updated:** 2026-08-18  
 **Purpose:** backlog of research tracks that should be pursued **inside this repo’s `docs/research/`**, independent of RipX.
 
 When a track finishes, add a dated research note and update [02_PARITY_MATRIX.md](./02_PARITY_MATRIX.md) + the research log in [README.md](./README.md).
@@ -68,6 +68,27 @@ When a track finishes, add a dated research note and update [02_PARITY_MATRIX.md
 
 **Exit:** `docs/research/CLASSIC_FIGMA_DELTA.md` + [RIPX_SMART_PRICING_PARITY.md](./RIPX_SMART_PRICING_PARITY.md). Pixel must-fix list still open for Track C polish.
 
+**Fork (2026-08-17):** Admin skin approved and implemented. Track C’s *pixel* source is Shopify Admin / Polaris; EchoTest remains layout/IA only. See [2026-08-17_ADMIN_POLARIS_SKIN.md](./2026-08-17_ADMIN_POLARIS_SKIN.md) and Track L.
+
+---
+
+## Track L — Admin / Polaris skin (P1)
+
+**Question:** Can the existing Classic screens feel like a Shopify-internal Admin surface without changing routes, wizard steps, or field order?
+
+**Status:** Done (2026-08-17). Shared `admin-polaris-tokens.css`; `data-palette="admin"` on embedded + public; Polaris controls on list, wizard (including Variations fields + AI actions), Setup, Settings, pickers, toolbars, review; primary = `#303030`. Button icons use Polaris `icon` + `@shopify/polaris-icons` (pass 15).
+
+**Research tasks:**
+
+1. Unlock EchoTest orange as visual source of truth (layout stays). — ✅  
+2. Screenshot live Admin vs list / wizard / details / settings. — optional follow-up  
+3. Map `--classic-*` → `--p-color-*`; primary fill near-black. — ✅  
+4. Public marketing: same Admin palette. — ✅  
+5. Token remap via `data-palette="admin"`. — ✅  
+6. Phase 2: Polaris controls where boxes do not move. — ✅ finished
+
+**Exit:** [2026-08-17_ADMIN_POLARIS_SKIN.md](./2026-08-17_ADMIN_POLARIS_SKIN.md) implemented. Remaining natives are density/layout-locked or storefront (out of scope). Phase 3 IndexTable is gated.
+
 ---
 
 ## Track D — Price surfaces quality (P1)
@@ -130,7 +151,10 @@ When a track finishes, add a dated research note and update [02_PARITY_MATRIX.md
 1. Confirm scopes in `shopify.app.toml` match actual GraphQL usage.  
 2. Uninstall data retention policy (what is deleted vs paused).  
 3. Customer privacy webhooks if App Store requires them.  
-4. Secret handling: separate env from any RipX credentials.
+4. Secret handling: separate env from any RipX credentials.  
+5. Persist real granted scopes (`session.scope` + `currentAppInstallation.accessScopes`) into Express `shop_sessions`; sync `app/scopes_update` to Express, not only Prisma.
+
+**Progress (2026-08-18):** `read_discounts` / `write_discounts` added for Offer Test. Install refresh + scopes webhook now update Express. Merchant should re-open the app once so the offline token lists the new scopes. See [2026-08-18_OFFER_TEST.md](./2026-08-18_OFFER_TEST.md).
 
 **Exit:** Privacy brief + scope justification table for App Store listing.
 
@@ -233,6 +257,6 @@ Save as `docs/research/YYYY-MM-DD_<slug>.md` and link from [README.md](./README.
 
 ## Explicit non-goals for further research
 
-- Porting Checkout Studio / shipping / non-price tests into this app  
+- Porting Checkout Studio / shipping / RipX Test Wizard types (A/B, MVT, split URL, feature flag, free shipping) into this app. Classic **Offer Test** (percent/fixed checkout discount) is in scope — see [2026-08-18_OFFER_TEST.md](./2026-08-18_OFFER_TEST.md).
 - Merging RipsPriceX back into RipX  
 - Editing RipX to unblock RipsPriceX (fix RipX only for its own product work)  

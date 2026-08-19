@@ -14,7 +14,7 @@ export function publicMeta({ title, description, path = '/', noIndex = false }) 
   return [
     { title: fullTitle },
     description ? { name: 'description', content: description } : null,
-    { name: 'theme-color', content: '#fefbf8' },
+    { name: 'theme-color', content: '#f1f1f1' },
     noIndex ? { name: 'robots', content: 'noindex, nofollow' } : null,
     { property: 'og:title', content: fullTitle },
     { property: 'og:type', content: 'website' },

@@ -1,9 +1,12 @@
 import {
+  enrichInboxPlansForLaunch,
+  formatClassicStatusLabel,
   formatExperimentTypeLabel,
   getPlanExperimentId,
   getPlanExperimentTitle,
   getPlanProductTitle,
   groupPlansIntoExperiments,
+  rollupExperimentStatus,
   stampClassicExperimentMetadata,
   upsertExperimentPlansInInbox,
 } from '../classicExperimentHelpers';
@@ -11,6 +14,7 @@ import {
 describe('classicExperimentHelpers', () => {
   it('formats experiment type labels for list sublines', () => {
     expect(formatExperimentTypeLabel('price_test')).toBe('PRICE');
+    expect(formatExperimentTypeLabel('offer_test')).toBe('OFFER');
     expect(formatExperimentTypeLabel('ab_test')).toBe('AB');
     expect(formatExperimentTypeLabel('multivariate')).toBe('MULTIVARIATE');
   });
@@ -45,6 +49,25 @@ describe('classicExperimentHelpers', () => {
     expect(winter.title).toBe('Winter');
     expect(winter.visitors).toBe(150);
     expect(winter.confidence).toBe(95);
+    expect(winter.experimentType).toBe('price_test');
+  });
+
+  it('does not treat a paused plan as running just because it has a test_id', () => {
+    expect(
+      rollupExperimentStatus([{ id: 'p1', status: 'paused', test_id: 'test-1' }])
+    ).toBe('paused');
+    expect(
+      rollupExperimentStatus([
+        { id: 'p1', status: 'paused', test_id: 'test-1' },
+        { id: 'p2', status: 'paused', test_id: 'test-2' },
+      ])
+    ).toBe('paused');
+    expect(
+      rollupExperimentStatus([
+        { id: 'p1', status: 'running', test_id: 'test-1' },
+        { id: 'p2', status: 'paused', test_id: 'test-2' },
+      ])
+    ).toBe('running');
   });
 
   it('falls back to title prefix grouping for legacy plans', () => {
@@ -67,6 +90,43 @@ describe('classicExperimentHelpers', () => {
     expect(getPlanExperimentTitle(stamped[0])).toBe('Promo');
     expect(getPlanProductTitle(stamped[0])).toBe('Shirt');
     expect(stamped[0].title).toContain('Promo');
+  });
+
+  it('labels offer winner_ready as Result ready', () => {
+    expect(formatClassicStatusLabel('winner_ready', 'offer_test')).toBe('Result ready');
+    expect(formatClassicStatusLabel('winner_ready', 'price_test')).toBe('Winner ready');
+  });
+
+  it('enriches inbox drafts from audience_ui before list launch', () => {
+    const [enriched] = enrichInboxPlansForLaunch([
+      {
+        id: 'p1',
+        metadata: {
+          audience_ui: {
+            segment: 'new_visitors',
+            trafficAllocation: 35,
+            devices: ['Mobile'],
+            deviceMode: 'include',
+            countries: ['US'],
+            countryMode: 'include',
+          },
+        },
+      },
+    ]);
+    expect(enriched.audience.inherit_from_shop_defaults).toBe(false);
+    expect(enriched.audience.segments.customer).toBe('new');
+    expect(enriched.audience.traffic_allocation).toBe(35);
+    expect(enriched.launch_preferences.auto_start).toBe(true);
+  });
+
+  it('stamps experiment_type from metadata onto the plan root for list launch', () => {
+    const [enriched] = enrichInboxPlansForLaunch([
+      {
+        id: 'p-offer',
+        metadata: { experiment_type: 'offer_test' },
+      },
+    ]);
+    expect(enriched.experiment_type).toBe('offer_test');
   });
 
   it('replaces prior inbox plans for the same experiment on upsert', () => {

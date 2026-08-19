@@ -12,6 +12,11 @@ const {
 const { getShopPriceSurfaceMappings } = require('../priceSurfaceRegistryService');
 const { buildPriceSurfaceReadinessSummary } = require('../../utils/priceSurfaceRegistry');
 const { SETTINGS_PRICE_SURFACES_TAB } = require('../../utils/checkoutReadinessHints');
+const {
+  getOfferCheckoutDiscountStatus,
+  pickCheckoutDiscountFunction,
+  discountRecordId,
+} = require('./offerCheckoutDiscountService');
 
 const readinessCache = new Map();
 
@@ -37,7 +42,13 @@ function clearSmartPricingCheckoutReadinessCache(shopDomain = null) {
     readinessCache.clear();
     return;
   }
-  readinessCache.delete(normalizeShopDomain(shopDomain));
+  const domain = normalizeShopDomain(shopDomain);
+  const prefix = `${domain}:`;
+  for (const key of readinessCache.keys()) {
+    if (key === domain || key.startsWith(prefix)) {
+      readinessCache.delete(key);
+    }
+  }
 }
 
 function resolveExtensionConfigInput() {
@@ -140,7 +151,7 @@ async function resolveSmartPricingCheckoutReadiness(
 ) {
   const domain = normalizeShopDomain(shopDomain);
   const ttlMs = getReadinessCacheTtlMs();
-  const cacheKey = `${domain}:${accessToken ? 'live' : 'static'}`;
+  const cacheKey = `${domain}:${accessToken ? 'live' : 'static'}:offer-fn-v3`;
   const cached = readinessCache.get(cacheKey);
   if (!forceRefresh && ttlMs > 0 && cached && cached.expiresAt > Date.now()) {
     return {
@@ -206,6 +217,36 @@ async function resolveSmartPricingCheckoutReadiness(
     };
   }
 
+  const infraDiscountAvailable = Boolean(
+    diagnostics.infrastructure?.discount_function_available
+  );
+  const pickedDiscountFunction = pickCheckoutDiscountFunction(live.shopifyFunctions || []);
+  let discountFunctionAvailable =
+    infraDiscountAvailable || Boolean(pickedDiscountFunction?.id);
+  let discountFunctionId =
+    diagnostics.infrastructure?.discount_function_id || pickedDiscountFunction?.id || null;
+  let automaticDiscountAvailable = false;
+  let automaticDiscountId = null;
+  if (accessToken && live.live_api_checked === true) {
+    try {
+      const offerDiscount = await getOfferCheckoutDiscountStatus({
+        shopDomain: domain,
+        accessToken,
+        functionNodes: live.shopifyFunctionsQueryError ? null : live.shopifyFunctions,
+      });
+      automaticDiscountAvailable = offerDiscount.automatic_discount_available === true;
+      automaticDiscountId = discountRecordId(offerDiscount.discount) || null;
+      if (offerDiscount.function_available === true || automaticDiscountAvailable) {
+        discountFunctionAvailable = true;
+      }
+      if (!discountFunctionId && offerDiscount.function?.id) {
+        discountFunctionId = offerDiscount.function.id;
+      }
+    } catch {
+      automaticDiscountAvailable = false;
+    }
+  }
+
   const readiness = {
     ready,
     status,
@@ -217,6 +258,10 @@ async function resolveSmartPricingCheckoutReadiness(
     price_surface: priceSurface,
     batch_url_configured: Boolean(getConfiguredBatchResolveUrls().batchUrl),
     live_api_checked: live.live_api_checked,
+    discount_function_available: discountFunctionAvailable,
+    discount_function_id: discountFunctionId,
+    automatic_discount_available: automaticDiscountAvailable,
+    automatic_discount_id: automaticDiscountId,
     shopify_functions_count: Array.isArray(live.shopifyFunctions)
       ? live.shopifyFunctions.length
       : 0,
@@ -226,6 +271,17 @@ async function resolveSmartPricingCheckoutReadiness(
         ? 'Checkout price override path looks configured (live Shopify check).'
         : 'Checkout price override path looks configured.'
       : failedChecks[0] || 'Checkout price function needs attention before launch.',
+    offer_message: !live.live_api_checked
+      ? 'Offer checkout will be verified after you re-open the app from Shopify Admin.'
+      : discountFunctionAvailable
+        ? automaticDiscountAvailable
+          ? 'Checkout discount function is attached for offer tests.'
+          : 'Checkout discount function is deployed. Launch will attach the automatic discount.'
+        : 'Offer tests need the RipsPriceX checkout discount function. Deploy ripspricex-checkout-discount, then re-check Setup.',
+    offer_ready:
+      live.live_api_checked !== true ||
+      discountFunctionAvailable === true ||
+      automaticDiscountAvailable === true,
     cached: false,
   };
 

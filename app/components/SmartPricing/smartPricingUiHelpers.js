@@ -60,7 +60,10 @@ export function planStatusLabel(plan) {
   if (plan?.status === 'winner_ready') {
     return { tone: 'attention', label: 'Apply price' };
   }
-  if (plan?.status === 'running' || plan?.test_id) {
+  if (plan?.status === 'paused' || plan?.status === 'stopped') {
+    return { tone: 'warning', label: 'Paused' };
+  }
+  if (plan?.status === 'running') {
     return { tone: 'success', label: 'Live' };
   }
   if (!planCanLaunchWithoutConfirm(plan)) {
@@ -186,14 +189,10 @@ export function groupInboxPlans(plans = []) {
       applied.push(plan);
       return;
     }
-    if (
-      plan.status === 'running' ||
-      (plan.test_id &&
-        plan.status !== 'queued' &&
-        plan.status !== 'draft' &&
-        plan.status !== 'applied' &&
-        plan.status !== 'winner_ready')
-    ) {
+    if (plan.status === 'paused' || plan.status === 'stopped') {
+      return;
+    }
+    if (plan.status === 'running') {
       live.push(plan);
       return;
     }

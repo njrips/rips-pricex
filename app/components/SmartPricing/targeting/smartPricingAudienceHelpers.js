@@ -4,6 +4,7 @@
  */
 
 import { resolveCountryToCode } from '../../../utils/iso3166CountryDisplay';
+import { collapseCountrySelection } from '../classic/countrySelection';
 
 export const DEVICE_OPTIONS = [
   { label: 'All devices', value: 'all' },
@@ -102,7 +103,11 @@ export function normalizeClassicAudienceTargeting(state = {}) {
       ? source.sources.map(String)
       : [...CLASSIC_SOURCE_OPTIONS]
     : [...CLASSIC_SOURCE_OPTIONS];
-  const countries = Array.isArray(source.countries) ? normalizeCountryList(source.countries) : [];
+  const countryMode = normalizeMode(source.countryMode || source.country_mode);
+  const countries = collapseCountrySelection(
+    Array.isArray(source.countries) ? source.countries : [],
+    countryMode
+  );
 
   return {
     devices,
@@ -110,7 +115,7 @@ export function normalizeClassicAudienceTargeting(state = {}) {
     countries,
     deviceMode: normalizeMode(source.deviceMode || source.device_mode),
     sourceMode: normalizeMode(source.sourceMode || source.source_mode),
-    countryMode: normalizeMode(source.countryMode || source.country_mode),
+    countryMode,
   };
 }
 
@@ -654,7 +659,7 @@ export function classicAudienceToSegments(audienceUi = {}, baseSegments = {}) {
   const countryMode = normalizeMode(audienceUi.countryMode);
   const devices = mapClassicDevicesToEngine(audienceUi.devices);
   const sourceValues = expandClassicSources(audienceUi.sources);
-  const countries = normalizeCountryList(audienceUi.countries);
+  const countries = collapseCountrySelection(audienceUi.countries, countryMode);
   const traffic = clampTrafficPercent(audienceUi.trafficAllocation);
 
   const out = {

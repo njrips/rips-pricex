@@ -55,19 +55,18 @@ export async function deleteClassicExperimentSynchronized(
   const remaining = current.filter(plan => !planIdSet.has(plan.id));
   writeInboxPlans(shopDomain, remaining, { persist: false });
 
-  for (const planId of planIds) {
-    const result = await deletePersistedInboxPlan(shopDomain, planId);
-    if (result?.ok) {
-      deletedPlanIds.push(planId);
-    } else {
-      errors.push(result?.error || `Could not delete inbox plan ${planId}.`);
-    }
-  }
-
   try {
     await persistInboxPlansNow(shopDomain, remaining);
-  } catch (err) {
-    errors.push(err?.message || 'Could not sync remaining inbox plans to your account.');
+    deletedPlanIds.push(...planIds);
+  } catch (persistErr) {
+    for (const planId of planIds) {
+      const result = await deletePersistedInboxPlan(shopDomain, planId);
+      if (result?.ok) {
+        deletedPlanIds.push(planId);
+      } else {
+        errors.push(result?.error || persistErr?.message || `Could not delete inbox plan ${planId}.`);
+      }
+    }
   }
 
   if (deleteLinkedTests && testIds.length) {

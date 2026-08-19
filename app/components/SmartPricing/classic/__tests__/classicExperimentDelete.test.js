@@ -60,8 +60,8 @@ describe('classicExperimentDelete', () => {
     expect(writeInboxPlans).toHaveBeenCalledWith('shop.myshopify.com', [{ id: 'p3' }], {
       persist: false,
     });
-    expect(deletePersistedInboxPlan).toHaveBeenCalledTimes(2);
     expect(persistInboxPlansNow).toHaveBeenCalledWith('shop.myshopify.com', [{ id: 'p3' }]);
+    expect(deletePersistedInboxPlan).not.toHaveBeenCalled();
     expect(apiDelete).toHaveBeenCalledWith('/tests/test-1');
     expect(apiDelete).toHaveBeenCalledWith('/tests/test-2');
     expect(result.ok).toBe(true);
@@ -70,6 +70,7 @@ describe('classicExperimentDelete', () => {
   });
 
   it('reports partial failure when a server delete fails', async () => {
+    persistInboxPlansNow.mockRejectedValueOnce(new Error('Server busy'));
     deletePersistedInboxPlan
       .mockResolvedValueOnce({ ok: true })
       .mockResolvedValueOnce({ ok: false, error: 'Server busy' });

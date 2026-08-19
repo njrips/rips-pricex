@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { IconCheck, IconGlobe, IconSearch } from './classicIcons';
+import { Button, TextField } from '@shopify/polaris';
+import { IconCheck, IconGlobe } from './classicIcons';
 import styles from './SmartPricingClassic.module.css';
 
 function formatMoney(value) {
@@ -162,19 +163,18 @@ export default function ClassicProductPickerModal({
               {Math.max(collectionOptions.length - 1, 0)}+ collections and thousands of products.
             </p>
           </div>
-          <button type="button" className={styles.iconClose} onClick={onClose} aria-label="Close">
-            ×
-          </button>
+          <Button onClick={onClose}>Close</Button>
         </div>
 
         <div className={styles.modalBody}>
           <aside className={styles.modalSide}>
-            <div className={`${styles.searchWrap} ${styles.modalSearch}`}>
-              <IconSearch size={14} />
-              <input
-                className={`${styles.input} ${styles.modalSearchInput}`}
+            <div className={styles.modalSearch}>
+              <TextField
+                label="Search collections"
+                labelHidden
                 value={sideSearch}
-                onChange={e => setSideSearch(e.target.value)}
+                onChange={setSideSearch}
+                autoComplete="off"
                 placeholder="Search collections"
               />
             </div>
@@ -234,23 +234,23 @@ export default function ClassicProductPickerModal({
                   {activeLabel === 'All products' ? 'catalog' : `${activeLabel} collection`}.
                 </div>
               </div>
-              <button
-                type="button"
-                className={styles.selectAllLink}
+              <Button
+                variant="plain"
                 onClick={allVisibleSelected ? deselectVisible : selectAllVisible}
                 disabled={!products.length}
               >
                 {allVisibleSelected
                   ? `Deselect ${products.length}`
                   : `Select all ${products.length}`}
-              </button>
+              </Button>
             </div>
-            <div className={`${styles.searchWrap} ${styles.modalSearch}`}>
-              <IconSearch size={14} />
-              <input
-                className={`${styles.input} ${styles.modalSearchInput}`}
+            <div className={styles.modalSearch}>
+              <TextField
+                label={`Search in ${activeLabel}`}
+                labelHidden
                 value={productSearch}
-                onChange={e => setProductSearch(e.target.value)}
+                onChange={setProductSearch}
+                autoComplete="off"
                 placeholder={`Search in ${activeLabel}`}
               />
             </div>
@@ -299,9 +299,9 @@ export default function ClassicProductPickerModal({
             {collectionsTouched === 1 ? '' : 's'}
             {selectedIds.length >= maxSelection ? ` · max ${maxSelection}` : ''}
           </span>
-          <button type="button" className={styles.primaryBtn} onClick={onClose}>
+          <Button variant="primary" onClick={onClose}>
             Done
-          </button>
+          </Button>
         </div>
       </div>
     </div>,

@@ -3,6 +3,13 @@
  * Real API: `{ success, readiness: { ready, failed_checks, checks, price_surface, ... } }`.
  */
 
+import {
+  getOfferCheckoutBlockReason,
+  isOfferCheckoutReady,
+} from '../components/SmartPricing/classic/offerSelection';
+
+export { getOfferCheckoutBlockReason, isOfferCheckoutReady };
+
 /**
  * @param {unknown} data
  * @returns {Record<string, unknown> | null}
@@ -76,6 +83,62 @@ export function priceSurfaceSummary(readiness) {
  */
 export function isCheckoutReady(readiness) {
   return readiness?.ready === true;
+}
+
+/**
+ * Price-path or offer-path can unlock Create. Launch still gates per experiment type.
+ * @param {Record<string, unknown> | null | undefined} readiness
+ */
+export function describeSmartPricingLaunchReadiness(readiness) {
+  if (!readiness || typeof readiness !== 'object') {
+    return {
+      priceReady: null,
+      offerReady: null,
+      anyReady: null,
+      title: 'Checking checkout readiness…',
+      detail: '',
+    };
+  }
+  const priceReady = isCheckoutReady(readiness);
+  const offerReady = isOfferCheckoutReady(readiness);
+  if (priceReady && offerReady) {
+    return {
+      priceReady: true,
+      offerReady: true,
+      anyReady: true,
+      title: 'Ready to launch price and offer tests',
+      detail: 'Cart transform and checkout discount are both available.',
+    };
+  }
+  if (offerReady) {
+    return {
+      priceReady: false,
+      offerReady: true,
+      anyReady: true,
+      title: 'Ready to launch offer tests',
+      detail:
+        'Offer tests can launch. Price tests still need cart transform and theme price selectors.',
+    };
+  }
+  if (priceReady) {
+    return {
+      priceReady: true,
+      offerReady: false,
+      anyReady: true,
+      title: 'Ready to launch price tests',
+      detail:
+        getOfferCheckoutBlockReason(readiness) ||
+        'Offer tests need the checkout discount function (Setup step 3).',
+    };
+  }
+  return {
+    priceReady: false,
+    offerReady: false,
+    anyReady: false,
+    title: 'Checkout needs attention',
+    detail:
+      'Offer tests need the checkout discount (Setup step 3). Price tests need cart transform (step 2).',
+  };
 }
 
 /**

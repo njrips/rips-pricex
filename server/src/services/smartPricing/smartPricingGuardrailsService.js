@@ -22,6 +22,7 @@ const DEFAULT_GUARDRAILS = Object.freeze({
   default_cogs_percent: 55,
   min_margin_percent: 35,
   max_price_change_percent: 15,
+  max_revenue_drop_percent: 10,
   max_parallel_tests: 5,
   objective: 'revenue_per_visitor',
   ai_ranking_enabled: true,
@@ -130,6 +131,12 @@ function normalizeGuardrails(raw = {}) {
       3,
       30,
       DEFAULT_GUARDRAILS.max_price_change_percent
+    ),
+    max_revenue_drop_percent: clampNumber(
+      source.max_revenue_drop_percent ?? source.maxRevenueDropPercent,
+      3,
+      50,
+      DEFAULT_GUARDRAILS.max_revenue_drop_percent
     ),
     max_parallel_tests: clampNumber(
       source.max_parallel_tests ?? source.maxParallelTests,

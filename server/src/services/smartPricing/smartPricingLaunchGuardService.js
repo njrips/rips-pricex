@@ -5,7 +5,7 @@
 const { getTestsByShop } = require('../../models/test');
 const { getShopSmartPricingGuardrails } = require('./smartPricingGuardrailsService');
 
-const PRICE_TEST_TYPES = new Set(['price', 'pricing', 'smart-pricing']);
+const PRICE_TEST_TYPES = new Set(['price', 'pricing', 'smart-pricing', 'offer']);
 
 async function countRunningPriceTests(shopDomain) {
   const running = await getTestsByShop(shopDomain, 'running');
@@ -53,7 +53,7 @@ async function assertCanLaunchPriceTests(
     const running = capacity.running_count;
     const max = capacity.max_parallel;
     const err = new Error(
-      `You already have ${running} running price test${running === 1 ? '' : 's'}. Max parallel tests allowed: ${max}.`
+      `You already have ${running} running Smart Pricing test${running === 1 ? '' : 's'}. Max parallel tests allowed: ${max}.`
     );
     err.isValidation = true;
     err.errors = [err.message];

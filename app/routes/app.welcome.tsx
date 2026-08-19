@@ -1,9 +1,9 @@
 import { useMemo } from 'react';
 import { Link, useNavigate, useOutletContext, useSearchParams } from 'react-router';
+import { Banner } from '@shopify/polaris';
 import type { AppOutletContext } from '../lib/api.client';
 import { useUpgradeRedirect } from '../lib/useUpgradeRedirect';
 import ClassicAdminShell from '../components/SmartPricing/classic/ClassicAdminShell';
-import { IconSparkles } from '../components/SmartPricing/classic/classicIcons';
 import styles from '../components/SmartPricing/classic/SmartPricingClassic.module.css';
 
 /**
@@ -58,19 +58,16 @@ export default function PlanWelcomePage() {
             }
       }
     >
-      <div className={styles.callout} role="status" style={{ marginBottom: 20 }}>
-        <span className={styles.calloutIcon} aria-hidden>
-          <IconSparkles size={16} />
-        </span>
-        <span className={styles.calloutBody}>
-          <span className={styles.calloutStrong}>
-            {entitled ? 'Create is unlocked' : 'Waiting on entitlement'}
-          </span>
-          <span className={styles.calloutMeta}>
+      <div style={{ marginBottom: 20 }}>
+        <Banner
+          tone={entitled ? 'success' : 'info'}
+          title={entitled ? 'Create is unlocked' : 'Waiting on entitlement'}
+        >
+          <p>
             Plan: <strong>{displayPlan}</strong>
             {planFromQuery ? ' (from Shopify redirect)' : ''}. Shop: {ctx.shop}
-          </span>
-        </span>
+          </p>
+        </Banner>
       </div>
 
       <div className={styles.adminStack}>

@@ -189,7 +189,15 @@ async function buildBatchPreviewLaunch({
   });
 
   const blockers = [];
-  if (readiness?.ready === false) {
+  const { isOfferPlan } = require('./planToOfferTestService');
+  const offerBatch = list.some(plan => isOfferPlan(plan));
+  if (offerBatch) {
+    if (readiness?.live_api_checked === true && readiness?.discount_function_available !== true) {
+      blockers.push(
+        'Offer tests need a deployed checkout discount function. Deploy ripspricex-checkout-discount, then re-check Setup.'
+      );
+    }
+  } else if (readiness?.ready === false) {
     blockers.push(readiness.message || 'Checkout price path is not ready.');
   }
   if (capacity?.can_launch === false || capacity?.slots_remaining === 0) {

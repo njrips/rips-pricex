@@ -1,5 +1,6 @@
 import React from 'react';
-import { IconPlus, IconScales } from './classicIcons';
+import { Button, TextField } from '@shopify/polaris';
+import { ButtonIconPlus, IconScales } from './classicIcons';
 import styles from './SmartPricingClassic.module.css';
 import {
   buildNextVariation,
@@ -8,6 +9,7 @@ import {
   splitEvenly,
   trafficTotal,
 } from './variationsStepHelpers';
+import { isOfferExperimentType } from './offerSelection';
 
 export {
   createDefaultVariations,
@@ -17,9 +19,14 @@ export {
   trafficTotal,
 } from './variationsStepHelpers';
 
-export default function VariationsStepPanel({ variations, onChange }) {
+export default function VariationsStepPanel({
+  variations,
+  onChange,
+  experimentType = 'price_test',
+}) {
   const total = trafficTotal(variations);
   const ok = total === 100;
+  const isOffer = isOfferExperimentType(experimentType);
 
   const updateRow = (index, patch) => {
     onChange(variations.map((row, i) => (i === index ? { ...row, ...patch } : row)));
@@ -45,14 +52,14 @@ export default function VariationsStepPanel({ variations, onChange }) {
           <span className={ok ? styles.trafficOk : styles.trafficBad}>{total}%</span>
           <span className={styles.trafficBannerMuted}>/ 100%</span>
         </span>
-        <button
-          type="button"
-          className={styles.ghostBtn}
-          onClick={() => onChange(splitEvenly(variations))}
-        >
-          Split evenly
-        </button>
+        <Button onClick={() => onChange(splitEvenly(variations))}>Split evenly</Button>
       </div>
+      {isOffer ? (
+        <p className={styles.help}>
+          Traffic only on this step. Set the percent or amount-off offer for each variation on
+          Products.
+        </p>
+      ) : null}
 
       {variations.map((row, index) => (
         <div key={row.id} className={styles.variationBlock}>
@@ -60,26 +67,38 @@ export default function VariationsStepPanel({ variations, onChange }) {
             <span className={styles.variationBadgeLetter}>{row.letter}</span>
             <span className={styles.variationTag}>{row.role}</span>
             {index > 1 ? (
-              <button
-                type="button"
-                className={`${styles.footerLink} ${styles.variationRemove}`}
-                onClick={() => onChange(splitEvenly(variations.filter((_, i) => i !== index)))}
-              >
-                Remove
-              </button>
+              <span className={styles.variationRemove}>
+                <Button
+                  variant="plain"
+                  tone="critical"
+                  onClick={() => onChange(splitEvenly(variations.filter((_, i) => i !== index)))}
+                >
+                  Remove
+                </Button>
+              </span>
             ) : null}
           </div>
-          <input
-            className={`${styles.input} ${styles.variationInput}`}
+          <TextField
+            label="Variation name"
+            labelHidden
             value={row.name}
-            onChange={e => updateRow(index, { name: e.target.value })}
+            onChange={value => updateRow(index, { name: value })}
+            autoComplete="off"
             placeholder="Variation name"
           />
-          <input
-            className={`${styles.input} ${styles.variationInput}`}
+          <TextField
+            label="Variation description"
+            labelHidden
             value={row.description}
-            onChange={e => updateRow(index, { description: e.target.value })}
-            placeholder={index === 0 ? 'Current price' : "Describe what's different (optional)"}
+            onChange={value => updateRow(index, { description: value })}
+            autoComplete="off"
+            placeholder={
+              index === 0
+                ? isOffer
+                  ? 'No offer (baseline)'
+                  : 'Current price'
+                : "Describe what's different (optional)"
+            }
           />
           <div className={styles.sliderRow}>
             <div className={styles.sliderCol}>
@@ -103,9 +122,9 @@ export default function VariationsStepPanel({ variations, onChange }) {
       ))}
 
       {variations.length < 5 ? (
-        <button type="button" className={styles.addVariation} onClick={addVariation}>
-          <IconPlus size={16} /> Add variation
-        </button>
+        <Button icon={ButtonIconPlus} onClick={addVariation}>
+          Add variation
+        </Button>
       ) : null}
     </div>
   );

@@ -7,7 +7,7 @@ import { useUpgradeRedirect } from '../lib/useUpgradeRedirect';
 import type { AppOutletContext } from '../lib/api.client';
 import { rpxApi } from '../lib/api.client';
 import {
-  isCheckoutReady,
+  describeSmartPricingLaunchReadiness,
   unwrapCheckoutReadiness,
 } from '../utils/checkoutReadinessClient';
 import '../styles/classic-theme.css';
@@ -16,11 +16,13 @@ export default function ExperimentsHome() {
   const ctx = useOutletContext<AppOutletContext>();
   const navigate = useNavigate();
   const upgrade = useUpgradeRedirect(ctx.upgradeUrl);
-  const [checkoutReady, setCheckoutReady] = useState<boolean | null>(null);
+  const [launchSummary, setLaunchSummary] = useState(() =>
+    describeSmartPricingLaunchReadiness(null)
+  );
 
   useEffect(() => {
     if (!ctx.entitled || !ctx.shop) {
-      setCheckoutReady(null);
+      setLaunchSummary(describeSmartPricingLaunchReadiness(null));
       return;
     }
     let cancelled = false;
@@ -28,10 +30,10 @@ export default function ExperimentsHome() {
       .checkoutReadiness(ctx)
       .then(data => {
         if (cancelled) return;
-        setCheckoutReady(isCheckoutReady(unwrapCheckoutReadiness(data)));
+        setLaunchSummary(describeSmartPricingLaunchReadiness(unwrapCheckoutReadiness(data)));
       })
       .catch(() => {
-        if (!cancelled) setCheckoutReady(null);
+        if (!cancelled) setLaunchSummary(describeSmartPricingLaunchReadiness(null));
       });
     return () => {
       cancelled = true;
@@ -48,7 +50,7 @@ export default function ExperimentsHome() {
         ) : null}
       </TitleBar>
       {!ctx.entitled ? (
-        <Box padding="400" paddingBlockEnd="0">
+        <Box paddingInline="800" paddingBlockStart="400" paddingBlockEnd="0">
           <Banner
             tone="warning"
             title="Create is locked"
@@ -65,8 +67,8 @@ export default function ExperimentsHome() {
             </p>
           </Banner>
         </Box>
-      ) : checkoutReady === false ? (
-        <Box padding="400" paddingBlockEnd="0">
+      ) : launchSummary.anyReady === false ? (
+        <Box paddingInline="800" paddingBlockStart="400" paddingBlockEnd="0">
           <Banner
             tone="warning"
             title="Finish Setup before launch"
@@ -77,8 +79,25 @@ export default function ExperimentsHome() {
             }}
           >
             <p>
-              Checkout readiness still needs attention (theme embed, cart transform, or price
-              surfaces). Create is unlocked, but Launch may be blocked until Setup is green.
+              {launchSummary.detail ||
+                'Offer tests need the checkout discount. Price tests need cart transform and theme price selectors.'}
+            </p>
+          </Banner>
+        </Box>
+      ) : launchSummary.priceReady === false && launchSummary.offerReady === true ? (
+        <Box paddingInline="800" paddingBlockStart="400" paddingBlockEnd="0">
+          <Banner
+            tone="info"
+            title="Offer tests can launch"
+            action={{ content: 'Open Setup', onAction: () => navigate('/app/setup') }}
+            secondaryAction={{
+              content: 'Price surfaces',
+              onAction: () => navigate('/app/settings?tab=price-surfaces&automap=1'),
+            }}
+          >
+            <p>
+              Price tests still need cart transform and theme price selectors. Offer tests apply at
+              checkout and do not wait on those steps.
             </p>
           </Banner>
         </Box>

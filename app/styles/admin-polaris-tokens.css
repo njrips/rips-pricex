@@ -1,0 +1,78 @@
+/**
+ * Shopify Admin / Polaris 13 semantic colors.
+ * Shared by embedded app + public site so both match Admin.
+ * When PolarisAppProvider is mounted, prefer live --p-color-* via var().
+ * Hex fallbacks match Polaris 13 light theme for surfaces without the provider.
+ *
+ * Layout source: Classic (EchoTest). Visual source: Admin.
+ */
+:root,
+[data-palette='admin'],
+[data-palette='orange-classic'] {
+  /* Polaris 13 light fallbacks (used when --p-color-* is unset) */
+  --rpx-admin-bg: #f1f1f1;
+  --rpx-admin-surface: #ffffff;
+  --rpx-admin-surface-secondary: #f7f7f7;
+  --rpx-admin-surface-selected: #f1f1f1;
+  --rpx-admin-text: #303030;
+  --rpx-admin-text-secondary: #616161;
+  --rpx-admin-border: #e3e3e3;
+  --rpx-admin-fill-brand: #303030;
+  --rpx-admin-fill-brand-hover: #1a1a1a;
+  --rpx-admin-fill-success: #047b5d;
+  --rpx-admin-success-surface: #cdfed4;
+  --rpx-admin-warning-surface: #fff1e3;
+  --rpx-admin-warning-fill: #ffb800;
+  --rpx-admin-critical-surface: #fee8eb;
+
+  --ripx-font-classic: 'Inter', -apple-system, BlinkMacSystemFont, 'San Francisco',
+    'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+
+  /* Accent (Settings / TargetingSection glass) — near-black brand, not orange */
+  --accent-primary-rgb: 48, 48, 48;
+  --accent-secondary-rgb: 26, 26, 26;
+  --accent-primary: rgb(var(--accent-primary-rgb));
+  --text-link: var(--p-color-text, var(--rpx-admin-text));
+  --bg-primary: var(--p-color-bg, var(--rpx-admin-bg));
+  --bg-secondary: var(--p-color-bg-surface, var(--rpx-admin-surface));
+  --border-primary: var(--p-color-border, var(--rpx-admin-border));
+  --text-primary: var(--p-color-text, var(--rpx-admin-text));
+
+  /* Classic token aliases → Admin / Polaris */
+  --classic-cream: var(--p-color-bg, var(--rpx-admin-bg));
+  --classic-card: var(--p-color-bg-surface, var(--rpx-admin-surface));
+  --classic-ink: var(--p-color-text, var(--rpx-admin-text));
+  --classic-body: var(--p-color-text, var(--rpx-admin-text));
+  --classic-muted: var(--p-color-text-secondary, var(--rpx-admin-text-secondary));
+  --classic-muted-soft: var(--p-color-text-secondary, var(--rpx-admin-text-secondary));
+  --classic-line: var(--p-color-border, var(--rpx-admin-border));
+  --classic-line-strong: var(--p-color-border, var(--rpx-admin-border));
+  --classic-wash: var(--p-color-bg-surface-secondary, var(--rpx-admin-surface-secondary));
+  --classic-track: var(--p-color-bg-surface-secondary, var(--rpx-admin-surface-secondary));
+  --classic-neutral: rgba(48, 48, 48, 0.06);
+  --classic-radius: 8px;
+  --classic-radius-sm: 6px;
+  /* Primary / selected — near-black (was orange brand) */
+  --classic-orange: var(--p-color-bg-fill-brand, var(--rpx-admin-fill-brand));
+  --classic-orange-soft: var(--p-color-bg-surface-selected, var(--rpx-admin-surface-selected));
+  --classic-orange-deep: var(--p-color-bg-fill-brand-hover, var(--rpx-admin-fill-brand-hover));
+  --classic-orange-border: rgba(48, 48, 48, 0.35);
+  --classic-success: var(--p-color-bg-fill-success, var(--rpx-admin-fill-success));
+  --classic-success-bg: var(--p-color-bg-surface-success, var(--rpx-admin-success-surface));
+  --classic-shadow: 0 1px 0 rgba(0, 0, 0, 0.05);
+  --classic-table-head: var(--p-color-bg-surface-secondary, var(--rpx-admin-surface-secondary));
+  --classic-table-row: var(--p-color-bg-surface, var(--rpx-admin-surface));
+  --classic-table-row-hover: var(--p-color-bg-surface-hover, #f7f7f7);
+  --classic-table-variant: var(--p-color-bg-surface-secondary, var(--rpx-admin-surface-secondary));
+  --classic-table-variant-hover: var(--p-color-bg-surface-secondary-hover, #f1f1f1);
+  --classic-pricing-toolbar: var(--p-color-bg-surface-secondary, var(--rpx-admin-surface-secondary));
+  --classic-pricing-input: var(--p-color-bg-surface, var(--rpx-admin-surface));
+  --classic-pricing-border: var(--p-color-border, var(--rpx-admin-border));
+  --classic-panel-tint: var(--p-color-bg-surface-secondary, var(--rpx-admin-surface-secondary));
+  --classic-callout-bg: var(--p-color-bg-surface-warning, var(--rpx-admin-warning-surface));
+  --classic-callout-border: rgba(255, 184, 0, 0.45);
+  --classic-segment-on: rgba(255, 255, 255, 0.7);
+  --classic-disabled-field: var(--p-color-bg-surface-disabled, rgba(0, 0, 0, 0.05));
+  --classic-disabled-text: #8a8a8a;
+  --classic-primary-btn-text: #ffffff;
+}

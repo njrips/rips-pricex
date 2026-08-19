@@ -25,6 +25,18 @@ describe('smartPricingAiSuggestService', () => {
     });
     expect(result.source).toBe('deterministic');
     expect(result.hypothesis).toMatch(/Hoodie/);
+    expect(result.hypothesis).toMatch(/price points/);
+  });
+
+  it('drafts offer-test hypotheses about checkout discounts', async () => {
+    const result = await suggestHypothesis({
+      name: 'Summer offer',
+      experimentType: 'offer_test',
+      variants: [{ variant_id: 'v1', title: 'Tee', current_price: 29 }],
+    });
+    expect(result.hypothesis).toMatch(/checkout offers/);
+    expect(result.hypothesis).toMatch(/Tee/);
+    expect(result.hypothesis).not.toMatch(/price points/);
   });
 
   it('builds guardrail-clamped price suggestions for each test arm', () => {

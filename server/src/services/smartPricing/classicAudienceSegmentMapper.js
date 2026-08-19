@@ -75,6 +75,21 @@ function expandClassicSources(sources = []) {
   return out;
 }
 
+/** Include lists this large are worldwide, not a hand-picked set. */
+const WORLDWIDE_INCLUDE_MIN = 200;
+
+const WORLDWIDE_SENTINELS = new Set([
+  '*',
+  'ALL',
+  'WW',
+  'WORLD',
+  'WORLDWIDE',
+  'EVERY',
+  'ENTIRE',
+  'ALL COUNTRIES',
+  'ALL-COUNTRIES',
+]);
+
 function normalizeCountryList(rawCountries) {
   const values = Array.isArray(rawCountries) ? rawCountries : [];
   const out = [];
@@ -83,13 +98,20 @@ function normalizeCountryList(rawCountries) {
     const code = String(raw || '')
       .trim()
       .toUpperCase();
-    if (!/^[A-Z]{2}$/.test(code) || seen.has(code)) {
+    if (WORLDWIDE_SENTINELS.has(code) || !/^[A-Z]{2}$/.test(code) || seen.has(code)) {
       continue;
     }
     seen.add(code);
     out.push(code);
   }
   return out;
+}
+
+function collapseIncludeCountries(list, mode) {
+  if (mode !== 'exclude' && list.length >= WORLDWIDE_INCLUDE_MIN) {
+    return [];
+  }
+  return list;
 }
 
 function segmentCustomerFromUi(segment) {
@@ -110,7 +132,10 @@ function classicAudienceToSegments(audienceUi = {}, baseSegments = {}) {
   const countryMode = normalizeMode(audienceUi.countryMode || audienceUi.country_mode);
   const devices = mapClassicDevicesToEngine(audienceUi.devices);
   const sourceValues = expandClassicSources(audienceUi.sources);
-  const countries = normalizeCountryList(audienceUi.countries);
+  const countries = collapseIncludeCountries(
+    normalizeCountryList(audienceUi.countries),
+    countryMode
+  );
   const traffic = clampTrafficPercent(
     audienceUi.trafficAllocation ?? audienceUi.traffic_allocation
   );

@@ -94,4 +94,73 @@ describe('smartPricingAudienceGoalService', () => {
     expect(preview.blockers.some(b => /checkout/i.test(b))).toBe(true);
     expect(preview.suggested_timeline_days).toBe(14);
   });
+
+  it('does not block offer-test preview on cart-transform price readiness', async () => {
+    resolveLaunchCapacity.mockResolvedValue({
+      can_launch: true,
+      slots_remaining: 3,
+      running_count: 0,
+    });
+    resolveSmartPricingCheckoutReadiness.mockResolvedValue({
+      ready: false,
+      message: 'Checkout price function needs attention before launch.',
+      live_api_checked: true,
+      discount_function_available: true,
+    });
+    listInboxPlans.mockResolvedValue({ plans: [] });
+
+    const preview = await buildBatchPreviewLaunch({
+      shopDomain: 'demo.myshopify.com',
+      plans: [
+        {
+          id: 'SP-offer',
+          title: 'Tee offer',
+          experiment_type: 'offer_test',
+          metadata: { experiment_type: 'offer_test' },
+          guardrail_checks: [{ id: 'x', passed: true }],
+          statistical_design: { power_rating: 'adequate', estimated_duration_days: 10 },
+          goal: { cogs: { enabled: true } },
+        },
+      ],
+      guardrails: {},
+    });
+
+    expect(preview.blockers.some(b => /price function|cart transform|price path/i.test(b))).toBe(
+      false
+    );
+    expect(preview.ready_to_launch).toBe(true);
+  });
+
+  it('blocks offer-test preview when the checkout discount function is missing', async () => {
+    resolveLaunchCapacity.mockResolvedValue({
+      can_launch: true,
+      slots_remaining: 3,
+      running_count: 0,
+    });
+    resolveSmartPricingCheckoutReadiness.mockResolvedValue({
+      ready: true,
+      live_api_checked: true,
+      discount_function_available: false,
+    });
+    listInboxPlans.mockResolvedValue({ plans: [] });
+
+    const preview = await buildBatchPreviewLaunch({
+      shopDomain: 'demo.myshopify.com',
+      plans: [
+        {
+          id: 'SP-offer',
+          title: 'Tee offer',
+          experiment_type: 'offer_test',
+          metadata: { experiment_type: 'offer_test' },
+          guardrail_checks: [{ id: 'x', passed: true }],
+          statistical_design: { power_rating: 'adequate', estimated_duration_days: 10 },
+          goal: { cogs: { enabled: true } },
+        },
+      ],
+      guardrails: {},
+    });
+
+    expect(preview.ready_to_launch).toBe(false);
+    expect(preview.blockers.some(b => /checkout discount function/i.test(b))).toBe(true);
+  });
 });

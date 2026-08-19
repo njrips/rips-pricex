@@ -17,6 +17,10 @@ import {
   filterSortProductPerformance,
   filterSortVariationProducts,
   formatPrimaryMetricLabel,
+  formatAudienceSegmentLabel,
+  formatAudienceFactValue,
+  formatActivityMeta,
+  groupActivityByDay,
   groupVariationProductsByProduct,
   isControlArm,
   matchArmOnPlan,
@@ -30,6 +34,38 @@ describe('classicExperimentDetailsHelpers', () => {
   it('formats primary metric labels', () => {
     expect(formatPrimaryMetricLabel('conversion_rate')).toBe('Conversion rate');
     expect(formatPrimaryMetricLabel('profit_per_visitor')).toBe('Profit per visitor');
+  });
+
+  it('formats audience segment labels', () => {
+    expect(formatAudienceSegmentLabel('all')).toBe('All visitors');
+    expect(formatAudienceSegmentLabel('new_visitors')).toBe('New visitors');
+    expect(formatAudienceSegmentLabel('returning')).toBe('Returning visitors');
+  });
+
+  it('joins audience fact values like the details cards', () => {
+    expect(formatAudienceFactValue(['desktop', 'mobile'], 'All devices')).toBe('Desktop, Mobile');
+    expect(formatAudienceFactValue([], 'All devices')).toBe('All devices');
+    expect(formatAudienceFactValue(undefined, 'All devices')).toBe('All devices');
+  });
+
+  it('formats activity meta as actor · timestamp', () => {
+    expect(
+      formatActivityMeta({
+        actor: 'Maya Chen',
+        at: '2026-07-12T09:14:00.000Z',
+      })
+    ).toMatch(/^Maya Chen · /);
+  });
+
+  it('groups activity items by calendar day', () => {
+    const groups = groupActivityByDay([
+      { id: 'a', at: '2026-08-20T10:00:00.000Z', title: 'Started' },
+      { id: 'b', at: '2026-08-20T12:00:00.000Z', title: 'Paused' },
+      { id: 'c', at: '2026-08-19T09:00:00.000Z', title: 'Created' },
+    ]);
+    expect(groups).toHaveLength(2);
+    expect(groups[0].items.map(item => item.id)).toEqual(['a', 'b']);
+    expect(groups[1].items.map(item => item.id)).toEqual(['c']);
   });
 
   it('detects control arms', () => {
@@ -125,8 +161,57 @@ describe('classicExperimentDetailsHelpers', () => {
       },
     };
     expect(buildVariationsSummary(plan)).toHaveLength(2);
+    expect(buildVariationsSummary(plan)[1].offer).toBeNull();
     expect(buildAudienceSummary(plan).countries).toEqual(['US']);
+    expect(buildAudienceSummary(plan).segmentLabel).toBe('All visitors');
     expect(buildMetricsSummary(plan).secondaryEvents).toEqual(['page_view']);
+  });
+
+  it('attaches offer rules from plan arms or test variant config', () => {
+    const plan = {
+      price_arms: [
+        { id: 'c', role: 'control', label: 'Control', price: 40 },
+        {
+          id: 'a',
+          role: 'challenger',
+          label: 'A',
+          price: 40,
+          offer: { discount_type: 'percent', discount_value: 15, offer_message: 'Save 15%' },
+        },
+      ],
+    };
+    const fromPlan = buildVariationsSummary(plan);
+    expect(fromPlan[1].offer).toEqual({
+      discount_type: 'percent',
+      discount_value: 15,
+      offer_message: 'Save 15%',
+    });
+
+    const fromTest = buildVariationsSummary(
+      {
+        price_arms: [
+          { id: 'c', role: 'control', label: 'Control' },
+          { id: 'a', role: 'challenger', label: 'A' },
+        ],
+      },
+      null,
+      {
+        test: {
+          variants: [
+            { id: 'v0', config: {} },
+            {
+              id: 'v1',
+              config: { discount_type: 'fixed', discount_value: 5, offer_message: 'Five off' },
+            },
+          ],
+        },
+      }
+    );
+    expect(fromTest[1].offer).toEqual({
+      discount_type: 'fixed',
+      discount_value: 5,
+      offer_message: 'Five off',
+    });
   });
 
   it('lists per-product prices when an experiment has multiple plans', () => {
@@ -352,6 +437,20 @@ describe('classicExperimentDetailsHelpers', () => {
     expect(resolvePlanProductPath({})).toBe('/');
   });
 
+  it('does not promise catalog rollout on offer-test activity', () => {
+    const items = buildActivityTimeline({
+      plan: {
+        experiment_type: 'offer_test',
+        status: 'winner_ready',
+        updated_at: '2026-07-04T00:00:00.000Z',
+        winner_applied_at: '2026-07-05T00:00:00.000Z',
+      },
+      test: { status: 'stopped', stopped_at: '2026-07-04T00:00:00.000Z', type: 'offer' },
+    });
+    expect(items.find(item => item.id === 'winner_applied')?.detail).toMatch(/catalog prices were not changed/);
+    expect(items.find(item => item.id === 'paused')?.detail).toBe('Leading variation identified');
+  });
+
   it('builds activity timeline newest first', () => {
     const items = buildActivityTimeline({
       plan: {
@@ -365,6 +464,9 @@ describe('classicExperimentDetailsHelpers', () => {
     });
     expect(items[0].id).toBe('qa_r1');
     expect(items.some(item => item.id === 'created')).toBe(true);
+    expect(items.find(item => item.id === 'created')?.title).toBe('Created experiment');
+    expect(items.find(item => item.id === 'started')?.title).toBe('Launched experiment');
+    expect(items.find(item => item.id === 'created')?.actor).toBe('You');
   });
 
   it('includes shop guardrail notes in settings summary', () => {
@@ -376,6 +478,33 @@ describe('classicExperimentDetailsHelpers', () => {
     expect(settings.trafficRampPercent).toBe(40);
     expect(settings.guardrailNotes.length).toBeGreaterThanOrEqual(3);
     expect(settings.maxParallelTests).toBe(5);
+    expect(settings.priceApplicationMethod).toBe('direct_price_override');
+    expect(settings.autoStopEnabled).toBe(false);
+  });
+
+  it('includes the revenue drop limit and treats auto-stop as on', () => {
+    const settings = buildSettingsSummary(
+      { id: 'p1', audience: { traffic_allocation: 40 } },
+      {
+        status: 'running',
+        auto_stop: true,
+        guardrail_config: { auto_stop: true, max_revenue_drop_percent: 10 },
+        goal: { guardrails: { auto_stop: true, max_revenue_drop_percent: 10 } },
+      },
+      { max_revenue_drop_percent: 10, max_parallel_tests: 5 }
+    );
+    expect(settings.autoStopEnabled).toBe(true);
+    expect(settings.guardrailNotes.some(note => /Max revenue drop: 10%/.test(note))).toBe(true);
+  });
+
+  it('marks offer tests as checkout-discount application', () => {
+    const settings = buildSettingsSummary(
+      { id: 'p1', experiment_type: 'offer_test', audience: { traffic_allocation: 50 } },
+      { type: 'offer', status: 'running', variants: [{ config: {} }] },
+      { max_parallel_tests: 5, max_price_change_percent: 15 }
+    );
+    expect(settings.priceApplicationMethod).toBe('checkout_discount_function');
+    expect(settings.guardrailNotes.some(note => note.includes('Max price change'))).toBe(false);
   });
 
   it('averages variation performance across product tests without double-counting', () => {

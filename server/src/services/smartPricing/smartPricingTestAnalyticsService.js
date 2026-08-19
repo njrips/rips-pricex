@@ -35,10 +35,69 @@ function variantFixedPrice(variant = {}) {
   return null;
 }
 
-function matchVariantToArm(arm, testVariants = [], analyticsVariants = []) {
+function isOfferAnalyticsContext(arm, test) {
+  const type = String(test?.type || test?.metadata?.experiment_type || '')
+    .trim()
+    .toLowerCase();
+  if (type === 'offer' || type === 'offer_test') return true;
+  return Boolean(arm?.offer && typeof arm.offer === 'object');
+}
+
+function matchAnalyticsToTestVariant(testVariant, analyticsVariants = [], extraNeedles = []) {
+  const byIdentity = analyticsVariants.find(row => {
+    if (testVariant?.id !== undefined && testVariant?.id !== null) {
+      return String(row.id) === String(testVariant.id);
+    }
+    if (testVariant?.name && row.name) {
+      return String(row.name).trim() === String(testVariant.name).trim();
+    }
+    return false;
+  });
+  if (byIdentity) return byIdentity;
+  for (const needle of extraNeedles) {
+    const text = String(needle || '')
+      .trim()
+      .toLowerCase();
+    if (!text) continue;
+    const hit = analyticsVariants.find(row =>
+      String(row.name || '')
+        .toLowerCase()
+        .includes(text)
+    );
+    if (hit) return hit;
+  }
+  return null;
+}
+
+function matchOfferVariantToArm(arm, index, testVariants = [], analyticsVariants = []) {
+  const label = String(arm?.label || '').trim();
+  const armId = String(arm?.id || '').trim();
+  const testVariant =
+    testVariants.find(variant => armId && String(variant?.id) === armId) ||
+    testVariants.find(variant => {
+      const name = String(variant?.name || '').trim();
+      if (!label || !name) return false;
+      const a = name.toLowerCase();
+      const b = label.toLowerCase();
+      return a === b || a.includes(b) || b.includes(a);
+    }) ||
+    (Number.isInteger(index) && index >= 0 ? testVariants[index] || null : null);
+
+  return {
+    testVariant,
+    analyticsVariant: matchAnalyticsToTestVariant(testVariant, analyticsVariants, [label, armId]),
+  };
+}
+
+function matchVariantToArm(arm, testVariants = [], analyticsVariants = [], options = {}) {
+  const index = Number.isInteger(options.index) ? options.index : null;
+  if (isOfferAnalyticsContext(arm, options.test)) {
+    return matchOfferVariantToArm(arm, index, testVariants, analyticsVariants);
+  }
+
   const targetPrice = Number(arm?.price);
   if (!Number.isFinite(targetPrice)) {
-    return { testVariant: null, analyticsVariant: null };
+    return matchOfferVariantToArm(arm, index, testVariants, analyticsVariants);
   }
 
   const testVariant =
@@ -47,18 +106,10 @@ function matchVariantToArm(arm, testVariants = [], analyticsVariants = []) {
       return Number.isFinite(price) && Math.abs(price - targetPrice) < 0.02;
     }) ||
     testVariants.find(variant => String(variant?.name || '').includes(String(targetPrice))) ||
-    null;
+    (Number.isInteger(index) && index >= 0 ? testVariants[index] || null : null);
 
   const analyticsVariant =
-    analyticsVariants.find(row => {
-      if (testVariant?.id !== undefined && testVariant?.id !== null) {
-        return String(row.id) === String(testVariant.id);
-      }
-      if (testVariant?.name && row.name) {
-        return String(row.name).trim() === String(testVariant.name).trim();
-      }
-      return false;
-    }) ||
+    matchAnalyticsToTestVariant(testVariant, analyticsVariants) ||
     analyticsVariants.find(row => String(row.name || '').includes(String(targetPrice))) ||
     null;
 
@@ -263,6 +314,17 @@ async function buildSmartPricingTestAnalytics(shopDomain, testId) {
       : [];
 
   const analytics = await analyticsService.getTestAnalytics(testId, shopDomain).catch(() => null);
+  let revenueGuardrail = null;
+  try {
+    const { enforceRevenueDropGuardrail } = require('./smartPricingGuardrailEvaluatorService');
+    revenueGuardrail = await enforceRevenueDropGuardrail({
+      shopDomain,
+      test,
+      analytics,
+    });
+  } catch {
+    revenueGuardrail = null;
+  }
   const analyticsVariants = Array.isArray(analytics?.variants) ? analytics.variants : [];
   const baselinePpv =
     plan?.statistical_design?.baseline_ppv ??
@@ -279,12 +341,12 @@ async function buildSmartPricingTestAnalytics(shopDomain, testId) {
       .map(row => [String(Number(row.price)), row])
   );
 
-  const armRows = arms.map(arm => {
+  const armRows = arms.map((arm, index) => {
     const projection =
       projectionByArmId.get(String(arm.id)) ||
       projectionByPrice.get(String(Number(arm.price))) ||
       null;
-    const matches = matchVariantToArm(arm, testVariants, analyticsVariants);
+    const matches = matchVariantToArm(arm, testVariants, analyticsVariants, { test, index });
     return buildArmAnalyticsRow(arm, projection, matches, baselinePpv);
   });
 
@@ -325,7 +387,8 @@ async function buildSmartPricingTestAnalytics(shopDomain, testId) {
   return {
     test_id: testId,
     plan_id: plan?.id || metadata.smart_pricing_plan_id || null,
-    test_status: test.status,
+    test_status: revenueGuardrail?.test_status || test.status,
+    revenue_guardrail: revenueGuardrail,
     baseline_ppv: baselinePpv,
     cogs: test.goal?.cogs || null,
     currency: plan?.currency || metadata.currency || 'USD',

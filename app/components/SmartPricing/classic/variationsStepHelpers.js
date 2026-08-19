@@ -1,3 +1,5 @@
+import { isOfferExperimentType } from './offerSelection';
+
 const LETTERS = 'ABCDEFGH';
 
 export function createDefaultVariations() {
@@ -62,6 +64,25 @@ export function splitEvenly(variations) {
 
 export function trafficTotal(variations) {
   return variations.reduce((sum, row) => sum + (Number(row.traffic) || 0), 0);
+}
+
+export function variationsFromPlanArms(arms = [], experimentType = 'price_test') {
+  const isOffer = isOfferExperimentType(experimentType);
+  return (Array.isArray(arms) ? arms : []).map((arm, index) => {
+    const isControl =
+      index === 0 ||
+      arm?.role === 'control' ||
+      String(arm?.id || '').toLowerCase() === 'control';
+    const challengerLetter = String.fromCharCode(64 + Math.max(1, index));
+    return {
+      id: arm?.id || (isControl ? 'control' : `var_${challengerLetter.toLowerCase()}`),
+      letter: isControl ? 'A' : challengerLetter,
+      role: isControl ? 'Control' : `Variation ${challengerLetter}`,
+      name: arm?.label || (isControl ? 'Control' : `Variation ${challengerLetter}`),
+      description: isControl ? (isOffer ? 'No offer (baseline)' : 'Current price') : '',
+      traffic: Number(arm?.allocation_percent ?? arm?.traffic_percent ?? arm?.traffic) || 0,
+    };
+  });
 }
 
 export function buildNextVariation(variations = []) {

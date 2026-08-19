@@ -1,18 +1,4 @@
-/* Classic Smart Pricing theme tokens (Figma / EchoTest orange-classic) */
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap');
-
-:root,
-[data-palette='orange-classic'] {
-  --ripx-font-classic: 'DM Sans', 'Inter', system-ui, sans-serif;
-  --accent-primary-rgb: 232, 93, 4;
-  --accent-secondary-rgb: 120, 53, 15;
-  --accent-primary: rgb(var(--accent-primary-rgb));
-  --text-link: #c2410c;
-  --bg-primary: #faf7f2;
-  --bg-secondary: #ffffff;
-  --border-primary: #e7e0d6;
-  --text-primary: #1c1917;
-}
+/* Classic layout chrome + Admin / Polaris visual tokens (tokens pinned from root) */
 
 html,
 body {
@@ -31,6 +17,7 @@ h2.ripx-classic-sans,
 .rpx-page-shell {
   min-height: 100%;
   box-sizing: border-box;
+  background: var(--bg-primary);
 }
 
 .rpx-page-shell *,
@@ -54,7 +41,7 @@ h2.ripx-classic-sans,
   right: 0;
   height: 3px;
   overflow: hidden;
-  background: rgba(241, 106, 26, 0.18);
+  background: rgba(48, 48, 48, 0.12);
 }
 
 .rpx-route-loading__bar::after {
@@ -65,7 +52,7 @@ h2.ripx-classic-sans,
   height: 100%;
   width: 40%;
   border-radius: 0 2px 2px 0;
-  background: linear-gradient(90deg, #f16a1a, #ff8a3d);
+  background: linear-gradient(90deg, #303030, #616161);
   animation: rpx-route-bar 1.05s ease-in-out infinite;
 }
 
@@ -75,7 +62,7 @@ h2.ripx-classic-sans,
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(250, 247, 242, 0.55);
+  background: rgba(241, 241, 241, 0.72);
   backdrop-filter: blur(1px);
   pointer-events: auto;
 }
@@ -86,18 +73,18 @@ h2.ripx-classic-sans,
   align-items: center;
   gap: 12px;
   padding: 20px 28px;
-  border-radius: 16px;
+  border-radius: 8px;
   background: #ffffff;
-  border: 1px solid #e9e3df;
-  box-shadow: 0 8px 28px rgba(35, 24, 20, 0.1);
+  border: 1px solid #e3e3e3;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.05);
 }
 
 .rpx-route-loading__spinner {
   width: 28px;
   height: 28px;
   border-radius: 50%;
-  border: 2.5px solid rgba(241, 106, 26, 0.2);
-  border-top-color: #f16a1a;
+  border: 2.5px solid rgba(48, 48, 48, 0.15);
+  border-top-color: #303030;
   animation: rpx-route-spin 0.7s linear infinite;
 }
 
@@ -106,7 +93,7 @@ h2.ripx-classic-sans,
   font-family: var(--ripx-font-classic);
   font-size: 0.875rem;
   font-weight: 500;
-  color: #231814;
+  color: #303030;
 }
 
 @keyframes rpx-route-bar {

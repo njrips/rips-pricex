@@ -18,8 +18,8 @@ function PageShell({
   return (
     <div
       className={['rpx-page-shell', className].filter(Boolean).join(' ')}
-      data-palette="orange-classic"
-      style={{ minHeight: '100%', background: '#FAF7F2' }}
+      data-palette="admin"
+      style={{ minHeight: '100%', background: 'var(--bg-primary, #f1f1f1)' }}
     >
       {message ? (
         <Toast

@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
-import { IconCheck, IconChevron, IconWand } from './classicIcons';
+import { Button, TextField } from '@shopify/polaris';
+import TooltipWrapper from '../../shared/TooltipWrapper';
+import { IconCheck, IconChevron } from './classicIcons';
 import styles from './SmartPricingClassic.module.css';
 
 export const EXPERIMENT_TYPES = [
@@ -36,8 +38,8 @@ export const EXPERIMENT_TYPES = [
   {
     id: 'offer_test',
     title: 'Offer test',
-    description: 'Test discounts, bundles, or promotional offers.',
-    enabled: false,
+    description: 'Test a percent or amount-off offer on selected products.',
+    enabled: true,
   },
 ];
 
@@ -58,53 +60,55 @@ export default function SetupStepPanel({
   return (
     <div>
       <div className={styles.field}>
-        <label className={styles.label} htmlFor="classic-exp-name">
-          Experiment name<span className={styles.required}>*</span>
-        </label>
-        <input
+        <TextField
           id="classic-exp-name"
-          className={styles.input}
+          label="Experiment name"
+          requiredIndicator
           value={name}
-          onChange={e => onNameChange(e.target.value)}
-          placeholder="e.g. Growth plan — $39 price test"
+          onChange={onNameChange}
+          placeholder={
+            experimentType === 'offer_test'
+              ? 'e.g. Summer offer — 10% off'
+              : 'e.g. Growth plan — $39 price test'
+          }
+          autoComplete="off"
           autoFocus
         />
       </div>
 
       <div className={styles.field}>
         <div className={styles.labelRow}>
-          <label className={styles.label} htmlFor="classic-hypothesis">
-            Hypothesis
-          </label>
+          <span className={styles.label}>Hypothesis</span>
           {typeof onGenerateHypothesis === 'function' ? (
-            <button
-              type="button"
-              className={styles.aiTextBtn}
+            <Button
+              variant="plain"
               onClick={onGenerateHypothesis}
               disabled={hypothesisBusy}
+              loading={hypothesisBusy}
             >
-              <IconWand size={14} />
-              {hypothesisBusy ? 'Generating…' : 'Generate with AI'}
-            </button>
+              Generate with AI
+            </Button>
           ) : null}
         </div>
-        <textarea
+        <TextField
           id="classic-hypothesis"
-          className={styles.textarea}
+          label=""
+          labelHidden
           value={hypothesis}
-          onChange={e => onHypothesisChange(e.target.value)}
+          onChange={onHypothesisChange}
           placeholder="If we change… then… because…"
+          multiline={3}
+          autoComplete="off"
+          helpText="What do you expect to happen, and why?"
         />
-        <p className={styles.help}>What do you expect to happen, and why?</p>
       </div>
 
       <div className={styles.sectionLabel}>Experiment type</div>
       <div className={styles.typeGrid}>
         {EXPERIMENT_TYPES.map(type => {
           const selected = experimentType === type.id;
-          return (
+          const card = (
             <button
-              key={type.id}
               type="button"
               disabled={!type.enabled}
               className={`${styles.choiceCard} ${selected ? styles.choiceCardSelected : ''} ${
@@ -124,6 +128,16 @@ export default function SetupStepPanel({
               <p className={styles.choiceDesc}>{type.description}</p>
             </button>
           );
+          if (type.enabled) {
+            return <React.Fragment key={type.id}>{card}</React.Fragment>;
+          }
+          return (
+            <span key={type.id} className={styles.choiceCardTooltipWrap}>
+              <TooltipWrapper content="Coming soon" preferredPosition="above">
+                <span className={styles.choiceCardTooltipTarget}>{card}</span>
+              </TooltipWrapper>
+            </span>
+          );
         })}
       </div>
 
@@ -138,18 +152,16 @@ export default function SetupStepPanel({
         </summary>
         <div className={styles.advancedBody}>
           <div className={styles.field} style={{ marginBottom: 0, marginTop: 14 }}>
-            <label className={styles.label} htmlFor="classic-min-sample">
-              Minimum sample size per variation
-            </label>
-            <input
+            <TextField
               id="classic-min-sample"
-              className={styles.input}
+              label="Minimum sample size per variation"
               type="number"
               min={100}
-              value={minSampleSize}
-              onChange={e => onMinSampleSizeChange(e.target.value)}
+              value={String(minSampleSize ?? '')}
+              onChange={onMinSampleSizeChange}
+              autoComplete="off"
+              helpText="Used when estimating how long the test needs to run."
             />
-            <p className={styles.help}>Used when estimating how long the test needs to run.</p>
           </div>
         </div>
       </details>

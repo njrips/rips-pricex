@@ -7,7 +7,7 @@ const {
   markShopUninstalled,
   pricingPlansUrl,
 } = require('../services/billing/entitlementService');
-const { upsertShopSession, deleteShopSession } = require('../models/shopSession');
+const { upsertShopSession, getShopSession, deleteShopSession } = require('../models/shopSession');
 const logger = require('../utils/logger');
 
 const router = express.Router();
@@ -50,7 +50,16 @@ router.post('/billing/dev-entitle', requireShop, async (req, res) => {
 router.post('/shops/install', requireShop, async (req, res) => {
   await upsertShopInstall(req.shopDomain);
   const accessToken = req.shopifyAccessToken || req.body?.access_token || req.body?.accessToken;
-  const scope = req.body?.scope || process.env.SHOPIFY_SCOPES || null;
+  let scope = req.body?.scope || process.env.SHOPIFY_SCOPES || process.env.SCOPES || null;
+  if (accessToken && req.body?.refresh_scopes === true) {
+    try {
+      const { fetchCurrentAccessScopes, formatScopeList } = require('../services/shopifyAccessScopes');
+      const live = await fetchCurrentAccessScopes(req.shopDomain, accessToken);
+      if (live.length) scope = formatScopeList(live);
+    } catch (err) {
+      logger.warn('Could not refresh live Shopify access scopes', { message: err.message });
+    }
+  }
   if (accessToken) {
     try {
       await upsertShopSession({
@@ -61,6 +70,19 @@ router.post('/shops/install', requireShop, async (req, res) => {
     } catch (err) {
       logger.error('shop_sessions upsert failed', { message: err.message });
       return res.status(500).json({ error: 'Failed to persist shop session', detail: err.message });
+    }
+  } else if (scope) {
+    try {
+      const existing = await getShopSession(req.shopDomain);
+      if (existing?.access_token) {
+        await upsertShopSession({
+          shopDomain: req.shopDomain,
+          accessToken: existing.access_token,
+          scope,
+        });
+      }
+    } catch (err) {
+      logger.error('shop_sessions scope update failed', { message: err.message });
     }
   }
   res.json({

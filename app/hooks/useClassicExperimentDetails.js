@@ -11,7 +11,7 @@ import {
   updateInboxPlan,
   writeInboxPlans,
 } from '../components/SmartPricing/smartPricingConstants';
-import { hydrateInboxFromServer } from '../components/SmartPricing/smartPricingInboxPersistence';
+import { hydrateInboxFromServer, persistInboxPlansNow } from '../components/SmartPricing/smartPricingInboxPersistence';
 import {
   findExperimentByPlanId,
   findPlanInCatalog,
@@ -49,20 +49,30 @@ export function useClassicExperimentDetails(shopDomain, planId) {
   const [message, setMessage] = useState('');
   const [messageType, setMessageType] = useState('error');
   const [reloadKey, setReloadKey] = useState(0);
+  const hydrateOptionsRef = useRef({});
   const handleBackfillKeyRef = useRef('');
 
-  const refresh = useCallback(() => {
+  const refresh = useCallback((hydrateOptions = {}) => {
+    hydrateOptionsRef.current =
+      hydrateOptions && typeof hydrateOptions === 'object' ? hydrateOptions : {};
     setReloadKey(key => key + 1);
   }, []);
 
   useEffect(() => {
     let cancelled = false;
+    const hydrateOptions = hydrateOptionsRef.current || {};
+    hydrateOptionsRef.current = {};
+    const quiet = Boolean(hydrateOptions.quiet || hydrateOptions.preferLocalIds);
     (async () => {
-      setLoading(true);
-      setMessage('');
+      if (!quiet) {
+        setLoading(true);
+        setMessage('');
+      }
       try {
         const local = readInboxPlans(shopDomain) || [];
-        const hydrated = await hydrateInboxFromServer(shopDomain, local).catch(() => null);
+        const hydrated = await hydrateInboxFromServer(shopDomain, local, hydrateOptions).catch(
+          () => null
+        );
         let nextPlans = Array.isArray(hydrated?.plans) ? hydrated.plans : local;
 
         const needle = String(planId || '').trim();
@@ -331,6 +341,26 @@ export function useClassicExperimentDetails(shopDomain, planId) {
     [plan?.id, shopDomain]
   );
 
+  const patchExperimentPlansLocal = useCallback(
+    async (patch, { persist = true } = {}) => {
+      const ids = new Set(
+        (Array.isArray(experimentPlans) ? experimentPlans : [])
+          .map(row => String(row?.id || '').trim())
+          .filter(Boolean)
+      );
+      if (!ids.size || !shopDomain) return;
+      const apply = row => (ids.has(row.id) ? { ...row, ...patch } : row);
+      setAllPlans(prev => prev.map(apply));
+      const current = readInboxPlans(shopDomain) || [];
+      const next = current.map(apply);
+      writeInboxPlans(shopDomain, next, { persist: false });
+      if (persist) {
+        await persistInboxPlansNow(shopDomain, next);
+      }
+    },
+    [experimentPlans, shopDomain]
+  );
+
   return {
     loading,
     analyticsLoading,
@@ -355,7 +385,10 @@ export function useClassicExperimentDetails(shopDomain, planId) {
     messageType,
     setMessage,
     setMessageType,
+    experimentPlans,
+    experimentTestIds,
     refresh,
     patchPlanLocal,
+    patchExperimentPlansLocal,
   };
 }

@@ -1,12 +1,26 @@
 import React from 'react';
+import { Button } from '@shopify/polaris';
+import { formatCountryAudienceValue } from '../countrySelection';
+import { formatAudienceFactValue } from '../classicExperimentDetailsHelpers';
 import styles from '../SmartPricingClassic.module.css';
 
-function joinList(items, empty = 'All') {
-  if (!Array.isArray(items) || !items.length) return empty;
-  return items.join(', ');
+function FactCard({ label, value, action, actionLabel, onAction }) {
+  return (
+    <div className={`${styles.statCard} ${styles.detailFactCard}`}>
+      <div className={styles.detailFactHead}>
+        <div className={styles.statLabel}>{label}</div>
+        {action ? (
+          <Button variant="plain" accessibilityLabel={actionLabel || action} onClick={onAction}>
+            {action}
+          </Button>
+        ) : null}
+      </div>
+      <div className={styles.statValue}>{value}</div>
+    </div>
+  );
 }
 
-export default function ClassicAudienceTab({ audience }) {
+export default function ClassicAudienceTab({ audience, onEdit }) {
   if (!audience) {
     return (
       <div className={styles.statCard}>
@@ -16,50 +30,44 @@ export default function ClassicAudienceTab({ audience }) {
     );
   }
 
+  const traffic =
+    audience.trafficAllocation !== null && audience.trafficAllocation !== undefined
+      ? Number(audience.trafficAllocation)
+      : null;
+  const deviceFallback =
+    audience.device && String(audience.device).toLowerCase() !== 'all'
+      ? formatAudienceFactValue([audience.device], 'All devices')
+      : 'All devices';
+
   return (
-    <div className={styles.detailStack}>
-      <div className={styles.statCard}>
-        <h3 className={styles.panelTitle}>Who sees this experiment</h3>
-        <div className={styles.selectionBar}>
-          <span>Customer segment</span>
-          <strong>{audience.customer || 'all'}</strong>
-        </div>
-        <div className={styles.selectionBar}>
-          <span>Traffic allocation</span>
-          <strong>
-            {audience.trafficAllocation !== null && audience.trafficAllocation !== undefined
-              ? `${audience.trafficAllocation}%`
-              : '—'}
-          </strong>
-        </div>
-        <div className={styles.selectionBar}>
-          <span>Devices ({audience.deviceMode})</span>
-          <strong>{joinList(audience.devices, audience.device || 'All')}</strong>
-        </div>
-        <div className={styles.selectionBar}>
-          <span>Sources ({audience.sourceMode})</span>
-          <strong>{joinList(audience.sources, audience.trafficSource || 'All')}</strong>
-        </div>
-        <div className={styles.selectionBar}>
-          <span>Countries ({audience.countryMode})</span>
-          <strong>{joinList(audience.countries, 'All')}</strong>
-        </div>
-      </div>
-      <div className={styles.statCard}>
-        <h3 className={styles.panelTitle}>Exclusions</h3>
-        <div className={styles.selectionBar}>
-          <span>Exclude bots</span>
-          <strong>{audience.excludeBots ? 'On' : 'Off'}</strong>
-        </div>
-        <div className={styles.selectionBar}>
-          <span>Exclude internal IPs</span>
-          <strong>{audience.excludeInternalIps ? 'On' : 'Off'}</strong>
-        </div>
-        <div className={styles.selectionBar}>
-          <span>Inherit shop defaults</span>
-          <strong>{audience.inheritDefaults ? 'Yes' : 'No'}</strong>
-        </div>
-      </div>
+    <div className={styles.detailCardGrid}>
+      <FactCard
+        label="Segment"
+        value={audience.segmentLabel || 'All visitors'}
+        action={onEdit ? 'Edit targeting' : null}
+        onAction={onEdit}
+      />
+      <FactCard
+        label="Traffic allocation"
+        value={Number.isFinite(traffic) ? `${traffic}%` : '—'}
+        action={onEdit ? 'Adjust' : null}
+        actionLabel="Adjust traffic allocation"
+        onAction={onEdit}
+      />
+      <FactCard
+        label="Devices"
+        value={formatAudienceFactValue(audience.devices, deviceFallback)}
+        action={onEdit ? 'Edit' : null}
+        actionLabel="Edit devices"
+        onAction={onEdit}
+      />
+      <FactCard
+        label="Countries"
+        value={formatCountryAudienceValue(audience.countries, audience.countryMode)}
+        action={onEdit ? 'Edit' : null}
+        actionLabel="Edit countries"
+        onAction={onEdit}
+      />
     </div>
   );
 }

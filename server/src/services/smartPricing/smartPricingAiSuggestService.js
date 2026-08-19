@@ -38,6 +38,13 @@ function normalizeVariantRows(variants = []) {
     .filter(row => row.variant_id && row.current_price > 0);
 }
 
+function isOfferExperimentType(raw) {
+  const key = String(raw || '')
+    .trim()
+    .toLowerCase();
+  return key === 'offer_test' || key === 'offer';
+}
+
 function deterministicHypothesis({ name, experimentType, variants = [], objective }) {
   const titles = variants
     .slice(0, 3)
@@ -47,10 +54,17 @@ function deterministicHypothesis({ name, experimentType, variants = [], objectiv
     ? titles.join(', ') + (variants.length > 3 ? ` (+${variants.length - 3} more)` : '')
     : 'selected products';
   const metric = String(objective || 'paid conversion rate').replace(/_/g, ' ');
-  const typeLabel =
-    String(experimentType || 'price_test') === 'price_test' ? 'price points' : 'variations';
+  const offer = isOfferExperimentType(experimentType);
+  const typeLabel = offer
+    ? 'checkout offers'
+    : String(experimentType || 'price_test') === 'price_test'
+      ? 'price points'
+      : 'variations';
+  const because = offer
+    ? 'shoppers respond differently to a checkout discount versus paying the catalog price'
+    : 'shoppers respond differently to value framing within a safe margin band';
   const label = String(name || '').trim() || 'this experiment';
-  return `If we test alternate ${typeLabel} on ${productBit} for “${label}”, then ${metric} will improve because shoppers respond differently to value framing within a safe margin band.`;
+  return `If we test alternate ${typeLabel} on ${productBit} for “${label}”, then ${metric} will improve because ${because}.`;
 }
 
 async function suggestHypothesis({
@@ -68,13 +82,14 @@ async function suggestHypothesis({
   }
 
   const payload = await chatJson({
-    systemPrompt: `You are a senior Shopify pricing experiment designer for RipX.
+    systemPrompt: `You are a senior Shopify experiment designer for Classic Smart Pricing.
 Return strict JSON only:
 { "hypothesis": "one clear If/then/because sentence, max 220 chars", "rationale": "max 100 chars why this hypothesis" }
 Rules:
 - Use merchant-friendly plain language.
 - Focus on conversion/profit tradeoffs, not hype.
-- Do not invent products not in the list.`,
+- Do not invent products not in the list.
+- If experiment_type is offer_test or offer, write about a checkout percent or amount-off discount, not catalog price changes.`,
     userPrompt: JSON.stringify({
       experiment_name: name || null,
       experiment_type: experimentType,

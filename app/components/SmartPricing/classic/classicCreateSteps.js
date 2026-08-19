@@ -1,6 +1,42 @@
 /** Five-step Classic Light create wizard (mockup V25). Kept in its own module so create
  * does not depend on the shared Smart Pricing helpers chunk (analytics / inbox). */
 
+import { isOfferExperimentType } from './offerSelection';
+
+export function getClassicCreateSteps(experimentType = 'price_test') {
+  const isOffer = isOfferExperimentType(experimentType);
+  return CLASSIC_CREATE_STEPS.map(step => {
+    if (step.id === 'variations') {
+      return {
+        ...step,
+        description: isOffer
+          ? 'Each variation applies its offer to every selected product. Traffic must total 100%.'
+          : step.description,
+      };
+    }
+    if (step.id === 'products') {
+      return {
+        ...step,
+        subtitle: isOffer ? 'Pick & offer' : 'Pick & price',
+        title: isOffer ? 'Choose products & offers' : step.title,
+        description: isOffer
+          ? 'Pick which products are part of this experiment and set an offer per variation.'
+          : step.description,
+      };
+    }
+    return step;
+  });
+}
+
+export function classicCreateStepIndex(stepId) {
+  const key = String(stepId || '')
+    .trim()
+    .toLowerCase();
+  if (!key) return null;
+  const index = CLASSIC_CREATE_STEPS.findIndex(step => step.id === key);
+  return index >= 0 ? index : null;
+}
+
 export const CLASSIC_CREATE_STEPS = [
   {
     id: 'setup',

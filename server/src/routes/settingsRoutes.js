@@ -221,6 +221,7 @@ ${resourceHints}<script src="${scriptUrl}" defer crossorigin="anonymous" fetchpr
           'Configure App Proxy: subpath prefix "apps", subpath "ripspricex"',
           'Enable RipsPriceX theme app embed in Online Store → Themes → Customize',
           'Deploy cart transform extension (ripspricex-cart-transform) for charged-price parity',
+          'Deploy checkout discount (ripspricex-checkout-discount) and Ensure it for offer tests',
         ],
       },
     });
@@ -540,6 +541,98 @@ router.get(
       installCheck: {
         status: installCheckStatus,
         reason: installCheckReason,
+      },
+    });
+  })
+);
+
+/**
+ * POST /api/settings/checkout-discount/ensure
+ * Create (or reuse) the automatic app discount that runs ripspricex-checkout-discount.
+ */
+router.post(
+  '/checkout-discount/ensure',
+  asyncHandler(async (req, res) => {
+    const shopDomain = resolveShopDomain(req);
+    if (!shopDomain) {
+      return sendError(res, 401, 'Shop domain required');
+    }
+
+    const fallbackSession = await getShopSession(shopDomain);
+    const accessToken = req.shopifyAccessToken || fallbackSession?.access_token || '';
+    const {
+      ensureOfferCheckoutDiscount,
+    } = require('../services/smartPricing/offerCheckoutDiscountService');
+    const {
+      clearSmartPricingCheckoutReadinessCache,
+    } = require('../services/smartPricing/smartPricingCheckoutReadinessService');
+
+    try {
+      const result = await ensureOfferCheckoutDiscount({
+        shopDomain,
+        accessToken,
+        title: String(req.body?.title || '').trim() || undefined,
+      });
+      clearSmartPricingCheckoutReadinessCache(shopDomain);
+      return res.json({
+        success: true,
+        created: result.created === true,
+        titleAdjusted: result.titleAdjusted === true,
+        discount: result.discount,
+        function: result.function,
+        installedForRipxFunction: Boolean(
+          result.discount?.discountId || result.discount?.id
+        ),
+      });
+    } catch (err) {
+      const status =
+        err?.code === 'TOKEN_MISSING' || err?.code === 'SCOPE_MISSING'
+          ? 400
+          : err?.code === 'FUNCTION_MISSING'
+            ? 404
+            : 400;
+      return sendError(res, status, err.message || 'Could not attach checkout discount.', {
+        code: err.code || null,
+        shopifyUserErrors: err.userErrors || [],
+      });
+    }
+  })
+);
+
+/**
+ * GET /api/settings/checkout-discount/status
+ */
+router.get(
+  '/checkout-discount/status',
+  asyncHandler(async (req, res) => {
+    const shopDomain = resolveShopDomain(req);
+    if (!shopDomain) {
+      return sendError(res, 401, 'Shop domain required');
+    }
+
+    const fallbackSession = await getShopSession(shopDomain);
+    const accessToken = req.shopifyAccessToken || fallbackSession?.access_token || '';
+    if (!accessToken) {
+      return sendError(
+        res,
+        400,
+        'Missing Shopify access token for this shop. Re-open RipsPriceX from Shopify Admin and try again.'
+      );
+    }
+
+    const {
+      getOfferCheckoutDiscountStatus,
+    } = require('../services/smartPricing/offerCheckoutDiscountService');
+    const status = await getOfferCheckoutDiscountStatus({ shopDomain, accessToken });
+    return res.json({
+      success: true,
+      function: status.function,
+      discount: status.discount,
+      installedForRipxFunction: status.automatic_discount_available === true,
+      functionAvailable: status.function_available === true,
+      installCheck: {
+        status: status.lookup_status,
+        reason: status.error || null,
       },
     });
   })

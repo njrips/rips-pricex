@@ -273,39 +273,30 @@ export function StoreSettingsPriceSurfacesSection({
   const body = bare ? (
     <div className={classicStyles.adminStackTight}>
       <p className={classicStyles.help}>{sectionSummary}</p>
-      <div className={classicStyles.callout} role="status">
-        <span className={classicStyles.calloutBody}>
-          <span className={classicStyles.calloutStrong}>One mapping for all price tests</span>
-          <span className={classicStyles.calloutMeta}>
-            Suggest from theme or Auto-map (scans theme files + live pages), then verify with
-            visual pick on a real product page. Test Wizard can still add per-test overrides
-            when needed.
-          </span>
-        </span>
-      </div>
+      <Banner tone="info" title="One mapping for all price tests">
+        <p>
+          Suggest from theme or Auto-map (scans theme files + live pages), then verify with
+          visual pick on a real product page. Test Wizard can still add per-test overrides when
+          needed.
+        </p>
+      </Banner>
       {shopDomain ? (
-        <div className={classicStyles.field}>
-          <label className={classicStyles.label} htmlFor="price-surface-product-path">
-            Product path for visual pick
-          </label>
-          <input
-            id="price-surface-product-path"
-            className={classicStyles.input}
-            value={manualProductPath}
-            onChange={e => setManualProductPath(e.target.value)}
-            autoComplete="off"
-            placeholder={
-              pickerProductLoading
-                ? 'Loading a sample product…'
-                : resolvedProductPath || '/products/your-product-handle'
-            }
-          />
-          <p className={classicStyles.help}>
-            {resolvedProductPath
+        <TextField
+          label="Product path for visual pick"
+          value={manualProductPath}
+          onChange={setManualProductPath}
+          autoComplete="off"
+          placeholder={
+            pickerProductLoading
+              ? 'Loading a sample product…'
+              : resolvedProductPath || '/products/your-product-handle'
+          }
+          helpText={
+            resolvedProductPath
               ? `Pick PDP opens ${resolvedProductPath}. Override with a handle or /products/… path if needed.`
-              : 'Enter a product handle so Pick PDP opens a real product page (not the homepage).'}
-          </p>
-        </div>
+              : 'Enter a product handle so Pick PDP opens a real product page (not the homepage).'
+          }
+        />
       ) : (
         <p className={classicStyles.help}>
           Open Settings from a connected shop to edit theme price selectors.

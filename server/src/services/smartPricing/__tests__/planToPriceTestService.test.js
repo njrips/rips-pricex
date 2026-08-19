@@ -101,6 +101,29 @@ describe('planToPriceTestService', () => {
     );
   });
 
+  it('maps Classic audience_ui onto segments when plan.audience is missing', () => {
+    const payload = buildPriceTestPayloadFromPlan({
+      ...samplePlan,
+      metadata: {
+        audience_ui: {
+          segment: 'new_visitors',
+          trafficAllocation: 40,
+          devices: ['Mobile'],
+          deviceMode: 'include',
+          sources: [],
+          countries: ['GB'],
+          countryMode: 'include',
+        },
+      },
+    });
+    expect(payload.segments).toMatchObject({
+      customer: 'new',
+      device: 'mobile',
+      countries: ['GB'],
+      traffic_ramp_percent: 40,
+    });
+  });
+
   it('falls back to shop default audience template when plan has no audience', () => {
     const payload = buildPriceTestPayloadFromPlan(samplePlan, {
       guardrails: {

@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Button, Select, TextField } from '@shopify/polaris';
 import { ensureSmartPricingPlanPreviewTest } from '../../../../services/smartPricingApi';
 import { formatCurrency } from '../../smartPricingConstants';
+import { formatOfferRule, formatOfferSummary } from '../offerSelection';
 import {
   VARIATION_PRODUCTS_PAGE_SIZE,
   VARIATION_PRODUCTS_PAGE_SIZES,
@@ -19,11 +21,10 @@ import {
   resolvePlanProductPath,
 } from '../classicExperimentDetailsHelpers';
 import {
+  ButtonIconExternalLink,
+  ButtonIconQr,
   IconChevron,
   IconChevronRight,
-  IconExternalLink,
-  IconQr,
-  IconSearch,
   IconTrophy,
 } from '../classicIcons';
 import styles from '../SmartPricingClassic.module.css';
@@ -208,7 +209,9 @@ async function prepareArmPreviewUrl(arm, product, shopDomain, fallbackTestId) {
     nextProduct.testId || fallbackTestId
   );
   if (!url) {
-    window.alert('Preview unavailable for this arm until it is linked to a price test.');
+    window.alert(
+      'Preview unavailable for this variation until the experiment is launched and linked.'
+    );
     return null;
   }
   return url;
@@ -290,6 +293,7 @@ function VariationCard({
   setQrOpenId,
   previewBusyKey,
   onPreviewBusy,
+  isOfferTest = false,
 }) {
   const popoverRef = useRef(null);
   const copyTimerRef = useRef(null);
@@ -377,11 +381,20 @@ function VariationCard({
     }
   };
 
-  const priceLabel = multiSku
-    ? `${productCount} SKUs`
-    : arm.price !== null && arm.price !== undefined && Number.isFinite(Number(arm.price))
-      ? formatCurrency(arm.price, currency)
-      : '—';
+  const offerLabel = arm?.offer ? formatOfferRule(arm.offer, currency) : '';
+  const offerSummary = arm?.offer ? formatOfferSummary(arm.offer, currency) : '';
+  const priceLabel =
+    isOfferTest || (offerLabel && offerLabel !== 'No offer')
+      ? arm.isControl
+        ? 'No offer'
+        : offerLabel && offerLabel !== 'No offer'
+          ? offerLabel
+          : 'No offer'
+      : multiSku
+        ? `${productCount} SKUs`
+        : arm.price !== null && arm.price !== undefined && Number.isFinite(Number(arm.price))
+          ? formatCurrency(arm.price, currency)
+          : '—';
 
   const canPreview =
     Boolean(shopDomain) &&
@@ -401,6 +414,11 @@ function VariationCard({
         </h3>
         <strong>{priceLabel}</strong>
       </div>
+      {isOfferTest && !arm.isControl && offerSummary && offerSummary !== offerLabel ? (
+        <p className={styles.help} style={{ marginTop: 0 }}>
+          {arm.offer?.offer_message}
+        </p>
+      ) : null}
 
       <div className={styles.selectionBar}>
         <span>Traffic split</span>
@@ -408,14 +426,16 @@ function VariationCard({
           {arm.allocation !== null && arm.allocation !== undefined ? `${arm.allocation}%` : '—'}
         </strong>
       </div>
-      <div className={styles.selectionBar}>
-        <span>Delta vs control</span>
-        <strong>
-          {arm.deltaPercent !== null && arm.deltaPercent !== undefined
-            ? `${Number(arm.deltaPercent) >= 0 ? '+' : ''}${Number(arm.deltaPercent).toFixed(1)}%`
-            : '—'}
-        </strong>
-      </div>
+      {isOfferTest ? null : (
+        <div className={styles.selectionBar}>
+          <span>Delta vs control</span>
+          <strong>
+            {arm.deltaPercent !== null && arm.deltaPercent !== undefined
+              ? `${Number(arm.deltaPercent) >= 0 ? '+' : ''}${Number(arm.deltaPercent).toFixed(1)}%`
+              : '—'}
+          </strong>
+        </div>
+      )}
       <div className={styles.selectionBar}>
         <span>Visitors</span>
         <strong>{formatNumber(arm.visitors)}</strong>
@@ -428,34 +448,26 @@ function VariationCard({
       <div className={styles.variationPreviewRow} ref={popoverRef}>
         {canPreview ? (
           <>
-            <button
-              type="button"
-              className={styles.ghostBtn}
+            <Button
+              icon={ButtonIconExternalLink}
               disabled={Boolean(previewBusyKey)}
+              loading={isBusy}
               onClick={runPreview}
-              title={
-                multiSku
-                  ? `Preview ${arm.label} on ${primaryProduct?.title || 'first product'} (use Products table for other SKUs)`
-                  : `Preview ${arm.label}`
-              }
             >
-              <IconExternalLink /> {isBusy ? 'Preparing…' : 'Preview'}
-            </button>
-            <button
-              type="button"
-              className={styles.ghostBtn}
+              Preview
+            </Button>
+            <Button
+              icon={ButtonIconQr}
               aria-expanded={isQrOpen}
-              aria-haspopup="dialog"
               disabled={Boolean(previewBusyKey)}
               onClick={openQr}
-              title={`QR preview for ${arm.label}`}
             >
-              <IconQr /> QR
-            </button>
+              QR
+            </Button>
           </>
         ) : (
           <p className={styles.help} style={{ margin: 0 }}>
-            Preview available after this arm is linked to a price test.
+            Preview available after this arm is linked to a running test.
           </p>
         )}
         {isQrOpen && (ensuredQrUrl || previewUrl) ? (
@@ -473,22 +485,12 @@ function VariationCard({
               {multiSku ? ' Per-SKU previews are also in the products table below.' : ''}
             </p>
             <div className={styles.variationPreviewRow}>
-              <button
-                type="button"
-                className={styles.ghostBtn}
-                disabled={Boolean(previewBusyKey)}
-                onClick={runPreview}
-              >
+              <Button disabled={Boolean(previewBusyKey)} onClick={runPreview}>
                 Open link
-              </button>
-              <button
-                type="button"
-                className={styles.ghostBtn}
-                disabled={Boolean(previewBusyKey)}
-                onClick={copyLink}
-              >
+              </Button>
+              <Button disabled={Boolean(previewBusyKey)} onClick={copyLink}>
                 {copied ? 'Copied' : 'Copy link'}
-              </button>
+              </Button>
             </div>
           </div>
         ) : null}
@@ -497,7 +499,12 @@ function VariationCard({
   );
 }
 
-function formatArmCell(group, armId, currency, { variantRow = null } = {}) {
+function formatArmCell(group, armId, currency, { variantRow = null, isOfferTest = false, arms = [] } = {}) {
+  if (isOfferTest) {
+    const arm = (arms || []).find(row => String(row.id) === String(armId));
+    if (arm?.isControl) return 'No offer';
+    return formatOfferRule(arm?.offer, currency);
+  }
   if (variantRow) {
     const price = variantRow.pricesByArmId?.[String(armId)];
     return price !== null && price !== undefined && Number.isFinite(Number(price))
@@ -517,6 +524,7 @@ function VariationsProductsTable({
   resetKey = '',
   previewBusyKey = '',
   onPreviewBusy,
+  isOfferTest = false,
 }) {
   const [query, setQuery] = useState('');
   const [page, setPage] = useState(1);
@@ -620,51 +628,37 @@ function VariationsProductsTable({
           </p>
         </div>
         <div className={styles.variationPreviewRow} style={{ marginTop: 0 }}>
-          <button
-            type="button"
-            className={`${styles.ghostBtn} ${styles.showAllBtn}`}
-            onClick={expandAllOnPage}
-          >
-            Expand
-          </button>
-          <button
-            type="button"
-            className={`${styles.ghostBtn} ${styles.showAllBtn}`}
-            onClick={collapseAll}
-          >
-            Collapse
-          </button>
+          <Button onClick={expandAllOnPage}>Expand</Button>
+          <Button onClick={collapseAll}>Collapse</Button>
         </div>
       </div>
 
       <div className={styles.variationsProductsToolbar}>
-        <div className={`${styles.searchWrap} ${styles.variationsProductsSearch}`}>
-          <IconSearch size={14} />
-          <input
-            className={`${styles.input} ${styles.modalSearchInput}`}
+        <div className={styles.variationsProductsSearch}>
+          <TextField
+            label="Search products"
+            labelHidden
             value={query}
-            onChange={event => {
-              setQuery(event.target.value);
+            onChange={value => {
+              setQuery(value);
               setPage(1);
             }}
+            autoComplete="off"
             placeholder="Search products, variants, or handle"
-            aria-label="Search products"
           />
         </div>
-        <label className={styles.tablePageSize}>
-          Preview as
-          <select
-            className={`${styles.input} ${styles.tablePageSizeSelect}`}
+        <div className={styles.tablePageSize}>
+          <Select
+            label="Preview as"
+            labelHidden
             value={String(previewArmId || defaultArmId || '')}
-            onChange={event => setPreviewArmId(String(event.target.value))}
-          >
-            {arms.map(arm => (
-              <option key={arm.id} value={String(arm.id)}>
-                {arm.label}
-              </option>
-            ))}
-          </select>
-        </label>
+            onChange={setPreviewArmId}
+            options={arms.map(arm => ({
+              label: arm.label,
+              value: String(arm.id),
+            }))}
+          />
+        </div>
       </div>
 
       <div className={`${styles.tableScroll} ${styles.variationsProductsTableScroll}`}>
@@ -750,13 +744,12 @@ function VariationsProductsTable({
                       </td>
                       {arms.map(arm => (
                         <td key={arm.id} className={styles.variationsPriceCol}>
-                          {formatArmCell(group, arm.id, currency)}
+                          {formatArmCell(group, arm.id, currency, { isOfferTest, arms })}
                         </td>
                       ))}
                       <td className={styles.variationsActionsCol}>
-                        <button
-                          type="button"
-                          className={styles.ghostBtn}
+                        <Button
+                          size="slim"
                           disabled={
                             Boolean(previewBusyKey) ||
                             !shopDomain ||
@@ -765,15 +758,10 @@ function VariationsProductsTable({
                               !primaryVariant?.planId &&
                               !primaryVariant)
                           }
-                          aria-label={
-                            groupPreviewUrl || group.productId || primaryVariant
-                              ? `Open ${previewArm?.label || 'variation'} preview for ${group.title}`
-                              : `Preview unavailable for ${group.title}`
-                          }
-                          title={
-                            groupPreviewUrl || group.productId || primaryVariant
-                              ? `Open ${previewArm?.label || 'variation'} preview (price bootstrap)`
-                              : 'Needs a linked test and a catalog product'
+                          loading={
+                            Boolean(previewBusyKey) &&
+                            String(previewBusyKey) ===
+                              String(primaryVariant?.planId || group.productId || '')
                           }
                           onClick={() =>
                             openArmPreview(
@@ -796,13 +784,8 @@ function VariationsProductsTable({
                             )
                           }
                         >
-                          <IconExternalLink />{' '}
-                          {previewBusyKey &&
-                          String(previewBusyKey) ===
-                            String(primaryVariant?.planId || group.productId || '')
-                            ? 'Preparing…'
-                            : 'Open'}
-                        </button>
+                          Open
+                        </Button>
                       </td>
                     </tr>
                     {multi && isOpen
@@ -825,13 +808,14 @@ function VariationsProductsTable({
                                 <td key={arm.id} className={styles.variationsPriceCol}>
                                   {formatArmCell(group, arm.id, currency, {
                                     variantRow: variant,
+                                    isOfferTest,
+                                    arms,
                                   })}
                                 </td>
                               ))}
                               <td className={styles.variationsActionsCol}>
-                                <button
-                                  type="button"
-                                  className={styles.ghostBtn}
+                                <Button
+                                  size="slim"
                                   disabled={
                                     Boolean(previewBusyKey) ||
                                     !shopDomain ||
@@ -840,10 +824,10 @@ function VariationsProductsTable({
                                       !variant.productId &&
                                       !variant.handle)
                                   }
-                                  aria-label={
-                                    variantUrl || variant.productId || variant.handle
-                                      ? `Open ${previewArm?.label || 'variation'} preview for ${formatVariationVariantLabel(variant)}`
-                                      : `Preview unavailable for ${formatVariationVariantLabel(variant)}`
+                                  loading={
+                                    Boolean(previewBusyKey) &&
+                                    String(previewBusyKey) ===
+                                      String(variant.planId || variant.productId || '')
                                   }
                                   onClick={() =>
                                     openArmPreview(
@@ -855,13 +839,8 @@ function VariationsProductsTable({
                                     )
                                   }
                                 >
-                                  <IconExternalLink />{' '}
-                                  {previewBusyKey &&
-                                  String(previewBusyKey) ===
-                                    String(variant.planId || variant.productId || '')
-                                    ? 'Preparing…'
-                                    : 'Open'}
-                                </button>
+                                  Open
+                                </Button>
                               </td>
                             </tr>
                           );
@@ -886,49 +865,45 @@ function VariationsProductsTable({
                   )} of ${pageData.total} products`
                 : '0 products'}
             </span>
-            <label className={styles.tablePageSize}>
-              Rows
-              <select
-                className={`${styles.input} ${styles.tablePageSizeSelect}`}
-                value={pageSize}
-                onChange={event => {
-                  setPageSize(Number(event.target.value) || VARIATION_PRODUCTS_PAGE_SIZE);
+            <div className={styles.tablePageSize}>
+              <Select
+                label="Rows"
+                labelHidden
+                value={String(pageSize)}
+                onChange={value => {
+                  setPageSize(Number(value) || VARIATION_PRODUCTS_PAGE_SIZE);
                   setPage(1);
                 }}
-              >
-                {VARIATION_PRODUCTS_PAGE_SIZES.map(size => (
-                  <option key={size} value={size}>
-                    {size}
-                  </option>
-                ))}
-              </select>
-            </label>
+                options={VARIATION_PRODUCTS_PAGE_SIZES.map(size => ({
+                  label: String(size),
+                  value: String(size),
+                }))}
+              />
+            </div>
           </div>
           {showPager ? (
             <div className={styles.tablePager}>
-              <button
-                type="button"
-                className={styles.tablePagerBtn}
+              <Button
+                size="slim"
                 disabled={pageData.page <= 1}
-                aria-label="Previous page"
+                accessibilityLabel="Previous page"
                 onClick={() => setPage(current => Math.max(1, current - 1))}
               >
                 <span className={styles.tablePagerChevronPrev} aria-hidden>
                   <IconChevronRight size={14} />
                 </span>
-              </button>
+              </Button>
               <span className={styles.help} style={{ margin: 0 }}>
                 Page {pageData.page} / {pageData.totalPages}
               </span>
-              <button
-                type="button"
-                className={styles.tablePagerBtn}
+              <Button
+                size="slim"
                 disabled={pageData.page >= pageData.totalPages}
-                aria-label="Next page"
+                accessibilityLabel="Next page"
                 onClick={() => setPage(current => Math.min(pageData.totalPages, current + 1))}
               >
                 <IconChevronRight size={14} />
-              </button>
+              </Button>
             </div>
           ) : null}
         </div>
@@ -942,6 +917,7 @@ export default function ClassicVariationsTab({
   currency = 'USD',
   shopDomain = '',
   testId = null,
+  isOfferTest = false,
 }) {
   const [qrOpenId, setQrOpenId] = useState('');
   const [previewBusyKey, setPreviewBusyKey] = useState('');
@@ -957,7 +933,9 @@ export default function ClassicVariationsTab({
     return (
       <div className={styles.statCard}>
         <h3 className={styles.panelTitle}>Variations</h3>
-        <p className={styles.help}>No price arms on this experiment yet.</p>
+        <p className={styles.help}>
+          {isOfferTest ? 'No offer variations on this experiment yet.' : 'No price arms on this experiment yet.'}
+        </p>
       </div>
     );
   }
@@ -977,6 +955,7 @@ export default function ClassicVariationsTab({
             setQrOpenId={setQrOpenId}
             previewBusyKey={previewBusyKey}
             onPreviewBusy={setPreviewBusyKey}
+            isOfferTest={isOfferTest}
           />
         ))}
       </div>
@@ -989,6 +968,7 @@ export default function ClassicVariationsTab({
         resetKey={resetKey}
         previewBusyKey={previewBusyKey}
         onPreviewBusy={setPreviewBusyKey}
+        isOfferTest={isOfferTest}
       />
     </div>
   );

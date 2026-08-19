@@ -28,4 +28,25 @@ describe('classicAudienceSegmentMapper', () => {
     ]);
     expect(segs.countries).toEqual(['US']);
   });
+
+  it('maps empty include countries to worldwide (no country filter)', () => {
+    const segs = classicAudienceToSegments({
+      countries: [],
+      countryMode: 'include',
+    });
+    expect(segs.countries).toEqual([]);
+    expect(segs.audience_rules).toBeUndefined();
+  });
+
+  it('treats All-countries sentinels and huge include dumps as worldwide', () => {
+    expect(classicAudienceToSegments({ countries: ['*'], countryMode: 'include' }).countries).toEqual(
+      []
+    );
+    const dump = Array.from({ length: 200 }, (_, i) =>
+      String.fromCharCode(65 + (i % 26), 65 + Math.floor(i / 26) % 26)
+    );
+    expect(
+      classicAudienceToSegments({ countries: dump, countryMode: 'include' }).countries
+    ).toEqual([]);
+  });
 });

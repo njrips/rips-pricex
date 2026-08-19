@@ -2,6 +2,8 @@
  * Maps SmartPricingTestPlan → RipX price test payload.
  */
 
+const { buildRevenueDropGuardrailConfig } = require('./smartPricingRevenueGuardrail');
+
 function formatCurrencyLabel(amount, currency = 'USD') {
   const n = Number(amount);
   if (!Number.isFinite(n)) {
@@ -86,19 +88,29 @@ function resolvePlanSegments(plan = {}, guardrails = {}) {
   let segments = {};
   if (audience.segments && typeof audience.segments === 'object') {
     segments = { ...audience.segments };
-  } else if (audience.inherit_from_shop_defaults !== false) {
-    const template =
-      guardrails.default_audience_template || guardrails.defaultAudienceTemplate || {};
-    if (template && typeof template === 'object' && Object.keys(template).length > 0) {
-      segments = { ...template };
-    } else {
-      segments = {
-        device: 'all',
-        customer: 'all',
-        countries: [],
-        exclude_bots: true,
-        exclude_internal_ips: true,
-      };
+  } else {
+    const audienceUi =
+      (plan.metadata && typeof plan.metadata.audience_ui === 'object'
+        ? plan.metadata.audience_ui
+        : null) ||
+      (audience.audience_ui && typeof audience.audience_ui === 'object' ? audience.audience_ui : null);
+    if (audienceUi) {
+      const { classicAudienceToSegments } = require('./classicAudienceSegmentMapper');
+      segments = classicAudienceToSegments(audienceUi, {});
+    } else if (audience.inherit_from_shop_defaults !== false) {
+      const template =
+        guardrails.default_audience_template || guardrails.defaultAudienceTemplate || {};
+      if (template && typeof template === 'object' && Object.keys(template).length > 0) {
+        segments = { ...template };
+      } else {
+        segments = {
+          device: 'all',
+          customer: 'all',
+          countries: [],
+          exclude_bots: true,
+          exclude_internal_ips: true,
+        };
+      }
     }
   }
 
@@ -194,6 +206,7 @@ function resolvePlanGoal(plan = {}, guardrails = {}) {
       ? planGoal.secondary_events
       : defaultGoal.secondary_events
   );
+  const revenueGuardrail = buildRevenueDropGuardrailConfig(guardrails, plan);
   return {
     // abTestEngine.validateTest requires goal.type (Test Wizard default).
     type: planGoal.type || defaultGoal.type || 'conversion',
@@ -203,6 +216,11 @@ function resolvePlanGoal(plan = {}, guardrails = {}) {
     secondary,
     secondary_events: secondary.map(item => item.event_name),
     cogs,
+    auto_stop: true,
+    guardrails: {
+      auto_stop: true,
+      max_revenue_drop_percent: revenueGuardrail.max_revenue_drop_percent,
+    },
   };
 }
 
@@ -251,6 +269,8 @@ function buildPriceTestPayloadFromPlan(plan = {}, options = {}) {
     target_ids: [productId],
     description: `Created from Smart Pricing plan ${plan.id || ''}`.trim(),
     goal,
+    auto_stop: true,
+    guardrail_config: buildRevenueDropGuardrailConfig(guardrails, plan),
     segments,
     metadata: {
       smart_pricing_plan_id: plan.id || null,

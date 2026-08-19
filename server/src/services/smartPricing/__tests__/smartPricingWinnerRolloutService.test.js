@@ -67,6 +67,21 @@ describe('smartPricingWinnerRolloutService', () => {
     expect(result.published_to_shopify).toBe(true);
   });
 
+  it('blocks catalog winner rollout for offer tests', async () => {
+    getTestById.mockResolvedValueOnce({
+      ...smartPricingTest,
+      type: 'offer',
+    });
+    await expect(
+      applySmartPricingWinnerRollout({
+        testId: 'test-1',
+        shopDomain: 'demo.myshopify.com',
+        accessToken: 'token',
+      })
+    ).rejects.toThrow(/price tests/i);
+    expect(applyPersonalization).not.toHaveBeenCalled();
+  });
+
   it('blocks rollout while test is still running', async () => {
     getTestById.mockResolvedValueOnce({ ...smartPricingTest, status: 'running' });
     await expect(

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useOutletContext, useSearchParams } from 'react-router';
+import { Badge, Banner, Button, Checkbox, Select, TextField } from '@shopify/polaris';
 import type { AppOutletContext } from '../lib/api.client';
 import { rpxApi } from '../lib/api.client';
 import { useThemeEmbedRedirect } from '../lib/useThemeEmbedRedirect';
@@ -9,6 +10,7 @@ import SettingsPlanPanel, {
   usePlanBillingState,
 } from '../components/Settings/sections/SettingsPlanPanel';
 import useCartTransformStatus from '../hooks/useCartTransformStatus';
+import useCheckoutDiscountStatus from '../hooks/useCheckoutDiscountStatus';
 import ClassicAdminShell from '../components/SmartPricing/classic/ClassicAdminShell';
 import styles from '../components/SmartPricing/classic/SmartPricingClassic.module.css';
 
@@ -32,7 +34,7 @@ const TABS: { id: TabId; label: string; title: string; subtitle: string }[] = [
   {
     id: 'installation',
     label: 'Installation',
-    title: 'Theme embed & cart transform',
+    title: 'Theme embed, cart transform & checkout discount',
     subtitle:
       'Advanced install details — readiness progress lives on Setup. Snippet, script, and ensure live here.',
   },
@@ -69,6 +71,7 @@ export default function SettingsPage() {
   const planState = usePlanBillingState(ctx, { enabled: tab === 'plan' });
 
   const [maxChange, setMaxChange] = useState('15');
+  const [maxRevenueDrop, setMaxRevenueDrop] = useState('10');
   const [minMargin, setMinMargin] = useState('35');
   const [defaultCogs, setDefaultCogs] = useState('55');
   const [scenarioPreset, setScenarioPreset] = useState('recommended');
@@ -85,6 +88,7 @@ export default function SettingsPage() {
     prefetch: tab === 'installation',
   });
   const cart = useCartTransformStatus(shopDomain, { enabled: tab === 'installation' });
+  const discount = useCheckoutDiscountStatus(shopDomain, { enabled: tab === 'installation' });
 
   const activeMeta = useMemo(() => TABS.find(item => item.id === tab) || TABS[1], [tab]);
 
@@ -129,6 +133,7 @@ export default function SettingsPage() {
         const root = data as { guardrails?: Record<string, unknown> };
         const g = (root?.guardrails || data || {}) as Record<string, unknown>;
         if (g.max_price_change_percent != null) setMaxChange(String(g.max_price_change_percent));
+        if (g.max_revenue_drop_percent != null) setMaxRevenueDrop(String(g.max_revenue_drop_percent));
         if (g.min_margin_percent != null) setMinMargin(String(g.min_margin_percent));
         if (g.default_cogs_percent != null) setDefaultCogs(String(g.default_cogs_percent));
         if (g.default_scenario_preset != null) {
@@ -185,6 +190,7 @@ export default function SettingsPage() {
     try {
       const result = (await rpxApi.saveGuardrails(ctx, {
         max_price_change_percent: Number(maxChange),
+        max_revenue_drop_percent: Number(maxRevenueDrop),
         min_margin_percent: Number(minMargin),
         default_cogs_percent: Number(defaultCogs),
         default_scenario_preset: scenarioPreset,
@@ -192,6 +198,7 @@ export default function SettingsPage() {
       })) as { guardrails?: Record<string, unknown> };
       const g = (result?.guardrails || {}) as Record<string, unknown>;
       if (g.max_price_change_percent != null) setMaxChange(String(g.max_price_change_percent));
+      if (g.max_revenue_drop_percent != null) setMaxRevenueDrop(String(g.max_revenue_drop_percent));
       if (g.min_margin_percent != null) setMinMargin(String(g.min_margin_percent));
       if (g.default_cogs_percent != null) setDefaultCogs(String(g.default_cogs_percent));
       if (g.default_scenario_preset != null) setScenarioPreset(String(g.default_scenario_preset));
@@ -207,6 +214,11 @@ export default function SettingsPage() {
   const ensureCart = async () => {
     await cart.ensure();
     await cart.refresh();
+  };
+
+  const ensureDiscount = async () => {
+    await discount.ensure();
+    await discount.refresh();
   };
 
   const footerPrimary =
@@ -273,116 +285,114 @@ export default function SettingsPage() {
       {tab === 'guardrails' ? (
         <div>
           {guardrailsLoading ? (
-            <div className={styles.callout} role="status" style={{ marginBottom: 16 }}>
-              <span className={styles.calloutStrong}>Loading guardrails…</span>
+            <div style={{ marginBottom: 16 }}>
+              <Banner tone="info" title="Loading guardrails…" />
             </div>
           ) : null}
           {message ? (
-            <div className={styles.callout} role="status" style={{ marginBottom: 16 }}>
-              <span className={styles.calloutStrong}>{message}</span>
+            <div style={{ marginBottom: 16 }}>
+              <Banner tone="success" title={message} />
             </div>
           ) : null}
           {error ? <p className={styles.error}>{error}</p> : null}
           <div className={styles.field}>
-            <label className={styles.label} htmlFor="max-change">
-              Max price change %
-            </label>
-            <input
+            <TextField
               id="max-change"
-              className={styles.input}
+              label="Max price change %"
               type="number"
               min={0}
               max={100}
-              value={maxChange}
+              value={String(maxChange ?? '')}
               disabled={guardrailsLoading || saving}
-              onChange={e => setMaxChange(e.target.value)}
+              onChange={setMaxChange}
+              autoComplete="off"
+              helpText="Absolute band vs current price (typically 3–30)."
             />
-            <p className={styles.help}>Absolute band vs current price (typically 3–30).</p>
           </div>
           <div className={styles.field}>
-            <label className={styles.label} htmlFor="min-margin">
-              Min margin %
-            </label>
-            <input
+            <TextField
+              id="max-revenue-drop"
+              label="Max revenue drop %"
+              type="number"
+              min={3}
+              max={50}
+              value={String(maxRevenueDrop ?? '')}
+              disabled={guardrailsLoading || saving}
+              onChange={setMaxRevenueDrop}
+              autoComplete="off"
+              helpText="Always on for price and offer tests. Pauses a running test if any variation’s revenue per visitor drops more than this versus control (after ~100 visitors per arm)."
+            />
+          </div>
+          <div className={styles.field}>
+            <TextField
               id="min-margin"
-              className={styles.input}
+              label="Min margin %"
               type="number"
               min={0}
               max={100}
-              value={minMargin}
+              value={String(minMargin ?? '')}
               disabled={guardrailsLoading || saving}
-              onChange={e => setMinMargin(e.target.value)}
+              onChange={setMinMargin}
+              autoComplete="off"
+              helpText="Suggested prices stay above this when COGS is known."
             />
-            <p className={styles.help}>Suggested prices stay above this when COGS is known.</p>
           </div>
           <div className={styles.field}>
-            <label className={styles.label} htmlFor="default-cogs">
-              Default COGS %
-            </label>
-            <input
+            <TextField
               id="default-cogs"
-              className={styles.input}
+              label="Default COGS %"
               type="number"
               min={0}
               max={100}
-              value={defaultCogs}
+              value={String(defaultCogs ?? '')}
               disabled={guardrailsLoading || saving}
-              onChange={e => setDefaultCogs(e.target.value)}
+              onChange={setDefaultCogs}
+              autoComplete="off"
+              helpText="Used when a product has no unit cost."
             />
-            <p className={styles.help}>Used when a product has no unit cost.</p>
           </div>
           <div className={styles.field}>
-            <label className={styles.label} htmlFor="scenario">
-              Default scenario preset
-            </label>
-            <select
+            <Select
               id="scenario"
-              className={styles.select}
+              label="Default scenario preset"
+              options={[
+                { label: 'Conservative', value: 'conservative' },
+                { label: 'Recommended', value: 'recommended' },
+                { label: 'Aggressive', value: 'aggressive' },
+              ]}
               value={scenarioPreset}
               disabled={guardrailsLoading || saving}
-              onChange={e => setScenarioPreset(e.target.value)}
-            >
-              <option value="conservative">Conservative</option>
-              <option value="recommended">Recommended</option>
-              <option value="aggressive">Aggressive</option>
-            </select>
-          </div>
-          <label className={styles.adminCheckRow}>
-            <input
-              type="checkbox"
-              checked={autoRound2}
-              disabled={guardrailsLoading || saving}
-              onChange={e => setAutoRound2(e.target.checked)}
+              onChange={setScenarioPreset}
             />
-            <span>Auto-start round 2 by default</span>
-          </label>
+          </div>
+          <Checkbox
+            label="Auto-start round 2 by default"
+            checked={autoRound2}
+            disabled={guardrailsLoading || saving}
+            onChange={setAutoRound2}
+          />
         </div>
       ) : null}
 
       {tab === 'installation' ? (
         <div className={styles.adminStack}>
-          <div className={styles.callout} role="note" style={{ marginBottom: 16 }}>
-            <span className={styles.calloutBody}>
-              <span className={styles.calloutStrong}>Advanced install details</span>
-              <span className={styles.calloutMeta}>
+          <div style={{ marginBottom: 16 }}>
+            <Banner tone="info" title="Advanced install details">
+              <p>
                 Overall readiness and primary ensure CTAs live on{' '}
-                <button type="button" className={styles.editLink} onClick={() => navigate('/app/setup')}>
+                <Button variant="plain" onClick={() => navigate('/app/setup')}>
                   Setup
-                </button>
+                </Button>
                 .
-              </span>
-            </span>
+              </p>
+            </Banner>
           </div>
           <div className={styles.adminRow}>
             <div className={styles.adminRowHead}>
               <p className={styles.adminRowTitle}>Theme embed & app proxy</p>
-              <span
-                className={`${styles.adminBadge} ${
-                  embedUrl ? styles.adminBadgeNeutral : styles.adminBadgeWarn
-                }`}
-              >
+              <Badge tone={embedUrl ? undefined : 'warning'}>
                 {embedUrl ? 'Confirm in theme editor' : 'API key missing'}
-              </span>
+              </Badge>
             </div>
             <p className={styles.adminRowBody}>
               Enable the RipsPriceX theme app embed for PDP paint. The app proxy serves{' '}
@@ -402,62 +412,64 @@ export default function SettingsPage() {
             {installSnippet ? <pre className={styles.adminCodeBlock}>{installSnippet}</pre> : null}
             <div className={styles.adminRowActions}>
               {embedUrl ? (
-                <a
-                  className={styles.primaryBtn}
-                  href={embedUrl}
-                  target="_top"
-                  rel="noopener"
-                  onClick={event => {
-                    event.preventDefault();
+                <Button
+                  variant="primary"
+                  onClick={() => {
                     void openEmbed();
                   }}
                 >
                   Enable theme app embed
-                </a>
+                </Button>
               ) : (
                 <p className={styles.help}>
                   Missing API key — cannot build the theme embed deep link.
                 </p>
               )}
-              <button
-                type="button"
-                className={styles.ghostBtn}
-                onClick={() => navigate('/app/setup')}
-              >
-                Open Setup checklist
-              </button>
+              <Button onClick={() => navigate('/app/setup')}>Open Setup checklist</Button>
             </div>
           </div>
 
           <div className={styles.adminRow}>
             <div className={styles.adminRowHead}>
               <p className={styles.adminRowTitle}>Cart transform</p>
-              <span
-                className={`${styles.adminBadge} ${
-                  cart.installed ? styles.adminBadgeOk : styles.adminBadgeWarn
-                }`}
-              >
+              <Badge tone={cart.installed ? 'success' : 'warning'}>
                 {cart.installed ? 'Installed' : 'Needs ensure'}
-              </span>
+              </Badge>
             </div>
             <p className={styles.adminRowBody}>{cart.status}</p>
             {cart.error ? <p className={styles.error}>{cart.error}</p> : null}
             <div className={styles.adminRowActions}>
-              <button
-                type="button"
-                className={styles.primaryBtn}
+              <Button
+                variant="primary"
                 disabled={cart.busy}
+                loading={cart.busy}
                 onClick={() => void ensureCart()}
               >
-                {cart.busy ? 'Ensuring…' : 'Ensure cart transform'}
-              </button>
-              <button
-                type="button"
-                className={styles.ghostBtn}
-                onClick={() => setTab('price-surfaces')}
+                Ensure cart transform
+              </Button>
+              <Button onClick={() => setTab('price-surfaces')}>Open price surfaces</Button>
+            </div>
+          </div>
+
+          <div className={styles.adminRow}>
+            <div className={styles.adminRowHead}>
+              <p className={styles.adminRowTitle}>Checkout discount</p>
+              <Badge tone={discount.installed ? 'success' : 'warning'}>
+                {discount.installed ? 'Attached' : 'Needs ensure'}
+              </Badge>
+            </div>
+            <p className={styles.adminRowBody}>{discount.status}</p>
+            {discount.error ? <p className={styles.error}>{discount.error}</p> : null}
+            <div className={styles.adminRowActions}>
+              <Button
+                variant="primary"
+                disabled={discount.busy}
+                loading={discount.busy}
+                onClick={() => void ensureDiscount()}
               >
-                Open price surfaces
-              </button>
+                Ensure checkout discount
+              </Button>
+              <Button onClick={() => navigate('/app/setup')}>Open Setup checklist</Button>
             </div>
           </div>
         </div>
