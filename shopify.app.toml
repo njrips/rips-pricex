@@ -4,12 +4,11 @@
 
 name = "rips-pricex"
 client_id = "1427bfea71317ff9999f4ad85b59675b"
-application_url = "https://localhost"
+application_url = "https://pricefy.echologyx.com"
 embedded = true
 
 [build]
-automatically_update_urls_on_dev = true
-include_config_on_deploy = true
+automatically_update_urls_on_dev = false
 
 [access_scopes]
 scopes = "read_products,write_products,read_orders,read_inventory,read_locations,read_cart_transforms,write_cart_transforms,read_discounts,write_discounts,read_themes,read_content,read_online_store_pages,read_markets,read_reports"
@@ -17,7 +16,11 @@ optional_scopes = []
 use_legacy_install_flow = false
 
 [auth]
-redirect_urls = [ "https://localhost/auth/callback" ]
+redirect_urls = [
+  "https://pricefy.echologyx.com/auth/callback",
+  "https://pricefy.echologyx.com/auth/shopify/callback",
+  "https://pricefy.echologyx.com/api/auth/callback"
+]
 
 [webhooks]
 api_version = "2025-10"
@@ -35,7 +38,7 @@ api_version = "2025-10"
   uri = "/webhooks/app/scopes_update"
 
 [app_proxy]
-url = "/api/proxy"
+url = "https://pricefy.echologyx.com/api/proxy"
 subpath = "ripspricex"
 prefix = "apps"
 

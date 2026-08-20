@@ -1,10 +1,10 @@
 # RipsPriceX production — https://pricefy.echologyx.com
-# Same Partner app as shopify.app.ripspricex.toml (M.A.K. Ripon).
+# EchoLogyx Ltd Partner app (shopify.app.toml / client 1427bfea…).
 # Deploy: shopify app deploy --config shopify.app.production.toml --allow-updates
 # Do not enable automatically_update_urls_on_dev here (would clobber this host).
 
-name = "RipsPriceX"
-client_id = "4c6899f56aea53cbee6e22893c179fa4"
+name = "rips-pricex"
+client_id = "1427bfea71317ff9999f4ad85b59675b"
 application_url = "https://pricefy.echologyx.com"
 embedded = true
 
