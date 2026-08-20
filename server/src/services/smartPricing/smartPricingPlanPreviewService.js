@@ -8,7 +8,12 @@
  */
 
 const { createTest, getTestById, updateTest } = require('../../models/test');
-const { listInboxPlans, patchInboxPlan } = require('../../models/smartPricingInboxStore');
+const {
+  listInboxPlans,
+  patchInboxPlan,
+  getInboxPlanById,
+  upsertInboxPlan,
+} = require('../../models/smartPricingInboxStore');
 const { getShopSession } = require('../../models/shopSession');
 const shopifyService = require('../shopifyService');
 const { getShopSmartPricingGuardrails } = require('./smartPricingGuardrailsService');
@@ -435,12 +440,28 @@ async function ensureExperimentPreviewTest(domain, primaryPlan, experimentPlans)
   }
 }
 
+async function upsertIncomingInboxPlans(domain, planId, incomingPlan, incomingPlans) {
+  const rows = [];
+  if (incomingPlan && typeof incomingPlan === 'object') {
+    rows.push({ ...incomingPlan, id: String(incomingPlan.id || planId).trim() || planId });
+  }
+  (Array.isArray(incomingPlans) ? incomingPlans : []).forEach(row => {
+    if (!row || typeof row !== 'object') return;
+    const rowId = String(row.id || row.plan_id || '').trim();
+    if (!rowId) return;
+    if (rows.some(existing => String(existing.id) === rowId)) return;
+    rows.push({ ...row, id: rowId });
+  });
+  await Promise.all(rows.map(row => upsertInboxPlan(domain, row).catch(() => null)));
+}
+
 /**
  * @param {string} shopDomain
  * @param {string} planId
+ * @param {{ plan?: object|null, plans?: object[] }} [options]
  * @returns {Promise<object>}
  */
-async function ensureSmartPricingPlanPreviewTest(shopDomain, planId) {
+async function ensureSmartPricingPlanPreviewTest(shopDomain, planId, options = {}) {
   const domain = normalizeShopDomain(shopDomain);
   const id = String(planId || '').trim();
   if (!domain || !id) {
@@ -449,14 +470,19 @@ async function ensureSmartPricingPlanPreviewTest(shopDomain, planId) {
     throw err;
   }
 
-  const inbox = await listInboxPlans(domain);
-  const originalPlan = (inbox.plans || []).find(row => String(row.id || '') === id) || null;
+  let originalPlan = await getInboxPlanById(domain, id);
+  if (!originalPlan) {
+    await upsertIncomingInboxPlans(domain, id, options.plan, options.plans);
+    originalPlan = await getInboxPlanById(domain, id);
+  }
   if (!originalPlan) {
     const err = new Error(`Inbox plan not found: ${id}`);
     err.isValidation = true;
     err.code = 'PLAN_NOT_FOUND';
     throw err;
   }
+
+  const inbox = await listInboxPlans(domain);
 
   let plan = { ...originalPlan };
   const experimentPlans = collectExperimentPlans(inbox.plans || [], originalPlan);

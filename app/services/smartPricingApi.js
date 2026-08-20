@@ -225,10 +225,15 @@ export async function patchSmartPricingInboxPlan(domain, planId, patch = {}) {
 }
 
 /** Create/reuse a draft price test so Classic Preview works for queued plans. */
-export async function ensureSmartPricingPlanPreviewTest(domain, planId) {
+export async function ensureSmartPricingPlanPreviewTest(domain, planId, extras = {}) {
+  const plan = extras.plan && typeof extras.plan === 'object' ? extras.plan : null;
+  const plans = Array.isArray(extras.plans) ? extras.plans : [];
   const res = await apiPost(
     `/smart-pricing/inbox/plans/${encodeURIComponent(planId)}/ensure-preview-test`,
-    {},
+    {
+      ...(plan ? { plan } : {}),
+      ...(plans.length ? { plans } : {}),
+    },
     domain ? { params: { domain } } : {}
   );
   return unwrapData(res);

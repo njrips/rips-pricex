@@ -99,12 +99,34 @@ export async function hydrateInboxFromServer(domain, localPlans = [], options = 
     }
     if (serverPlans.length) {
       const merged = mergeServerAndLocalInbox(serverPlans, localPlans, options);
+      const serverIds = new Set(serverPlans.map(plan => String(plan?.id || '')).filter(Boolean));
+      const localOnly = merged.filter(plan => plan?.id && !serverIds.has(String(plan.id)));
+      if (localOnly.length) {
+        try {
+          const saved = await persistInboxPlansNow(domain, merged);
+          return {
+            plans: Array.isArray(saved?.plans) && saved.plans.length ? saved.plans : merged,
+            source: 'server_merged_local',
+            serverUpdatedAt: saved?.updated_at || data?.updated_at || null,
+            revision: saved?.revision || data?.revision || null,
+            migratedLocalOnly: true,
+          };
+        } catch {
+          return {
+            plans: merged,
+            source: 'server_merged_local',
+            serverUpdatedAt: data?.updated_at || null,
+            revision: data?.revision || null,
+            migratedLocalOnly: true,
+          };
+        }
+      }
       return {
         plans: merged,
         source: localPlans.length > serverPlans.length ? 'server_merged_local' : 'server',
         serverUpdatedAt: data?.updated_at || null,
         revision: data?.revision || null,
-        migratedLocalOnly: merged.length > serverPlans.length,
+        migratedLocalOnly: false,
       };
     }
     if (localPlans.length) {
@@ -362,14 +384,30 @@ export async function persistInboxPlansNow(domain, plans) {
     clearTimeout(persistTimers.get(key));
     persistTimers.delete(key);
   }
-  const saved = await saveSmartPricingInboxPlans(domain, plans, {
-    revision: getInboxServerRevision(domain),
-  });
-  if (saved?.revision) {
-    setInboxServerRevision(domain, saved.revision);
+  try {
+    const saved = await saveSmartPricingInboxPlans(domain, plans, {
+      revision: getInboxServerRevision(domain),
+    });
+    if (saved?.revision) {
+      setInboxServerRevision(domain, saved.revision);
+    }
+    clearInboxConflict(domain);
+    return saved;
+  } catch (err) {
+    const conflictPayload = extractConflictPayload(err);
+    if (!conflictPayload) {
+      throw err;
+    }
+    const merged = mergeServerAndLocalInbox(conflictPayload.plans || [], plans, {
+      preferLocalIds: (Array.isArray(plans) ? plans : []).map(plan => plan?.id).filter(Boolean),
+    });
+    const saved = await saveSmartPricingInboxPlans(domain, merged);
+    if (saved?.revision) {
+      setInboxServerRevision(domain, saved.revision);
+    }
+    clearInboxConflict(domain);
+    return saved;
   }
-  clearInboxConflict(domain);
-  return saved;
 }
 
 export async function patchServerInboxPlan(domain, planId, patch = {}) {

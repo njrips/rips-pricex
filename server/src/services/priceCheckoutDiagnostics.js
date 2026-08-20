@@ -443,6 +443,11 @@ function buildCheckoutPriceDiagnostics(opts = {}) {
   const assignmentSignatureOk = !assignmentSignatureRequired || assignmentSignatureSecretConfigured;
   const nodeEnv = process.env.NODE_ENV || 'development';
   const isProduction = nodeEnv === 'production';
+  // Classic price tests charge via Cart Transform line attributes, not the RipX
+  // checkout-discount HTTP batch + shared secret. Those env checks stay as
+  // operator notes and must not keep the experiment-list banner red.
+  const classicPriceTestOnly =
+    String(process.env.RIPSPRICEX_CLASSIC_PRICE_TEST_ONLY || 'true').toLowerCase() !== 'false';
 
   const parsed = batchUrl ? parseUrlSafe(batchUrl) : null;
   const usesHttps = parsed ? parsed.protocol === 'https:' : false;
@@ -461,17 +466,22 @@ function buildCheckoutPriceDiagnostics(opts = {}) {
       : 'Set APP_URL or RIPX_PRICE_RESOLVE_BATCH_URL so the Discount Function can reach your API.',
   });
 
+  const assignmentCheckOk = classicPriceTestOnly || assignmentSignatureOk;
   checklist.push({
     id: 'assignment_signature_enforcement',
-    ok: assignmentSignatureOk,
-    severity: assignmentSignatureOk ? 'ok' : 'warning',
-    message: assignmentSignatureRequired
+    ok: assignmentCheckOk,
+    severity: assignmentCheckOk ? 'ok' : 'warning',
+    message: classicPriceTestOnly
       ? assignmentSignatureSecretConfigured
-        ? 'Signed assignment verification is required and signature secret is configured.'
-        : 'Signed assignment verification is required but no signature secret is configured (set RIPX_PRICE_ASSIGNMENT_SIGNATURE_SECRET or RIPX_CHECKOUT_PRICE_SECRET).'
-      : isProduction
-        ? 'Signed assignment verification is explicitly disabled in production. Consider enabling it unless you are in migration mode.'
-        : 'Signed assignment verification is optional in non-production.',
+        ? 'Assignment HMAC secret is configured. Classic cart transform still charges from line attributes when proof attrs are present.'
+        : 'Classic cart transform charges from line attributes when assignment proof attrs are present. RIPX_CHECKOUT_PRICE_SECRET is optional operator hardening, not a merchant Setup step.'
+      : assignmentSignatureRequired
+        ? assignmentSignatureSecretConfigured
+          ? 'Signed assignment verification is required and signature secret is configured.'
+          : 'Signed assignment verification is required but no signature secret is configured (set RIPX_PRICE_ASSIGNMENT_SIGNATURE_SECRET or RIPX_CHECKOUT_PRICE_SECRET).'
+        : isProduction
+          ? 'Signed assignment verification is explicitly disabled in production. Consider enabling it unless you are in migration mode.'
+          : 'Signed assignment verification is optional in non-production.',
   });
 
   const EXPECTED_BATCH_PATH = '/api/track/price-resolve-batch';
@@ -527,16 +537,20 @@ function buildCheckoutPriceDiagnostics(opts = {}) {
     });
   }
 
-  const secretOk = secretRequired || !isProduction;
+  const secretOk = classicPriceTestOnly || secretRequired || !isProduction;
   checklist.push({
     id: 'checkout_secret_consistency',
     ok: secretOk,
     severity: secretOk ? 'ok' : 'warning',
-    message: secretRequired
-      ? 'RIPX_CHECKOUT_PRICE_SECRET is set — extension ripxConfig and Discount Function requests must include the same secret.'
-      : isProduction
-        ? 'RIPX_CHECKOUT_PRICE_SECRET is unset in production — anyone who discovers your batch URL could call it; set a secret and sync the extension.'
-        : 'RIPX_CHECKOUT_PRICE_SECRET is unset — OK for local dev; set in production.',
+    message: classicPriceTestOnly
+      ? secretRequired
+        ? 'RIPX_CHECKOUT_PRICE_SECRET is set. Classic price tests use Cart Transform, not the checkout-discount batch secret.'
+        : 'Checkout batch secret is not required for Classic price tests (Cart Transform path). Offer tests use the Shopify checkout discount function.'
+      : secretRequired
+        ? 'RIPX_CHECKOUT_PRICE_SECRET is set — extension ripxConfig and Discount Function requests must include the same secret.'
+        : isProduction
+          ? 'RIPX_CHECKOUT_PRICE_SECRET is unset in production — anyone who discovers your batch URL could call it; set a secret and sync the extension.'
+          : 'RIPX_CHECKOUT_PRICE_SECRET is unset — OK for local dev; set in production.',
   });
 
   /** @type {string[]} */
@@ -639,9 +653,6 @@ function buildCheckoutPriceDiagnostics(opts = {}) {
   });
 
   // RipsPriceX Classic price tests use Cart Transform only (no checkout discount function).
-  const classicPriceTestOnly =
-    String(process.env.RIPSPRICEX_CLASSIC_PRICE_TEST_ONLY || 'true').toLowerCase() !== 'false';
-
   if (functionSnapshot.length === 0 && shopifyAdminApiStatus === 'ok') {
     if (!classicPriceTestOnly) {
       checklist.push({

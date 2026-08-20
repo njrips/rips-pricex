@@ -29,6 +29,21 @@ describe('checkoutReadinessClient', () => {
     expect(summary.title).toMatch(/offer tests/i);
   });
 
+  it('surfaces the first failed price-path check instead of a generic cart-transform line', () => {
+    const summary = describeSmartPricingLaunchReadiness({
+      ready: false,
+      live_api_checked: true,
+      discount_function_available: true,
+      offer_ready: true,
+      failed_checks: [
+        'Signed assignment verification is required but no signature secret is configured.',
+      ],
+      price_surface: { ready: true, configured_shop: 22 },
+    });
+    expect(summary.detail).toMatch(/signature secret/i);
+    expect(summary.detail).not.toMatch(/theme price selectors/i);
+  });
+
   it('does not claim offer launch when live Shopify has no discount function', () => {
     const summary = describeSmartPricingLaunchReadiness({
       ready: true,

@@ -6,6 +6,8 @@ jest.mock('../../../models/test', () => ({
 jest.mock('../../../models/smartPricingInboxStore', () => ({
   listInboxPlans: jest.fn(),
   patchInboxPlan: jest.fn(),
+  getInboxPlanById: jest.fn(),
+  upsertInboxPlan: jest.fn(),
 }));
 jest.mock('../../../models/shopSession', () => ({
   getShopSession: jest.fn(),
@@ -24,7 +26,7 @@ jest.mock('../offerCheckoutDiscountService', () => ({
 }));
 
 const { getTestById, createTest, updateTest } = require('../../../models/test');
-const { listInboxPlans, patchInboxPlan } = require('../../../models/smartPricingInboxStore');
+const { listInboxPlans, patchInboxPlan, getInboxPlanById, upsertInboxPlan } = require('../../../models/smartPricingInboxStore');
 const { getShopSession } = require('../../../models/shopSession');
 const shopifyService = require('../../shopifyService');
 const { launchSmartPricingPlanAsTest } = require('../smartPricingLaunchService');
@@ -33,6 +35,14 @@ const { ensureSmartPricingPlanPreviewTest } = require('../smartPricingPlanPrevie
 describe('smartPricingPlanPreviewService', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    getInboxPlanById.mockImplementation(async (_shop, id) => {
+      const inbox = await listInboxPlans();
+      return (inbox?.plans || []).find(row => String(row.id) === String(id)) || null;
+    });
+    upsertInboxPlan.mockImplementation(async (_shop, plan) => ({
+      ...plan,
+      id: String(plan?.id || '').trim(),
+    }));
   });
 
   it('creates a draft test for a single queued plan and returns Liquid arm preview names', async () => {
@@ -404,5 +414,58 @@ describe('smartPricingPlanPreviewService', () => {
     expect(result.testId).toBe('77777777-7777-4777-8777-777777777777');
     expect(result.testType).toBe('offer');
     expect(result.variants[1].variantName).toBe('10% off Variation A');
+  });
+
+  it('upserts a client-supplied offer plan when the inbox row is missing', async () => {
+    const incoming = {
+      id: 'SP-1787208287323-0',
+      status: 'queued',
+      test_id: null,
+      product_id: 'gid://shopify/Product/1',
+      variant_id: 'gid://shopify/ProductVariant/1',
+      handle: 'offer-tee',
+      currency: 'USD',
+      metadata: { experiment_type: 'offer_test' },
+      price_arms: [
+        { id: 'control', role: 'control', label: 'Control' },
+        {
+          id: 'var_a',
+          role: 'challenger',
+          label: 'Variation A',
+          offer: { discount_type: 'percent', discount_value: 10 },
+        },
+      ],
+    };
+    getInboxPlanById.mockReset();
+    getInboxPlanById.mockResolvedValueOnce(null).mockResolvedValue(incoming);
+    listInboxPlans.mockResolvedValue({ plans: [incoming] });
+    upsertInboxPlan.mockResolvedValue(incoming);
+    launchSmartPricingPlanAsTest.mockResolvedValue({
+      test: {
+        id: '88888888-8888-4888-8888-888888888888',
+        type: 'offer',
+        variants: [
+          { id: 'c', name: 'Control' },
+          { id: 'a', name: '10% off Variation A' },
+        ],
+      },
+    });
+    patchInboxPlan.mockResolvedValue({ plan: incoming });
+    getShopSession.mockResolvedValue({ access_token: 'tok' });
+    shopifyService.getProduct.mockResolvedValue({
+      handle: 'offer-tee',
+      publishedAt: '2026-01-01T00:00:00Z',
+    });
+
+    const result = await ensureSmartPricingPlanPreviewTest(
+      'splitter-plus.myshopify.com',
+      'SP-1787208287323-0',
+      { plan: incoming }
+    );
+
+    expect(upsertInboxPlan).toHaveBeenCalled();
+    expect(launchSmartPricingPlanAsTest).toHaveBeenCalled();
+    expect(result.testId).toBe('88888888-8888-4888-8888-888888888888');
+    expect(result.testType).toBe('offer');
   });
 });

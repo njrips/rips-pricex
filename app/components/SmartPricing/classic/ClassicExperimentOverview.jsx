@@ -86,6 +86,7 @@ export default function ClassicExperimentOverview() {
     messageType,
     setMessage,
     setMessageType,
+    experimentPlans,
     experimentTestIds,
     refresh,
     patchExperimentPlansLocal,
@@ -555,6 +556,7 @@ export default function ClassicExperimentOverview() {
               shopDomain={shopDomain}
               testId={testId}
               isOfferTest={isOfferTest}
+              inboxPlans={experimentPlans}
             />
           ) : null}
           {tab === 'Audience' ? (

@@ -96,8 +96,8 @@ export default function ExperimentsHome() {
             }}
           >
             <p>
-              Price tests still need cart transform and theme price selectors. Offer tests apply at
-              checkout and do not wait on those steps.
+              {launchSummary.detail ||
+                'Price tests still need cart transform and theme price selectors. Offer tests apply at checkout and do not wait on those steps.'}
             </p>
           </Banner>
         </Box>

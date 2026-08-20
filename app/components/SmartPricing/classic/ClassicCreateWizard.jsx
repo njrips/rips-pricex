@@ -1205,7 +1205,7 @@ export default function ClassicCreateWizard() {
         experimentId
       );
       writeInboxPlans(shopDomain, merged);
-      persistInboxPlansNow(shopDomain, merged).catch(() => null);
+      await persistInboxPlansNow(shopDomain, merged).catch(() => null);
       try {
         setBusy(true);
         const result = await launchMany(enriched);

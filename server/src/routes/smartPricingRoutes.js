@@ -543,7 +543,11 @@ router.post(
       return sendValidationError(res, ['planId is required']);
     }
     try {
-      const preview = await ensureSmartPricingPlanPreviewTest(req.shopDomain, planId);
+      const body = req.body && typeof req.body === 'object' ? req.body : {};
+      const preview = await ensureSmartPricingPlanPreviewTest(req.shopDomain, planId, {
+        plan: body.plan && typeof body.plan === 'object' ? body.plan : null,
+        plans: Array.isArray(body.plans) ? body.plans : [],
+      });
       return sendSuccess(res, HTTP_STATUS.OK, {
         ...preview,
         source: 'server',

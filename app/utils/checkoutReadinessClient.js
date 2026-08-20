@@ -111,13 +111,29 @@ export function describeSmartPricingLaunchReadiness(readiness) {
     };
   }
   if (offerReady) {
+    const failed = Array.isArray(readiness.failed_checks)
+      ? readiness.failed_checks.map(item => String(item || '').trim()).filter(Boolean)
+      : [];
+    const surface = priceSurfaceSummary(readiness);
+    let detail =
+      'Offer tests apply at checkout and do not wait on cart transform or theme price selectors.';
+    if (!priceReady) {
+      if (failed.length) {
+        detail = `Offer tests can launch. Price tests: ${failed[0]}`;
+      } else if (!surface.ready) {
+        detail =
+          'Offer tests can launch. Price tests still need theme price selectors (Settings → Price surfaces).';
+      } else {
+        detail =
+          'Offer tests can launch. Price tests still need the RipsPriceX cart transform (Setup step 2).';
+      }
+    }
     return {
       priceReady: false,
       offerReady: true,
       anyReady: true,
       title: 'Ready to launch offer tests',
-      detail:
-        'Offer tests can launch. Price tests still need cart transform and theme price selectors.',
+      detail,
     };
   }
   if (priceReady) {

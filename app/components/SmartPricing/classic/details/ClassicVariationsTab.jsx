@@ -123,7 +123,7 @@ async function prepareArmPreviewUrl(
   product,
   shopDomain,
   fallbackTestId,
-  { isOfferTest = false, purpose = 'open' } = {}
+  { isOfferTest = false, purpose = 'open', inboxPlans = [] } = {}
 ) {
   const baseProduct = product || arm?.products?.[0] || null;
   let nextProduct = { ...(baseProduct || {}) };
@@ -143,7 +143,13 @@ async function prepareArmPreviewUrl(
   }
   if (planId) {
     try {
-      const ensured = await ensureSmartPricingPlanPreviewTest(shopDomain, planId);
+      const catalog = Array.isArray(inboxPlans) ? inboxPlans : [];
+      const inboxPlan =
+        catalog.find(row => String(row?.id || row?.plan_id || '') === planId) || null;
+      const ensured = await ensureSmartPricingPlanPreviewTest(shopDomain, planId, {
+        plan: inboxPlan,
+        plans: catalog,
+      });
       if (!ensured?.testId) {
         window.alert('Could not prepare a preview test for this product.');
         return null;
@@ -233,7 +239,7 @@ async function openArmPreview(
   product,
   shopDomain,
   fallbackTestId,
-  { beginPreview, endPreview, busyKey, isOfferTest = false } = {}
+  { beginPreview, endPreview, busyKey, isOfferTest = false, inboxPlans = [] } = {}
 ) {
   const key =
     busyKey ||
@@ -247,6 +253,7 @@ async function openArmPreview(
   try {
     const url = await prepareArmPreviewUrl(arm, product, shopDomain, fallbackTestId, {
       isOfferTest,
+      inboxPlans,
     });
     if (url) openPreview(url);
   } finally {
@@ -326,6 +333,7 @@ function VariationCard({
   beginPreview,
   endPreview,
   isOfferTest = false,
+  inboxPlans = [],
 }) {
   const popoverRef = useRef(null);
   const copyTimerRef = useRef(null);
@@ -396,6 +404,7 @@ function VariationCard({
       endPreview,
       busyKey: previewKey,
       isOfferTest,
+      inboxPlans,
     });
 
   const openQr = async () => {
@@ -413,6 +422,7 @@ function VariationCard({
       const url = await prepareArmPreviewUrl(arm, primaryProduct, shopDomain, fallbackTestId, {
         isOfferTest,
         purpose: 'share',
+        inboxPlans,
       });
       if (!url) return;
       setEnsuredQrUrl(url);
@@ -440,6 +450,7 @@ function VariationCard({
       const url = await prepareArmPreviewUrl(arm, primaryProduct, shopDomain, fallbackTestId, {
         isOfferTest,
         purpose: 'share',
+        inboxPlans,
       });
       if (!url) return;
       setEnsuredQrUrl(url);
@@ -597,6 +608,7 @@ function SkuPreviewButton({
   endPreview,
   canOpen,
   isOfferTest = false,
+  inboxPlans = [],
 }) {
   const rowKey = buildPreviewBusyKey({
     scope: 'sku',
@@ -621,6 +633,7 @@ function SkuPreviewButton({
           endPreview,
           busyKey: rowKey,
           isOfferTest,
+          inboxPlans,
         })
       }
     >
@@ -656,6 +669,7 @@ function VariationsProductsTable({
   beginPreview,
   endPreview,
   isOfferTest = false,
+  inboxPlans = [],
 }) {
   const [query, setQuery] = useState('');
   const [page, setPage] = useState(1);
@@ -909,6 +923,7 @@ function VariationsProductsTable({
                           beginPreview={beginPreview}
                           endPreview={endPreview}
                           isOfferTest={isOfferTest}
+                          inboxPlans={inboxPlans}
                           canOpen={
                             Boolean(shopDomain) &&
                             Boolean(
@@ -957,6 +972,7 @@ function VariationsProductsTable({
                                   beginPreview={beginPreview}
                                   endPreview={endPreview}
                                   isOfferTest={isOfferTest}
+                                  inboxPlans={inboxPlans}
                                   canOpen={
                                     Boolean(shopDomain) &&
                                     Boolean(
@@ -1044,6 +1060,7 @@ export default function ClassicVariationsTab({
   shopDomain = '',
   testId = null,
   isOfferTest = false,
+  inboxPlans = [],
 }) {
   const [qrOpenId, setQrOpenId] = useState('');
   const { previewBusyKey, beginPreview, endPreview } = useExclusivePreviewBusy();
@@ -1089,6 +1106,7 @@ export default function ClassicVariationsTab({
             beginPreview={beginPreview}
             endPreview={endPreview}
             isOfferTest={isOfferTest}
+            inboxPlans={inboxPlans}
           />
         ))}
       </div>
@@ -1103,6 +1121,7 @@ export default function ClassicVariationsTab({
         beginPreview={beginPreview}
         endPreview={endPreview}
         isOfferTest={isOfferTest}
+        inboxPlans={inboxPlans}
       />
     </div>
   );

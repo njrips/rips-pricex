@@ -341,6 +341,56 @@ async function saveInboxPlans(
   return listInboxPlans(domain);
 }
 
+async function upsertInboxPlan(shopDomain, plan) {
+  const domain = normalizeShopDomain(shopDomain);
+  const normalized = normalizePlanJson(plan);
+  if (!domain || !normalized) {
+    return null;
+  }
+  const { status, testId, archived, archivedAt } = extractPlanFields(normalized);
+  try {
+    await query(
+      `INSERT INTO smart_pricing_inbox_plans
+         (shop_domain, plan_id, plan_json, status, test_id, archived, archived_at, updated_at)
+       VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7, NOW())
+       ON CONFLICT (shop_domain, plan_id)
+       DO UPDATE SET
+         plan_json = EXCLUDED.plan_json,
+         status = EXCLUDED.status,
+         test_id = EXCLUDED.test_id,
+         archived = EXCLUDED.archived,
+         archived_at = EXCLUDED.archived_at,
+         updated_at = NOW()`,
+      [
+        domain,
+        normalized.id,
+        JSON.stringify(normalized),
+        status,
+        testId,
+        archived,
+        archived ? archivedAt : null,
+      ]
+    );
+  } catch (err) {
+    if (!/archived/i.test(String(err?.message || ''))) {
+      throw err;
+    }
+    await query(
+      `INSERT INTO smart_pricing_inbox_plans
+         (shop_domain, plan_id, plan_json, status, test_id, updated_at)
+       VALUES ($1, $2, $3::jsonb, $4, $5, NOW())
+       ON CONFLICT (shop_domain, plan_id)
+       DO UPDATE SET
+         plan_json = EXCLUDED.plan_json,
+         status = EXCLUDED.status,
+         test_id = EXCLUDED.test_id,
+         updated_at = NOW()`,
+      [domain, normalized.id, JSON.stringify(normalized), status, testId]
+    );
+  }
+  return getInboxPlanById(domain, normalized.id);
+}
+
 async function deleteInboxPlan(shopDomain, planId) {
   const domain = normalizeShopDomain(shopDomain);
   const id = String(planId || '').trim();
@@ -533,6 +583,7 @@ module.exports = {
   patchInboxPlansFromSync,
   getInboxPlanById,
   findInboxPlanByTestId,
+  upsertInboxPlan,
   linkInboxPlanToTest,
   summarizeInboxPlans,
   MAX_PLANS_PER_SHOP,
