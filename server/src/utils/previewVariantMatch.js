@@ -10,6 +10,9 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-
 
 /** Leading currency / amount prefix used in Smart Pricing arm variant names. */
 const PRICE_PREFIX_RE = /^(?:[A-Z]{3}\s*)?(?:[$€£¥]|USD|EUR|GBP|CAD|AUD)?\s*[\d,]+(?:\.\d+)?\s+/i;
+/** Offer arms: "10% off Variation A" or "$5.00 off Variation A". */
+const OFFER_PREFIX_RE =
+  /^(?:[\d,.]+%\s+off\s+)|(?:(?:[A-Z]{3}\s*)?(?:[$€£¥]|USD|EUR|GBP|CAD|AUD)?\s*[\d,]+(?:\.\d+)?\s+off\s+)/i;
 
 function normalizePreviewLabel(value) {
   return String(value ?? '')
@@ -23,7 +26,9 @@ function stripPricePrefix(label) {
   if (!normalized) {
     return '';
   }
-  return normalized.replace(PRICE_PREFIX_RE, '').trim() || normalized;
+  return (
+    normalized.replace(OFFER_PREFIX_RE, '').replace(PRICE_PREFIX_RE, '').trim() || normalized
+  );
 }
 
 function previewLabelEquals(a, b) {

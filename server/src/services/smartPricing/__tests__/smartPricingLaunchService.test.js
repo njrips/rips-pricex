@@ -91,7 +91,6 @@ describe('smartPricingLaunchService', () => {
 
     expect(assertCanLaunchPriceTests).toHaveBeenCalledWith('demo.myshopify.com', {
       additionalCount: 1,
-      maxParallel: 5,
     });
     expect(abTestEngine.startTest).toHaveBeenCalled();
   });

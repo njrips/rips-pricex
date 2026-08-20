@@ -8,7 +8,9 @@ import {
   VARIATION_PRODUCTS_PAGE_SIZES,
   averageGroupArmPrice,
   buildQrImageUrl,
+  buildPreviewBusyKey,
   buildVariationPreviewUrl,
+  buildVariationSharePreviewUrl,
   buildVariationProductsMatrix,
   filterSortVariationProducts,
   formatNumber,
@@ -18,8 +20,10 @@ import {
   groupArmPricesAreMixed,
   groupVariationProductsByProduct,
   paginateVariationProducts,
+  previewButtonState,
   resolvePlanProductPath,
 } from '../classicExperimentDetailsHelpers';
+import useExclusivePreviewBusy from '../useExclusivePreviewBusy';
 import {
   ButtonIconExternalLink,
   ButtonIconQr,
@@ -114,7 +118,13 @@ function matchEnsuredArmVariant(ensuredVariants, arm) {
  * Prepare + optionally open a storefront preview for one arm/SKU.
  * @returns {Promise<string|null>} preview URL when successful
  */
-async function prepareArmPreviewUrl(arm, product, shopDomain, fallbackTestId) {
+async function prepareArmPreviewUrl(
+  arm,
+  product,
+  shopDomain,
+  fallbackTestId,
+  { isOfferTest = false, purpose = 'open' } = {}
+) {
   const baseProduct = product || arm?.products?.[0] || null;
   let nextProduct = { ...(baseProduct || {}) };
   // Drop experiment-level arm.variantName so sibling SKUs rebuild their own priced name.
@@ -206,7 +216,8 @@ async function prepareArmPreviewUrl(arm, product, shopDomain, fallbackTestId) {
       price: nextProduct.price ?? nextProduct.pricesByArmId?.[String(arm?.id)] ?? nextArm.price,
     },
     shopDomain,
-    nextProduct.testId || fallbackTestId
+    nextProduct.testId || fallbackTestId,
+    { isOfferTest, purpose }
   );
   if (!url) {
     window.alert(
@@ -217,16 +228,29 @@ async function prepareArmPreviewUrl(arm, product, shopDomain, fallbackTestId) {
   return url;
 }
 
-async function openArmPreview(arm, product, shopDomain, fallbackTestId, { onBusy } = {}) {
-  const busyKey = String(
-    product?.planId || product?.plan_id || product?.productId || arm?.id || 'preview'
-  );
+async function openArmPreview(
+  arm,
+  product,
+  shopDomain,
+  fallbackTestId,
+  { beginPreview, endPreview, busyKey, isOfferTest = false } = {}
+) {
+  const key =
+    busyKey ||
+    buildPreviewBusyKey({
+      scope: 'arm',
+      action: 'preview',
+      armId: arm?.id,
+      product,
+    });
+  if (typeof beginPreview === 'function' && !beginPreview(key)) return;
   try {
-    if (typeof onBusy === 'function') onBusy(busyKey);
-    const url = await prepareArmPreviewUrl(arm, product, shopDomain, fallbackTestId);
+    const url = await prepareArmPreviewUrl(arm, product, shopDomain, fallbackTestId, {
+      isOfferTest,
+    });
     if (url) openPreview(url);
   } finally {
-    if (typeof onBusy === 'function') onBusy('');
+    if (typeof endPreview === 'function') endPreview(key);
   }
 }
 
@@ -241,7 +265,13 @@ const TEST_VARIANT_UUID_RE =
  * Never pair a product PDP with another plan's testId — byProduct won't match and
  * the storefront correctly refuses to paint (matrix miss).
  */
-function armPreviewUrl(arm, product, shopDomain, fallbackTestId) {
+function armPreviewUrl(
+  arm,
+  product,
+  shopDomain,
+  fallbackTestId,
+  { isOfferTest = false, purpose = 'open' } = {}
+) {
   if (!shopDomain || !arm) return null;
   const productTestId =
     product?.testId !== null && product?.testId !== undefined && String(product.testId).trim()
@@ -269,17 +299,18 @@ function armPreviewUrl(arm, product, shopDomain, fallbackTestId) {
     Boolean(fallbackTestId) && testId && String(testId) === String(fallbackTestId);
   const safeVariantId = uuidOk && (productOwnsTest || sameFallbackTest) ? rawVariantId : undefined;
   const productForName = product || arm?.products?.[0] || null;
-  return buildVariationPreviewUrl({
+  const builder = purpose === 'share' ? buildVariationSharePreviewUrl : buildVariationPreviewUrl;
+  return builder({
     shopDomain,
     testId,
     variantId: safeVariantId,
-    // Prefer "$884.94 Variation A" over short "Variation A" so preview does not
-    // fall back to Control when the experiment-level test row has no variantName.
     variantName: formatSmartPricingPreviewVariantName(arm, {
       price: productForName?.price ?? arm.price,
       currency: productForName?.currency,
+      isOffer: isOfferTest,
     }),
     productPath: resolvePlanProductPath(productForName),
+    testType: isOfferTest ? 'offer' : 'price',
   });
 }
 
@@ -292,18 +323,42 @@ function VariationCard({
   qrOpenId,
   setQrOpenId,
   previewBusyKey,
-  onPreviewBusy,
+  beginPreview,
+  endPreview,
   isOfferTest = false,
 }) {
   const popoverRef = useRef(null);
   const copyTimerRef = useRef(null);
   const primaryProduct = arm.products?.[0] || null;
-  const busyKey = String(primaryProduct?.planId || primaryProduct?.productId || arm?.id || '');
-  const isBusy = Boolean(previewBusyKey) && String(previewBusyKey) === busyKey;
+  const previewKey = buildPreviewBusyKey({
+    scope: 'arm',
+    action: 'preview',
+    armId: arm?.id,
+    product: primaryProduct,
+  });
+  const qrKey = buildPreviewBusyKey({
+    scope: 'arm',
+    action: 'qr',
+    armId: arm?.id,
+    product: primaryProduct,
+  });
+  const copyKey = buildPreviewBusyKey({
+    scope: 'arm',
+    action: 'copy',
+    armId: arm?.id,
+    product: primaryProduct,
+  });
+  const previewBtn = previewButtonState(previewBusyKey, previewKey);
+  const qrBtn = previewButtonState(previewBusyKey, qrKey);
+  const copyBtn = previewButtonState(previewBusyKey, copyKey);
   const multiSku = productCount > 1;
   const previewUrl = useMemo(
-    () => armPreviewUrl(arm, primaryProduct, shopDomain, fallbackTestId),
-    [arm, primaryProduct, shopDomain, fallbackTestId]
+    () =>
+      armPreviewUrl(arm, primaryProduct, shopDomain, fallbackTestId, {
+        isOfferTest,
+        purpose: 'share',
+      }),
+    [arm, primaryProduct, shopDomain, fallbackTestId, isOfferTest]
   );
   const [ensuredQrUrl, setEnsuredQrUrl] = useState('');
   const qrUrl = buildQrImageUrl(ensuredQrUrl || previewUrl, 168);
@@ -337,7 +392,10 @@ function VariationCard({
 
   const runPreview = () =>
     openArmPreview(arm, primaryProduct, shopDomain, fallbackTestId, {
-      onBusy: onPreviewBusy,
+      beginPreview,
+      endPreview,
+      busyKey: previewKey,
+      isOfferTest,
     });
 
   const openQr = async () => {
@@ -350,24 +408,39 @@ function VariationCard({
       setQrOpenId(arm.id);
       return;
     }
+    if (typeof beginPreview === 'function' && !beginPreview(qrKey)) return;
     try {
-      if (typeof onPreviewBusy === 'function') onPreviewBusy(busyKey);
-      const url = await prepareArmPreviewUrl(arm, primaryProduct, shopDomain, fallbackTestId);
+      const url = await prepareArmPreviewUrl(arm, primaryProduct, shopDomain, fallbackTestId, {
+        isOfferTest,
+        purpose: 'share',
+      });
       if (!url) return;
       setEnsuredQrUrl(url);
       setQrOpenId(arm.id);
     } finally {
-      if (typeof onPreviewBusy === 'function') onPreviewBusy('');
+      if (typeof endPreview === 'function') endPreview(qrKey);
     }
   };
 
   const copyLink = async () => {
+    const readyUrl = ensuredQrUrl || previewUrl;
+    if (readyUrl) {
+      try {
+        await navigator.clipboard.writeText(readyUrl);
+        setCopied(true);
+        if (copyTimerRef.current) window.clearTimeout(copyTimerRef.current);
+        copyTimerRef.current = window.setTimeout(() => setCopied(false), 1600);
+      } catch {
+        // ignore
+      }
+      return;
+    }
+    if (typeof beginPreview === 'function' && !beginPreview(copyKey)) return;
     try {
-      if (typeof onPreviewBusy === 'function') onPreviewBusy(busyKey);
-      const url =
-        ensuredQrUrl ||
-        previewUrl ||
-        (await prepareArmPreviewUrl(arm, primaryProduct, shopDomain, fallbackTestId));
+      const url = await prepareArmPreviewUrl(arm, primaryProduct, shopDomain, fallbackTestId, {
+        isOfferTest,
+        purpose: 'share',
+      });
       if (!url) return;
       setEnsuredQrUrl(url);
       await navigator.clipboard.writeText(url);
@@ -377,7 +450,7 @@ function VariationCard({
     } catch {
       // ignore
     } finally {
-      if (typeof onPreviewBusy === 'function') onPreviewBusy('');
+      if (typeof endPreview === 'function') endPreview(copyKey);
     }
   };
 
@@ -450,8 +523,11 @@ function VariationCard({
           <>
             <Button
               icon={ButtonIconExternalLink}
-              disabled={Boolean(previewBusyKey)}
-              loading={isBusy}
+              disabled={previewBtn.disabled}
+              loading={previewBtn.loading}
+              accessibilityLabel={
+                previewBtn.loading ? `Preparing ${arm.label} preview` : `Preview ${arm.label}`
+              }
               onClick={runPreview}
             >
               Preview
@@ -459,7 +535,11 @@ function VariationCard({
             <Button
               icon={ButtonIconQr}
               aria-expanded={isQrOpen}
-              disabled={Boolean(previewBusyKey)}
+              disabled={qrBtn.disabled}
+              loading={qrBtn.loading}
+              accessibilityLabel={
+                qrBtn.loading ? `Preparing ${arm.label} QR code` : `QR code for ${arm.label}`
+              }
               onClick={openQr}
             >
               QR
@@ -485,10 +565,18 @@ function VariationCard({
               {multiSku ? ' Per-SKU previews are also in the products table below.' : ''}
             </p>
             <div className={styles.variationPreviewRow}>
-              <Button disabled={Boolean(previewBusyKey)} onClick={runPreview}>
+              <Button
+                disabled={previewBtn.disabled}
+                loading={previewBtn.loading}
+                onClick={runPreview}
+              >
                 Open link
               </Button>
-              <Button disabled={Boolean(previewBusyKey)} onClick={copyLink}>
+              <Button
+                disabled={copyBtn.disabled}
+                loading={copyBtn.loading}
+                onClick={copyLink}
+              >
                 {copied ? 'Copied' : 'Copy link'}
               </Button>
             </div>
@@ -496,6 +584,48 @@ function VariationCard({
         ) : null}
       </div>
     </div>
+  );
+}
+
+function SkuPreviewButton({
+  arm,
+  product,
+  shopDomain,
+  fallbackTestId,
+  previewBusyKey,
+  beginPreview,
+  endPreview,
+  canOpen,
+  isOfferTest = false,
+}) {
+  const rowKey = buildPreviewBusyKey({
+    scope: 'sku',
+    action: 'preview',
+    armId: arm?.id,
+    product,
+  });
+  const rowBtn = previewButtonState(previewBusyKey, rowKey);
+  return (
+    <Button
+      size="slim"
+      disabled={rowBtn.disabled || !canOpen}
+      loading={rowBtn.loading}
+      accessibilityLabel={
+        rowBtn.loading
+          ? `Preparing ${arm?.label || 'variation'} storefront preview`
+          : `Open ${arm?.label || 'variation'} storefront preview`
+      }
+      onClick={() =>
+        openArmPreview(arm, product, shopDomain, fallbackTestId, {
+          beginPreview,
+          endPreview,
+          busyKey: rowKey,
+          isOfferTest,
+        })
+      }
+    >
+      Open
+    </Button>
   );
 }
 
@@ -523,7 +653,8 @@ function VariationsProductsTable({
   fallbackTestId,
   resetKey = '',
   previewBusyKey = '',
-  onPreviewBusy,
+  beginPreview,
+  endPreview,
   isOfferTest = false,
 }) {
   const [query, setQuery] = useState('');
@@ -628,8 +759,12 @@ function VariationsProductsTable({
           </p>
         </div>
         <div className={styles.variationPreviewRow} style={{ marginTop: 0 }}>
-          <Button onClick={expandAllOnPage}>Expand</Button>
-          <Button onClick={collapseAll}>Collapse</Button>
+          <Button disabled={Boolean(previewBusyKey)} onClick={expandAllOnPage}>
+            Expand
+          </Button>
+          <Button disabled={Boolean(previewBusyKey)} onClick={collapseAll}>
+            Collapse
+          </Button>
         </div>
       </div>
 
@@ -653,6 +788,7 @@ function VariationsProductsTable({
             labelHidden
             value={String(previewArmId || defaultArmId || '')}
             onChange={setPreviewArmId}
+            disabled={Boolean(previewBusyKey)}
             options={arms.map(arm => ({
               label: arm.label,
               value: String(arm.id),
@@ -694,7 +830,8 @@ function VariationsProductsTable({
                   previewArm,
                   primaryVariant,
                   shopDomain,
-                  fallbackTestId
+                  fallbackTestId,
+                  { isOfferTest, purpose: 'share' }
                 );
 
                 return (
@@ -706,6 +843,7 @@ function VariationsProductsTable({
                             <button
                               type="button"
                               className={styles.expandToggle}
+                              disabled={Boolean(previewBusyKey)}
                               onClick={() => toggleExpand(group.key)}
                               aria-expanded={isOpen}
                               aria-label={
@@ -748,44 +886,39 @@ function VariationsProductsTable({
                         </td>
                       ))}
                       <td className={styles.variationsActionsCol}>
-                        <Button
-                          size="slim"
-                          disabled={
-                            Boolean(previewBusyKey) ||
-                            !shopDomain ||
-                            (!groupPreviewUrl &&
-                              !group.productId &&
-                              !primaryVariant?.planId &&
-                              !primaryVariant)
+                        <SkuPreviewButton
+                          arm={previewArm}
+                          product={
+                            primaryVariant || {
+                              planId: group.variants?.[0]?.planId || null,
+                              testId: group.variants?.[0]?.testId || null,
+                              productId: group.productId,
+                              variantId: group.variants?.[0]?.variantId || null,
+                              handle: group.handle,
+                              title: group.title,
+                              key: group.key,
+                              price:
+                                group.variants?.[0]?.pricesByArmId?.[String(previewArm?.id)] ??
+                                null,
+                              currency: group.currency || null,
+                            }
                           }
-                          loading={
-                            Boolean(previewBusyKey) &&
-                            String(previewBusyKey) ===
-                              String(primaryVariant?.planId || group.productId || '')
-                          }
-                          onClick={() =>
-                            openArmPreview(
-                              previewArm,
-                              primaryVariant || {
-                                planId: group.variants?.[0]?.planId || null,
-                                testId: group.variants?.[0]?.testId || null,
-                                productId: group.productId,
-                                variantId: group.variants?.[0]?.variantId || null,
-                                handle: group.handle,
-                                title: group.title,
-                                price:
-                                  group.variants?.[0]?.pricesByArmId?.[String(previewArm?.id)] ??
-                                  null,
-                                currency: group.currency || null,
-                              },
-                              shopDomain,
-                              fallbackTestId,
-                              { onBusy: onPreviewBusy }
+                          shopDomain={shopDomain}
+                          fallbackTestId={fallbackTestId}
+                          previewBusyKey={previewBusyKey}
+                          beginPreview={beginPreview}
+                          endPreview={endPreview}
+                          isOfferTest={isOfferTest}
+                          canOpen={
+                            Boolean(shopDomain) &&
+                            Boolean(
+                              groupPreviewUrl ||
+                                group.productId ||
+                                primaryVariant?.planId ||
+                                primaryVariant
                             )
                           }
-                        >
-                          Open
-                        </Button>
+                        />
                       </td>
                     </tr>
                     {multi && isOpen
@@ -794,7 +927,8 @@ function VariationsProductsTable({
                             previewArm,
                             variant,
                             shopDomain,
-                            fallbackTestId
+                            fallbackTestId,
+                            { isOfferTest, purpose: 'share' }
                           );
                           return (
                             <tr key={variant.key} className={styles.variantRow}>
@@ -814,33 +948,25 @@ function VariationsProductsTable({
                                 </td>
                               ))}
                               <td className={styles.variationsActionsCol}>
-                                <Button
-                                  size="slim"
-                                  disabled={
-                                    Boolean(previewBusyKey) ||
-                                    !shopDomain ||
-                                    (!variantUrl &&
-                                      !variant.planId &&
-                                      !variant.productId &&
-                                      !variant.handle)
-                                  }
-                                  loading={
-                                    Boolean(previewBusyKey) &&
-                                    String(previewBusyKey) ===
-                                      String(variant.planId || variant.productId || '')
-                                  }
-                                  onClick={() =>
-                                    openArmPreview(
-                                      previewArm,
-                                      variant,
-                                      shopDomain,
-                                      fallbackTestId,
-                                      { onBusy: onPreviewBusy }
+                                <SkuPreviewButton
+                                  arm={previewArm}
+                                  product={variant}
+                                  shopDomain={shopDomain}
+                                  fallbackTestId={fallbackTestId}
+                                  previewBusyKey={previewBusyKey}
+                                  beginPreview={beginPreview}
+                                  endPreview={endPreview}
+                                  isOfferTest={isOfferTest}
+                                  canOpen={
+                                    Boolean(shopDomain) &&
+                                    Boolean(
+                                      variantUrl ||
+                                        variant.planId ||
+                                        variant.productId ||
+                                        variant.handle
                                     )
                                   }
-                                >
-                                  Open
-                                </Button>
+                                />
                               </td>
                             </tr>
                           );
@@ -920,7 +1046,13 @@ export default function ClassicVariationsTab({
   isOfferTest = false,
 }) {
   const [qrOpenId, setQrOpenId] = useState('');
-  const [previewBusyKey, setPreviewBusyKey] = useState('');
+  const { previewBusyKey, beginPreview, endPreview } = useExclusivePreviewBusy();
+
+  useEffect(() => {
+    if (previewBusyKey && !/:qr:/.test(previewBusyKey) && !/:copy:/.test(previewBusyKey)) {
+      setQrOpenId('');
+    }
+  }, [previewBusyKey]);
 
   const matrix = useMemo(() => buildVariationProductsMatrix(variations || []), [variations]);
   const productCount = matrix.length;
@@ -941,7 +1073,7 @@ export default function ClassicVariationsTab({
   }
 
   return (
-    <div className={styles.detailStack}>
+    <div className={styles.detailStack} aria-busy={Boolean(previewBusyKey) || undefined}>
       <div className={styles.variationArmGrid}>
         {variations.map(arm => (
           <VariationCard
@@ -954,7 +1086,8 @@ export default function ClassicVariationsTab({
             qrOpenId={qrOpenId}
             setQrOpenId={setQrOpenId}
             previewBusyKey={previewBusyKey}
-            onPreviewBusy={setPreviewBusyKey}
+            beginPreview={beginPreview}
+            endPreview={endPreview}
             isOfferTest={isOfferTest}
           />
         ))}
@@ -967,7 +1100,8 @@ export default function ClassicVariationsTab({
         fallbackTestId={testId}
         resetKey={resetKey}
         previewBusyKey={previewBusyKey}
-        onPreviewBusy={setPreviewBusyKey}
+        beginPreview={beginPreview}
+        endPreview={endPreview}
         isOfferTest={isOfferTest}
       />
     </div>

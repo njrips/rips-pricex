@@ -170,6 +170,7 @@ function buildOfferTestPayloadFromPlan(plan = {}, options = {}) {
 module.exports = {
   buildOfferTestPayloadFromPlan,
   buildOfferVariantConfig,
+  formatOfferArmName,
   isOfferPlan,
   slugOfferCodeName,
 };

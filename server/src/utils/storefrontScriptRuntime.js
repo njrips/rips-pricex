@@ -4,7 +4,7 @@
  */
 
 /** Bump when embedded runtime config or script contract changes. Keep ?v= in sync: extensions/ripx-theme/blocks/ripx-app-embed.liquid + frontend RIPX_STOREFRONT_SCRIPT_VERSION. */
-const SCRIPT_VERSION = '1.0.49';
+const SCRIPT_VERSION = '1.0.51';
 
 /**
  * DB/API may use "pricing"; storefront logic expects "price".
@@ -12,8 +12,10 @@ const SCRIPT_VERSION = '1.0.49';
  * @returns {string}
  */
 function normalizeTestTypeForStorefront(type) {
-  const t = (type || '').toString().toLowerCase();
-  return t === 'pricing' ? 'price' : t;
+  const t = (type || '').toString().toLowerCase().trim();
+  if (t === 'pricing') return 'price';
+  if (t === 'offer_test') return 'offer';
+  return t;
 }
 
 function normalizeTargetTypeForStorefront(test) {

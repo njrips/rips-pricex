@@ -533,7 +533,7 @@ router.patch(
 
 /**
  * Create/reuse a draft price test for a queued inbox plan so Classic Preview can
- * open /apps/ripx/price-preview-bootstrap with a real test_id + byProduct matrix.
+ * open /apps/ripspricex/price-preview-bootstrap with a real test_id + byProduct matrix.
  */
 router.post(
   '/inbox/plans/:planId/ensure-preview-test',

@@ -195,7 +195,7 @@
   function testTypeIsOffer(test) {
     if (!test || test.type === undefined || test.type === null) return false;
     var ty = String(test.type).toLowerCase();
-    return ty === 'offer';
+    return ty === 'offer' || ty === 'offer_test';
   }
   function testTypeIsShipping(test) {
     if (!test || test.type === undefined || test.type === null) return false;
@@ -1428,6 +1428,17 @@
     return;
   }
 
+  function resolveSyntheticPreviewType() {
+    var hinted = String(PREVIEW_TEST_TYPE || '')
+      .trim()
+      .toLowerCase();
+    if (hinted === 'shipping') return 'shipping';
+    if (hinted === 'offer' || hinted === 'offer_test' || hinted === 'checkout') return 'offer';
+    if (hinted === 'price' || hinted === 'pricing') return 'price';
+    if (resolvePreviewLooksLikeShipping(null)) return 'shipping';
+    return 'price';
+  }
+
   function getRuntimeActiveTestsForBootstrap() {
     if (PREVIEW_MODE && PREVIEW_TEST_ID) {
       var embedded = Array.isArray(CONFIG.activeTests) ? CONFIG.activeTests : [];
@@ -1437,12 +1448,7 @@
           return [candidate];
         }
       }
-      var bootstrapType =
-        String(PREVIEW_TEST_TYPE || '')
-          .trim()
-          .toLowerCase() === 'shipping' || resolvePreviewLooksLikeShipping(null)
-          ? 'shipping'
-          : 'price';
+      var bootstrapType = resolveSyntheticPreviewType();
       // Never use all-products for synthetic price preview — that paints one arm
       // price on every PDP/card until preview-storefront-test returns.
       if (bootstrapType === 'shipping') {
@@ -1451,6 +1457,18 @@
             id: PREVIEW_TEST_ID,
             type: 'shipping',
             targetType: 'all-products',
+          },
+        ];
+      }
+      if (bootstrapType === 'offer') {
+        return [
+          {
+            id: PREVIEW_TEST_ID,
+            type: 'offer',
+            targetType: 'product',
+            targetIds: null,
+            targetId: null,
+            previewSynthetic: true,
           },
         ];
       }
@@ -1893,6 +1911,29 @@
     return true;
   }
 
+  function parseOfferProofFromPreviewName(name) {
+    var raw = String(name || '')
+      .replace(/\+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!raw) return null;
+    var percent = raw.match(/^([\d,.]+)\s*%\s+off\b/i);
+    if (percent) {
+      var pct = Number(String(percent[1] || '').replace(/,/g, ''));
+      if (isFinite(pct) && pct > 0) {
+        return { discountType: 'percent', discountValue: pct, codeName: '', message: '' };
+      }
+    }
+    var fixed = raw.match(/^(?:[A-Z]{3}\s*)?(?:[$€£¥])?\s*([\d,.]+)\s+off\b/i);
+    if (fixed) {
+      var amount = Number(String(fixed[1] || '').replace(/,/g, ''));
+      if (isFinite(amount) && amount > 0) {
+        return { discountType: 'fixed', discountValue: amount, codeName: '', message: '' };
+      }
+    }
+    return null;
+  }
+
   /**
    * Seed cart attributes as early as possible in preview mode.
    * This avoids races where add-to-cart fires before the main init flow finishes.
@@ -1931,6 +1972,18 @@
           testId: PREVIEW_TEST_ID,
           variant: earlyVariantId,
         });
+        return true;
+      }
+      if (resolveSyntheticPreviewType() === 'offer') {
+        injectPriceTestCartAttributes(
+          PREVIEW_TEST_ID,
+          earlyVariantId,
+          null,
+          null,
+          null,
+          { applicationMethod: 'discounted_checkout_price' },
+          parseOfferProofFromPreviewName(PREVIEW_VARIANT_NAME)
+        );
         return true;
       }
       // Seed test+variant only — never claim direct_price_override without a resolved
@@ -2005,9 +2058,12 @@
       if (!/\.myshopify\.com$/i.test(String(parsed.hostname || ''))) return parsed.toString();
       var p = String(parsed.pathname || '').toLowerCase();
       if (
+        p.indexOf('/apps/ripspricex/preview-bootstrap') === 0 ||
+        p.indexOf('/apps/ripspricex/preview-bootstrap-v2') === 0 ||
+        p.indexOf('/apps/ripspricex/price-preview-bootstrap') === 0 ||
         p.indexOf('/apps/ripx/preview-bootstrap') === 0 ||
         p.indexOf('/apps/ripx/preview-bootstrap-v2') === 0 ||
-        p.indexOf('/apps/ripx/price-preview-bootstrap-v1') === 0
+        p.indexOf('/apps/ripx/price-preview-bootstrap') === 0
       )
         return parsed.toString();
       if (PREVIEW_SIMPLE_MODE) return parsed.toString();
@@ -2015,7 +2071,7 @@
       return (
         'https://' +
         parsed.hostname +
-        '/apps/ripx/preview-bootstrap-v2?url=' +
+        '/apps/ripspricex/preview-bootstrap-v2?url=' +
         encodeURIComponent(parsed.toString())
       );
     } catch (_e) {
@@ -4817,7 +4873,7 @@
       return enrichRipxPayloadForCartVariant(basePayload, variantId);
     }
     function applyPricePreviewSectionsUrlToObject(obj) {
-      // Price preview runs under /apps/ripx; Shopify section rendering must still use the real PDP
+      // Price preview runs under /apps/ripspricex; Shopify section rendering must still use the real PDP
       // path or cart drawers can render wrong/empty sections after add/change/update.
       if (!PRICE_PREVIEW_TARGET_PATH || !obj || typeof obj !== 'object') return;
       obj.sections_url = PRICE_PREVIEW_TARGET_PATH;
@@ -4839,7 +4895,11 @@
         });
       }
     }
-    if (!isRipxShippingCartState(effectivePayload) && !effectivePayload._ripx_price_method) {
+    if (
+      !isRipxShippingCartState(effectivePayload) &&
+      !effectivePayload._ripx_price_method &&
+      resolveSyntheticPreviewType() !== 'offer'
+    ) {
       var preferredMethodPid = getPreferredRipxProductIdForCartAttrs();
       var rememberedPriceMethod = preferredMethodPid
         ? getRememberedRipxPriceMethodForProductId(preferredMethodPid)
@@ -6956,6 +7016,9 @@
    */
   function injectPreviewCartAttributesWhenConfigMissing(testId, variant) {
     if (!PREVIEW_MODE || !testId || !variant) return;
+    if (resolveSyntheticPreviewType() === 'offer') return;
+    var previewTest = getActiveTestById(testId);
+    if (previewTest && testTypeIsOffer(previewTest)) return;
     if (variant.config) return;
     var allow =
       variant.isPreview || (PREVIEW_TEST_ID != null && String(testId) === String(PREVIEW_TEST_ID));
@@ -12752,12 +12815,7 @@
             // storefront test shape in background so first paint is not blocked on network.
             // Price synthetics stay product-scoped (never all-products). Seed the opened
             // PDP id when known so first paint is not skipped waiting on target_ids.
-            var syntheticType =
-              String(PREVIEW_TEST_TYPE || '')
-                .trim()
-                .toLowerCase() === 'shipping' || resolvePreviewLooksLikeShipping(null)
-                ? 'shipping'
-                : 'price';
+            var syntheticType = resolveSyntheticPreviewType();
             var syntheticFocusPid = null;
             try {
               syntheticFocusPid = getCurrentProductId();
@@ -12765,7 +12823,7 @@
               syntheticFocusPid = null;
             }
             if (syntheticFocusPid) rememberPreviewFocusProductId(syntheticFocusPid);
-            ripxTrace('S1', 'init synthetic price preview', {
+            ripxTrace('S1', 'init synthetic preview', {
               productId: syntheticFocusPid,
               type: syntheticType,
               targetIds: null,
@@ -12779,15 +12837,24 @@
                     targetIds: null,
                     targetId: null,
                   }
-                : {
-                    id: PREVIEW_TEST_ID,
-                    type: 'price',
-                    targetType: 'product',
-                    // Empty until variant matrix / preview-storefront-test arrives.
-                    targetIds: null,
-                    targetId: null,
-                    previewSynthetic: true,
-                  }
+                : syntheticType === 'offer'
+                  ? {
+                      id: PREVIEW_TEST_ID,
+                      type: 'offer',
+                      targetType: 'product',
+                      targetIds: null,
+                      targetId: null,
+                      previewSynthetic: true,
+                    }
+                  : {
+                      id: PREVIEW_TEST_ID,
+                      type: 'price',
+                      targetType: 'product',
+                      // Empty until variant matrix / preview-storefront-test arrives.
+                      targetIds: null,
+                      targetId: null,
+                      previewSynthetic: true,
+                    }
             );
             mergeMeta.usedSyntheticFallback = true;
             mergeMeta.previewStorefrontTestFetchDeferred = true;
@@ -12832,6 +12899,13 @@
                       } else {
                         bootstrapPreviewCartAttributeSeed(variant, 'preview_storefront_test_merge');
                       }
+                    })
+                    .catch(function () {});
+                } else if (testTypeIsOffer(extraTest)) {
+                  getVariant(PREVIEW_TEST_ID)
+                    .then(function (variant) {
+                      if (!variant) return;
+                      injectOfferTestCartAttributes(extraTest, variant);
                     })
                     .catch(function () {});
                 }

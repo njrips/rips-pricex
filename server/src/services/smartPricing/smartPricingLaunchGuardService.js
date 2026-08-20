@@ -1,71 +1,64 @@
 /**
- * Running price test limits for Smart Pricing launch guardrails.
+ * Running Smart Pricing test counts for launch capacity.
+ * Parallel launch is not capped — merchants can start as many tests as they need.
  */
 
 const { getTestsByShop } = require('../../models/test');
-const { getShopSmartPricingGuardrails } = require('./smartPricingGuardrailsService');
 
-const PRICE_TEST_TYPES = new Set(['price', 'pricing', 'smart-pricing', 'offer']);
+const PRICE_TEST_TYPES = new Set(['price', 'pricing', 'smart-pricing', 'offer', 'offer_test']);
+
+function isPreviewOnlyTest(test) {
+  const meta = test?.metadata && typeof test.metadata === 'object' ? test.metadata : {};
+  if (meta.smart_pricing_experiment_preview === true) return true;
+  return /^Smart Pricing Preview\b/i.test(String(test?.name || ''));
+}
+
+function isCountableRunningTest(test) {
+  if (isPreviewOnlyTest(test)) return false;
+  return PRICE_TEST_TYPES.has(
+    String(test?.type || '')
+      .trim()
+      .toLowerCase()
+  );
+}
 
 async function countRunningPriceTests(shopDomain) {
   const running = await getTestsByShop(shopDomain, 'running');
-  return running.filter(test =>
-    PRICE_TEST_TYPES.has(
-      String(test?.type || '')
-        .trim()
-        .toLowerCase()
-    )
-  ).length;
+  return (Array.isArray(running) ? running : []).filter(isCountableRunningTest).length;
 }
 
-async function resolveLaunchCapacity(shopDomain, { requestedCount = 1, maxParallel } = {}) {
-  const guardrails =
-    maxParallel !== undefined && maxParallel !== null
-      ? { max_parallel_tests: maxParallel }
-      : await getShopSmartPricingGuardrails(shopDomain);
-  const max = Math.max(1, Number(guardrails?.max_parallel_tests) || 5);
+async function resolveLaunchCapacity(shopDomain, { requestedCount = 1 } = {}) {
   const running = await countRunningPriceTests(shopDomain);
-  const available = Math.max(0, max - running);
   const requested = Math.max(0, Number(requestedCount) || 0);
 
   return {
     running_count: running,
-    max_parallel: max,
-    available_slots: available,
+    max_parallel: null,
+    unlimited: true,
+    available_slots: null,
     requested_count: requested,
-    launchable_count: requested > 0 ? Math.min(requested, available) : available,
-    blocked_count: Math.max(0, requested - available),
-    can_launch_all: requested > 0 && requested <= available,
-    can_launch_one: available >= 1,
-    at_capacity: available === 0,
+    launchable_count: requested,
+    blocked_count: 0,
+    can_launch_all: true,
+    can_launch_one: true,
+    can_launch: true,
+    slots_remaining: null,
+    at_capacity: false,
   };
 }
 
-async function assertCanLaunchPriceTests(
-  shopDomain,
-  { additionalCount = 1, maxParallel = 5 } = {}
-) {
-  const capacity = await resolveLaunchCapacity(shopDomain, {
-    requestedCount: additionalCount,
-    maxParallel,
-  });
-  if (capacity.blocked_count > 0) {
-    const running = capacity.running_count;
-    const max = capacity.max_parallel;
-    const err = new Error(
-      `You already have ${running} running Smart Pricing test${running === 1 ? '' : 's'}. Max parallel tests allowed: ${max}.`
-    );
-    err.isValidation = true;
-    err.errors = [err.message];
-    err.running_count = running;
-    err.max_parallel = max;
-    err.capacity = capacity;
-    throw err;
-  }
+async function assertCanLaunchPriceTests(_shopDomain, _opts = {}) {
   return {
-    running_count: capacity.running_count,
-    max_parallel: capacity.max_parallel,
-    capacity,
+    running_count: null,
+    max_parallel: null,
+    capacity: {
+      unlimited: true,
+      can_launch: true,
+      can_launch_all: true,
+      can_launch_one: true,
+      at_capacity: false,
+      blocked_count: 0,
+    },
   };
 }
 
@@ -73,4 +66,5 @@ module.exports = {
   countRunningPriceTests,
   resolveLaunchCapacity,
   assertCanLaunchPriceTests,
+  isPreviewOnlyTest,
 };

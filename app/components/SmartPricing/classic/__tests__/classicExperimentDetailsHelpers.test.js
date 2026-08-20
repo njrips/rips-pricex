@@ -1,3 +1,4 @@
+import { describe, expect, it } from 'vitest';
 import {
   buildActivityTimeline,
   buildAudienceSummary,
@@ -6,9 +7,11 @@ import {
   buildOverviewKpis,
   buildProductPerformanceGrid,
   buildSettingsSummary,
+  buildPreviewBusyKey,
   buildQrImageUrl,
   buildVariationAveragePerformance,
   buildVariationPreviewUrl,
+  buildVariationSharePreviewUrl,
   buildVariationProductsMatrix,
   buildVariationsSummary,
   formatSmartPricingPreviewVariantName,
@@ -23,6 +26,10 @@ import {
   groupActivityByDay,
   groupVariationProductsByProduct,
   isControlArm,
+  isPreviewControlBusy,
+  canAcquirePreviewBusy,
+  previewButtonState,
+  shouldReleasePreviewBusy,
   matchArmOnPlan,
   mergeExperimentAnalytics,
   paginateVariationProducts,
@@ -320,7 +327,7 @@ describe('classicExperimentDetailsHelpers', () => {
       productPath: '/products/alpha-tee',
     });
     // Price previews must use the Shopify price-preview bootstrap (PDP + ATC).
-    expect(preview).toContain('/apps/ripx/price-preview-bootstrap-v1');
+    expect(preview).toContain('/apps/ripspricex/price-preview-bootstrap-v1');
     expect(preview).toContain(encodeURIComponent('ab_preview=1'));
     expect(preview).toContain(encodeURIComponent('ab_preview_test=test_1'));
     expect(preview).toContain(encodeURIComponent('ab_preview_variant=var_a'));
@@ -331,9 +338,67 @@ describe('classicExperimentDetailsHelpers', () => {
         productPath: '/',
       })
     ).toBeNull();
-    const qr = buildQrImageUrl(preview, 160);
+    const share = buildVariationSharePreviewUrl({
+      shopDomain: 'ripx-plus.myshopify.com',
+      testId: 'test_1',
+      variantId: 'var_a',
+      variantName: 'A',
+      productPath: '/products/alpha-tee',
+    });
+    expect(share).toContain('https://ripx-plus.myshopify.com/products/alpha-tee');
+    expect(share).not.toContain('price-preview-bootstrap');
+    const qr = buildQrImageUrl(share, 160);
     expect(qr).toContain('api.qrserver.com');
-    expect(qr).toContain(encodeURIComponent(preview));
+    expect(qr).toContain(encodeURIComponent(share));
+    const offerPreview = buildVariationPreviewUrl({
+      shopDomain: 'ripx-plus.myshopify.com',
+      testId: 'offer_1',
+      variantName: '10% off Variation A',
+      productPath: '/products/alpha-tee',
+      testType: 'offer',
+    });
+    expect(offerPreview).toContain('https://ripx-plus.myshopify.com/products/alpha-tee');
+    expect(offerPreview).toContain('ab_preview_test_type=offer');
+    expect(offerPreview).not.toContain('price-preview-bootstrap');
+  });
+
+  it('keeps variation preview busy keys unique when arms share a product', () => {
+    const product = { planId: 'plan-1', productId: 'gid://shopify/Product/1' };
+    const control = buildPreviewBusyKey({
+      scope: 'arm',
+      action: 'preview',
+      armId: 'control',
+      product,
+    });
+    const variantA = buildPreviewBusyKey({
+      scope: 'arm',
+      action: 'preview',
+      armId: 'var_a',
+      product,
+    });
+    const variantAQr = buildPreviewBusyKey({
+      scope: 'arm',
+      action: 'qr',
+      armId: 'var_a',
+      product,
+    });
+    expect(control).not.toBe(variantA);
+    expect(variantA).not.toBe(variantAQr);
+    expect(isPreviewControlBusy(variantA, control)).toBe(false);
+    expect(isPreviewControlBusy(variantA, variantA)).toBe(true);
+    expect(isPreviewControlBusy('', variantA)).toBe(false);
+    expect(canAcquirePreviewBusy('', variantA)).toBe(true);
+    expect(canAcquirePreviewBusy(control, variantA)).toBe(false);
+    expect(canAcquirePreviewBusy(variantA, variantA)).toBe(false);
+    expect(shouldReleasePreviewBusy(variantA, variantA)).toBe(true);
+    expect(shouldReleasePreviewBusy(variantA, control)).toBe(false);
+    expect(previewButtonState(variantA, variantA)).toEqual({ loading: true, disabled: false });
+    expect(previewButtonState(variantA, control)).toEqual({ loading: false, disabled: true });
+    expect(previewButtonState('', variantA)).toEqual({ loading: false, disabled: false });
+    expect(canAcquirePreviewBusy('', '')).toBe(false);
+    expect(canAcquirePreviewBusy(variantA, '')).toBe(false);
+    expect(shouldReleasePreviewBusy('', variantA)).toBe(false);
+    expect(shouldReleasePreviewBusy(variantA, '')).toBe(false);
   });
 
   it('formats Smart Pricing preview variant names with price prefix', () => {
@@ -356,6 +421,22 @@ describe('classicExperimentDetailsHelpers', () => {
         { price: 1148, currency: 'USD' }
       )
     ).toBe('$1,148.00 Variation A');
+    expect(
+      formatSmartPricingPreviewVariantName(
+        {
+          label: 'Variation A',
+          role: 'challenger',
+          offer: { discount_type: 'percent', discount_value: 10 },
+        },
+        { isOffer: true, currency: 'USD' }
+      )
+    ).toBe('10% off Variation A');
+    expect(
+      formatSmartPricingPreviewVariantName(
+        { label: 'Control', role: 'control' },
+        { isOffer: true }
+      )
+    ).toBe('Control');
   });
 
   it('groups matrix SKUs under products for accordion rows', () => {
@@ -505,6 +586,16 @@ describe('classicExperimentDetailsHelpers', () => {
     );
     expect(settings.priceApplicationMethod).toBe('checkout_discount_function');
     expect(settings.guardrailNotes.some(note => note.includes('Max price change'))).toBe(false);
+  });
+
+  it('hides the parallel-test cap when guardrails are unlimited', () => {
+    const settings = buildSettingsSummary(
+      { id: 'p1', audience: { traffic_allocation: 40 } },
+      { status: 'running', segments: {} },
+      { max_parallel_tests: 0, max_price_change_percent: 15 }
+    );
+    expect(settings.maxParallelTests).toBeNull();
+    expect(settings.guardrailNotes.some(note => /parallel/i.test(note))).toBe(false);
   });
 
   it('averages variation performance across product tests without double-counting', () => {

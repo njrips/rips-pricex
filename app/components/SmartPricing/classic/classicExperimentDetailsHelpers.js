@@ -1,6 +1,6 @@
 import { collapseCountrySelection } from './countrySelection';
 import { getPlanProductTitle } from './classicExperimentHelpers';
-import { isOfferExperimentType } from './offerSelection';
+import { formatOfferRule, isOfferExperimentType } from './offerSelection';
 import {
   buildPreviewUrl,
   buildShopifyPricePreviewBootstrapUrl,
@@ -413,13 +413,23 @@ export function resolvePlanProductPath(planOrProduct = null) {
  * rebuild the priced name so sibling products do not inherit the primary plan's
  * arm.variantName (e.g. Liquid $884.94 on Oxygen).
  */
-export function formatSmartPricingPreviewVariantName(arm, { price, currency } = {}) {
+export function formatSmartPricingPreviewVariantName(
+  arm,
+  { price, currency, isOffer = false } = {}
+) {
   const existing = String(arm?.variantName || '').trim();
   const amount = Number(price ?? arm?.price);
   const currencyCode = String(currency || 'USD').trim() || 'USD';
   const label = isControlArm(arm)
     ? 'Control'
     : String(arm?.label || existing || 'Variant').trim() || 'Variant';
+  const offerPreview = isOffer === true || isOfferExperimentType(isOffer);
+  if (offerPreview) {
+    if (isControlArm(arm)) return 'Control';
+    const rule = formatOfferRule(arm?.offer, currencyCode);
+    if (rule && rule !== 'No offer') return `${rule} ${label}`.trim();
+    return label;
+  }
 
   if (Number.isFinite(amount)) {
     let priceLabel = '';
@@ -479,10 +489,53 @@ export function formatVariationVariantLabel(row = {}) {
   return row.sku || row.handle || 'Variant';
 }
 
+function normalizeVariationPreviewTestType(testType) {
+  const raw = String(testType || '')
+    .trim()
+    .toLowerCase();
+  if (raw === 'offer' || raw === 'offer_test' || raw === 'checkout') return 'offer';
+  return 'price';
+}
+
 /**
- * Storefront preview URL for a variation arm (optionally scoped to one product).
- * Mirrors TestWizard price previews: require a PDP path and wrap myshopify URLs in
- * price-preview-bootstrap so RipX injects before theme scripts (PDP + add-to-cart).
+ * Storefront PDP preview (ab_preview*). QR / copy / offer Open use this so the
+ * merchant lands on the product page, not the app-proxy bootstrap URL.
+ */
+export function buildVariationSharePreviewUrl({
+  shopDomain,
+  testId,
+  variantId,
+  variantName,
+  productPath = '/',
+  testType = 'price',
+} = {}) {
+  const tid =
+    testId !== null && testId !== undefined && String(testId).trim() ? String(testId).trim() : '';
+  if (!tid || !shopDomain) return null;
+  const path = String(productPath || '').trim() || '/';
+  if (!path.startsWith('/products/')) return null;
+  const baseUrl = resolvePreviewBaseUrl({
+    domain: shopDomain,
+    path,
+  });
+  if (!baseUrl) return null;
+  return buildPreviewUrl({
+    baseUrl,
+    testId: tid,
+    variantId: variantId || undefined,
+    variantName: variantName || undefined,
+    tenantDomain: shopDomain,
+    testType: normalizeVariationPreviewTestType(testType),
+    simplePreview: true,
+    resetPreviewSession: true,
+  });
+}
+
+/**
+ * URL used when the merchant clicks Preview / Open.
+ * Price tests wrap the PDP in price-preview-bootstrap so RipX injects before
+ * theme scripts. Offer tests open the storefront PDP directly — the bootstrap
+ * path looks like an API link and would seed a synthetic price test.
  */
 export function buildVariationPreviewUrl({
   shopDomain,
@@ -491,29 +544,20 @@ export function buildVariationPreviewUrl({
   variantName,
   productPath = '/',
   storefrontPassword,
+  testType = 'price',
 } = {}) {
-  const tid =
-    testId !== null && testId !== undefined && String(testId).trim() ? String(testId).trim() : '';
-  if (!tid || !shopDomain) return null;
-  const path = String(productPath || '').trim() || '/';
-  // Price paint requires a product PDP; homepage preview cannot apply byProduct prices.
-  if (!path.startsWith('/products/')) return null;
-  const baseUrl = resolvePreviewBaseUrl({
-    domain: shopDomain,
-    path,
-  });
-  if (!baseUrl) return null;
-  const directPreviewUrl = buildPreviewUrl({
-    baseUrl,
-    testId: tid,
-    variantId: variantId || undefined,
-    variantName: variantName || undefined,
-    tenantDomain: shopDomain,
-    testType: 'price',
-    simplePreview: true,
-    resetPreviewSession: true,
+  const directPreviewUrl = buildVariationSharePreviewUrl({
+    shopDomain,
+    testId,
+    variantId,
+    variantName,
+    productPath,
+    testType,
   });
   if (!directPreviewUrl) return null;
+  if (normalizeVariationPreviewTestType(testType) === 'offer') {
+    return directPreviewUrl;
+  }
   if (isShopifyPreviewUrl(directPreviewUrl)) {
     const password =
       storefrontPassword !== null && storefrontPassword !== undefined
@@ -534,6 +578,59 @@ export function buildQrImageUrl(url, size = 180) {
   if (!raw) return null;
   const dim = Math.max(80, Math.min(400, Number(size) || 180));
   return `https://api.qrserver.com/v1/create-qr-code/?size=${dim}x${dim}&data=${encodeURIComponent(raw)}`;
+}
+
+/**
+ * Which preview control is in-flight. Must include arm id — variation cards
+ * share the same primary product/plan, so a plan-only key would spin every Preview.
+ */
+export function buildPreviewBusyKey({
+  scope = 'arm',
+  action = 'preview',
+  armId,
+  product,
+} = {}) {
+  const arm = String(armId || '').trim() || 'arm';
+  const productKey = String(
+    product?.planId ||
+      product?.plan_id ||
+      product?.key ||
+      product?.variantId ||
+      product?.variant_id ||
+      product?.productId ||
+      product?.product_id ||
+      ''
+  ).trim();
+  return [scope, action, arm, productKey || 'primary'].join(':');
+}
+
+export function isPreviewControlBusy(previewBusyKey, candidateKey) {
+  const current = String(previewBusyKey || '').trim();
+  const candidate = String(candidateKey || '').trim();
+  return Boolean(current) && Boolean(candidate) && current === candidate;
+}
+
+/** True when no other preview is in flight (same-tick double-clicks are rejected). */
+export function canAcquirePreviewBusy(currentKey, nextKey) {
+  const current = String(currentKey || '').trim();
+  const next = String(nextKey || '').trim();
+  return Boolean(next) && !current;
+}
+
+/** Only the locker that started the preview may clear it. */
+export function shouldReleasePreviewBusy(currentKey, endedKey) {
+  const current = String(currentKey || '').trim();
+  const ended = String(endedKey || '').trim();
+  return Boolean(current) && Boolean(ended) && current === ended;
+}
+
+/** Polaris props: spinner on the clicked control, disable every other preview control. */
+export function previewButtonState(previewBusyKey, candidateKey) {
+  const loading = isPreviewControlBusy(previewBusyKey, candidateKey);
+  return {
+    loading,
+    disabled: Boolean(String(previewBusyKey || '').trim()) && !loading,
+  };
 }
 
 /** Default page size for the Variations tab products table / modal. */
@@ -1361,8 +1458,10 @@ export function buildSettingsSummary(plan = null, test = null, shopGuardrails = 
     .toLowerCase();
   const isOffer = experimentType === 'offer_test' || experimentType === 'offer';
 
-  if (Number.isFinite(Number(guardrails.max_parallel_tests))) {
-    notes.push(`Max parallel tests: ${guardrails.max_parallel_tests}`);
+  const maxParallel = Number(guardrails.max_parallel_tests);
+  const hasParallelCap = Number.isFinite(maxParallel) && maxParallel > 0;
+  if (hasParallelCap) {
+    notes.push(`Max parallel tests: ${maxParallel}`);
   }
   if (!isOffer && Number.isFinite(Number(guardrails.max_price_change_percent))) {
     notes.push(`Max price change: ±${guardrails.max_price_change_percent}%`);
@@ -1401,7 +1500,7 @@ export function buildSettingsSummary(plan = null, test = null, shopGuardrails = 
     testId: plan?.test_id || test?.id || null,
     planId: plan?.id || null,
     scenarioPreset: plan?.scenario_preset || plan?.metadata?.scenario_preset || null,
-    maxParallelTests: guardrails.max_parallel_tests ?? null,
+    maxParallelTests: hasParallelCap ? maxParallel : null,
     maxPriceChangePercent: guardrails.max_price_change_percent ?? null,
     minMarginPercent: guardrails.min_margin_percent ?? null,
     guardrailNotes: notes,

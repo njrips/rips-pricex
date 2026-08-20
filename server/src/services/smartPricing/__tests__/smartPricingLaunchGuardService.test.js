@@ -14,68 +14,52 @@ describe('smartPricingLaunchGuardService', () => {
     getTestsByShop.mockReset();
   });
 
-  it('counts running price and offer tests, not other types', async () => {
+  it('counts running price and offer tests, not other types or preview drafts', async () => {
     getTestsByShop.mockResolvedValue([
       { id: 1, type: 'price', status: 'running' },
       { id: 2, type: 'checkout', status: 'running' },
       { id: 3, type: 'pricing', status: 'running' },
       { id: 4, type: 'offer', status: 'running' },
+      {
+        id: 5,
+        type: 'price',
+        status: 'running',
+        name: 'Smart Pricing Preview · Liquid',
+        metadata: { smart_pricing_experiment_preview: true },
+      },
     ]);
 
     await expect(countRunningPriceTests('demo.myshopify.com')).resolves.toBe(3);
   });
 
-  it('allows launch when under parallel limit', async () => {
-    getTestsByShop.mockResolvedValue([{ id: 1, type: 'price', status: 'running' }]);
+  it('allows launch with no parallel cap even when many tests are running', async () => {
+    getTestsByShop.mockResolvedValue(
+      Array.from({ length: 21 }, (_, i) => ({ id: i + 1, type: 'price', status: 'running' }))
+    );
 
     await expect(
-      assertCanLaunchPriceTests('demo.myshopify.com', { additionalCount: 1, maxParallel: 5 })
-    ).resolves.toMatchObject({ running_count: 1, max_parallel: 5 });
-  });
-
-  it('blocks launch when parallel limit would be exceeded', async () => {
-    getTestsByShop.mockResolvedValue([
-      { id: 1, type: 'price', status: 'running' },
-      { id: 2, type: 'price', status: 'running' },
-    ]);
-
-    await expect(
-      assertCanLaunchPriceTests('demo.myshopify.com', { additionalCount: 1, maxParallel: 2 })
-    ).rejects.toMatchObject({
-      isValidation: true,
-      running_count: 2,
-      max_parallel: 2,
+      assertCanLaunchPriceTests('demo.myshopify.com', { additionalCount: 3 })
+    ).resolves.toMatchObject({
+      max_parallel: null,
+      capacity: { unlimited: true, can_launch: true },
     });
+    expect(getTestsByShop).not.toHaveBeenCalled();
   });
 
-  it('previews how many plans can launch in a batch', async () => {
+  it('previews a full batch as launchable regardless of running count', async () => {
     getTestsByShop.mockResolvedValue([{ id: 1, type: 'price', status: 'running' }]);
 
     await expect(
-      resolveLaunchCapacity('demo.myshopify.com', { requestedCount: 4, maxParallel: 5 })
+      resolveLaunchCapacity('demo.myshopify.com', { requestedCount: 4 })
     ).resolves.toMatchObject({
       running_count: 1,
-      max_parallel: 5,
-      available_slots: 4,
+      max_parallel: null,
+      unlimited: true,
       launchable_count: 4,
       blocked_count: 0,
       can_launch_all: true,
-    });
-  });
-
-  it('reports blocked plans when batch exceeds available slots', async () => {
-    getTestsByShop.mockResolvedValue([
-      { id: 1, type: 'price', status: 'running' },
-      { id: 2, type: 'price', status: 'running' },
-    ]);
-
-    await expect(
-      resolveLaunchCapacity('demo.myshopify.com', { requestedCount: 3, maxParallel: 3 })
-    ).resolves.toMatchObject({
-      available_slots: 1,
-      launchable_count: 1,
-      blocked_count: 2,
-      can_launch_all: false,
+      can_launch: true,
+      at_capacity: false,
     });
   });
 });

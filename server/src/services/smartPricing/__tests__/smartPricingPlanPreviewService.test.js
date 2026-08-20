@@ -19,6 +19,9 @@ jest.mock('../smartPricingLaunchService', () => ({
 jest.mock('../smartPricingGuardrailsService', () => ({
   getShopSmartPricingGuardrails: jest.fn().mockResolvedValue({}),
 }));
+jest.mock('../offerCheckoutDiscountService', () => ({
+  ensureOfferCheckoutDiscount: jest.fn().mockResolvedValue({ created: false, cached: true }),
+}));
 
 const { getTestById, createTest, updateTest } = require('../../../models/test');
 const { listInboxPlans, patchInboxPlan } = require('../../../models/smartPricingInboxStore');
@@ -75,6 +78,7 @@ describe('smartPricingPlanPreviewService', () => {
     expect(launchSmartPricingPlanAsTest).toHaveBeenCalled();
     expect(createTest).not.toHaveBeenCalled();
     expect(result.testId).toBe('11111111-1111-4111-8111-111111111111');
+    expect(result.testType).toBe('price');
     expect(result.handle).toBe('the-collection-snowboard-liquid');
     expect(result.storefrontReady).toBe(true);
     expect(result.variants.map(v => v.variantName)).toEqual([
@@ -201,8 +205,14 @@ describe('smartPricingPlanPreviewService', () => {
               'gid://shopify/Product/1': {
                 byVariant: { 'gid://shopify/ProductVariant/11': { price: 10 } },
               },
+              1: {
+                byVariant: { 11: { price: 10 } },
+              },
               'gid://shopify/Product/2': {
                 byVariant: { 'gid://shopify/ProductVariant/22': { price: 20 } },
+              },
+              2: {
+                byVariant: { 22: { price: 20 } },
               },
             },
           },
@@ -215,8 +225,14 @@ describe('smartPricingPlanPreviewService', () => {
               'gid://shopify/Product/1': {
                 byVariant: { 'gid://shopify/ProductVariant/11': { price: 12 } },
               },
+              1: {
+                byVariant: { 11: { price: 12 } },
+              },
               'gid://shopify/Product/2': {
                 byVariant: { 'gid://shopify/ProductVariant/22': { price: 24 } },
+              },
+              2: {
+                byVariant: { 22: { price: 24 } },
               },
             },
           },
@@ -321,5 +337,72 @@ describe('smartPricingPlanPreviewService', () => {
       ].price
     ).toBe(30);
     expect(result.testId).toBe('55555555-5555-4555-8555-555555555555');
+  });
+
+  it('does not fold offer experiments into a shared price preview draft', async () => {
+    listInboxPlans.mockResolvedValue({
+      plans: [
+        {
+          id: 'SP-offer-a',
+          status: 'running',
+          test_id: '66666666-6666-4666-8666-666666666666',
+          experiment_id: 'exp-offer',
+          experiment_type: 'offer_test',
+          product_id: 'gid://shopify/Product/1',
+          variant_id: 'gid://shopify/ProductVariant/11',
+          currency: 'USD',
+          metadata: { experiment_type: 'offer_test' },
+          price_arms: [
+            { id: 'control', role: 'control', label: 'Control' },
+            {
+              id: 'a',
+              role: 'challenger',
+              label: 'Variation A',
+              offer: { discount_type: 'percent', discount_value: 10 },
+            },
+          ],
+        },
+        {
+          id: 'SP-offer-b',
+          status: 'running',
+          test_id: '77777777-7777-4777-8777-777777777777',
+          experiment_id: 'exp-offer',
+          experiment_type: 'offer_test',
+          product_id: 'gid://shopify/Product/2',
+          variant_id: 'gid://shopify/ProductVariant/22',
+          currency: 'USD',
+          metadata: { experiment_type: 'offer_test' },
+          price_arms: [
+            { id: 'control', role: 'control', label: 'Control' },
+            {
+              id: 'a',
+              role: 'challenger',
+              label: 'Variation A',
+              offer: { discount_type: 'percent', discount_value: 10 },
+            },
+          ],
+        },
+      ],
+    });
+    getTestById.mockResolvedValue({
+      id: '77777777-7777-4777-8777-777777777777',
+      type: 'offer',
+      variants: [
+        { id: 'c', name: 'Control' },
+        { id: 'a', name: '10% off Variation A' },
+      ],
+    });
+    getShopSession.mockResolvedValue({ access_token: 'tok' });
+    shopifyService.getProduct.mockResolvedValue({
+      handle: 'offer-tee',
+      publishedAt: '2026-01-01T00:00:00Z',
+    });
+
+    const result = await ensureSmartPricingPlanPreviewTest('demo.myshopify.com', 'SP-offer-b');
+    expect(createTest).not.toHaveBeenCalled();
+    expect(launchSmartPricingPlanAsTest).not.toHaveBeenCalled();
+    expect(result.testId).toBe('77777777-7777-4777-8777-777777777777');
+    expect(result.testType).toBe('offer');
+    expect(result.variants[1].variantName).toBe('10% off Variation A');
   });
 });

@@ -39,7 +39,7 @@ export function useSmartPricingLaunch(shopDomain) {
       if (!list.length) {
         throw new Error('Nothing to launch.');
       }
-      const limit = Number.isFinite(maxCount) && maxCount >= 0 ? maxCount : list.length;
+      const limit = Number.isFinite(maxCount) && maxCount > 0 ? maxCount : list.length;
 
       try {
         for (const plan of list) {
@@ -47,23 +47,12 @@ export function useSmartPricingLaunch(shopDomain) {
             stoppedEarly = true;
             break;
           }
-          try {
-            const data = await launchSmartPricingPlan(shopDomain, plan, { autoStart: true });
-            updateInboxPlan(shopDomain, plan.id, {
-              status: data?.inbox_plan?.status || 'running',
-              test_id: data?.inbox_plan?.test_id || data?.test?.id || null,
-            });
-            launched += 1;
-          } catch (err) {
-            if (err?.isValidation || /parallel test/i.test(String(err?.message || ''))) {
-              stoppedEarly = true;
-              if (launched === 0) {
-                throw err;
-              }
-              break;
-            }
-            throw err;
-          }
+          const data = await launchSmartPricingPlan(shopDomain, plan, { autoStart: true });
+          updateInboxPlan(shopDomain, plan.id, {
+            status: data?.inbox_plan?.status || 'running',
+            test_id: data?.inbox_plan?.test_id || data?.test?.id || null,
+          });
+          launched += 1;
         }
         return { launched, stoppedEarly, requested: list.length };
       } finally {

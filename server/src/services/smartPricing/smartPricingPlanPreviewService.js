@@ -13,7 +13,9 @@ const { getShopSession } = require('../../models/shopSession');
 const shopifyService = require('../shopifyService');
 const { getShopSmartPricingGuardrails } = require('./smartPricingGuardrailsService');
 const { buildPriceTestPayloadFromPlan, formatArmVariantName } = require('./planToPriceTestService');
+const { formatOfferArmName, isOfferPlan } = require('./planToOfferTestService');
 const { launchSmartPricingPlanAsTest } = require('./smartPricingLaunchService');
+const { ensureOfferCheckoutDiscount } = require('./offerCheckoutDiscountService');
 
 function normalizeShopDomain(shopDomain) {
   return String(shopDomain || '')
@@ -271,7 +273,9 @@ function mapArmPreviewVariants(plan, test) {
   const arms = Array.isArray(plan?.price_arms) ? plan.price_arms : [];
   const testVariants = Array.isArray(test?.variants) ? test.variants : [];
   return arms.map((arm, index) => {
-    const expectedName = formatArmVariantName(arm, currency);
+    const expectedName = isOfferPlan(plan)
+      ? formatOfferArmName(arm, index, currency)
+      : formatArmVariantName(arm, currency);
     const shortName = shortArmVariantName(arm, index);
     const bySoft =
       findVariantForPreviewQuery(testVariants, { variant_name: expectedName }) ||
@@ -460,7 +464,10 @@ async function ensureSmartPricingPlanPreviewTest(shopDomain, planId) {
   let test = null;
   let testId = '';
 
-  if (experimentPlans.length > 1) {
+  const offerExperiment =
+    isOfferPlan(originalPlan) ||
+    (Array.isArray(experimentPlans) && experimentPlans.some(isOfferPlan));
+  if (experimentPlans.length > 1 && !offerExperiment) {
     const ensured = await ensureExperimentPreviewTest(domain, originalPlan, experimentPlans);
     test = ensured.test;
     testId = ensured.testId;
@@ -540,9 +547,24 @@ async function ensureSmartPricingPlanPreviewTest(shopDomain, planId) {
     productPath = `${productPath}?variant=${variantNumeric}`;
   }
 
+  const testType = String(test?.type || '')
+    .trim()
+    .toLowerCase();
+  const isOfferPreview = offerExperiment || testType === 'offer' || testType === 'offer_test';
+  if (isOfferPreview) {
+    getShopSession(domain)
+      .then(session => {
+        const token = session?.access_token || '';
+        if (!token) return null;
+        return ensureOfferCheckoutDiscount({ shopDomain: domain, accessToken: token });
+      })
+      .catch(() => null);
+  }
+
   return {
     planId: id,
     testId,
+    testType: isOfferPreview ? 'offer' : 'price',
     handle: handle || '',
     productPath,
     productId: plan.product_id || originalPlan.product_id || null,

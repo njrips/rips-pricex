@@ -23,7 +23,7 @@ const DEFAULT_GUARDRAILS = Object.freeze({
   min_margin_percent: 35,
   max_price_change_percent: 15,
   max_revenue_drop_percent: 10,
-  max_parallel_tests: 5,
+  max_parallel_tests: 0,
   objective: 'revenue_per_visitor',
   ai_ranking_enabled: true,
   focus_collection_ids: [],
@@ -138,12 +138,7 @@ function normalizeGuardrails(raw = {}) {
       50,
       DEFAULT_GUARDRAILS.max_revenue_drop_percent
     ),
-    max_parallel_tests: clampNumber(
-      source.max_parallel_tests ?? source.maxParallelTests,
-      1,
-      20,
-      DEFAULT_GUARDRAILS.max_parallel_tests
-    ),
+    max_parallel_tests: 0,
     objective:
       String(source.objective || DEFAULT_GUARDRAILS.objective).trim() ||
       DEFAULT_GUARDRAILS.objective,

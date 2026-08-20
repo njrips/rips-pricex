@@ -39,7 +39,6 @@ async function launchSmartPricingPlanAsTest(
   if (autoStart) {
     await assertCanLaunchPriceTests(shopDomain, {
       additionalCount: 1,
-      maxParallel: guardrails.max_parallel_tests,
     });
 
     const session = await getShopSession(shopDomain).catch(() => null);
@@ -84,7 +83,7 @@ async function launchSmartPricingPlanAsTest(
   if (autoStart) {
     try {
       const { ensureDefaultSchedule, startQaRun } = require('../selfQa/selfQaOrchestratorService');
-      // Classic/inbox launch already gates on checkout readiness + parallel capacity.
+      // Classic/inbox launch already gates on checkout readiness.
       // Self-QA still runs, but must not hard-block (password-protected shops and
       // theme mapping gaps are common on Shopify development stores).
       await ensureDefaultSchedule(shopDomain, test.id, {

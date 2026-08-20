@@ -43,6 +43,7 @@ Details tab layout (2026-08-20, EchoTest Final page — colors stay Admin / Pola
 - **Metrics** (`245:609`): stacked Primary + Secondary cards. Guardrails/COGS moved to the Settings tab (not on this Figma frame).
 - **Activity** (`245:853`): one **Activity history** card, newest-first timeline (`title` + `owner · timestamp`).
 - Performance / Variations / Settings are tabs on those frames, not separate Figma screens. Settings holds targeting extras + guardrails that the simplified Audience/Metrics layouts no longer show.
+- **Variations** preview: only the clicked Preview / QR / Open control shows a spinner. Sibling variation cards share one product/plan, so busy state is keyed by arm + action. Other preview controls disable until that request finishes. Offer Preview / QR / Copy open the storefront PDP (`ab_preview_test_type=offer`), not the price-preview bootstrap API URL.
 
 Page chrome alignment (2026-08-20):
 

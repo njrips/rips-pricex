@@ -200,7 +200,7 @@ async function buildBatchPreviewLaunch({
   } else if (readiness?.ready === false) {
     blockers.push(readiness.message || 'Checkout price path is not ready.');
   }
-  if (capacity?.can_launch === false || capacity?.slots_remaining === 0) {
+  if (capacity?.unlimited !== true && (capacity?.can_launch === false || capacity?.slots_remaining === 0)) {
     blockers.push(capacity?.message || 'No launch capacity remaining.');
   }
   perPlan.forEach(row => {

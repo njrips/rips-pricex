@@ -19,6 +19,8 @@ describe('previewVariantMatch', () => {
     expect(stripPricePrefix('$884.94 Variation A')).toBe('Variation A');
     expect(stripPricePrefix('USD 12.50 Warm')).toBe('Warm');
     expect(stripPricePrefix('Control')).toBe('Control');
+    expect(stripPricePrefix('10% off Variation A')).toBe('Variation A');
+    expect(stripPricePrefix('$5.00 off Variation A')).toBe('Variation A');
   });
 
   test('previewLabelEquals matches priced ↔ short arm labels', () => {

@@ -69,6 +69,13 @@ Can Classic keep the 5-step EchoTest wizard and still run a checkout **offer** t
 - Ensure is capped at 20s. The admin Launch request times out at 45s with a Setup/Ensure message instead of spinning forever.
 - Running **offer** tests count toward the shop parallel-test cap.
 
+## Follow-up (preview link + discount)
+
+- Offer Preview / QR / Copy open the storefront PDP (`/products/…?ab_preview_test_type=offer`), not `/apps/ripspricex/price-preview-bootstrap-v1` (that API-looking URL seeded a synthetic **price** test and skipped checkout discount attrs).
+- Multi-SKU offer preview reuses each plan’s offer test. It no longer builds a shared price-preview draft (`direct_price_override`), which the checkout function ignores.
+- Storefront synthetic preview honors `ab_preview_test_type=offer`. Script version **1.0.51**.
+- Early cart seed for offer preview uses `discounted_checkout_price` plus `10% off` / `$5 off` name parsing, and does not reuse a leftover price-override method from a prior price preview.
+
 ## Not in this pass
 
 - Free shipping offers.
