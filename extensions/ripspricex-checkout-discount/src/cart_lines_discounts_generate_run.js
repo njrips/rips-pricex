@@ -40,6 +40,8 @@ function normalizeOfferType(value) {
 }
 
 function lineMessage(line) {
+  // Buyer-facing allocation label: variation Message when set, otherwise the
+  // auto-generated title + variation code name that checkout already shows.
   const message = String(line?.ripxOfferMessage?.value || '').trim();
   if (message) return message.slice(0, 120);
   const code = String(line?.ripxOfferCodeName?.value || '').trim();

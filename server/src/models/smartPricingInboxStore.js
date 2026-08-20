@@ -342,6 +342,7 @@ async function saveInboxPlans(
 }
 
 async function upsertInboxPlan(shopDomain, plan) {
+  // Insert-if-absent only. Preview must not overwrite launch-persisted status/test_id.
   const domain = normalizeShopDomain(shopDomain);
   const normalized = normalizePlanJson(plan);
   if (!domain || !normalized) {
@@ -353,14 +354,7 @@ async function upsertInboxPlan(shopDomain, plan) {
       `INSERT INTO smart_pricing_inbox_plans
          (shop_domain, plan_id, plan_json, status, test_id, archived, archived_at, updated_at)
        VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7, NOW())
-       ON CONFLICT (shop_domain, plan_id)
-       DO UPDATE SET
-         plan_json = EXCLUDED.plan_json,
-         status = EXCLUDED.status,
-         test_id = EXCLUDED.test_id,
-         archived = EXCLUDED.archived,
-         archived_at = EXCLUDED.archived_at,
-         updated_at = NOW()`,
+       ON CONFLICT (shop_domain, plan_id) DO NOTHING`,
       [
         domain,
         normalized.id,
@@ -379,12 +373,7 @@ async function upsertInboxPlan(shopDomain, plan) {
       `INSERT INTO smart_pricing_inbox_plans
          (shop_domain, plan_id, plan_json, status, test_id, updated_at)
        VALUES ($1, $2, $3::jsonb, $4, $5, NOW())
-       ON CONFLICT (shop_domain, plan_id)
-       DO UPDATE SET
-         plan_json = EXCLUDED.plan_json,
-         status = EXCLUDED.status,
-         test_id = EXCLUDED.test_id,
-         updated_at = NOW()`,
+       ON CONFLICT (shop_domain, plan_id) DO NOTHING`,
       [domain, normalized.id, JSON.stringify(normalized), status, testId]
     );
   }

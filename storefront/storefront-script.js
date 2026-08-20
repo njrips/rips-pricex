@@ -510,6 +510,94 @@
     }, 0);
   }
 
+  var _ripxPdpNavTimer = null;
+  var _ripxPdpNavLastKey = '';
+  var _ripxPdpReadyTimer = null;
+
+  function getPdpNavigationKey() {
+    return [
+      String((window.location && window.location.pathname) || '').toLowerCase(),
+      getUrlShopifyVariantId() || '',
+      typeof getCurrentProductId === 'function' ? getCurrentProductId() || '' : '',
+    ].join('|');
+  }
+
+  function schedulePdpReadyReapply(reason) {
+    if (_ripxPdpReadyTimer) return;
+    var attempts = 0;
+    _ripxPdpReadyTimer = setInterval(function () {
+      attempts += 1;
+      var pid = typeof getCurrentProductId === 'function' ? getCurrentProductId() : null;
+      if (pid || attempts >= 48) {
+        clearInterval(_ripxPdpReadyTimer);
+        _ripxPdpReadyTimer = null;
+        if (pid) flushQueuedPriceReapply(reason || 'pdp_ready');
+      }
+    }, 125);
+  }
+
+  function maybeFlushPdpNav(reason) {
+    var nextKey = getPdpNavigationKey();
+    if (nextKey === _ripxPdpNavLastKey) return;
+    _ripxPdpNavLastKey = nextKey;
+    if (typeof isPdpProductPath === 'function' && isPdpProductPath() && !getCurrentProductId()) {
+      schedulePdpReadyReapply(reason || 'pdp_navigation');
+    }
+    flushQueuedPriceReapply(reason || 'pdp_navigation');
+  }
+
+  function schedulePdpNavReapply(reason) {
+    if (_ripxPdpNavTimer) clearTimeout(_ripxPdpNavTimer);
+    _ripxPdpNavTimer = setTimeout(function () {
+      _ripxPdpNavTimer = null;
+      maybeFlushPdpNav(reason || 'pdp_navigation');
+      // Theme morph often updates product-info after the URL; re-check once DOM catches up.
+      setTimeout(function () {
+        maybeFlushPdpNav((reason || 'pdp_navigation') + '_late');
+      }, 250);
+    }, 40);
+  }
+
+  function installPdpNavigationReapply() {
+    if (window.__RIPX_PDP_NAV_REAPPLY__) return;
+    window.__RIPX_PDP_NAV_REAPPLY__ = true;
+    _ripxPdpNavLastKey = getPdpNavigationKey();
+    function onNav(eventName) {
+      return function () {
+        schedulePdpNavReapply(eventName);
+      };
+    }
+    ['popstate', 'pageshow', 'pagereveal'].forEach(function (evt) {
+      try {
+        window.addEventListener(evt, onNav(evt));
+      } catch (_eWin) {}
+    });
+    ['shopify:section:load', 'variant:change', 'product:update'].forEach(function (evt) {
+      try {
+        document.addEventListener(evt, onNav(evt));
+      } catch (_eDoc) {}
+    });
+    if (window.history && !window.__RIPX_PDP_HISTORY_PATCHED__) {
+      window.__RIPX_PDP_HISTORY_PATCHED__ = true;
+      var originalPushState = window.history.pushState;
+      var originalReplaceState = window.history.replaceState;
+      if (typeof originalPushState === 'function') {
+        window.history.pushState = function () {
+          var result = originalPushState.apply(window.history, arguments);
+          schedulePdpNavReapply('history_push');
+          return result;
+        };
+      }
+      if (typeof originalReplaceState === 'function') {
+        window.history.replaceState = function () {
+          var result = originalReplaceState.apply(window.history, arguments);
+          schedulePdpNavReapply('history_replace');
+          return result;
+        };
+      }
+    }
+  }
+
   function releaseAntiFlickerGuard(reason) {
     var releaseReason = reason || 'manual';
     if (antiFlickerState.active) {
@@ -1117,6 +1205,33 @@
   const PREVIEW_STORAGE_MAX_AGE_MS = 2 * 60 * 60 * 1000; // 2 hours
   const PREVIEW_VARIANT_CACHE_MAX_AGE_MS = 30 * 60 * 1000; // 30 minutes
   const LIVE_USER_STORAGE_KEY = '__ripx_live_user_id_v1__';
+  function getLiveSearchParams() {
+    try {
+      return new URLSearchParams(window.location.search || '');
+    } catch (_eLiveSearch) {
+      return URL_PARAMS;
+    }
+  }
+  function isRipxBootstrapPathname(pathname) {
+    var p = String(pathname || '').toLowerCase();
+    return p.indexOf('/apps/ripspricex/') === 0 || p.indexOf('/apps/ripx/') === 0;
+  }
+  function getUrlShopifyVariantId() {
+    try {
+      var params = getLiveSearchParams();
+      var fromSearch = String(params.get('variant') || '').trim();
+      if (/^\d+$/.test(fromSearch)) return fromSearch;
+      if (isRipxBootstrapPathname(window.location.pathname)) {
+        var nestedTarget = String(params.get('url') || URL_PARAMS.get('url') || '').trim();
+        if (nestedTarget) {
+          var nestedUrl = new URL(nestedTarget, window.location.origin);
+          var nestedVariant = String(nestedUrl.searchParams.get('variant') || '').trim();
+          if (/^\d+$/.test(nestedVariant)) return nestedVariant;
+        }
+      }
+    } catch (_eUrlVariant) {}
+    return '';
+  }
   function extractPreviewParamsFromSearch(search) {
     var params = new URLSearchParams(search || '');
     var testId = params.get('ab_preview_test') || null;
@@ -1172,11 +1287,16 @@
   }
   function getEffectivePreviewPathname() {
     try {
-      var nestedTarget = URL_PARAMS.get('url') || '';
-      if (nestedTarget) {
-        var parsedTarget = new URL(nestedTarget, window.location.origin);
-        var nestedPath = String(parsedTarget.pathname || '').toLowerCase();
-        if (nestedPath) return nestedPath;
+      // Only the app-proxy bootstrap uses ?url= as the real storefront target.
+      // Live PDPs often have unrelated query params; never treat those as a nested path.
+      if (isRipxBootstrapPathname(window.location.pathname)) {
+        var nestedTarget =
+          getLiveSearchParams().get('url') || URL_PARAMS.get('url') || '';
+        if (nestedTarget) {
+          var parsedTarget = new URL(nestedTarget, window.location.origin);
+          var nestedPath = String(parsedTarget.pathname || '').toLowerCase();
+          if (nestedPath) return nestedPath;
+        }
       }
     } catch (_eNestedPath) {}
     return String(window.location.pathname || '').toLowerCase();
@@ -4144,6 +4264,13 @@
           product.selected_or_first_available_variant ||
           data.selected_or_first_available_variant ||
           (variants.length ? variants[0] : null);
+        var urlVariantId = getUrlShopifyVariantId();
+        if (urlVariantId && variants.length) {
+          selected =
+            variants.find(function (v) {
+              return String(v.id) === String(urlVariantId);
+            }) || selected;
+        }
         if (selected && variants.length) {
           var selId = selected.id || selected.variant_id;
           if (
@@ -4164,28 +4291,44 @@
     if (window.ShopifyAnalytics?.meta?.product) {
       var p = window.ShopifyAnalytics.meta.product;
       var vs = p.variants || [];
+      var urlVid = getUrlShopifyVariantId();
       var sel =
+        (urlVid &&
+          vs.find(function (v) {
+            return String(v.id) === String(urlVid);
+          })) ||
         vs.find(function (v) {
           return String(v.id) === String(p.selected_variant_id);
-        }) || vs[0];
+        }) ||
+        vs[0];
       return { product: p, variants: vs, selectedVariant: sel };
     }
     if (window.Shopify?.meta?.product) {
       var p2 = window.Shopify.meta.product;
       var vs2 = p2.variants || [];
+      var urlVid2 = getUrlShopifyVariantId();
       var sel2 =
+        (urlVid2 &&
+          vs2.find(function (v) {
+            return String(v.id) === String(urlVid2);
+          })) ||
         vs2.find(function (v) {
           return String(v.id) === String(p2.selected_variant_id);
-        }) || vs2[0];
+        }) ||
+        vs2[0];
       return { product: p2, variants: vs2, selectedVariant: sel2 };
     }
     return null;
   }
 
   /**
-   * Get currently selected variant ID (form input or product JSON).
+   * Get currently selected variant ID (URL ?variant=, form input, or product JSON).
+   * Dawn collection cards and option pickers put the SKU in the query string before the
+   * hidden `id` input is hydrated; prefer the live URL so tests apply without a reload.
    */
   function getSelectedVariantId() {
+    var fromUrl = getUrlShopifyVariantId();
+    if (fromUrl) return fromUrl;
     var input = document.querySelector('input[name="id"], input[name="variant_id"], [name="id"]');
     if (input && input.value) return input.value.trim();
     var json = getProductJson();
@@ -4346,6 +4489,9 @@
     return String(key || '').charAt(0) === '_' ? String(key).slice(1) : String(key || '');
   }
   function getRipxBuyerVisibleLineSummary(payload) {
+    var offerMessage =
+      payload && payload._ripx_offer_message ? String(payload._ripx_offer_message).trim() : '';
+    if (offerMessage) return offerMessage;
     var variant = payload && payload._ripx_variant ? String(payload._ripx_variant).trim() : '';
     var label = 'Price Test';
     if (payload && payload.__ripx_shipping_test) label = 'Shipping Test';
@@ -4986,10 +5132,10 @@
               var setAssignmentProp = overwriteRipxAssignmentProps
                 ? setRipxAssignmentProp
                 : setPropIfMissing;
-              setPropIfMissing(
-                RIPX_BUYER_VISIBLE_PROPERTY_KEY,
-                getRipxBuyerVisibleLineSummary(propsPayload)
-              );
+              var summary = getRipxBuyerVisibleLineSummary(propsPayload);
+              if (summary) {
+                nextProps[RIPX_BUYER_VISIBLE_PROPERTY_KEY] = summary;
+              }
               setAssignmentProp('_ripx_price_test', propsPayload._ripx_price_test);
               setAssignmentProp('_ripx_variant', propsPayload._ripx_variant);
               setAssignmentProp('_ripx_shop', propsPayload._ripx_shop);
@@ -11320,10 +11466,14 @@
     return isFinite(numericValue) && numericValue > 0;
   }
   function resolveOfferMessageFromConfig(config) {
-    var cfg = config && typeof config === 'object' ? config : {};
-    var raw = cfg.offer_message || cfg.offerMessage || cfg.message || '';
-    var text = String(raw || '').trim();
-    return text ? text.slice(0, 120) : '';
+    var candidates = getOfferConfigCandidates(config);
+    for (var i = 0; i < candidates.length; i += 1) {
+      var cfg = candidates[i] && typeof candidates[i] === 'object' ? candidates[i] : {};
+      var raw = cfg.offer_message || cfg.offerMessage || cfg.message || '';
+      var text = String(raw || '').trim();
+      if (text) return text.slice(0, 120);
+    }
+    return '';
   }
   function getOfferTargetProductIdsForCartAttrs(test) {
     var tt = getNormalizedTargetType(test);
@@ -12982,6 +13132,9 @@
                 'current collection=' + (getCurrentCollectionId() || 'none')
               );
             }
+            if (isPdpProductPath() && !getCurrentProductId()) {
+              schedulePdpReadyReapply('init_missing_product_id');
+            }
             if (shouldTrackAntiFlicker) markAntiFlickerDone();
             return;
           }
@@ -14170,12 +14323,19 @@
     window.__RIPX_TEST_HOOKS__.getRipxCartAttributeState = function () {
       return _ripxCartAttributeState;
     };
+    window.__RIPX_TEST_HOOKS__.getUrlShopifyVariantId = getUrlShopifyVariantId;
+    window.__RIPX_TEST_HOOKS__.getSelectedVariantId = getSelectedVariantId;
+    window.__RIPX_TEST_HOOKS__.resolveOfferMessageFromConfig = resolveOfferMessageFromConfig;
+    window.__RIPX_TEST_HOOKS__.getRipxBuyerVisibleLineSummary = getRipxBuyerVisibleLineSummary;
     window.__RIPX_TEST_HOOKS__.getRipxCartFormTargetProductIds = function () {
       return Array.isArray(_ripxCartFormTargetProductIds)
         ? _ripxCartFormTargetProductIds.slice()
         : _ripxCartFormTargetProductIds || null;
     };
   }
+  try {
+    installPdpNavigationReapply();
+  } catch (_ePdpNav) {}
   debugLog('init', 'v' + SCRIPT_VERSION);
   window.__RIPX_LOADED__ = true;
   window.__RIPX_LOADING__ = false;

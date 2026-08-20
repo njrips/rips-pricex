@@ -440,19 +440,29 @@ async function ensureExperimentPreviewTest(domain, primaryPlan, experimentPlans)
   }
 }
 
-async function upsertIncomingInboxPlans(domain, planId, incomingPlan, incomingPlans) {
-  const rows = [];
+function pickRequestedIncomingPlan(planId, incomingPlan, incomingPlans) {
+  const requestedId = String(planId || '').trim();
+  if (!requestedId) return null;
   if (incomingPlan && typeof incomingPlan === 'object') {
-    rows.push({ ...incomingPlan, id: String(incomingPlan.id || planId).trim() || planId });
+    const incomingId = String(incomingPlan.id || incomingPlan.plan_id || requestedId).trim();
+    if (incomingId === requestedId) {
+      return { ...incomingPlan, id: requestedId };
+    }
   }
-  (Array.isArray(incomingPlans) ? incomingPlans : []).forEach(row => {
-    if (!row || typeof row !== 'object') return;
-    const rowId = String(row.id || row.plan_id || '').trim();
-    if (!rowId) return;
-    if (rows.some(existing => String(existing.id) === rowId)) return;
-    rows.push({ ...row, id: rowId });
+  const fromList = (Array.isArray(incomingPlans) ? incomingPlans : []).find(row => {
+    if (!row || typeof row !== 'object') return false;
+    return String(row.id || row.plan_id || '').trim() === requestedId;
   });
-  await Promise.all(rows.map(row => upsertInboxPlan(domain, row).catch(() => null)));
+  if (!fromList) return null;
+  return { ...fromList, id: requestedId };
+}
+
+async function upsertIncomingInboxPlans(domain, planId, incomingPlan, incomingPlans) {
+  const requested = pickRequestedIncomingPlan(planId, incomingPlan, incomingPlans);
+  if (!requested) return;
+  const existing = await getInboxPlanById(domain, requested.id);
+  if (existing) return;
+  await upsertInboxPlan(domain, requested).catch(() => null);
 }
 
 /**
