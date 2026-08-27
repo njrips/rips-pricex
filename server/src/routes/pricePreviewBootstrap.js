@@ -140,9 +140,17 @@ function buildPricePreviewHtml({
         font: inherit;
         padding: 4px 9px;
       }
+      .ripx-price-preview-fallback {
+        color: #6b7280;
+        font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        margin: 0;
+        padding: 28vh 24px 24px;
+        text-align: center;
+      }
     </style>
   </head>
   <body>
+    <p class="ripx-price-preview-fallback" id="ripx-price-preview-fallback">Opening preview…</p>
     <div class="ripx-price-preview-bar" id="ripx-price-preview-bar" style="${simplePreview ? 'display:none' : ''}">
       <span class="ripx-price-preview-dot" id="ripx-price-preview-dot"></span>
       <span id="ripx-price-preview-status">Loading price preview...</span>
@@ -240,17 +248,24 @@ function buildPricePreviewHtml({
                 (/id=["']password["']/i.test(html) || /enter store password/i.test(html)));
             var hasCopy =
               lower.indexOf('this store is password protected') !== -1 ||
-              lower.indexOf('enter store password') !== -1;
-            // Require form + copy so theme scripts that mention storefront_password
-            // do not look like the password gate.
-            return hasForm && hasCopy;
+              lower.indexOf('enter store password') !== -1 ||
+              lower.indexOf('use the password to enter the store') !== -1;
+            if (hasForm && hasCopy) return true;
+            // Horizon/OS 2.0 password shells often omit the form until theme JS runs.
+            return hasCopy;
           } catch (_e) {
             return false;
           }
         }
 
+        function htmlLooksLikeProductPage(htmlText) {
+          var html = String(htmlText || '');
+          return /product-form|product-info|\/cart\/add|name=["']id["']/i.test(html);
+        }
+
         function isPasswordGateResponse(result) {
           if (isPasswordPageHtml(result && result.htmlText)) return true;
+          if (result && result.ok && !htmlLooksLikeProductPage(result.htmlText)) return true;
           try {
             var path = new URL(
               (result && result.finalUrl) || '',
@@ -259,6 +274,14 @@ function buildPricePreviewHtml({
             return path === '/password' || /\/password\/?$/.test(path);
           } catch (_e) {
             return false;
+          }
+        }
+
+        function openStorefrontPreview() {
+          try {
+            window.location.replace(target);
+          } catch (_e) {
+            window.location.href = target;
           }
         }
 
@@ -300,7 +323,7 @@ function buildPricePreviewHtml({
             retry.textContent = 'Retry preview';
             retry.style.cssText =
               'padding:10px 14px;border:0;border-radius:9px;background:#111827;color:white;cursor:pointer;margin-right:10px;';
-            retry.onclick = opts.retryWithClientFetch ? loadPreview : reloadPreview;
+            retry.onclick = opts.retryWithClientFetch ? openStorefrontPreview : reloadPreview;
             var openProduct = document.createElement('button');
             openProduct.textContent = 'Open product URL';
             openProduct.style.cssText =
@@ -319,11 +342,10 @@ function buildPricePreviewHtml({
         }
 
         function showPasswordHelp() {
-          showFatalError(
-            'Storefront password required',
-            'This Shopify store is password protected. Open the password page, enter the Online Store password (not your Shopify admin login), then click Retry preview.',
-            { showPasswordButton: true, retryWithClientFetch: true }
-          );
+          // Do not mount the password shell here — theme JS is stripped, which
+          // paints a blank page. Navigate to the PDP so Shopify can show its
+          // password form or the product (if this browser is already unlocked).
+          openStorefrontPreview();
         }
 
         function showNotFoundHelp() {
@@ -625,7 +647,7 @@ function buildPricePreviewHtml({
         }
 
         function handleFetchedHtml(htmlText, statusCode) {
-          if (isPasswordPageHtml(htmlText)) {
+          if (isPasswordPageHtml(htmlText) || !htmlLooksLikeProductPage(htmlText)) {
             lastError = 'password_required';
             showPasswordHelp();
             return;
@@ -655,15 +677,25 @@ function buildPricePreviewHtml({
             }
             return;
           }
-          // Server prefetch cannot use the shopper's storefront_digest cookie.
-          // password_required from Pricefy must still try a same-origin fetch.
           if (prefetchError === 'fetch_failed_404' || prefetchError === '404') {
             lastError = 'target_fetch_failed_404';
             showNotFoundHelp();
             return;
           }
-          setStatus('Loading product preview...', false, !simplePreview);
-          fetch(target, { method: 'GET', credentials: 'include', redirect: 'follow' })
+          // Server prefetch cannot use storefront cookies. Fetch-and-mount of the
+          // password wall strips theme JS and shows a blank page — navigate instead.
+          if (prefetchError === 'password_required') {
+            lastError = 'password_required';
+            openStorefrontPreview();
+            return;
+          }
+          setStatus('Loading product preview...', false, true);
+          fetch(target, {
+            method: 'GET',
+            credentials: 'include',
+            redirect: 'follow',
+            headers: { Accept: 'text/html' },
+          })
             .then(function (response) {
               var status = response && response.status ? response.status : 0;
               var finalUrl = '';

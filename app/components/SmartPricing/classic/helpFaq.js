@@ -5,11 +5,11 @@ export const HELP_FAQ_ITEMS = [
   },
   {
     q: 'Shoppers do not see the offer under the product price',
-    a: 'Offer tests keep the catalog price and apply the discount at checkout. The offer message — or the offer amount if you left the message empty — is painted directly under the product price on live and Preview (Dawn and Horizon-style themes). If several offer tests target the same product, shoppers see the newest one. Enable the theme app embed and map the PDP price selector under Settings → Price surfaces if your theme uses a custom price block.',
+    a: 'Offer tests apply the discount at checkout. On the product page, assigned shoppers see a sale cutout (catalog price struck through plus the offer price) and the offer message — or the offer amount if you left the message empty — directly under that cutout on live and Preview (Dawn and Horizon-style themes). If several offer tests target the same product, shoppers see the newest one. Enable the theme app embed and map the PDP price selector under Settings → Price surfaces if your theme uses a custom price block.',
   },
   {
     q: 'Preview, QR, or copy link is wrong',
-    a: 'Preview opens the storefront product page with a preview query so you see that variation only. Offer tests keep the catalog price; the assigned message or offer amount should appear under the product price. If it is missing, confirm the theme embed is enabled and the PDP price selector is mapped, then retry Preview from the Variations tab.',
+    a: 'Preview opens the storefront product page with a preview query so you see that variation only. Offer tests show the sale cutout and the assigned message or offer amount under the product price. If either is missing, confirm the theme embed is enabled and the PDP price selector is mapped, then retry Preview from the Variations tab.',
   },
   {
     q: 'I edited audience or metrics on a live test',

@@ -13,26 +13,25 @@ function html(prefetchError) {
 }
 
 describe('price preview bootstrap password gate', () => {
-  it('does not treat server password_required prefetch as fatal', () => {
+  it('navigates to the PDP when server prefetch hits the password wall', () => {
     const page = html('password_required');
-    assert.match(page, /credentials:\s*'include'/);
-    assert.doesNotMatch(page, /if \(prefetchError === 'password_required'\)/);
-    assert.match(page, /isPasswordGateResponse/);
+    assert.match(page, /function openStorefrontPreview\s*\(/);
+    assert.match(page, /if \(prefetchError === 'password_required'\)/);
+    assert.match(page, /window\.location\.replace\(target\)/);
+    assert.match(page, /Opening preview/);
   });
 
-  it('keeps the preview tab when opening the storefront password page', () => {
+  it('does not fetch-and-mount password HTML from the bootstrap tab', () => {
     const page = html('password_required');
-    assert.match(page, /window\.open\('\/password',\s*'_blank'/);
-    assert.doesNotMatch(page, /location\.replace\('\/password'\)/);
-    assert.match(page, /retryWithClientFetch/);
+    const afterPassword = page.split("if (prefetchError === 'password_required')")[1] || '';
+    const untilFetch = afterPassword.split('fetch(target')[0] || '';
+    assert.match(untilFetch, /openStorefrontPreview\(\)/);
+    assert.match(untilFetch, /return;/);
   });
 
-  it('requires password form + copy, not a loose storefront_password substring', () => {
+  it('treats password copy without a form as the gate', () => {
     const page = html(null);
-    assert.match(page, /hasForm && hasCopy/);
-    assert.doesNotMatch(
-      page,
-      /lower\.indexOf\('storefront_password'\) !== -1 \|\|/
-    );
+    assert.match(page, /use the password to enter the store/);
+    assert.match(page, /return hasCopy;/);
   });
 });

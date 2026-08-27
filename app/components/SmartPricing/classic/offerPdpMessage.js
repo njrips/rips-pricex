@@ -1,6 +1,9 @@
 /** Keep in sync with storefront/storefront-script.js offer PDP paint. */
 export const OFFER_PDP_MESSAGE_ATTR = 'data-ripx-offer-pdp-message';
 export const OFFER_PDP_TEST_ATTR = 'data-ripx-offer-test';
+export const OFFER_PDP_STACK_ATTR = 'data-ripx-offer-pdp';
+export const OFFER_PDP_CUTOUT_ATTR = 'data-ripx-offer-pdp-cutout';
+export const OFFER_PDP_HOST_PAINTED_ATTR = 'data-ripx-offer-cutout-painted';
 
 /** Horizon `product-price`, then Dawn `.price`, then common wrappers. */
 export const OFFER_PDP_HOST_SELECTOR =
@@ -26,6 +29,32 @@ export function resolveOfferPdpMessageHost(el) {
 }
 
 /**
+ * Climb out of shadow roots so the stack sits in light DOM after product-price / .price
+ * (below the theme cutout), instead of inside a flex price row that clips the message.
+ */
+export function resolveOfferPdpLightHost(el) {
+  let node = el;
+  while (node) {
+    const root = typeof node.getRootNode === 'function' ? node.getRootNode() : null;
+    if (root && root !== node && root.host) {
+      node = root.host;
+      continue;
+    }
+    break;
+  }
+  return resolveOfferPdpMessageHost(node);
+}
+
+export function isOfferPdpInjectedNode(node) {
+  if (!node || typeof node.hasAttribute !== 'function') return false;
+  return (
+    node.hasAttribute(OFFER_PDP_STACK_ATTR) ||
+    node.hasAttribute(OFFER_PDP_MESSAGE_ATTR) ||
+    node.hasAttribute(OFFER_PDP_CUTOUT_ATTR)
+  );
+}
+
+/**
  * Stay put when the node is already in the offer-message chain after the host
  * (one or more tests can stack). Move when the parent differs or it is elsewhere.
  */
@@ -35,7 +64,7 @@ export function offerPdpMessageNodeNeedsMove(node, host) {
   let walk = host.nextElementSibling;
   while (walk) {
     if (walk === node) return false;
-    if (!walk.hasAttribute || !walk.hasAttribute(OFFER_PDP_MESSAGE_ATTR)) break;
+    if (!isOfferPdpInjectedNode(walk)) break;
     walk = walk.nextElementSibling;
   }
   return true;

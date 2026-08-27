@@ -500,7 +500,7 @@ function VariationCard({
       </div>
       {isOfferTest && !arm.isControl && pdpMessage ? (
         <p className={styles.help} style={{ marginTop: 0 }}>
-          Shoppers see “{pdpMessage}” under the product price.
+          Shoppers see the sale cutout and “{pdpMessage}” under the product price.
         </p>
       ) : null}
 

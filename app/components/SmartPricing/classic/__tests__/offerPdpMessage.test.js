@@ -3,12 +3,17 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { resolveOfferPdpDisplayText } from '../offerSelection.js';
+import { computeOfferPdpCutout, resolveOfferPdpDisplayText } from '../offerSelection.js';
 import {
+  OFFER_PDP_CUTOUT_ATTR,
+  OFFER_PDP_HOST_PAINTED_ATTR,
   OFFER_PDP_MESSAGE_ATTR,
   OFFER_PDP_RELATED_SEL,
+  OFFER_PDP_STACK_ATTR,
   OFFER_PDP_TEST_ATTR,
+  isOfferPdpInjectedNode,
   offerPdpMessageNodeNeedsMove,
+  resolveOfferPdpLightHost,
   resolveOfferPdpMessageHost,
 } from '../offerPdpMessage.js';
 
@@ -45,6 +50,19 @@ describe('offer PDP message', () => {
     );
     assert.equal(resolveOfferPdpDisplayText({ discount_type: 'percent', discount_value: '' }), '');
     assert.equal(resolveOfferPdpDisplayText({ discount_type: 'percent', discount_value: 120 }), '');
+  });
+
+  it('computes the sale cutout from catalog minus the offer', () => {
+    assert.deepEqual(computeOfferPdpCutout(20, { discount_type: 'percent', discount_value: 15 }), {
+      was: 20,
+      now: 17,
+    });
+    assert.deepEqual(computeOfferPdpCutout(20, { discount_type: 'fixed', discount_value: 5 }), {
+      was: 20,
+      now: 15,
+    });
+    assert.equal(computeOfferPdpCutout(20, { discount_type: 'percent', discount_value: '' }), null);
+    assert.equal(computeOfferPdpCutout(20, { discount_type: 'percent', discount_value: 0 }), null);
   });
 
   it('anchors below the outer Dawn price block, not the money leaf', () => {
@@ -91,6 +109,27 @@ describe('offer PDP message', () => {
     assert.equal(offerPdpMessageNodeNeedsMove(second, priceBlock), false);
     assert.equal(offerPdpMessageNodeNeedsMove({ parentNode: { id: 'other' } }, priceBlock), true);
     assert.equal(offerPdpMessageNodeNeedsMove({ previousElementSibling: null }, priceBlock), true);
+    const shadowHost = { id: 'product-price' };
+    const shadowLeaf = {
+      closest() {
+        return null;
+      },
+      getRootNode() {
+        return { host: shadowHost };
+      },
+    };
+    shadowHost.closest = function closest(selector) {
+      if (String(selector) === 'product-price') return shadowHost;
+      return null;
+    };
+    assert.equal(resolveOfferPdpLightHost(shadowLeaf), shadowHost);
+    const stack = {
+      hasAttribute(name) {
+        return name === OFFER_PDP_STACK_ATTR;
+      },
+    };
+    assert.equal(isOfferPdpInjectedNode(stack), true);
+    assert.equal(isOfferPdpInjectedNode({ hasAttribute: () => false }), false);
   });
 
   it('keeps storefront paint wired to the same contract', () => {
@@ -99,7 +138,16 @@ describe('offer PDP message', () => {
     assert.match(storefrontSrc, /function upsertOfferPdpMessage\s*\(/);
     assert.match(storefrontSrc, /function resolveOfferPdpDisplayText\s*\(/);
     assert.match(storefrontSrc, /function resolveOfferPdpMessageHost\s*\(/);
+    assert.match(storefrontSrc, /function resolveOfferPdpLightHost\s*\(/);
+    assert.match(storefrontSrc, /function computeOfferPdpCutoutPrices\s*\(/);
+    assert.match(storefrontSrc, /function paintThemeOfferCutout\s*\(/);
     assert.match(storefrontSrc, /function queryOfferPdpMessageNodes\s*\(/);
+    assert.match(storefrontSrc, new RegExp(OFFER_PDP_STACK_ATTR.replace(/-/g, '\\-')));
+    assert.match(storefrontSrc, new RegExp(OFFER_PDP_CUTOUT_ATTR.replace(/-/g, '\\-')));
+    assert.match(storefrontSrc, new RegExp(OFFER_PDP_HOST_PAINTED_ATTR.replace(/-/g, '\\-')));
+    assert.match(storefrontSrc, /price--on-sale/);
+    assert.match(storefrontSrc, /input\[name="product-id"\]/);
+    assert.match(storefrontSrc, /window\.meta/);
     assert.match(storefrontSrc, /function insertOfferPdpMessageAfterHost\s*\(/);
     assert.match(storefrontSrc, /function installOfferPdpThemeListeners\s*\(/);
     assert.match(storefrontSrc, /function isPrimaryOfferPdpTest\s*\(/);

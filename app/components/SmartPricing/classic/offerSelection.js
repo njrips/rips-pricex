@@ -135,6 +135,23 @@ export function resolveOfferPdpDisplayText(raw = {}, currency = 'USD') {
   return rule === 'No offer' ? '' : rule;
 }
 
+/**
+ * Catalog vs offered unit for the PDP sale cutout (strikethrough + sale price).
+ * Visual only — checkout still applies the offer discount.
+ */
+export function computeOfferPdpCutout(catalog, raw = {}) {
+  if (!isActionableOfferConfig(raw)) return null;
+  const cfg = normalizeOfferConfig(raw);
+  const n = parseOfferDiscountValue(cfg.discount_value);
+  const catalogN = Number(catalog);
+  if (n == null || n <= 0 || !Number.isFinite(catalogN) || catalogN <= 0) return null;
+  if (cfg.discount_type === 'percent' && n > 100) return null;
+  const nowRaw = cfg.discount_type === 'fixed' ? catalogN - n : catalogN * (1 - n / 100);
+  const now = Math.round(Math.max(0, nowRaw) * 100) / 100;
+  if (!(now < catalogN - 0.0001)) return null;
+  return { was: catalogN, now };
+}
+
 export function offerByArmFromPlanArms(arms = []) {
   const out = {};
   (Array.isArray(arms) ? arms : []).forEach((arm, index) => {

@@ -268,8 +268,9 @@ export default function ReviewLaunchStepPanel({
         </div>
         {isOfferTest ? (
           <p className={styles.help}>
-            Assigned shoppers see the offer message under the product price. If a variation has no
-            message, they still see the offer amount there.
+            Assigned shoppers see the catalog price struck through, the offer price, and the
+            message under that cutout. If a variation has no message, they still see the offer
+            amount there. Checkout applies the discount.
           </p>
         ) : null}
         {plans.length ? (

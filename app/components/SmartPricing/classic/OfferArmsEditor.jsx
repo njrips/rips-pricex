@@ -46,8 +46,10 @@ export default function OfferArmsEditor({
       <div className={styles.sectionLabel}>Offers for each variation</div>
       <p className={styles.help}>
         Control stays at the catalog price with no discount. Each test variation applies one offer
-        to every selected product. The message always appears under the product price for that
-        variation. If you leave it empty, shoppers still see the offer amount under the price.
+        to every selected product. Assigned shoppers see the catalog price struck through, the
+        offer price beside it, and the message directly under that cutout. If you leave the
+        message empty, they still see the offer amount under the cutout. Checkout applies the
+        discount.
       </p>
       {(variations || []).map((arm, index) => {
         const isControl = index === 0 || arm.id === 'control';
@@ -101,7 +103,7 @@ export default function OfferArmsEditor({
                   maxLength={120}
                   showCharacterCount
                   placeholder="e.g. Limited-time 10% off"
-                  helpText="Shown under the product price (and on cart) when this variation is assigned. Leave empty to show the offer amount only."
+                  helpText="Shown under the sale cutout (and on cart) when this variation is assigned. Leave empty to show the offer amount only."
                 />
               </div>
             )}

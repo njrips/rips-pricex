@@ -4337,6 +4337,22 @@
         vs2[0];
       return { product: p2, variants: vs2, selectedVariant: sel2 };
     }
+    // Dawn/Horizon often expose `var meta = { product: ... }` before Shopify.meta is wired.
+    if (window.meta && window.meta.product) {
+      var p3 = window.meta.product;
+      var vs3 = p3.variants || [];
+      var urlVid3 = getUrlShopifyVariantId();
+      var sel3 =
+        (urlVid3 &&
+          vs3.find(function (v) {
+            return String(v.id) === String(urlVid3);
+          })) ||
+        vs3.find(function (v) {
+          return String(v.id) === String(p3.selected_variant_id);
+        }) ||
+        vs3[0];
+      return { product: p3, variants: vs3, selectedVariant: sel3 };
+    }
     return null;
   }
 
@@ -11036,6 +11052,15 @@
     if (window.Shopify?.meta?.product?.id) {
       return toProductGid(window.Shopify.meta.product.id);
     }
+    if (window.meta && window.meta.product && window.meta.product.id) {
+      return toProductGid(window.meta.product.id);
+    }
+    var productIdInput =
+      document.querySelector('form[action*="/cart/add"] input[name="product-id"]') ||
+      document.querySelector('input[name="product-id"]');
+    if (productIdInput && productIdInput.value) {
+      return toProductGid(productIdInput.value);
+    }
     // Prefer PDP roots before any global [data-product-id] (cards/recommendations often render first).
     var primary =
       document.querySelector('product-info[data-product-id]') ||
@@ -11531,8 +11556,29 @@
     return formatOfferRuleFromConfig(config);
   }
 
+  function computeOfferPdpCutoutPrices(config, catalogHint) {
+    if (!isActionableOfferConfig(config)) return null;
+    var discountType = normalizeOfferDiscountType(config);
+    if (discountType === 'free_shipping') return null;
+    var n = parseOfferDiscountValue(config);
+    if (!isFinite(n) || n <= 0) return null;
+    if (discountType === 'percent' && n > 100) return null;
+    var catalog = catalogHint;
+    if (catalog == null || !isFinite(catalog) || catalog <= 0) {
+      catalog = getCatalogPriceFromPage();
+    }
+    if (catalog == null || !isFinite(catalog) || catalog <= 0) return null;
+    var now = discountType === 'fixed' ? catalog - n : catalog * (1 - n / 100);
+    now = Math.round(Math.max(0, now) * 100) / 100;
+    if (!(now < catalog - 0.0001)) return null;
+    return { was: catalog, now: now };
+  }
+
   var OFFER_PDP_MESSAGE_ATTR = 'data-ripx-offer-pdp-message';
   var OFFER_PDP_TEST_ATTR = 'data-ripx-offer-test';
+  var OFFER_PDP_STACK_ATTR = 'data-ripx-offer-pdp';
+  var OFFER_PDP_CUTOUT_ATTR = 'data-ripx-offer-pdp-cutout';
+  var OFFER_PDP_HOST_PAINTED_ATTR = 'data-ripx-offer-cutout-painted';
   var OFFER_PDP_STYLE_ID = 'ripx-offer-pdp-message-style';
   var OFFER_PDP_RELATED_SEL =
     '.recommended-products,.related-products,product-recommendations,.product-recommendations,[data-section-type="recently-viewed"],[id*="related"],[id*="recommend"],[id*="complementary"],.complementary-products';
@@ -11550,7 +11596,11 @@
       var style = document.createElement('style');
       style.id = OFFER_PDP_STYLE_ID;
       style.textContent =
-        '[data-ripx-offer-pdp-message]{display:block;flex-basis:100%;width:100%;max-width:36em;margin:.4em 0 0;padding:0;font:inherit;font-size:.9em;line-height:1.35;font-weight:600;color:inherit;letter-spacing:normal;}';
+        '[data-ripx-offer-pdp]{display:block;flex-basis:100%;width:100%;max-width:36em;margin:.4em 0 0;padding:0;}' +
+        '[data-ripx-offer-pdp-cutout]{display:flex;flex-wrap:wrap;align-items:baseline;gap:.45em .7em;margin:0 0 .2em;font:inherit;font-weight:600;line-height:1.3;}' +
+        '[data-ripx-offer-pdp-cutout] s{opacity:.72;font-weight:500;}' +
+        '[data-ripx-offer-pdp-message]{display:block;flex-basis:100%;width:100%;max-width:36em;margin:.4em 0 0;padding:0;font:inherit;font-size:.9em;line-height:1.35;font-weight:600;color:inherit;letter-spacing:normal;}' +
+        '[data-ripx-offer-pdp] [data-ripx-offer-pdp-message]{margin:.15em 0 0;}';
       (document.head || document.documentElement).appendChild(style);
     } catch (eStyle) {}
   }
@@ -11642,6 +11692,178 @@
     return themed || el;
   }
 
+  function resolveOfferPdpLightHost(el) {
+    var node = el;
+    while (node) {
+      var root = node.getRootNode && node.getRootNode();
+      if (root && root !== node && root.host) {
+        node = root.host;
+        continue;
+      }
+      break;
+    }
+    return resolveOfferPdpMessageHost(node);
+  }
+
+  function isOfferPdpInjectedNode(node) {
+    return !!(
+      node &&
+      node.hasAttribute &&
+      (node.hasAttribute(OFFER_PDP_STACK_ATTR) ||
+        node.hasAttribute(OFFER_PDP_MESSAGE_ATTR) ||
+        node.hasAttribute(OFFER_PDP_CUTOUT_ATTR))
+    );
+  }
+
+  function queryInOfferPdpHost(host, sel) {
+    var found = [];
+    function collect(root) {
+      if (!root || !root.querySelectorAll) return;
+      try {
+        root.querySelectorAll(sel).forEach(function (el) {
+          found.push(el);
+        });
+      } catch (eQ) {}
+    }
+    collect(host);
+    try {
+      if (host && host.shadowRoot) collect(host.shadowRoot);
+    } catch (eSh) {}
+    return found;
+  }
+
+  function rememberOfferPdpOrigText(el) {
+    if (!el || !el.getAttribute) return;
+    if (el.getAttribute('data-ripx-offer-orig-text') != null) return;
+    el.setAttribute('data-ripx-offer-orig-text', el.textContent || '');
+  }
+
+  function restoreOfferPdpOrigText(el) {
+    if (!el || !el.getAttribute) return;
+    if (el.getAttribute('data-ripx-offer-orig-text') == null) return;
+    el.textContent = el.getAttribute('data-ripx-offer-orig-text') || '';
+    el.removeAttribute('data-ripx-offer-orig-text');
+  }
+
+  function paintThemeOfferCutout(host, wasDisplay, nowDisplay, testId) {
+    if (!host || !wasDisplay || !nowDisplay) return false;
+    var priceRoot = host;
+    try {
+      if (
+        host.matches &&
+        !host.matches('.price, product-price, sale-price') &&
+        host.querySelector
+      ) {
+        priceRoot = host.querySelector('.price, product-price, sale-price') || host;
+      }
+    } catch (eRoot) {}
+    var saleNow = queryInOfferPdpHost(priceRoot, '.price-item--sale').filter(function (el) {
+      var tag = el.tagName && String(el.tagName).toUpperCase();
+      return tag !== 'S' && tag !== 'DEL' && tag !== 'STRIKE';
+    })[0];
+    if (!saleNow) {
+      saleNow = queryInOfferPdpHost(priceRoot, '.price__sale .price-item--last')[0];
+    }
+    var saleWas =
+      queryInOfferPdpHost(priceRoot, '.price__sale s.price-item--regular')[0] ||
+      queryInOfferPdpHost(priceRoot, '.price__sale s')[0] ||
+      queryInOfferPdpHost(priceRoot, 's.price-item--regular')[0] ||
+      queryInOfferPdpHost(priceRoot, '.compare-at-price')[0] ||
+      queryInOfferPdpHost(priceRoot, '.price-item--compare')[0];
+    var horizonNow = null;
+    try {
+      if (priceRoot.tagName && String(priceRoot.tagName).toLowerCase() === 'product-price') {
+        horizonNow = queryInOfferPdpHost(priceRoot, '.price')[0];
+      }
+    } catch (eHz) {}
+
+    if (saleNow || saleWas) {
+      if (priceRoot.classList && !priceRoot.classList.contains('price--on-sale')) {
+        priceRoot.classList.add('price--on-sale');
+        priceRoot.setAttribute('data-ripx-offer-added-onsale', '1');
+      }
+      if (saleWas) {
+        rememberOfferPdpOrigText(saleWas);
+        saleWas.textContent = wasDisplay;
+      } else if (saleNow && saleNow.parentNode) {
+        saleWas = document.createElement('s');
+        saleWas.className = 'price-item price-item--regular';
+        saleWas.setAttribute('data-ripx-offer-cutout-created', '1');
+        saleNow.parentNode.insertBefore(saleWas, saleNow);
+        saleWas.textContent = wasDisplay;
+      }
+      if (saleNow) {
+        rememberOfferPdpOrigText(saleNow);
+        saleNow.textContent = nowDisplay;
+      }
+      priceRoot.setAttribute(OFFER_PDP_HOST_PAINTED_ATTR, '1');
+      priceRoot.setAttribute('data-ripx-offer-cutout-test', String(testId || ''));
+      return true;
+    }
+
+    if (horizonNow) {
+      var cmp = queryInOfferPdpHost(priceRoot, '.compare-at-price')[0];
+      if (!cmp && horizonNow.parentNode) {
+        cmp = document.createElement('s');
+        cmp.className = 'compare-at-price';
+        cmp.setAttribute('data-ripx-offer-cutout-created', '1');
+        horizonNow.parentNode.insertBefore(cmp, horizonNow);
+      }
+      if (cmp) {
+        rememberOfferPdpOrigText(cmp);
+        cmp.textContent = wasDisplay;
+      }
+      rememberOfferPdpOrigText(horizonNow);
+      horizonNow.textContent = nowDisplay;
+      priceRoot.setAttribute(OFFER_PDP_HOST_PAINTED_ATTR, '1');
+      priceRoot.setAttribute('data-ripx-offer-cutout-test', String(testId || ''));
+      return true;
+    }
+
+    return false;
+  }
+
+  function restoreThemeOfferCutout(testId) {
+    var root = document.documentElement || document.body;
+    if (!root) return;
+    var id = String(testId || '').replace(/"/g, '');
+    var sel = id
+      ? '[' +
+        OFFER_PDP_HOST_PAINTED_ATTR +
+        '][data-ripx-offer-cutout-test="' +
+        id +
+        '"]'
+      : '[' + OFFER_PDP_HOST_PAINTED_ATTR + ']';
+    var hosts = [];
+    try {
+      hosts = querySelectorAllWithShadowRoots(root, sel);
+    } catch (eHosts) {}
+    hosts.forEach(function (host) {
+      if (!host) return;
+      if (host.getAttribute('data-ripx-offer-added-onsale') === '1' && host.classList) {
+        host.classList.remove('price--on-sale');
+        host.removeAttribute('data-ripx-offer-added-onsale');
+      }
+      queryInOfferPdpHost(host, '[data-ripx-offer-orig-text]').forEach(restoreOfferPdpOrigText);
+      if (host.getAttribute && host.getAttribute('data-ripx-offer-orig-text') != null) {
+        restoreOfferPdpOrigText(host);
+      }
+      queryInOfferPdpHost(host, '[data-ripx-offer-cutout-created]').forEach(function (el) {
+        if (el && el.parentNode) el.parentNode.removeChild(el);
+      });
+      host.removeAttribute(OFFER_PDP_HOST_PAINTED_ATTR);
+      host.removeAttribute('data-ripx-offer-cutout-test');
+    });
+  }
+
+  function catalogPriceFromOfferAnchor(anchor) {
+    var fromJson = getCatalogPriceFromPage();
+    if (fromJson != null && isFinite(fromJson) && fromJson > 0) return fromJson;
+    if (!anchor || !anchor.textContent) return null;
+    var parsed = parseVariantPrice(String(anchor.textContent || '').trim());
+    return parsed != null && isFinite(parsed) && parsed > 0 ? parsed : null;
+  }
+
   function shouldShowOfferMessageOnPdp(test) {
     if (!testTypeIsOffer(test)) return false;
     if (!isPdpProductPath()) return false;
@@ -11686,6 +11908,8 @@
     var fallbacks = [
       'product-price .price-item--sale',
       'product-price .price',
+      '.price__regular .price-item--regular',
+      '#price-template .price-item--regular',
       '.price-item--sale .price-item__sale',
       '.price-item--sale',
       '.price--on-sale .price-item--sale',
@@ -11761,13 +11985,27 @@
     }
   }
 
+  function queryOfferPdpStacks(testId) {
+    var root = document.documentElement || document.body;
+    if (!root) return [];
+    var id = String(testId || '').replace(/"/g, '');
+    var sel = id
+      ? '[' + OFFER_PDP_STACK_ATTR + '][' + OFFER_PDP_TEST_ATTR + '="' + id + '"]'
+      : '[' + OFFER_PDP_STACK_ATTR + ']';
+    try {
+      return querySelectorAllWithShadowRoots(root, sel);
+    } catch (eS) {
+      return [];
+    }
+  }
+
   function offerPdpMessageNodeNeedsMove(node, host) {
     if (!node || !host) return true;
     if (node.parentNode && host.parentNode && node.parentNode !== host.parentNode) return true;
     var walk = host.nextElementSibling;
     while (walk) {
       if (walk === node) return false;
-      if (!walk.hasAttribute || !walk.hasAttribute(OFFER_PDP_MESSAGE_ATTR)) break;
+      if (!isOfferPdpInjectedNode(walk)) break;
       walk = walk.nextElementSibling;
     }
     return true;
@@ -11776,12 +12014,7 @@
   function insertOfferPdpMessageAfterHost(host, node) {
     var last = host;
     var next = host.nextElementSibling;
-    while (
-      next &&
-      next.hasAttribute &&
-      next.hasAttribute(OFFER_PDP_MESSAGE_ATTR) &&
-      next !== node
-    ) {
+    while (next && isOfferPdpInjectedNode(next) && next !== node) {
       last = next;
       next = next.nextElementSibling;
     }
@@ -11790,9 +12023,16 @@
 
   function clearOfferPdpMessages(testId) {
     try {
+      restoreThemeOfferCutout(testId);
+      var stacks = queryOfferPdpStacks(testId);
+      stacks.forEach(function (node) {
+        if (node && node.parentNode) node.parentNode.removeChild(node);
+      });
       var nodes = queryOfferPdpMessageNodes(testId);
       nodes.forEach(function (node) {
-        if (node && node.parentNode) node.parentNode.removeChild(node);
+        if (node && node.parentNode && !node.closest('[' + OFFER_PDP_STACK_ATTR + ']')) {
+          node.parentNode.removeChild(node);
+        }
       });
     } catch (eClear) {}
   }
@@ -11879,6 +12119,18 @@
     try {
       _ripxOfferPdpMo.observe(root, { childList: true, subtree: true });
     } catch (eObs) {}
+    try {
+      var priceHosts = root.querySelectorAll
+        ? root.querySelectorAll('product-price, .price, sale-price')
+        : [];
+      Array.prototype.forEach.call(priceHosts, function (el) {
+        if (el && el.shadowRoot) {
+          try {
+            _ripxOfferPdpMo.observe(el.shadowRoot, { childList: true, subtree: true });
+          } catch (eShObs) {}
+        }
+      });
+    } catch (eHostsObs) {}
   }
 
   function scheduleOfferPdpMessageRetry(test, variant) {
@@ -11915,17 +12167,19 @@
       return;
     }
     var text = resolveOfferPdpDisplayText(variant && variant.config);
-    if (!text) {
+    var anchor = pickPdpOfferPriceAnchor(test);
+    var catalogHint = catalogPriceFromOfferAnchor(anchor);
+    var cutout = computeOfferPdpCutoutPrices(variant && variant.config, catalogHint);
+    if (!text && !cutout) {
       clearOfferPdpMessages(test && test.id);
       forgetOfferPdpApply(test && test.id);
       return;
     }
-    var anchor = pickPdpOfferPriceAnchor(test);
     if (!anchor) {
       if (!opts.skipRetry) scheduleOfferPdpMessageRetry(test, variant);
       return;
     }
-    var host = resolveOfferPdpMessageHost(anchor);
+    var host = resolveOfferPdpLightHost(anchor);
     if (!host || !host.insertAdjacentElement) {
       if (!opts.skipRetry) scheduleOfferPdpMessageRetry(test, variant);
       return;
@@ -11934,30 +12188,83 @@
     var testId = String((test && test.id) || '');
     _ripxOfferPdpRetry[testId] = 0;
     rememberOfferPdpApply(test, variant);
-    var existing = queryOfferPdpMessageNodes(testId)[0] || null;
-    if (!existing) {
-      existing = document.createElement('p');
-      existing.setAttribute(OFFER_PDP_MESSAGE_ATTR, '1');
-      existing.setAttribute('role', 'note');
-      existing.setAttribute('aria-live', 'polite');
+    var wasDisplay = cutout ? formatShopPrice(cutout.was) : '';
+    var nowDisplay = cutout ? formatShopPrice(cutout.now) : '';
+    var paintedTheme = false;
+    if (cutout && wasDisplay && nowDisplay) {
+      paintedTheme = paintThemeOfferCutout(host, wasDisplay, nowDisplay, testId);
+    } else {
+      restoreThemeOfferCutout(testId);
     }
-    existing.setAttribute(OFFER_PDP_TEST_ATTR, testId);
-    if (existing.textContent !== text) existing.textContent = text;
+    var stack = queryOfferPdpStacks(testId)[0] || null;
+    if (!stack) {
+      stack = document.createElement('div');
+      stack.setAttribute(OFFER_PDP_STACK_ATTR, '1');
+    }
+    stack.setAttribute(OFFER_PDP_TEST_ATTR, testId);
+    var cutoutEl = null;
+    try {
+      cutoutEl = stack.querySelector('[' + OFFER_PDP_CUTOUT_ATTR + ']');
+    } catch (eCut) {}
+    if (cutout && wasDisplay && nowDisplay && !paintedTheme) {
+      if (!cutoutEl) {
+        cutoutEl = document.createElement('span');
+        cutoutEl.setAttribute(OFFER_PDP_CUTOUT_ATTR, '1');
+        if (stack.firstChild) stack.insertBefore(cutoutEl, stack.firstChild);
+        else stack.appendChild(cutoutEl);
+      }
+      cutoutEl.textContent = '';
+      var wasNode = document.createElement('s');
+      wasNode.textContent = wasDisplay;
+      var nowNode = document.createElement('span');
+      nowNode.setAttribute('data-ripx-offer-pdp-now', '1');
+      nowNode.textContent = nowDisplay;
+      cutoutEl.appendChild(wasNode);
+      cutoutEl.appendChild(nowNode);
+    } else if (cutoutEl && cutoutEl.parentNode) {
+      cutoutEl.parentNode.removeChild(cutoutEl);
+    }
+    var existing = null;
+    try {
+      existing = stack.querySelector('[' + OFFER_PDP_MESSAGE_ATTR + ']');
+    } catch (eMsg) {}
+    if (text) {
+      if (!existing) {
+        existing = document.createElement('p');
+        existing.setAttribute(OFFER_PDP_MESSAGE_ATTR, '1');
+        existing.setAttribute('role', 'note');
+        existing.setAttribute('aria-live', 'polite');
+        stack.appendChild(existing);
+      }
+      existing.setAttribute(OFFER_PDP_TEST_ATTR, testId);
+      if (existing.textContent !== text) existing.textContent = text;
+    } else if (existing && existing.parentNode) {
+      existing.parentNode.removeChild(existing);
+    }
     try {
       var hostStyle = window.getComputedStyle ? window.getComputedStyle(host) : null;
-      if (hostStyle && hostStyle.color) existing.style.color = hostStyle.color;
+      if (hostStyle && hostStyle.color) {
+        stack.style.color = hostStyle.color;
+        if (existing) existing.style.color = hostStyle.color;
+      }
     } catch (eColor) {}
-    if (offerPdpMessageNodeNeedsMove(existing, host)) {
+    if (offerPdpMessageNodeNeedsMove(stack, host)) {
       try {
-        insertOfferPdpMessageAfterHost(host, existing);
+        insertOfferPdpMessageAfterHost(host, stack);
       } catch (eIns) {
         return;
       }
     }
     try {
-      var dupes = queryOfferPdpMessageNodes(testId);
+      var dupes = queryOfferPdpStacks(testId);
       dupes.forEach(function (node) {
-        if (node !== existing && node.parentNode) node.parentNode.removeChild(node);
+        if (node !== stack && node.parentNode) node.parentNode.removeChild(node);
+      });
+      var loose = queryOfferPdpMessageNodes(testId);
+      loose.forEach(function (node) {
+        if (node && node.parentNode && node.parentNode !== stack) {
+          node.parentNode.removeChild(node);
+        }
       });
     } catch (eDup) {}
     if (!opts.skipObserver) armOfferPdpMessageObserver();
@@ -14849,6 +15156,9 @@
     window.__RIPX_TEST_HOOKS__.resolveOfferMessageFromConfig = resolveOfferMessageFromConfig;
     window.__RIPX_TEST_HOOKS__.resolveOfferPdpDisplayText = resolveOfferPdpDisplayText;
     window.__RIPX_TEST_HOOKS__.resolveOfferPdpMessageHost = resolveOfferPdpMessageHost;
+    window.__RIPX_TEST_HOOKS__.resolveOfferPdpLightHost = resolveOfferPdpLightHost;
+    window.__RIPX_TEST_HOOKS__.computeOfferPdpCutoutPrices = computeOfferPdpCutoutPrices;
+    window.__RIPX_TEST_HOOKS__.paintThemeOfferCutout = paintThemeOfferCutout;
     window.__RIPX_TEST_HOOKS__.upsertOfferPdpMessage = upsertOfferPdpMessage;
     window.__RIPX_TEST_HOOKS__.shouldShowOfferMessageOnPdp = shouldShowOfferMessageOnPdp;
     window.__RIPX_TEST_HOOKS__.isPrimaryOfferPdpTest = isPrimaryOfferPdpTest;
