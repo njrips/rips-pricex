@@ -3,19 +3,23 @@ export const PUBLIC_ROUTES = {
   home: '/',
   privacy: '/privacy',
   terms: '/terms',
-  faq: '/faq',
   contact: '/contact',
+  /** CLI / shop-handle utility. Not linked from marketing — install is App Store. */
+  login: '/auth/login',
+  /** Operator ticket queue. Not a merchant Shopify login. */
+  staff: '/staff/login',
+};
+
+export const PUBLIC_ANCHORS = {
+  howItWorks: '/#how-it-works',
+  features: '/#features',
+  useCases: '/#use-cases',
+  faq: '/#faq',
+  cta: '/#cta',
 };
 
 export const PUBLIC_HEADER_NAV = [
-  { to: PUBLIC_ROUTES.home, label: 'Product', end: true },
-  { to: PUBLIC_ROUTES.faq, label: 'FAQ' },
-  { to: PUBLIC_ROUTES.contact, label: 'Contact' },
-];
-
-export const PUBLIC_FOOTER_NAV = [
-  { to: PUBLIC_ROUTES.privacy, label: 'Privacy' },
-  { to: PUBLIC_ROUTES.terms, label: 'Terms' },
-  { to: PUBLIC_ROUTES.faq, label: 'FAQ' },
-  { to: PUBLIC_ROUTES.contact, label: 'Contact' },
+  { to: PUBLIC_ANCHORS.howItWorks, label: 'How it works' },
+  { to: PUBLIC_ANCHORS.features, label: 'Features' },
+  { to: PUBLIC_ANCHORS.faq, label: 'FAQ' },
 ];

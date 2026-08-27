@@ -102,6 +102,18 @@ try {
   logger.warn('goalMetricRoutes not available', { message: err.message });
 }
 
+try {
+  const supportTicketRoutes = require('./routes/supportTicketRoutes');
+  const staffSupportRoutes = require('./routes/staffSupportRoutes');
+  const { requireStaff } = require('./middleware/staffContext');
+  const { requireSupportInternal } = require('./middleware/supportInternalContext');
+  app.use('/api/support/tickets', requireShop, requireSupportInternal, supportTicketRoutes);
+  app.use('/api/staff/support/tickets', requireStaff, staffSupportRoutes);
+  logger.info('Support ticket routes mounted');
+} catch (err) {
+  logger.warn('support ticket routes not available', { message: err.message });
+}
+
 // Track + proxy aliases
 try {
   const trackRoutes = require('./routes/trackSlimRoutes');

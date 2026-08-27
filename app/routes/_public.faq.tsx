@@ -1,16 +1,19 @@
 import type { MetaFunction } from "react-router";
+import { redirect } from "react-router";
 
 import { publicMeta } from "../components/public/publicMeta";
-import FaqPage from "../components/public/faq/FaqPage";
 
 export const meta: MetaFunction = () =>
   publicMeta({
     title: "FAQ",
-    description:
-      "Install, Setup, price surfaces, billing, and applying a winner in RipsPriceX.",
+    description: "Frequently asked questions about Pricify pricing experiments on Shopify.",
     path: "/faq",
   });
 
+export const loader = async () => {
+  throw redirect("/#faq");
+};
+
 export default function FaqRoute() {
-  return <FaqPage />;
+  return null;
 }

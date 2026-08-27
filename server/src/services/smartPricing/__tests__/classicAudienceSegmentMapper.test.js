@@ -49,4 +49,27 @@ describe('classicAudienceSegmentMapper', () => {
       classicAudienceToSegments({ countries: dump, countryMode: 'include' }).countries
     ).toEqual([]);
   });
+
+  it('maps exclude-only countries to audience rules without wiping include lists', () => {
+    const segs = classicAudienceToSegments({
+      countries: ['GB'],
+      countryMode: 'exclude',
+    });
+    expect(segs.countries).toEqual([]);
+    expect(segs.audience_rules).toEqual([
+      { type: 'exclude', field: 'country', value: ['GB'] },
+    ]);
+  });
+
+  it('keeps include and exclude lists independent', () => {
+    const segs = classicAudienceToSegments({
+      includeCountries: ['US', 'CA'],
+      excludeCountries: ['GB'],
+      countryMode: 'exclude',
+    });
+    expect(segs.countries).toEqual(['US', 'CA']);
+    expect(segs.audience_rules).toEqual([
+      { type: 'exclude', field: 'country', value: ['GB'] },
+    ]);
+  });
 });

@@ -1,7 +1,7 @@
 import React from 'react';
-import { Badge } from '@shopify/polaris';
+import { Badge, Button } from '@shopify/polaris';
 import { IconShield } from '../classicIcons';
-import { formatCountryAudienceValue } from '../countrySelection';
+import { formatSplitCountryAudienceLabel, resolveCountryLists } from '../countrySelection';
 import { formatAudienceFactValue } from '../classicExperimentDetailsHelpers';
 import styles from '../SmartPricingClassic.module.css';
 
@@ -9,7 +9,13 @@ function OnOff({ on }) {
   return on ? <Badge tone="success">On</Badge> : <Badge>Off</Badge>;
 }
 
-export default function ClassicSettingsTab({ settings, audience = null, metrics = null }) {
+export default function ClassicSettingsTab({
+  settings,
+  audience = null,
+  metrics = null,
+  onEdit = null,
+  onEditMetrics = null,
+}) {
   if (!settings) {
     return (
       <div className={styles.statCard}>
@@ -73,14 +79,29 @@ export default function ClassicSettingsTab({ settings, audience = null, metrics 
 
       {audience ? (
         <div className={styles.statCard}>
-          <h3 className={styles.panelTitle}>Traffic sources & exclusions</h3>
+          <div className={styles.detailFactHead}>
+            <h3 className={styles.panelTitle}>Traffic sources & exclusions</h3>
+            {onEdit ? (
+              <Button variant="plain" accessibilityLabel="Edit audience targeting" onClick={onEdit}>
+                Edit
+              </Button>
+            ) : null}
+          </div>
           <div className={styles.selectionBar}>
             <span>Sources ({audience.sourceMode || 'include'})</span>
             <strong>{formatAudienceFactValue(audience.sources, sourceFallback)}</strong>
           </div>
           <div className={styles.selectionBar}>
-            <span>Countries ({audience.countryMode || 'include'})</span>
-            <strong>{formatCountryAudienceValue(audience.countries, audience.countryMode)}</strong>
+            <span>Countries</span>
+            <strong>
+              {(() => {
+                const lists = resolveCountryLists(audience);
+                return formatSplitCountryAudienceLabel(
+                  lists.includeCountries,
+                  lists.excludeCountries
+                );
+              })()}
+            </strong>
           </div>
           <div className={styles.selectionBar}>
             <span>Exclude bots</span>
@@ -107,6 +128,15 @@ export default function ClassicSettingsTab({ settings, audience = null, metrics 
         <div className={styles.statCard}>
           <div className={styles.reviewHead}>
             <h3 className={styles.panelTitle}>Guardrail metrics</h3>
+            {onEditMetrics ? (
+              <Button
+                variant="plain"
+                accessibilityLabel="Edit guardrail metrics"
+                onClick={onEditMetrics}
+              >
+                Edit
+              </Button>
+            ) : null}
           </div>
           <div className={styles.detailTableWrap}>
             <table className={styles.guardTable}>

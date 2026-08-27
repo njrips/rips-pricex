@@ -6,11 +6,13 @@ import {
   collapseCountrySelection,
   formatCountryAudienceLabel,
   formatCountryAudienceValue,
+  formatSplitCountryAudienceLabel,
   getCountryFieldHelp,
   isAllCountriesOptionVisible,
   isAllCountriesSelected,
   isWorldwideCountrySelection,
   normalizeCountrySelection,
+  resolveCountryLists,
 } from '../countrySelection';
 
 describe('countrySelection', () => {
@@ -60,5 +62,45 @@ describe('countrySelection', () => {
     ).toBe('US, CA, DE, FR, JP, AU, NZ, IN + 1 more');
     expect(getCountryFieldHelp([], 'include')).toMatch(/worldwide/i);
     expect(getCountryFieldHelp([], 'exclude')).toMatch(/no countries excluded/i);
+    expect(getCountryFieldHelp(['US'], 'exclude', ['CA'])).toMatch(/other tab/i);
+  });
+
+  it('keeps include and exclude lists independent when switching tabs', () => {
+    expect(resolveCountryLists({ countries: ['US'], countryMode: 'include' })).toEqual({
+      includeCountries: ['US'],
+      excludeCountries: [],
+      countryMode: 'include',
+    });
+    expect(
+      resolveCountryLists({
+        includeCountries: ['US'],
+        excludeCountries: [],
+        countries: ['US'],
+        countryMode: 'exclude',
+      })
+    ).toEqual({
+      includeCountries: ['US'],
+      excludeCountries: [],
+      countryMode: 'exclude',
+    });
+    expect(
+      resolveCountryLists({
+        includeCountries: ['US'],
+        excludeCountries: ['GB', 'US'],
+        countryMode: 'exclude',
+      })
+    ).toEqual({
+      includeCountries: ['US'],
+      excludeCountries: ['GB'],
+      countryMode: 'exclude',
+    });
+  });
+
+  it('formats include and exclude together for review', () => {
+    expect(formatSplitCountryAudienceLabel(['US'], [])).toBe('Include: US');
+    expect(formatSplitCountryAudienceLabel([], ['GB'])).toBe('All countries · Exclude: GB');
+    expect(formatSplitCountryAudienceLabel(['US', 'CA'], ['GB'])).toBe(
+      'Include: US, CA · Exclude: GB'
+    );
   });
 });

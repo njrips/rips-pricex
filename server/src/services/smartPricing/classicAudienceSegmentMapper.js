@@ -114,6 +114,39 @@ function collapseIncludeCountries(list, mode) {
   return list;
 }
 
+function resolveCountryLists(audienceUi = {}) {
+  const source = audienceUi && typeof audienceUi === 'object' ? audienceUi : {};
+  const mode = normalizeMode(source.countryMode || source.country_mode);
+  const includeRaw = source.includeCountries ?? source.include_countries;
+  const excludeRaw = source.excludeCountries ?? source.exclude_countries;
+  const legacy = collapseIncludeCountries(normalizeCountryList(source.countries), mode);
+
+  let includeCountries = Array.isArray(includeRaw)
+    ? collapseIncludeCountries(normalizeCountryList(includeRaw), 'include')
+    : null;
+  let excludeCountries = Array.isArray(excludeRaw) ? normalizeCountryList(excludeRaw) : null;
+
+  if (includeCountries === null && excludeCountries === null) {
+    return {
+      includeCountries: mode === 'exclude' ? [] : legacy,
+      excludeCountries: mode === 'exclude' ? legacy : [],
+    };
+  }
+  if (includeCountries === null) {
+    includeCountries = mode === 'include' ? legacy : [];
+  }
+  if (excludeCountries === null) {
+    excludeCountries = mode === 'exclude' ? legacy : [];
+  }
+  if (!includeCountries.length && !excludeCountries.length && legacy.length) {
+    if (mode === 'exclude') excludeCountries = legacy;
+    else includeCountries = legacy;
+  }
+  const includeSet = new Set(includeCountries);
+  excludeCountries = excludeCountries.filter(code => !includeSet.has(code));
+  return { includeCountries, excludeCountries };
+}
+
 function segmentCustomerFromUi(segment) {
   const s = String(segment || 'all_visitors').trim();
   if (s === 'new_visitors' || s === 'new') {
@@ -129,13 +162,12 @@ function classicAudienceToSegments(audienceUi = {}, baseSegments = {}) {
   const base = baseSegments && typeof baseSegments === 'object' ? { ...baseSegments } : {};
   const deviceMode = normalizeMode(audienceUi.deviceMode || audienceUi.device_mode);
   const sourceMode = normalizeMode(audienceUi.sourceMode || audienceUi.source_mode);
-  const countryMode = normalizeMode(audienceUi.countryMode || audienceUi.country_mode);
+  const countryLists = resolveCountryLists(audienceUi);
   const devices = mapClassicDevicesToEngine(audienceUi.devices);
   const sourceValues = expandClassicSources(audienceUi.sources);
-  const countries = collapseIncludeCountries(
-    normalizeCountryList(audienceUi.countries),
-    countryMode
-  );
+  const excludeSet = new Set(countryLists.excludeCountries);
+  const countries = countryLists.includeCountries.filter(code => !excludeSet.has(code));
+  const excludeCountries = countryLists.excludeCountries;
   const traffic = clampTrafficPercent(
     audienceUi.trafficAllocation ?? audienceUi.traffic_allocation
   );
@@ -174,18 +206,16 @@ function classicAudienceToSegments(audienceUi = {}, baseSegments = {}) {
   }
 
   if (countries.length > 0) {
-    if (countryMode === 'include') {
-      out.countries = countries;
-    } else {
-      out.countries = [];
-      out.audience_rules = [
-        {
-          type: 'exclude',
-          field: 'country',
-          value: countries,
-        },
-      ];
-    }
+    out.countries = countries;
+  }
+  if (excludeCountries.length > 0) {
+    out.audience_rules = [
+      {
+        type: 'exclude',
+        field: 'country',
+        value: excludeCountries,
+      },
+    ];
   }
 
   return out;

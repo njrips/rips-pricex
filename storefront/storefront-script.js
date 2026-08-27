@@ -1639,6 +1639,25 @@
     return !resolvePreviewLooksLikeShipping(null);
   }
 
+  function previewFocusLooksLikeOffer() {
+    if (!(PREVIEW_MODE && PREVIEW_TEST_ID)) return false;
+    var hintedType = String(PREVIEW_TEST_TYPE || '')
+      .trim()
+      .toLowerCase();
+    if (hintedType === 'offer') return true;
+    if (hintedType === 'price' || hintedType === 'shipping' || hintedType === 'checkout') {
+      return false;
+    }
+    var embeddedOffer = Array.isArray(CONFIG.activeTests) ? CONFIG.activeTests : [];
+    for (var oi = 0; oi < embeddedOffer.length; oi += 1) {
+      var offerTest = embeddedOffer[oi];
+      if (offerTest && String(offerTest.id) === String(PREVIEW_TEST_ID)) {
+        return testTypeIsOffer(offerTest);
+      }
+    }
+    return false;
+  }
+
   function bootstrapAntiFlickerAndAssignment() {
     if (!hasValidConfig) return;
     var tests = getRuntimeActiveTestsForBootstrap();
@@ -7814,6 +7833,30 @@
   }
 
   /**
+   * Main product template root for PDP paint (price tests and offer messages).
+   */
+  function getMainProductRoot(pid) {
+    var id = pid ? String(pid) : '';
+    if (id) {
+      var byId =
+        document.querySelector('product-info[data-product-id="' + id + '"]') ||
+        document.querySelector('.product-single[data-product-id="' + id + '"]') ||
+        document.querySelector('main .product[data-product-id="' + id + '"]') ||
+        document.querySelector('[id^="MainProduct-"][data-product-id="' + id + '"]');
+      if (byId) return byId;
+    }
+    return (
+      document.querySelector('main product-info') ||
+      document.querySelector('product-info') ||
+      document.querySelector('[data-section-type="product-template"]') ||
+      document.querySelector('#MainProduct-template') ||
+      document.querySelector('[id^="MainProduct-"]') ||
+      document.querySelector('main .product-single') ||
+      document.querySelector('.product-template__container')
+    );
+  }
+
+  /**
    * Apply a price-test assignment to the product page.
    *
    * This function has two jobs: paint the main PDP price and prepare cart/checkout handoff data.
@@ -8156,17 +8199,7 @@
     ];
 
     function mainProductRoot() {
-      return (
-        document.querySelector('product-info[data-product-id="' + pid + '"]') ||
-        document.querySelector('.product-single[data-product-id="' + pid + '"]') ||
-        document.querySelector('main product-info') ||
-        document.querySelector('product-info') ||
-        document.querySelector('[data-section-type="product-template"]') ||
-        document.querySelector('#MainProduct-template') ||
-        document.querySelector('main .product[data-product-id="' + pid + '"]') ||
-        document.querySelector('main .product-single') ||
-        document.querySelector('.product-template__container')
-      );
+      return getMainProductRoot(pid);
     }
 
     var pdpPaintRoot = mainProductRoot();
@@ -11463,7 +11496,9 @@
     if (resolveExplicitOfferCodeFromConfig(config, 'config')) return true;
     if (discountType !== 'percent' && discountType !== 'fixed') return false;
     var numericValue = parseOfferDiscountValue(config);
-    return isFinite(numericValue) && numericValue > 0;
+    if (!isFinite(numericValue) || numericValue <= 0) return false;
+    if (discountType === 'percent' && numericValue > 100) return false;
+    return true;
   }
   function resolveOfferMessageFromConfig(config) {
     var candidates = getOfferConfigCandidates(config);
@@ -11475,6 +11510,465 @@
     }
     return '';
   }
+  function formatOfferRuleFromConfig(config) {
+    if (!isActionableOfferConfig(config)) return '';
+    var discountType = normalizeOfferDiscountType(config);
+    var n = parseOfferDiscountValue(config);
+    if (!isFinite(n) || n <= 0) return '';
+    if (discountType === 'fixed') {
+      var formatted = formatShopPrice(n);
+      return formatted ? formatted + ' off' : '';
+    }
+    if (discountType === 'percent') {
+      var whole = Math.abs(n - Math.round(n)) < 0.05;
+      return String(whole ? Math.round(n) : n) + '% off';
+    }
+    return '';
+  }
+  function resolveOfferPdpDisplayText(config) {
+    var custom = resolveOfferMessageFromConfig(config);
+    if (custom) return custom;
+    return formatOfferRuleFromConfig(config);
+  }
+
+  var OFFER_PDP_MESSAGE_ATTR = 'data-ripx-offer-pdp-message';
+  var OFFER_PDP_TEST_ATTR = 'data-ripx-offer-test';
+  var OFFER_PDP_STYLE_ID = 'ripx-offer-pdp-message-style';
+  var OFFER_PDP_RELATED_SEL =
+    '.recommended-products,.related-products,product-recommendations,.product-recommendations,[data-section-type="recently-viewed"],[id*="related"],[id*="recommend"],[id*="complementary"],.complementary-products';
+  var OFFER_PDP_CART_UI_SEL =
+    '.cart-drawer,.cart-notification,#CartDrawer,#mini-cart,.mini-cart,[data-cart-drawer],.drawer--cart,aside.mini-cart,cart-drawer,.header__cart,.site-header__cart,predictive-search';
+  var _ripxOfferPdpRetry = {};
+  var _ripxOfferPdpMo = null;
+  var _ripxOfferPdpMoRoot = null;
+  var _ripxOfferPdpMoTimer = null;
+  var _ripxOfferPdpLastApplyByTest = {};
+
+  function ensureOfferPdpMessageStyles() {
+    try {
+      if (document.getElementById(OFFER_PDP_STYLE_ID)) return;
+      var style = document.createElement('style');
+      style.id = OFFER_PDP_STYLE_ID;
+      style.textContent =
+        '[data-ripx-offer-pdp-message]{display:block;flex-basis:100%;width:100%;max-width:36em;margin:.4em 0 0;padding:0;font:inherit;font-size:.9em;line-height:1.35;font-weight:600;color:inherit;letter-spacing:normal;}';
+      (document.head || document.documentElement).appendChild(style);
+    } catch (eStyle) {}
+  }
+
+  function offerPdpAttrSelector(testId) {
+    var id = String(testId || '').replace(/"/g, '');
+    if (!id) return '[' + OFFER_PDP_MESSAGE_ATTR + ']';
+    return '[' + OFFER_PDP_MESSAGE_ATTR + '][' + OFFER_PDP_TEST_ATTR + '="' + id + '"]';
+  }
+
+  function isOfferPdpCartUiNode(el) {
+    return !!(el && el.closest && el.closest(OFFER_PDP_CART_UI_SEL));
+  }
+
+  function isOfferPdpCompareAtNode(el) {
+    if (!el) return true;
+    var tagU = el.tagName && String(el.tagName).toUpperCase();
+    if (tagU === 'S' || tagU === 'DEL' || tagU === 'STRIKE') return true;
+    try {
+      if (
+        el.matches &&
+        el.matches(
+          '.price--compare, .price-item--compare, [data-compare-at-price], .compare-at, .compare-at-price, .was-price'
+        )
+      ) {
+        return true;
+      }
+      if (
+        el.closest &&
+        el.closest('.price--compare, .compare-at, .compare-at-price, .was-price')
+      ) {
+        return true;
+      }
+      var lineStyle = window.getComputedStyle ? window.getComputedStyle(el) : null;
+      if (
+        lineStyle &&
+        String(lineStyle.textDecorationLine || lineStyle.textDecoration || '').indexOf(
+          'line-through'
+        ) !== -1
+      ) {
+        return true;
+      }
+    } catch (eCmp) {}
+    return false;
+  }
+
+  function isOfferPdpNodeVisible(el) {
+    if (!el) return false;
+    try {
+      if (el.getClientRects && el.getClientRects().length > 0) {
+        var selfStyle = window.getComputedStyle ? window.getComputedStyle(el) : null;
+        if (selfStyle && (selfStyle.display === 'none' || selfStyle.visibility === 'hidden')) {
+          return false;
+        }
+        return true;
+      }
+      var node = el;
+      while (node && node.nodeType === 1) {
+        var style = window.getComputedStyle ? window.getComputedStyle(node) : null;
+        if (style && (style.display === 'none' || style.visibility === 'hidden')) return false;
+        node = node.parentElement;
+      }
+    } catch (eVis) {}
+    return false;
+  }
+
+  function isOfferPdpForeignProductNode(el) {
+    var current = getCurrentProductId();
+    if (!el || !current || !el.closest) return false;
+    var owner = el.closest('[data-product-id]');
+    if (!owner) return false;
+    var hid = owner.getAttribute('data-product-id');
+    if (!hid) return false;
+    var a = toNumericProductId(current);
+    var b = toNumericProductId(hid);
+    if (!a || !b) return false;
+    return String(a) !== String(b);
+  }
+
+  function resolveOfferPdpMessageHost(el) {
+    if (!el || typeof el.closest !== 'function') return el || null;
+    var horizon = el.closest('product-price');
+    if (horizon) return horizon;
+    var priceBlock = el.closest('.price');
+    if (priceBlock) return priceBlock;
+    var themed = el.closest(
+      '.product__price, .product-price, .product-single__price, [data-price-container], sale-price, .product-form__price'
+    );
+    return themed || el;
+  }
+
+  function shouldShowOfferMessageOnPdp(test) {
+    if (!testTypeIsOffer(test)) return false;
+    if (!isPdpProductPath()) return false;
+    var tt = getNormalizedTargetType(test);
+    if (!isProductScopeTargetType(tt) && tt !== 'collection') return false;
+    var current = getCurrentProductId();
+    if (!current) return false;
+    if (isExcludedProductForTest(test, current)) return false;
+    if (tt === 'all-products' || tt === 'all_products') return true;
+    if (tt === 'collection') {
+      var cids =
+        test.targetIds ||
+        (test.targetId || test.target_id ? [test.targetId || test.target_id] : []);
+      return productBelongsToPriceTestCollections(cids);
+    }
+    return matchesTarget(test);
+  }
+
+  /**
+   * Classic launches one offer experiment per product. If leftover running tests
+   * also match this PDP, only the newest (or preview-focused) message is painted.
+   */
+  function isPrimaryOfferPdpTest(test) {
+    if (!testTypeIsOffer(test)) return false;
+    if (PREVIEW_MODE && PREVIEW_TEST_ID) {
+      return String(test.id) === String(PREVIEW_TEST_ID);
+    }
+    var tests = Array.isArray(CONFIG.activeTests) ? CONFIG.activeTests : [];
+    var i;
+    for (i = 0; i < tests.length; i += 1) {
+      var candidate = tests[i];
+      if (!shouldShowOfferMessageOnPdp(candidate)) continue;
+      return String(candidate.id) === String(test && test.id);
+    }
+    return true;
+  }
+
+  function collectPdpOfferPriceCandidates(test, root) {
+    var selectors = [];
+    appendConfiguredRegistrySelectors(selectors, 'pdp', 'regular', test);
+    var pid = toNumericProductId(getCurrentProductId());
+    var fallbacks = [
+      'product-price .price-item--sale',
+      'product-price .price',
+      '.price-item--sale .price-item__sale',
+      '.price-item--sale',
+      '.price--on-sale .price-item--sale',
+      '.price-item--regular .price-item__regular',
+      '.price-item--regular .price:not(.price--compare)',
+      '.price-item__regular',
+      '.price-item--regular',
+      '.product__price',
+      '.product-single__price',
+      '#ProductPrice',
+      '#productPrice',
+      '[data-product-price]',
+      '.product-price .money',
+      '.price .price-item--regular',
+      '.price .money',
+      'span[data-type="price"]',
+    ];
+    if (pid) {
+      fallbacks.unshift(
+        'product-info[data-product-id="' + pid + '"] .price-item--sale',
+        '[data-product-id="' + pid + '"] .price-item--sale',
+        'product-info[data-product-id="' + pid + '"] .price-item--regular .price-item__regular',
+        '[data-product-id="' + pid + '"] .price-item--regular .price-item__regular',
+        'product-info[data-product-id="' + pid + '"] .price-item--regular',
+        '[data-product-id="' + pid + '"] .price-item--regular'
+      );
+    }
+    fallbacks.forEach(function (sel) {
+      if (selectors.indexOf(sel) === -1) selectors.push(sel);
+    });
+    var seen = [];
+    var out = [];
+    selectors.forEach(function (sel) {
+      try {
+        querySelectorAllWithShadowRoots(root, sel).forEach(function (el) {
+          if (!el || seen.indexOf(el) !== -1) return;
+          if (isOfferPdpCartUiNode(el)) return;
+          if (el.closest && el.closest(OFFER_PDP_RELATED_SEL)) return;
+          if (isOfferPdpForeignProductNode(el)) return;
+          if (isOfferPdpCompareAtNode(el)) return;
+          seen.push(el);
+          out.push(el);
+        });
+      } catch (eSel) {}
+    });
+    return out;
+  }
+
+  function pickPdpOfferPriceAnchor(test) {
+    var pid = toNumericProductId(getCurrentProductId());
+    var root = getMainProductRoot(pid) || document.querySelector('main') || document.body;
+    if (!root) return null;
+    var candidates = collectPdpOfferPriceCandidates(test, root);
+    var i;
+    for (i = 0; i < candidates.length; i += 1) {
+      if (isLeafPricePaintNode(candidates[i]) && isOfferPdpNodeVisible(candidates[i])) {
+        return candidates[i];
+      }
+    }
+    for (i = 0; i < candidates.length; i += 1) {
+      if (isOfferPdpNodeVisible(candidates[i])) return candidates[i];
+    }
+    return candidates[0] || null;
+  }
+
+  function queryOfferPdpMessageNodes(testId) {
+    var root = document.documentElement || document.body;
+    if (!root) return [];
+    try {
+      return querySelectorAllWithShadowRoots(root, offerPdpAttrSelector(testId));
+    } catch (eQ) {
+      return [];
+    }
+  }
+
+  function offerPdpMessageNodeNeedsMove(node, host) {
+    if (!node || !host) return true;
+    if (node.parentNode && host.parentNode && node.parentNode !== host.parentNode) return true;
+    var walk = host.nextElementSibling;
+    while (walk) {
+      if (walk === node) return false;
+      if (!walk.hasAttribute || !walk.hasAttribute(OFFER_PDP_MESSAGE_ATTR)) break;
+      walk = walk.nextElementSibling;
+    }
+    return true;
+  }
+
+  function insertOfferPdpMessageAfterHost(host, node) {
+    var last = host;
+    var next = host.nextElementSibling;
+    while (
+      next &&
+      next.hasAttribute &&
+      next.hasAttribute(OFFER_PDP_MESSAGE_ATTR) &&
+      next !== node
+    ) {
+      last = next;
+      next = next.nextElementSibling;
+    }
+    last.insertAdjacentElement('afterend', node);
+  }
+
+  function clearOfferPdpMessages(testId) {
+    try {
+      var nodes = queryOfferPdpMessageNodes(testId);
+      nodes.forEach(function (node) {
+        if (node && node.parentNode) node.parentNode.removeChild(node);
+      });
+    } catch (eClear) {}
+  }
+
+  function rememberedOfferPdpApplyCount() {
+    var n = 0;
+    for (var key in _ripxOfferPdpLastApplyByTest) {
+      if (Object.prototype.hasOwnProperty.call(_ripxOfferPdpLastApplyByTest, key)) n += 1;
+    }
+    return n;
+  }
+
+  function rememberOfferPdpApply(test, variant) {
+    var id = String((test && test.id) || '');
+    if (!id) return;
+    _ripxOfferPdpLastApplyByTest[id] = { test: test, variant: variant };
+  }
+
+  function forgetOfferPdpApply(testId) {
+    var id = String(testId || '');
+    if (id) delete _ripxOfferPdpLastApplyByTest[id];
+    if (!rememberedOfferPdpApplyCount()) disconnectOfferPdpMessageObserver();
+  }
+
+  function resetOfferPdpApplyState() {
+    _ripxOfferPdpLastApplyByTest = {};
+    disconnectOfferPdpMessageObserver();
+  }
+
+  function reapplyRememberedOfferPdpMessages() {
+    for (var key in _ripxOfferPdpLastApplyByTest) {
+      if (!Object.prototype.hasOwnProperty.call(_ripxOfferPdpLastApplyByTest, key)) continue;
+      var entry = _ripxOfferPdpLastApplyByTest[key];
+      if (!entry) continue;
+      upsertOfferPdpMessage(entry.test, entry.variant, { skipRetry: true, skipObserver: true });
+    }
+    if (rememberedOfferPdpApplyCount()) armOfferPdpMessageObserver();
+  }
+
+  function installOfferPdpThemeListeners() {
+    if (window.__RIPX_OFFER_PDP_THEME_LISTENERS__) return;
+    window.__RIPX_OFFER_PDP_THEME_LISTENERS__ = true;
+    function onThemeMorph() {
+      setTimeout(function () {
+        reapplyRememberedOfferPdpMessages();
+      }, 40);
+    }
+    ['variant:change', 'shopify:section:load', 'product:update'].forEach(function (evt) {
+      try {
+        document.addEventListener(evt, onThemeMorph);
+      } catch (eListen) {}
+    });
+  }
+
+  function disconnectOfferPdpMessageObserver() {
+    if (_ripxOfferPdpMoTimer) {
+      clearTimeout(_ripxOfferPdpMoTimer);
+      _ripxOfferPdpMoTimer = null;
+    }
+    if (_ripxOfferPdpMo) {
+      try {
+        _ripxOfferPdpMo.disconnect();
+      } catch (eDisc) {}
+      _ripxOfferPdpMo = null;
+      _ripxOfferPdpMoRoot = null;
+    }
+  }
+
+  function armOfferPdpMessageObserver() {
+    if (typeof MutationObserver === 'undefined') return;
+    var pid = toNumericProductId(getCurrentProductId());
+    var root = getMainProductRoot(pid);
+    if (!root) return;
+    if (_ripxOfferPdpMo && _ripxOfferPdpMoRoot === root) return;
+    disconnectOfferPdpMessageObserver();
+    _ripxOfferPdpMoRoot = root;
+    _ripxOfferPdpMo = new MutationObserver(function () {
+      if (_ripxOfferPdpMoTimer) return;
+      _ripxOfferPdpMoTimer = setTimeout(function () {
+        _ripxOfferPdpMoTimer = null;
+        reapplyRememberedOfferPdpMessages();
+      }, 48);
+    });
+    try {
+      _ripxOfferPdpMo.observe(root, { childList: true, subtree: true });
+    } catch (eObs) {}
+  }
+
+  function scheduleOfferPdpMessageRetry(test, variant) {
+    var id = String((test && test.id) || '');
+    if (!id) return;
+    var attempts = _ripxOfferPdpRetry[id] || 0;
+    if (attempts >= 8) return;
+    _ripxOfferPdpRetry[id] = attempts + 1;
+    setTimeout(function () {
+      upsertOfferPdpMessage(test, variant, { skipRetry: false });
+    }, 90 * _ripxOfferPdpRetry[id]);
+  }
+
+  function upsertOfferPdpMessage(test, variant, options) {
+    var opts = options && typeof options === 'object' ? options : {};
+    if (!testTypeIsOffer(test)) return;
+    if (!isPdpProductPath()) {
+      clearOfferPdpMessages();
+      resetOfferPdpApplyState();
+      return;
+    }
+    if (!shouldShowOfferMessageOnPdp(test)) {
+      if (!getCurrentProductId() && !opts.skipRetry) {
+        scheduleOfferPdpMessageRetry(test, variant);
+        return;
+      }
+      clearOfferPdpMessages(test && test.id);
+      forgetOfferPdpApply(test && test.id);
+      return;
+    }
+    if (!isPrimaryOfferPdpTest(test)) {
+      clearOfferPdpMessages(test && test.id);
+      forgetOfferPdpApply(test && test.id);
+      return;
+    }
+    var text = resolveOfferPdpDisplayText(variant && variant.config);
+    if (!text) {
+      clearOfferPdpMessages(test && test.id);
+      forgetOfferPdpApply(test && test.id);
+      return;
+    }
+    var anchor = pickPdpOfferPriceAnchor(test);
+    if (!anchor) {
+      if (!opts.skipRetry) scheduleOfferPdpMessageRetry(test, variant);
+      return;
+    }
+    var host = resolveOfferPdpMessageHost(anchor);
+    if (!host || !host.insertAdjacentElement) {
+      if (!opts.skipRetry) scheduleOfferPdpMessageRetry(test, variant);
+      return;
+    }
+    ensureOfferPdpMessageStyles();
+    var testId = String((test && test.id) || '');
+    _ripxOfferPdpRetry[testId] = 0;
+    rememberOfferPdpApply(test, variant);
+    var existing = queryOfferPdpMessageNodes(testId)[0] || null;
+    if (!existing) {
+      existing = document.createElement('p');
+      existing.setAttribute(OFFER_PDP_MESSAGE_ATTR, '1');
+      existing.setAttribute('role', 'note');
+      existing.setAttribute('aria-live', 'polite');
+    }
+    existing.setAttribute(OFFER_PDP_TEST_ATTR, testId);
+    if (existing.textContent !== text) existing.textContent = text;
+    try {
+      var hostStyle = window.getComputedStyle ? window.getComputedStyle(host) : null;
+      if (hostStyle && hostStyle.color) existing.style.color = hostStyle.color;
+    } catch (eColor) {}
+    if (offerPdpMessageNodeNeedsMove(existing, host)) {
+      try {
+        insertOfferPdpMessageAfterHost(host, existing);
+      } catch (eIns) {
+        return;
+      }
+    }
+    try {
+      var dupes = queryOfferPdpMessageNodes(testId);
+      dupes.forEach(function (node) {
+        if (node !== existing && node.parentNode) node.parentNode.removeChild(node);
+      });
+    } catch (eDup) {}
+    if (!opts.skipObserver) armOfferPdpMessageObserver();
+    installOfferPdpThemeListeners();
+  }
+
+  function applyOfferPdpMessageOnAssignedVariant(test, variant) {
+    if (!test || !variant || !testTypeIsOffer(test)) return;
+    upsertOfferPdpMessage(test, variant);
+  }
+
   function getOfferTargetProductIdsForCartAttrs(test) {
     var tt = getNormalizedTargetType(test);
     if (tt !== 'product') return null;
@@ -11497,7 +11991,7 @@
         discountType: normalizeOfferDiscountType(cfg),
         discountValue: parseOfferDiscountValue(cfg),
         codeName: resolveOfferCodeForVariant(test, variant).codeName,
-        message: resolveOfferMessageFromConfig(cfg),
+        message: resolveOfferPdpDisplayText(cfg),
       };
     }
     injectPriceTestCartAttributes(
@@ -11910,7 +12404,7 @@
     if (!isActionableOfferConfig(variant.config)) return;
     var codeInfo = resolveOfferCodeForVariant(test, variant);
     var codeName = codeInfo.codeName;
-    var offerMessage = resolveOfferMessageFromConfig(variant && variant.config);
+    var offerMessage = resolveOfferPdpDisplayText(variant && variant.config);
     if (!codeName && !offerMessage) return;
 
     var container = getOfferCodeNoticeContainer();
@@ -12138,6 +12632,7 @@
     if (!test) return false;
     if (matchesTarget(test)) return true;
     if (testTypeIsOffer(test) && shouldShowOfferCodeOnCart(test)) return true;
+    if (testTypeIsOffer(test) && shouldShowOfferMessageOnPdp(test)) return true;
     if (testTypeIsShipping(test) && shouldShowShippingTestOnCart(test)) return true;
     if (shouldRunPriceTestOnListingSurface(test)) return true;
     if (shouldRunShippingTestOnListingSurface(test)) return true;
@@ -13056,6 +13551,7 @@
                     .then(function (variant) {
                       if (!variant) return;
                       injectOfferTestCartAttributes(extraTest, variant);
+                      applyOfferPdpMessageOnAssignedVariant(extraTest, variant);
                     })
                     .catch(function () {});
                 }
@@ -13135,6 +13631,10 @@
             if (isPdpProductPath() && !getCurrentProductId()) {
               schedulePdpReadyReapply('init_missing_product_id');
             }
+            if (testTypeIsOffer(test) && !(isPdpProductPath() && !getCurrentProductId())) {
+              clearOfferPdpMessages(test.id);
+              forgetOfferPdpApply(test.id);
+            }
             if (shouldTrackAntiFlicker) markAntiFlickerDone();
             return;
           }
@@ -13187,6 +13687,7 @@
                   if (shouldInjectOfferAttrs) {
                     injectOfferTestCartAttributes(test, variant);
                   }
+                  applyOfferPdpMessageOnAssignedVariant(test, variant);
                 }
                 if (testTypeIsShipping(test)) {
                   var shippingTargetType = getNormalizedTargetType(test);
@@ -13358,6 +13859,7 @@
                   }
                 } else if (previewTestForCart && testTypeIsOffer(previewTestForCart)) {
                   injectOfferTestCartAttributes(previewTestForCart, variant);
+                  applyOfferPdpMessageOnAssignedVariant(previewTestForCart, variant);
                 } else {
                   injectPriceTestCartAttributes(
                     PREVIEW_TEST_ID,
@@ -13407,7 +13909,12 @@
         }
 
         function shouldScheduleDynamicPriceReapply() {
-          if (PREVIEW_MODE && PREVIEW_TEST_ID && !previewFocusLooksLikePrice()) {
+          if (
+            PREVIEW_MODE &&
+            PREVIEW_TEST_ID &&
+            !previewFocusLooksLikePrice() &&
+            !previewFocusLooksLikeOffer()
+          ) {
             return false;
           }
           return true;
@@ -13423,9 +13930,17 @@
           if (!hasValidConfig || !CONFIG.activeTests || CONFIG.activeTests.length === 0) return;
           CONFIG.activeTests.forEach(function (test) {
             if (testTypeIsOffer(test)) {
+              if (!shouldRunPriceTestOnCurrentPage(test)) {
+                if (!(isPdpProductPath() && !getCurrentProductId())) {
+                  clearOfferPdpMessages(test.id);
+                  forgetOfferPdpApply(test.id);
+                }
+                return;
+              }
               getVariant(test.id).then(function (offerVariant) {
                 if (!offerVariant) return;
                 injectOfferTestCartAttributes(test, offerVariant);
+                applyOfferPdpMessageOnAssignedVariant(test, offerVariant);
               });
               return;
             }
@@ -13497,7 +14012,13 @@
           setTimeout(auditRipxPaintParityStampedNodes, 150);
         }
         function hasDynamicPriceSurface() {
-          return isProductListingSurface() || isCartSurface() || hasCartUiInDom() || !!cartUiRoot();
+          return (
+            isProductListingSurface() ||
+            isCartSurface() ||
+            hasCartUiInDom() ||
+            !!cartUiRoot() ||
+            isPdpProductPath()
+          );
         }
         function schedulePriceReapply(delayMs, dynamicOnly) {
           if (!shouldScheduleDynamicPriceReapply()) return;
@@ -14326,6 +14847,17 @@
     window.__RIPX_TEST_HOOKS__.getUrlShopifyVariantId = getUrlShopifyVariantId;
     window.__RIPX_TEST_HOOKS__.getSelectedVariantId = getSelectedVariantId;
     window.__RIPX_TEST_HOOKS__.resolveOfferMessageFromConfig = resolveOfferMessageFromConfig;
+    window.__RIPX_TEST_HOOKS__.resolveOfferPdpDisplayText = resolveOfferPdpDisplayText;
+    window.__RIPX_TEST_HOOKS__.resolveOfferPdpMessageHost = resolveOfferPdpMessageHost;
+    window.__RIPX_TEST_HOOKS__.upsertOfferPdpMessage = upsertOfferPdpMessage;
+    window.__RIPX_TEST_HOOKS__.shouldShowOfferMessageOnPdp = shouldShowOfferMessageOnPdp;
+    window.__RIPX_TEST_HOOKS__.isPrimaryOfferPdpTest = isPrimaryOfferPdpTest;
+    window.__RIPX_TEST_HOOKS__.applyOfferPdpMessageOnAssignedVariant =
+      applyOfferPdpMessageOnAssignedVariant;
+    window.__RIPX_TEST_HOOKS__.reapplyRememberedOfferPdpMessages =
+      reapplyRememberedOfferPdpMessages;
+    window.__RIPX_TEST_HOOKS__.previewFocusLooksLikeOffer = previewFocusLooksLikeOffer;
+    window.__RIPX_TEST_HOOKS__.resolveOfferPdpMessageHost = resolveOfferPdpMessageHost;
     window.__RIPX_TEST_HOOKS__.getRipxBuyerVisibleLineSummary = getRipxBuyerVisibleLineSummary;
     window.__RIPX_TEST_HOOKS__.getRipxCartFormTargetProductIds = function () {
       return Array.isArray(_ripxCartFormTargetProductIds)

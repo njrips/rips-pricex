@@ -5,7 +5,6 @@ const PATHS = [
   PUBLIC_ROUTES.home,
   PUBLIC_ROUTES.privacy,
   PUBLIC_ROUTES.terms,
-  PUBLIC_ROUTES.faq,
   PUBLIC_ROUTES.contact,
 ];
 

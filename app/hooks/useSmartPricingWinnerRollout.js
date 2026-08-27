@@ -1,6 +1,8 @@
 import { useCallback, useState } from 'react';
 import { applySmartPricingWinner, previewSmartPricingWinner } from '../services/smartPricingApi';
-import { updateInboxPlan } from '../components/SmartPricing/smartPricingConstants';
+import { appendActivityToPlans, createActivityEntry } from '../components/SmartPricing/classic/classicActivity';
+import { isOfferExperimentType } from '../components/SmartPricing/classic/offerSelection';
+import { readInboxPlans, updateInboxPlan } from '../components/SmartPricing/smartPricingConstants';
 import { patchServerInboxPlan } from '../components/SmartPricing/smartPricingInboxPersistence';
 
 export function useSmartPricingWinnerRollout(shopDomain) {
@@ -46,13 +48,34 @@ export function useSmartPricingWinnerRollout(shopDomain) {
       setError('');
       try {
         const data = await applySmartPricingWinner(shopDomain, testId, { publishToShopify });
+        const appliedAt = new Date().toISOString();
+        const current =
+          (readInboxPlans(shopDomain) || []).find(row => row.id === plan.id) || plan;
+        const isOffer = isOfferExperimentType(
+          current.experiment_type || current.metadata?.experiment_type
+        );
+        const [stamped] = appendActivityToPlans(
+          [{ ...current, status: 'applied', winner_applied_at: appliedAt }],
+          createActivityEntry({
+            id: 'winner_applied',
+            kind: 'complete',
+            title: isOffer ? 'Test completed' : 'Winner rolled out',
+            detail: isOffer
+              ? 'Offer test finished — catalog prices were not changed'
+              : 'Winning price applied to Shopify',
+            at: appliedAt,
+            actor: current.owner_name || current.created_by_name || 'You',
+          })
+        );
         updateInboxPlan(shopDomain, plan.id, {
           status: 'applied',
-          winner_applied_at: new Date().toISOString(),
+          winner_applied_at: appliedAt,
+          metadata: stamped.metadata,
         });
         patchServerInboxPlan(shopDomain, plan.id, {
           status: 'applied',
-          winner_applied_at: new Date().toISOString(),
+          winner_applied_at: appliedAt,
+          metadata: stamped.metadata,
         }).catch(() => {});
         setPreview(null);
         return data;

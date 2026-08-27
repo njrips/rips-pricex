@@ -116,7 +116,28 @@ describe('classicExperimentHelpers', () => {
     expect(enriched.audience.inherit_from_shop_defaults).toBe(false);
     expect(enriched.audience.segments.customer).toBe('new');
     expect(enriched.audience.traffic_allocation).toBe(35);
+    expect(enriched.audience.include_countries).toEqual(['US']);
+    expect(enriched.audience.segments.countries).toEqual(['US']);
     expect(enriched.launch_preferences.auto_start).toBe(true);
+  });
+
+  it('remaps include and exclude country lists onto launch segments', () => {
+    const [enriched] = enrichInboxPlansForLaunch([
+      {
+        id: 'p2',
+        metadata: {
+          audience_ui: {
+            includeCountries: ['US', 'CA'],
+            excludeCountries: ['GB'],
+            countryMode: 'exclude',
+          },
+        },
+      },
+    ]);
+    expect(enriched.audience.segments.countries).toEqual(['US', 'CA']);
+    expect(enriched.audience.segments.audience_rules).toEqual([
+      { type: 'exclude', field: 'country', value: ['GB'] },
+    ]);
   });
 
   it('stamps experiment_type from metadata onto the plan root for list launch', () => {

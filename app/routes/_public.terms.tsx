@@ -10,9 +10,9 @@ import {
 
 export const meta: MetaFunction = () =>
   publicMeta({
-    title: "Terms",
+    title: "Terms of Service",
     description:
-      "How merchants use RipsPriceX on Shopify — install, App Pricing, Setup, and applying a winner.",
+      "How merchants use Pricify on Shopify — install, App Pricing, Setup, and applying a winner.",
     path: "/terms",
   });
 
@@ -20,7 +20,7 @@ export default function TermsRoute() {
   return (
     <PublicDocPage
       eyebrow="Legal"
-      title="Terms"
+      title="Terms of Service"
       updated={TERMS_UPDATED}
       intro={TERMS_INTRO}
       sections={TERMS_SECTIONS}

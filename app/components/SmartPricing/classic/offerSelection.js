@@ -122,6 +122,19 @@ export function formatOfferSummary(raw = {}, currency = 'USD') {
   return `${rule} — ${message}`;
 }
 
+/**
+ * Copy shown under the PDP price for an assigned offer arm.
+ * Custom message wins; otherwise the formatted offer amount so treatment is visible
+ * even when the merchant left the optional field empty.
+ */
+export function resolveOfferPdpDisplayText(raw = {}, currency = 'USD') {
+  const cfg = normalizeOfferConfig(raw);
+  if (cfg.offer_message) return cfg.offer_message;
+  if (!isActionableOfferConfig(cfg)) return '';
+  const rule = formatOfferRule(cfg, currency);
+  return rule === 'No offer' ? '' : rule;
+}
+
 export function offerByArmFromPlanArms(arms = []) {
   const out = {};
   (Array.isArray(arms) ? arms : []).forEach((arm, index) => {

@@ -13,6 +13,8 @@ export type AppOutletContext = {
   devEntitleAll?: boolean;
   /** Dev-only storefront password from .env (never shown in the Settings UI) */
   devStorefrontPassword?: string;
+  /** Shopify staff email from the Admin session when present */
+  staffEmail?: string;
 };
 
 function apiRoot(ctx: AppOutletContext) {

@@ -18,6 +18,7 @@ export const ROUTES = {
   appPlan: (_domain) => '/app/settings?tab=plan',
   /** Shopify App Pricing welcome URL target (Partner Dashboard) */
   appWelcome: (_domain) => '/app/welcome',
+  appHelp: (_domain) => '/app/help',
 };
 
 export default ROUTES;

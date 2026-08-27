@@ -106,14 +106,97 @@ export function formatCountryAudienceLabel(codes, mode = 'include', maxVisible =
   return `Include: ${formatCountryCodesSummary(list, maxVisible)}`;
 }
 
-export function getCountryFieldHelp(codes, mode = 'include') {
-  const list = collapseCountrySelection(codes, mode);
-  if (String(mode).toLowerCase() === 'exclude') {
-    return list.length
-      ? 'Visitors in these countries will be excluded.'
-      : 'No countries excluded — visitors worldwide can enter. Pick countries to exclude.';
+export function normalizeCountryMode(raw) {
+  return String(raw || 'include').toLowerCase() === 'exclude' ? 'exclude' : 'include';
+}
+
+/**
+ * Include and Exclude keep independent lists. Legacy drafts only have
+ * `countries` + `countryMode` — those seed the active tab.
+ */
+export function resolveCountryLists(state = {}) {
+  const source = state && typeof state === 'object' ? state : {};
+  const mode = normalizeCountryMode(source.countryMode || source.country_mode);
+  const includeRaw = source.includeCountries ?? source.include_countries;
+  const excludeRaw = source.excludeCountries ?? source.exclude_countries;
+  const legacy = collapseCountrySelection(
+    Array.isArray(source.countries) ? source.countries : [],
+    mode
+  );
+
+  let includeCountries = Array.isArray(includeRaw)
+    ? collapseCountrySelection(includeRaw, 'include')
+    : null;
+  let excludeCountries = Array.isArray(excludeRaw)
+    ? collapseCountrySelection(excludeRaw, 'exclude')
+    : null;
+
+  if (includeCountries === null && excludeCountries === null) {
+    return {
+      includeCountries: mode === 'exclude' ? [] : legacy,
+      excludeCountries: mode === 'exclude' ? legacy : [],
+      countryMode: mode,
+    };
   }
-  return list.length
-    ? 'Only visitors in these countries will enter. Choose All countries to go worldwide again.'
-    : 'All countries — visitors worldwide can enter. Pick a country to narrow.';
+
+  if (includeCountries === null) {
+    includeCountries = mode === 'include' ? legacy : [];
+  }
+  if (excludeCountries === null) {
+    excludeCountries = mode === 'exclude' ? legacy : [];
+  }
+
+  if (!includeCountries.length && !excludeCountries.length && legacy.length) {
+    if (mode === 'exclude') excludeCountries = legacy;
+    else includeCountries = legacy;
+  }
+
+  const includeSet = new Set(includeCountries);
+  excludeCountries = excludeCountries.filter(code => !includeSet.has(code));
+
+  return { includeCountries, excludeCountries, countryMode: mode };
+}
+
+export function activeCountryList(state = {}) {
+  const lists = resolveCountryLists(state);
+  return lists.countryMode === 'exclude' ? lists.excludeCountries : lists.includeCountries;
+}
+
+export function blockedCountryCodes(state = {}) {
+  const lists = resolveCountryLists(state);
+  return lists.countryMode === 'exclude' ? lists.includeCountries : lists.excludeCountries;
+}
+
+export function formatSplitCountryAudienceLabel(
+  includeCountries = [],
+  excludeCountries = [],
+  maxVisible = 8
+) {
+  const include = collapseCountrySelection(includeCountries, 'include');
+  const exclude = collapseCountrySelection(excludeCountries, 'exclude');
+  const parts = [];
+  if (include.length) parts.push(`Include: ${formatCountryCodesSummary(include, maxVisible)}`);
+  else parts.push(ALL_COUNTRIES_LABEL);
+  if (exclude.length) parts.push(`Exclude: ${formatCountryCodesSummary(exclude, maxVisible)}`);
+  return parts.join(' · ');
+}
+
+export function getCountryFieldHelp(codes, mode = 'include', blockedCodes = []) {
+  const list = collapseCountrySelection(codes, mode);
+  const blocked = collapseCountrySelection(blockedCodes, 'include').length;
+  const otherTab =
+    blocked > 0 ? ' Countries already on the other tab are hidden from this list.' : '';
+  if (String(mode).toLowerCase() === 'exclude') {
+    return (
+      (list.length
+        ? 'Visitors in these countries will be excluded.'
+        : 'No countries excluded — visitors worldwide can enter. Pick countries to exclude.') +
+      otherTab
+    );
+  }
+  return (
+    (list.length
+      ? 'Only visitors in these countries will enter. Choose All countries to go worldwide again.'
+      : 'All countries — visitors worldwide can enter. Pick a country to narrow.') + otherTab
+  );
 }

@@ -4,6 +4,8 @@
  * @see https://apps.shopify.com
  */
 
+export const DEFAULT_APP_STORE_LISTING_URL = 'https://apps.shopify.com/ripspricex';
+
 export function buildAppStoreListingUrl({
   handle = '',
   overrideUrl = '',
@@ -25,9 +27,12 @@ export function buildAppStoreListingUrl({
   return `https://apps.shopify.com/${encodeURIComponent(slug)}`;
 }
 
-export function resolveAppStoreListingUrlFromEnv(env = process.env) {
+export function resolveAppStoreListingUrlFromEnv(env) {
+  const source =
+    env ||
+    (typeof process !== 'undefined' && process.env ? process.env : {});
   return buildAppStoreListingUrl({
-    handle: env.SHOPIFY_APP_HANDLE || env.VITE_SHOPIFY_APP_HANDLE || 'ripspricex',
-    overrideUrl: env.SHOPIFY_APP_STORE_URL || env.VITE_SHOPIFY_APP_STORE_URL || '',
+    handle: source.SHOPIFY_APP_HANDLE || source.VITE_SHOPIFY_APP_HANDLE || 'ripspricex',
+    overrideUrl: source.SHOPIFY_APP_STORE_URL || source.VITE_SHOPIFY_APP_STORE_URL || '',
   });
 }

@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  DEFAULT_APP_STORE_LISTING_URL,
   buildAppStoreListingUrl,
   resolveAppStoreListingUrlFromEnv,
 } from '../appStoreListingUrl.js';
@@ -36,9 +37,10 @@ describe('buildAppStoreListingUrl', () => {
 
 describe('resolveAppStoreListingUrlFromEnv', () => {
   it('defaults to ripspricex when unset', () => {
-    assert.equal(
-      resolveAppStoreListingUrlFromEnv({}),
-      'https://apps.shopify.com/ripspricex'
-    );
+    assert.equal(resolveAppStoreListingUrlFromEnv({}), DEFAULT_APP_STORE_LISTING_URL);
+  });
+
+  it('does not require process.env when called with no args', () => {
+    assert.equal(resolveAppStoreListingUrlFromEnv(), DEFAULT_APP_STORE_LISTING_URL);
   });
 });

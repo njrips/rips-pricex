@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useNavigate, useOutletContext, useSearchParams } from 'react-router';
+import { Link, useNavigate, useOutletContext, useSearchParams } from 'react-router';
 import { Badge, Banner, Button, Checkbox, Select, TextField } from '@shopify/polaris';
 import type { AppOutletContext } from '../lib/api.client';
 import { rpxApi } from '../lib/api.client';
@@ -12,6 +12,7 @@ import SettingsPlanPanel, {
 import useCartTransformStatus from '../hooks/useCartTransformStatus';
 import useCheckoutDiscountStatus from '../hooks/useCheckoutDiscountStatus';
 import ClassicAdminShell from '../components/SmartPricing/classic/ClassicAdminShell';
+import { withCurrentEmbeddedSearch } from '../utils/shopifyEmbeddedSearch';
 import styles from '../components/SmartPricing/classic/SmartPricingClassic.module.css';
 
 type TabId = 'plan' | 'guardrails' | 'installation' | 'price-surfaces';
@@ -483,6 +484,10 @@ export default function SettingsPage() {
           autoMapRequestToken={autoMapToken}
         />
       ) : null}
+
+      <p className={styles.help} style={{ marginTop: 20 }}>
+        <Link to={withCurrentEmbeddedSearch(searchParams, '/app/help')}>Get support</Link>
+      </p>
     </ClassicAdminShell>
   );
 }

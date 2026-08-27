@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { collapseCountrySelection } from './countrySelection';
+import { collapseCountrySelection, resolveCountryLists } from './countrySelection';
+import { estimateSignificanceDuration } from './estimateSignificanceDuration';
 import { useNavigate, useSearchParams } from 'react-router';
 import PageShell from '../../shared/PageShell';
 import { ROUTES } from '../../../constants';
@@ -54,6 +55,7 @@ import {
 import {
   formatCatalogLoadError,
   getProductsStepContinueState,
+  normalizeAiPriceBand,
   resolvePricingRows,
 } from './productsStepReadiness';
 import {
@@ -173,6 +175,7 @@ export default function ClassicCreateWizard() {
   const bulkDirection = activePricing.bulkDirection || 'increase';
   const aiMinPct = activePricing.aiMinPct ?? '10';
   const aiMaxPct = activePricing.aiMaxPct ?? '20';
+  const aiUnit = activePricing.aiUnit === 'amount' ? 'amount' : 'percent';
 
   const patchActivePricing = useCallback(
     patch => {
@@ -184,6 +187,7 @@ export default function ClassicCreateWizard() {
           bulkDirection: 'increase',
           aiMinPct: '10',
           aiMaxPct: '20',
+          aiUnit: 'percent',
           ...(prev[activeArmId] || {}),
           ...patch,
         },
@@ -196,6 +200,25 @@ export default function ClassicCreateWizard() {
     mode => patchActivePricing({ priceMode: mode }),
     [patchActivePricing]
   );
+  const markArmsAiSuggested = useCallback(armIds => {
+    const ids = (armIds || []).map(id => String(id || '').trim()).filter(Boolean);
+    if (!ids.length) return;
+    setPricingByArm(prev => {
+      const next = { ...prev };
+      ids.forEach(id => {
+        next[id] = {
+          priceMode: 'ai',
+          bulkPercent: '10',
+          bulkDirection: 'increase',
+          aiMinPct: '10',
+          aiMaxPct: '20',
+          ...(next[id] || {}),
+          aiSuggested: true,
+        };
+      });
+      return next;
+    });
+  }, []);
   const setBulkPercent = useCallback(
     value => patchActivePricing({ bulkPercent: String(value) }),
     [patchActivePricing]
@@ -205,11 +228,19 @@ export default function ClassicCreateWizard() {
     [patchActivePricing]
   );
   const setAiMinPct = useCallback(
-    value => patchActivePricing({ aiMinPct: String(value) }),
+    value => patchActivePricing({ aiMinPct: String(value), aiSuggested: false }),
     [patchActivePricing]
   );
   const setAiMaxPct = useCallback(
-    value => patchActivePricing({ aiMaxPct: String(value) }),
+    value => patchActivePricing({ aiMaxPct: String(value), aiSuggested: false }),
+    [patchActivePricing]
+  );
+  const setAiUnit = useCallback(
+    value =>
+      patchActivePricing({
+        aiUnit: value === 'amount' ? 'amount' : 'percent',
+        aiSuggested: false,
+      }),
     [patchActivePricing]
   );
   const [hypothesisBusy, setHypothesisBusy] = useState(false);
@@ -422,7 +453,10 @@ export default function ClassicCreateWizard() {
             const nextAudience = {
               ...createDefaultAudienceState(),
               ...first.metadata.audience_ui,
-              ...normalizeClassicAudienceTargeting(first.metadata.audience_ui),
+              ...normalizeClassicAudienceTargeting({
+                ...(first.audience || {}),
+                ...first.metadata.audience_ui,
+              }),
               primaryMetric: normalizePrimaryMetric(first.metadata.audience_ui.primaryMetric),
               secondaryMetrics: normalizeSecondaryEvents(
                 first.metadata.audience_ui.secondaryMetrics
@@ -546,7 +580,7 @@ export default function ClassicCreateWizard() {
   }, [loadGuardrails, shopDomain]);
 
   useEffect(() => {
-    if (step === 2) loadOpportunities();
+    if (step >= 2) loadOpportunities();
   }, [step, loadOpportunities]);
 
   const buildBatch = useCallback(async () => {
@@ -683,7 +717,18 @@ export default function ClassicCreateWizard() {
   const enrichPlansForLaunch = useCallback(
     (sourcePlans = plans, { status = 'queued' } = {}) => {
       const audienceState = audience || createDefaultAudienceState();
+      const countryLists = resolveCountryLists(audienceState);
       const mappedSegments = segmentsFromClassicAudience(audienceState, globalAudience);
+      const durationEstimate = estimateSignificanceDuration({
+        plans: sourcePlans,
+        opportunities,
+        selectedIds,
+        pickMode,
+        maxSelection,
+        variations,
+        trafficAllocation: audienceState.trafficAllocation,
+        minSampleSize: audienceState.minSampleSize || minSampleSize,
+      });
       const goalPayload = buildClassicGoalPayload(audienceState);
       const stamped = stampClassicExperimentMetadata(sourcePlans, {
         experimentId,
@@ -705,6 +750,13 @@ export default function ClassicCreateWizard() {
               : goalPayload;
         return {
           ...plan,
+          statistical_design: {
+            ...(plan.statistical_design || {}),
+            estimated_duration_days:
+              durationEstimate.days ?? plan.statistical_design?.estimated_duration_days ?? null,
+            estimate_detail: durationEstimate.detail,
+            traffic_allocation: durationEstimate.trafficAllocation,
+          },
           audience: {
             inherit_from_shop_defaults: false,
             segments: mappedSegments,
@@ -712,12 +764,16 @@ export default function ClassicCreateWizard() {
             devices: audienceState.devices,
             sources: audienceState.sources,
             countries: collapseCountrySelection(
-              audienceState.countries,
-              audienceState.countryMode || 'include'
+              countryLists.countryMode === 'exclude'
+                ? countryLists.excludeCountries
+                : countryLists.includeCountries,
+              countryLists.countryMode
             ),
+            include_countries: countryLists.includeCountries,
+            exclude_countries: countryLists.excludeCountries,
             device_mode: audienceState.deviceMode || 'include',
             source_mode: audienceState.sourceMode || 'include',
-            country_mode: audienceState.countryMode || 'include',
+            country_mode: countryLists.countryMode,
           },
           goal: {
             ...planGoal,
@@ -747,6 +803,11 @@ export default function ClassicCreateWizard() {
       name,
       hypothesis,
       experimentType,
+      opportunities,
+      selectedIds,
+      pickMode,
+      maxSelection,
+      variations,
     ]
   );
 
@@ -781,15 +842,12 @@ export default function ClassicCreateWizard() {
 
   const applyLocalAiBandFallback = useCallback(
     ({ unit = 'percent' } = {}) => {
-      const minRaw = Math.abs(Number(aiMinPct) || (unit === 'amount' ? 1 : 10));
-      const maxRaw = Math.abs(Number(aiMaxPct) || (unit === 'amount' ? 5 : 20));
-      const min = Math.min(minRaw, maxRaw);
-      const max = Math.max(minRaw, maxRaw);
-      let targetArms = variations.filter((row, i) => i > 0 && row.id !== 'control');
-      const active = variations[activeArmIndex];
-      if (active && active.id !== 'control' && activeArmIndex > 0) {
-        targetArms = [active];
-      }
+      const band = normalizeAiPriceBand(aiMinPct, aiMaxPct);
+      const min = band?.min ?? Math.abs(Number(aiMinPct) || (unit === 'amount' ? 1 : 10));
+      const max = band?.max ?? Math.abs(Number(aiMaxPct) || (unit === 'amount' ? 5 : 20));
+      const testArms = variations.filter((row, i) => i > 0 && row.id !== 'control');
+      const aiArms = testArms.filter(arm => (pricingByArm[arm.id]?.priceMode || '') === 'ai');
+      const targetArms = aiArms.length ? aiArms : testArms;
       const rows = resolvePricingRows({
         opportunities,
         selectedIds,
@@ -828,17 +886,19 @@ export default function ClassicCreateWizard() {
             : 'Local band fallback (AI unavailable).',
         busy: false,
       });
+      markArmsAiSuggested(targetArms.map(arm => arm.id));
       return true;
     },
     [
       aiMinPct,
       aiMaxPct,
       variations,
-      activeArmIndex,
+      pricingByArm,
       opportunities,
       selectedIds,
       pickMode,
       maxSelection,
+      markArmsAiSuggested,
     ]
   );
 
@@ -850,12 +910,9 @@ export default function ClassicCreateWizard() {
         pickMode,
         maxSelection,
       });
-      let targetArms = variations.filter((row, i) => i > 0 && row.id !== 'control');
-      // Prefer regenerating the active variation; fall back to all test arms.
-      const active = variations[activeArmIndex];
-      if (active && active.id !== 'control' && activeArmIndex > 0) {
-        targetArms = [active];
-      }
+      const testArms = variations.filter((row, i) => i > 0 && row.id !== 'control');
+      const aiArms = testArms.filter(arm => (pricingByArm[arm.id]?.priceMode || '') === 'ai');
+      const targetArms = aiArms.length ? aiArms : testArms;
       if (!rows.length || !targetArms.length) {
         setAiPriceMeta({
           source: null,
@@ -870,21 +927,25 @@ export default function ClassicCreateWizard() {
         setActiveArmIndex(1);
       }
 
-      let minPct = Math.abs(Number(aiMinPct) || 10);
-      let maxPct = Math.abs(Number(aiMaxPct) || 20);
+      const band = normalizeAiPriceBand(aiMinPct, aiMaxPct);
+      if (!band) {
+        setAiPriceMeta({
+          source: null,
+          summary: 'Enter a min and max greater than 0, then click Suggest.',
+          busy: false,
+        });
+        return;
+      }
+      let minPct = band.min;
+      let maxPct = band.max;
       if (unit === 'amount') {
         // API bands are %-based; convert $ min/max using average base price.
         const bases = rows
           .map(row => Number(row.current_price ?? row.price) || 0)
           .filter(n => n > 0);
         const avg = bases.length ? bases.reduce((sum, n) => sum + n, 0) / bases.length : 100;
-        minPct = (Math.abs(Number(aiMinPct) || 0) / avg) * 100;
-        maxPct = (Math.abs(Number(aiMaxPct) || 0) / avg) * 100;
-        if (maxPct < minPct) {
-          const swap = minPct;
-          minPct = maxPct;
-          maxPct = swap;
-        }
+        minPct = (band.min / avg) * 100;
+        maxPct = (band.max / avg) * 100;
         if (maxPct <= 0) {
           minPct = 5;
           maxPct = 15;
@@ -946,6 +1007,13 @@ export default function ClassicCreateWizard() {
               : 'No AI prices returned — try Re-suggest or adjust the band.'),
           busy: false,
         });
+        if (suggestions.length) {
+          markArmsAiSuggested(
+            suggestions
+              .map(item => item?.arm_id)
+              .filter(Boolean)
+          );
+        }
         settled = true;
       } catch {
         if (requestId !== aiSuggestRequestId.current) return;
@@ -971,6 +1039,8 @@ export default function ClassicCreateWizard() {
       audience?.primaryMetric,
       shopGuardrails,
       applyLocalAiBandFallback,
+      pricingByArm,
+      markArmsAiSuggested,
     ]
   );
 
@@ -1026,8 +1096,15 @@ export default function ClassicCreateWizard() {
   ]);
 
   const handleAudienceChange = useCallback(nextAudience => {
-    setAudience(nextAudience);
-    setGlobalAudience(segmentsFromClassicAudience(nextAudience));
+    const next = {
+      ...(nextAudience || createDefaultAudienceState()),
+      ...normalizeClassicAudienceTargeting(nextAudience),
+    };
+    if (next.minSampleSize !== null && next.minSampleSize !== undefined) {
+      setMinSampleSize(String(next.minSampleSize));
+    }
+    setAudience(next);
+    setGlobalAudience(segmentsFromClassicAudience(next));
   }, []);
 
   const suggestAudienceWithAi = useCallback(async () => {
@@ -1139,6 +1216,7 @@ export default function ClassicCreateWizard() {
         priceOverrides,
         experimentType,
         offerByArm,
+        priceMode,
       });
       if (gate.disabled) {
         setMessageType('error');
@@ -1242,6 +1320,7 @@ export default function ClassicCreateWizard() {
         priceOverrides,
         experimentType,
         offerByArm,
+        priceMode,
       }),
     [
       loadingProducts,
@@ -1254,12 +1333,35 @@ export default function ClassicCreateWizard() {
       priceOverrides,
       experimentType,
       offerByArm,
+      priceMode,
     ]
   );
 
-  const estimatedDays =
-    plans[0]?.statistical_design?.estimated_duration_days ||
-    Math.max(5, Math.round(14 * (50 / Math.max(5, Number(audience?.trafficAllocation) || 50))));
+  const significanceEstimate = useMemo(
+    () =>
+      estimateSignificanceDuration({
+        plans,
+        opportunities,
+        selectedIds,
+        pickMode,
+        maxSelection,
+        variations,
+        trafficAllocation: audience?.trafficAllocation,
+        minSampleSize: audience?.minSampleSize || minSampleSize,
+      }),
+    [
+      plans,
+      opportunities,
+      selectedIds,
+      pickMode,
+      maxSelection,
+      variations,
+      audience?.trafficAllocation,
+      audience?.minSampleSize,
+      minSampleSize,
+    ]
+  );
+  const estimatedDays = significanceEstimate.days;
 
   return (
     <PageShell message={message} messageType={messageType} onCloseMessage={() => setMessage('')}>
@@ -1321,7 +1423,10 @@ export default function ClassicCreateWizard() {
               );
             }}
             minSampleSize={minSampleSize}
-            onMinSampleSizeChange={setMinSampleSize}
+            onMinSampleSizeChange={value => {
+              setMinSampleSize(String(value));
+              setAudience(prev => ({ ...prev, minSampleSize: String(value) }));
+            }}
           />
         ) : null}
 
@@ -1373,12 +1478,16 @@ export default function ClassicCreateWizard() {
                     aiMaxPct: '20',
                     ...(prev[armId] || {}),
                     priceMode: mode,
+                    aiSuggested: mode === 'ai' ? false : prev[armId]?.aiSuggested,
                   },
                 }));
                 if (nextIndex >= 0) setActiveArmIndex(nextIndex);
                 return;
               }
-              setPriceMode(mode);
+              patchActivePricing({
+                priceMode: mode,
+                ...(mode === 'ai' ? { aiSuggested: false } : {}),
+              });
             }}
             priceOverrides={priceOverrides}
             onPriceOverrideChange={(key, value) =>
@@ -1395,6 +1504,10 @@ export default function ClassicCreateWizard() {
             onAiSuggest={applyAiBand}
             aiSuggestBusy={aiPriceMeta.busy}
             aiSuggestSummary={aiPriceMeta.summary}
+            aiSuggested={activePricing.aiSuggested === true}
+            onAiBandDirty={() => patchActivePricing({ aiSuggested: false })}
+            aiUnit={aiUnit}
+            onAiUnitChange={setAiUnit}
             aiMinPct={aiMinPct}
             aiMaxPct={aiMaxPct}
             onAiMinPctChange={setAiMinPct}
@@ -1416,6 +1529,7 @@ export default function ClassicCreateWizard() {
             onSuggestAi={suggestAudienceWithAi}
             suggestBusy={audienceAiBusy}
             shopDomain={shopDomain}
+            significanceEstimate={significanceEstimate}
           />
         ) : null}
 
@@ -1435,6 +1549,7 @@ export default function ClassicCreateWizard() {
             offerByArm={offerByArm}
             audience={audience}
             estimatedDays={estimatedDays}
+            estimatedTimeDetail={significanceEstimate.detail}
             checkoutReady={launchCheckoutReady}
             checkoutLoading={checkoutLoading}
             checkoutReadiness={checkoutReadiness}

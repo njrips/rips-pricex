@@ -174,6 +174,21 @@ describe('classicExperimentDetailsHelpers', () => {
     expect(buildMetricsSummary(plan).secondaryEvents).toEqual(['page_view']);
   });
 
+  it('hides the primary custom goal from secondary metric chips', () => {
+    const summary = buildMetricsSummary({
+      goal: {
+        primary_metric: 'vip_checkout',
+        secondary: [
+          { event_name: 'vip_checkout', label: 'VIP checkout', metric_role: 'primary' },
+          { event_name: 'page_view', label: 'Page view' },
+        ],
+        secondary_events: ['vip_checkout', 'page_view'],
+      },
+    });
+    expect(summary.secondaryEvents).toEqual(['page_view']);
+    expect(summary.secondary.map(item => item.event_name)).toEqual(['page_view']);
+  });
+
   it('attaches offer rules from plan arms or test variant config', () => {
     const plan = {
       price_arms: [
@@ -529,7 +544,8 @@ describe('classicExperimentDetailsHelpers', () => {
       test: { status: 'stopped', stopped_at: '2026-07-04T00:00:00.000Z', type: 'offer' },
     });
     expect(items.find(item => item.id === 'winner_applied')?.detail).toMatch(/catalog prices were not changed/);
-    expect(items.find(item => item.id === 'paused')?.detail).toBe('Leading variation identified');
+    expect(items.find(item => item.id === 'winner_ready')?.detail).toBe('Leading variation identified');
+    expect(items.find(item => item.id === 'paused')).toBeUndefined();
   });
 
   it('builds activity timeline newest first', () => {

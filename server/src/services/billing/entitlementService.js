@@ -64,6 +64,12 @@ async function markShopUninstalled(shopDomain) {
      WHERE shop_domain = $1 AND type IN ('price','pricing') AND status = 'running'`,
     [shopDomain]
   ).catch(() => {});
+  try {
+    const { deleteTicketsForShop } = require('../../models/supportTicket');
+    await deleteTicketsForShop(shopDomain);
+  } catch {
+    // Table may not exist until migrate:api runs 005_support_tickets.sql
+  }
 }
 
 async function setEntitlement(shopDomain, { status, planHandle }) {

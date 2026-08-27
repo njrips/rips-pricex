@@ -48,7 +48,13 @@ function measureMenuBox(triggerEl) {
  * Include + empty list = All countries (worldwide). That is persisted as [] —
  * never as ~250 ISO codes — so the field shows one chip, not every country.
  */
-export default function ClassicCountryMultiSelect({ value = [], onChange, mode = 'include' }) {
+export default function ClassicCountryMultiSelect({
+  value = [],
+  onChange,
+  mode = 'include',
+  blockedCodes = [],
+  disabled = false,
+}) {
   const selected = useMemo(() => collapseCountrySelection(value, mode), [value, mode]);
   const allSelected = isAllCountriesSelected(selected, mode);
   const noneExcluded = mode === 'exclude' && selected.length === 0;
@@ -61,17 +67,27 @@ export default function ClassicCountryMultiSelect({ value = [], onChange, mode =
   const inputRef = useRef(null);
 
   const selectedSet = useMemo(() => new Set(selected), [selected]);
+  const blockedSet = useMemo(
+    () =>
+      new Set(
+        (Array.isArray(blockedCodes) ? blockedCodes : [])
+          .map(code => normalizeCountryCode(code))
+          .filter(Boolean)
+      ),
+    [blockedCodes]
+  );
   const showAllOption = isAllCountriesOptionVisible(query, mode);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return ISO_COUNTRIES;
     return ISO_COUNTRIES.filter(row => {
-      const code = String(row.code).toLowerCase();
+      const code = String(row.code).toUpperCase();
+      if (blockedSet.has(code)) return false;
+      if (!q) return true;
       const name = String(row.name).toLowerCase();
-      return code.includes(q) || name.includes(q);
+      return code.toLowerCase().includes(q) || name.includes(q);
     });
-  }, [query]);
+  }, [query, blockedSet]);
 
   const optionCodes = useMemo(() => {
     const codes = filtered.map(row => String(row.code).toUpperCase());
@@ -109,15 +125,28 @@ export default function ClassicCountryMultiSelect({ value = [], onChange, mode =
       setOpen(false);
     };
     const onKey = e => {
-      if (e.key === 'Escape') setOpen(false);
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      setOpen(false);
     };
     document.addEventListener('mousedown', onDoc);
-    document.addEventListener('keydown', onKey);
+    document.addEventListener('keydown', onKey, true);
     return () => {
       document.removeEventListener('mousedown', onDoc);
-      document.removeEventListener('keydown', onKey);
+      document.removeEventListener('keydown', onKey, true);
     };
   }, [open]);
+
+  useEffect(() => {
+    if (disabled) setOpen(false);
+  }, [disabled]);
+
+  useEffect(() => {
+    setQuery('');
+    setOpen(false);
+    setHighlight(0);
+  }, [mode]);
 
   useEffect(() => {
     setHighlight(0);
@@ -131,9 +160,11 @@ export default function ClassicCountryMultiSelect({ value = [], onChange, mode =
 
   const emit = useCallback(
     next => {
-      onChange?.(collapseCountrySelection(next, mode));
+      onChange?.(
+        collapseCountrySelection(next, mode).filter(code => !blockedSet.has(code))
+      );
     },
-    [onChange, mode]
+    [blockedSet, onChange, mode]
   );
 
   const selectAllCountries = useCallback(() => {
@@ -145,7 +176,7 @@ export default function ClassicCountryMultiSelect({ value = [], onChange, mode =
   const toggle = useCallback(
     code => {
       const n = normalizeCountryCode(code);
-      if (!n) return;
+      if (!n || blockedSet.has(n)) return;
       setQuery('');
       if (allSelected) {
         emit([n]);
@@ -157,7 +188,7 @@ export default function ClassicCountryMultiSelect({ value = [], onChange, mode =
         emit([...selected, n]);
       }
     },
-    [allSelected, emit, selected, selectedSet]
+    [allSelected, blockedSet, emit, selected, selectedSet]
   );
 
   const remove = useCallback(
@@ -220,8 +251,12 @@ export default function ClassicCountryMultiSelect({ value = [], onChange, mode =
         : `${filtered.length} match${filtered.length === 1 ? '' : 'es'}`
     : query.trim() === ''
       ? noneExcluded
-        ? 'Pick countries to exclude — empty means none'
-        : `${ISO_COUNTRIES.length} countries — type to filter`
+        ? blockedSet.size
+          ? 'Pick countries to exclude — countries on Include are hidden'
+          : 'Pick countries to exclude — empty means none'
+        : blockedSet.size
+          ? `${filtered.length} countries — countries on the other tab are hidden`
+          : `${ISO_COUNTRIES.length} countries — type to filter`
       : filtered.length === 0 && !showAllOption
         ? 'No matches — try another spelling'
         : `${filtered.length} match${filtered.length === 1 ? '' : 'es'}`;
@@ -333,8 +368,11 @@ export default function ClassicCountryMultiSelect({ value = [], onChange, mode =
     <div className={`${styles.countryMultiSelect} ${open ? styles.countryMultiSelectOpen : ''}`}>
       <div
         ref={wrapRef}
-        className={`${styles.countryField} ${open ? styles.countryFieldOpen : ''}`}
+        className={`${styles.countryField} ${open ? styles.countryFieldOpen : ''} ${
+          disabled ? styles.countryFieldDisabled : ''
+        }`}
         onClick={() => {
+          if (disabled) return;
           setOpen(true);
           inputRef.current?.focus();
         }}
@@ -361,8 +399,10 @@ export default function ClassicCountryMultiSelect({ value = [], onChange, mode =
                 type="button"
                 className={styles.countryChipRemove}
                 aria-label={`Remove ${code} (${getCountryDisplayName(code)})`}
+                disabled={disabled}
                 onClick={e => {
                   e.stopPropagation();
+                  if (disabled) return;
                   remove(code);
                 }}
               >
@@ -381,10 +421,13 @@ export default function ClassicCountryMultiSelect({ value = [], onChange, mode =
               setQuery(e.target.value);
               setOpen(true);
             }}
-            onFocus={() => setOpen(true)}
+            onFocus={() => {
+              if (!disabled) setOpen(true);
+            }}
             onKeyDown={onSearchKeyDown}
             placeholder={placeholder}
             autoComplete="off"
+            disabled={disabled}
             aria-expanded={open}
             aria-autocomplete="list"
             aria-label="Search countries"

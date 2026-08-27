@@ -4,6 +4,7 @@ import {
   getSmartPricingInboxSummary,
   saveSmartPricingInboxPlans,
 } from '../../services/smartPricingApi';
+import { mergePlanActivityLogs } from './classic/classicActivity';
 import { readInboxPlans, updateInboxPlan } from './smartPricingConstants';
 
 const persistTimers = new Map();
@@ -62,8 +63,10 @@ export function mergeServerAndLocalInbox(serverPlans = [], localPlans = [], opti
       byId.set(local.id, local);
       return;
     }
-    if (preferLocalIds.has(String(local.id))) {
-      const server = byId.get(local.id) || {};
+    const server = byId.get(local.id) || {};
+    const preferLocal = preferLocalIds.has(String(local.id));
+    const metadata = mergePlanActivityLogs(server.metadata, local.metadata, { preferLocal });
+    if (preferLocal) {
       byId.set(local.id, {
         ...server,
         ...local,
@@ -71,8 +74,14 @@ export function mergeServerAndLocalInbox(serverPlans = [], localPlans = [], opti
         archived: local.archived,
         archived_at: local.archived_at,
         test_id: local.test_id || server.test_id,
+        metadata,
       });
+      return;
     }
+    byId.set(local.id, {
+      ...server,
+      metadata,
+    });
   });
 
   return Array.from(byId.values());

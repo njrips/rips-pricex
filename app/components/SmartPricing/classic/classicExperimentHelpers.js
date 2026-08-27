@@ -246,12 +246,9 @@ export function enrichInboxPlansForLaunch(plans = []) {
       plan.metadata?.audience_ui && typeof plan.metadata.audience_ui === 'object'
         ? plan.metadata.audience_ui
         : null;
-    const segments =
-      existingAudience.segments && typeof existingAudience.segments === 'object'
-        ? existingAudience.segments
-        : audienceUi
-          ? classicAudienceToSegments(audienceUi)
-          : existingAudience.segments;
+    const segments = audienceUi
+      ? classicAudienceToSegments(audienceUi, existingAudience.segments)
+      : existingAudience.segments;
     const experimentType =
       plan.experiment_type ||
       plan.experimentType ||
@@ -270,6 +267,14 @@ export function enrichInboxPlansForLaunch(plans = []) {
               devices: audienceUi.devices ?? existingAudience.devices,
               sources: audienceUi.sources ?? existingAudience.sources,
               countries: audienceUi.countries ?? existingAudience.countries,
+              include_countries:
+                audienceUi.includeCountries ??
+                audienceUi.include_countries ??
+                existingAudience.include_countries,
+              exclude_countries:
+                audienceUi.excludeCountries ??
+                audienceUi.exclude_countries ??
+                existingAudience.exclude_countries,
               device_mode: audienceUi.deviceMode || existingAudience.device_mode || 'include',
               source_mode: audienceUi.sourceMode || existingAudience.source_mode || 'include',
               country_mode: audienceUi.countryMode || existingAudience.country_mode || 'include',

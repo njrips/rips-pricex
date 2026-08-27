@@ -2,16 +2,16 @@
  * Product-practice privacy page for the App Store listing URL.
  * Not legal advice — keep statements aligned with as-built scopes and runtime.
  */
-export const PRIVACY_UPDATED = '14 August 2026';
+export const PRIVACY_UPDATED = '24 August 2026';
 
 export const PRIVACY_INTRO =
-  'This page describes how RipsPriceX handles data when a merchant installs the app from Shopify. It is a product-practice notice for the App Store listing, not legal advice.';
+  'This page describes how Pricify handles data when a merchant installs the app from Shopify. It is a product-practice notice for the App Store listing, not legal advice.';
 
 export const PRIVACY_SECTIONS = [
   {
     title: 'Who this covers',
     paragraphs: [
-      'RipsPriceX is a Shopify-embedded Smart Pricing app. The tenant is the shop (session.shop). There is no email/password login on this website.',
+      'Pricify is a Shopify-embedded Smart Pricing app. The tenant is the shop (session.shop). There is no email/password login on this website.',
       'Merchants install from the Shopify App Store. Shopify supplies the shop and OAuth session. This public site does not collect a shop domain or a password.',
     ],
   },
@@ -46,13 +46,13 @@ export const PRIVACY_SECTIONS = [
     title: 'Storage, processors, and retention',
     paragraphs: [
       'Shop-scoped records live in our application database (Postgres). Hosting and Shopify itself are processors for install, Admin, and App Pricing. If AI features are enabled, the configured model provider may receive the minimum prompt needed to rank a suggestion.',
-      'When the app is uninstalled we revoke the session and pause running tests. Merchants can use Contact to request deletion of remaining shop-scoped records. Mandatory Shopify customer-privacy webhooks are on the App Store compliance roadmap if listing requires them.',
+      'When the app is uninstalled we revoke the session, pause running tests, and delete that shop’s support tickets. Merchants can use Contact to request deletion of remaining shop-scoped records. Mandatory Shopify customer-privacy webhooks are on the App Store compliance roadmap if listing requires them.',
     ],
   },
   {
     title: 'How to reach us',
     paragraphs: [
-      'Use the Contact page on this site, or the developer contact on the Shopify App Store listing. Some jurisdictions also expect a postal address — we will publish one there when the listing is live.',
+      'Installed merchants can open Help in the app (Shopify Admin → Get support). Others can use the Contact page on this site or the developer contact on the Shopify App Store listing. Some jurisdictions also expect a postal address — we will publish one there when the listing is live.',
     ],
   },
 ];

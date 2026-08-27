@@ -1,0 +1,10 @@
+[[extensions]]
+name = "t:name"
+handle = "ripspricex-support-link"
+uid = "a8c3e1d4-6b2f-4e09-9c71-5d4a2b8e1f60"
+type = "admin_link"
+description = "Send Admin Get support to the in-app Help page."
+
+[[extensions.targeting]]
+target = "admin.app.support.link"
+url = "/app/help"

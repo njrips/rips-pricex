@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
-import { Link, Outlet, useLoaderData, useRouteError } from "react-router";
+import { Link, Outlet, useLoaderData, useLocation, useNavigate, useRouteError } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { AppProvider } from "@shopify/shopify-app-react-router/react";
 import { NavMenu } from "@shopify/app-bridge-react";
@@ -15,6 +15,33 @@ import ClientOnly from "../components/shared/ClientOnly";
 import ShopifyReady from "../components/shared/ShopifyReady";
 import { buildPricingPlansUrl } from "../utils/pricingPlansUrl";
 import "../styles/classic-theme.css";
+
+function SupportLinkHandler() {
+  const navigate = useNavigate();
+  const { pathname } = useLocation();
+
+  useEffect(() => {
+    const shopify = window.shopify as
+      | { support?: { registerHandler?: (handler: (() => void) | null) => Promise<void> | void } }
+      | undefined;
+    if (!shopify?.support?.registerHandler) return undefined;
+    void shopify.support.registerHandler(() => {
+      if (pathname === "/app/help" || pathname === "/help") {
+        document.getElementById("help-new-ticket")?.scrollIntoView({
+          block: "start",
+          behavior: "smooth",
+        });
+        return;
+      }
+      navigate("/app/help");
+    });
+    return () => {
+      void shopify.support.registerHandler?.(null);
+    };
+  }, [navigate, pathname]);
+
+  return null;
+}
 
 function AppBootSplash() {
   return (
@@ -125,6 +152,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         scope: session.scope || process.env.SCOPES || process.env.SHOPIFY_SCOPES || undefined,
         refresh_scopes: !String(session.scope || "").includes("write_discounts"),
       }),
+      signal: AbortSignal.timeout(8000),
     });
     if (!installRes.ok) {
       console.warn(
@@ -150,6 +178,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           status: "ACTIVE",
           planHandle: planHandle || "smart_pricing",
         }),
+        signal: AbortSignal.timeout(8000),
       });
       if (!entitleRes.ok) {
         console.warn("[ripspricex] sync-entitlement failed", entitleRes.status);
@@ -162,6 +191,16 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     );
   }
 
+  const staffEmail = String(
+    (session as { email?: string | null }).email ||
+      (
+        session as {
+          onlineAccessInfo?: { associated_user?: { email?: string | null } };
+        }
+      ).onlineAccessInfo?.associated_user?.email ||
+      "",
+  ).trim();
+
   return {
     apiKey: process.env.SHOPIFY_API_KEY || "",
     shop,
@@ -169,6 +208,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     planHandle,
     upgradeUrl,
     apiBase: "/api",
+    staffEmail,
     devEntitleAll,
     // Dev-only; empty in production. Powers price-surface unlock without showing a password field.
     devStorefrontPassword: String(
@@ -200,7 +240,9 @@ export default function App() {
               <Link to="/app/experiments/new">Create</Link>
               <Link to="/app/setup">Setup</Link>
               <Link to="/app/settings">Settings</Link>
+              <Link to="/app/help">Help</Link>
             </NavMenu>
+            <SupportLinkHandler />
             <div data-palette="admin">
               <ClassicRouteLoading />
               <Outlet context={data} />

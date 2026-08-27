@@ -11,7 +11,12 @@ import {
   normalizeSecondaryEvents,
 } from '../targeting/smartPricingAudienceHelpers';
 import ClassicCountryMultiSelect from './ClassicCountryMultiSelect';
-import { getCountryFieldHelp } from './countrySelection';
+import {
+  activeCountryList,
+  blockedCountryCodes,
+  getCountryFieldHelp,
+  resolveCountryLists,
+} from './countrySelection';
 import ClassicGoalPickerModal from './ClassicGoalPickerModal';
 import { IconCheck, IconChevron, IconShield, IconWand } from './classicIcons';
 import { createRevenueGuardrailRow, ensureRevenueGuardrailRows } from './revenueGuardrail';
@@ -87,7 +92,7 @@ function toggleInList(list, value) {
   return list.includes(value) ? list.filter(v => v !== value) : [...list, value];
 }
 
-function IncludeExcludeToggle({ value, onChange, ariaLabel }) {
+function IncludeExcludeToggle({ value, onChange, ariaLabel, disabled = false }) {
   const mode = value === 'exclude' ? 'exclude' : 'include';
   return (
     <div
@@ -99,6 +104,7 @@ function IncludeExcludeToggle({ value, onChange, ariaLabel }) {
         type="button"
         className={`${styles.segmentBtn} ${mode === 'include' ? styles.segmentBtnActive : ''}`}
         aria-pressed={mode === 'include'}
+        disabled={disabled}
         onClick={() => onChange('include')}
       >
         Include
@@ -107,6 +113,7 @@ function IncludeExcludeToggle({ value, onChange, ariaLabel }) {
         type="button"
         className={`${styles.segmentBtn} ${mode === 'exclude' ? styles.segmentBtnActive : ''}`}
         aria-pressed={mode === 'exclude'}
+        disabled={disabled}
         onClick={() => onChange('exclude')}
       >
         Exclude
@@ -140,6 +147,8 @@ export default function AudienceSuccessStepPanel({
   onSuggestAi,
   suggestBusy = false,
   shopDomain = '',
+  significanceEstimate = null,
+  disabled = false,
 }) {
   const [advancedOpen, setAdvancedOpen] = useState(true);
   const [goalPickerOpen, setGoalPickerOpen] = useState(false);
@@ -151,14 +160,21 @@ export default function AudienceSuccessStepPanel({
     ? normalizeCustomGoals([state.primaryCustomGoal])[0] || null
     : null;
   const guardrails = ensureRevenueGuardrailRows(state.guardrails || DEFAULT_GUARDRAILS);
-  const { devices, sources, countries, countryMode } = normalizeClassicAudienceTargeting(state);
+  const targeting = normalizeClassicAudienceTargeting(state);
+  const { devices, sources, countryMode } = targeting;
+  const countryLists = resolveCountryLists({ ...state, ...targeting });
+  const countries = activeCountryList(countryLists);
+  const otherTabCountries = blockedCountryCodes(countryLists);
   const trafficAllocation = Number(state.trafficAllocation) || 50;
   const primaryMetric = primaryCustomGoal?.event_name
     ? String(primaryCustomGoal.event_name).trim().toLowerCase()
     : normalizePrimaryMetric(state.primaryMetric, 'revenue_per_visitor');
   const primaryMetricKey = primaryMetric;
 
-  const patch = partial => onChange({ ...state, ...partial });
+  const patch = partial => {
+    if (disabled) return;
+    onChange({ ...state, ...partial });
+  };
 
   const selectPrimaryMetric = value => {
     const next = normalizePrimaryMetric(value, 'revenue_per_visitor');
@@ -205,7 +221,12 @@ export default function AudienceSuccessStepPanel({
               <IconWand size={16} />
               AI audience targeting
             </div>
-            <Button variant="plain" onClick={onSuggestAi} disabled={suggestBusy} loading={suggestBusy}>
+            <Button
+              variant="plain"
+              onClick={onSuggestAi}
+              disabled={disabled || suggestBusy}
+              loading={suggestBusy}
+            >
               Suggest with AI
             </Button>
           </div>
@@ -227,6 +248,7 @@ export default function AudienceSuccessStepPanel({
             { label: 'Returning visitors', value: 'returning' },
           ]}
           value={state.segment || 'all_visitors'}
+          disabled={disabled}
           onChange={value => patch({ segment: value })}
         />
       </div>
@@ -242,13 +264,17 @@ export default function AudienceSuccessStepPanel({
           style={{ '--slider-fill': `${trafficAllocation}%` }}
           onChange={e => patch({ trafficAllocation: Number(e.target.value) })}
           aria-label="Traffic allocation"
+          disabled={disabled}
         />
         <p className={styles.help}>
           {trafficAllocation}% of matching visitors will enter the experiment.
+          {significanceEstimate?.days
+            ? ` Estimated time to significance: ~${significanceEstimate.days} days.`
+            : ''}
         </p>
       </div>
 
-      <div className={styles.field}>
+      <div className={styles.field} id="classic-metrics-editor">
         <div className={styles.label}>
           Primary success metric<span className={styles.required}>*</span>
         </div>
@@ -260,6 +286,7 @@ export default function AudienceSuccessStepPanel({
                 key={`primary-${metric.value}`}
                 label={metric.label}
                 active={active}
+                disabled={disabled}
                 onClick={() => selectPrimaryMetric(metric.value)}
               />
             );
@@ -269,6 +296,7 @@ export default function AudienceSuccessStepPanel({
               key={primaryCustomGoal.event_name}
               label={primaryCustomGoal.label}
               active
+              disabled={disabled}
               onClick={() =>
                 patch({ primaryCustomGoal: null, primaryMetric: 'revenue_per_visitor' })
               }
@@ -278,7 +306,9 @@ export default function AudienceSuccessStepPanel({
           <button
             type="button"
             className={`${styles.pill} ${styles.customGoalPill}`}
+            disabled={disabled}
             onClick={() => {
+              if (disabled) return;
               setGoalPickerTarget('primary');
               setGoalPickerOpen(true);
             }}
@@ -297,13 +327,13 @@ export default function AudienceSuccessStepPanel({
         <div className={`${styles.pillRow} ${styles.metricPillRow}`}>
           {ALL_CLASSIC_METRIC_OPTIONS.map(metric => {
             const active = secondaryMetrics.includes(metric.value);
-            const disabled = metric.value === primaryMetricKey;
+            const locked = metric.value === primaryMetricKey;
             return (
               <SelectablePill
                 key={`secondary-${metric.value}`}
                 label={metric.label}
                 active={active}
-                disabled={disabled}
+                disabled={disabled || locked}
                 onClick={() => toggleSecondary(metric.value)}
               />
             );
@@ -313,6 +343,7 @@ export default function AudienceSuccessStepPanel({
               key={goal.event_name}
               label={goal.label}
               active
+              disabled={disabled}
               onClick={() => removeCustomGoal(goal.event_name)}
               title={`${customGoalTriggerSummary(goal)} · click to remove`}
             />
@@ -320,7 +351,9 @@ export default function AudienceSuccessStepPanel({
           <button
             type="button"
             className={`${styles.pill} ${styles.customGoalPill}`}
+            disabled={disabled}
             onClick={() => {
+              if (disabled) return;
               setGoalPickerTarget('secondary');
               setGoalPickerOpen(true);
             }}
@@ -334,7 +367,7 @@ export default function AudienceSuccessStepPanel({
         </p>
       </div>
 
-      {goalPickerOpen ? (
+      {goalPickerOpen && !disabled ? (
         <ClassicGoalPickerModal
           shopDomain={shopDomain}
           selectedGoals={
@@ -393,6 +426,7 @@ export default function AudienceSuccessStepPanel({
                 <input
                   className={`${styles.thresholdInput} ${row.on ? '' : styles.thresholdInputDim}`}
                   value={row.threshold}
+                  disabled={disabled}
                   onChange={e => {
                     const next = guardrails.map((g, i) =>
                       i === index ? { ...g, threshold: e.target.value } : g
@@ -406,7 +440,7 @@ export default function AudienceSuccessStepPanel({
                   type="button"
                   className={`${styles.toggle} ${row.on ? styles.toggleOn : ''}`}
                   aria-pressed={row.on}
-                  disabled={row.locked || row.id === 'revenue'}
+                  disabled={disabled || row.locked || row.id === 'revenue'}
                   onClick={() => {
                     if (row.locked || row.id === 'revenue') return;
                     const next = guardrails.map((g, i) => (i === index ? { ...g, on: !g.on } : g));
@@ -442,6 +476,7 @@ export default function AudienceSuccessStepPanel({
               value={String(state.minSampleSize ?? '5000')}
               onChange={value => patch({ minSampleSize: value })}
               autoComplete="off"
+              disabled={disabled}
               helpText="We'll wait for at least this many visitors per variation before calling results."
             />
           </div>
@@ -457,6 +492,7 @@ export default function AudienceSuccessStepPanel({
                       key={device}
                       label={device}
                       active={active}
+                      disabled={disabled}
                       onClick={() =>
                         patch({ devices: toggleInList(devices, device), deviceMode: 'include' })
                       }
@@ -480,6 +516,7 @@ export default function AudienceSuccessStepPanel({
                       key={source}
                       label={source}
                       active={active}
+                      disabled={disabled}
                       onClick={() =>
                         patch({ sources: toggleInList(sources, source), sourceMode: 'include' })
                       }
@@ -496,16 +533,47 @@ export default function AudienceSuccessStepPanel({
               <div className={styles.sectionLabel}>Countries</div>
               <IncludeExcludeToggle
                 value={countryMode}
-                onChange={next => patch({ countryMode: next })}
+                disabled={disabled}
+                onChange={next => {
+                  const lists = resolveCountryLists({ ...state, ...targeting, countryMode: next });
+                  patch({
+                    countryMode: next,
+                    countries:
+                      next === 'exclude' ? lists.excludeCountries : lists.includeCountries,
+                    includeCountries: lists.includeCountries,
+                    excludeCountries: lists.excludeCountries,
+                  });
+                }}
                 ariaLabel="Country include or exclude"
               />
             </div>
             <ClassicCountryMultiSelect
+              key={countryMode}
               value={countries}
               mode={countryMode}
-              onChange={next => patch({ countries: next })}
+              blockedCodes={otherTabCountries}
+              disabled={disabled}
+              onChange={next => {
+                if (countryMode === 'exclude') {
+                  patch({
+                    countryMode: 'exclude',
+                    excludeCountries: next,
+                    includeCountries: countryLists.includeCountries,
+                    countries: next,
+                  });
+                  return;
+                }
+                patch({
+                  countryMode: 'include',
+                  includeCountries: next,
+                  excludeCountries: countryLists.excludeCountries,
+                  countries: next,
+                });
+              }}
             />
-            <p className={styles.help}>{getCountryFieldHelp(countries, countryMode)}</p>
+            <p className={styles.help}>
+              {getCountryFieldHelp(countries, countryMode, otherTabCountries)}
+            </p>
           </div>
         </div>
       </details>

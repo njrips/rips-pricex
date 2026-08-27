@@ -1,4 +1,5 @@
-import { collapseCountrySelection } from './countrySelection';
+import { resolveCountryLists } from './countrySelection';
+import { collectActivityLogs, formatActivityRelative, mergeActivityTimeline } from './classicActivity';
 import { getPlanProductTitle } from './classicExperimentHelpers';
 import { formatOfferRule, isOfferExperimentType } from './offerSelection';
 import {
@@ -81,8 +82,8 @@ export function formatActivityStamp(value) {
   }
 }
 
-export function formatActivityMeta(item) {
-  const when = formatActivityStamp(item?.at);
+export function formatActivityMeta(item, now = Date.now()) {
+  const when = formatActivityRelative(item?.at, now) || formatActivityStamp(item?.at);
   const actor = String(item?.actor || '').trim();
   if (actor && when) return `${actor} · ${when}`;
   return actor || when;
@@ -1246,6 +1247,26 @@ export function buildAudienceSummary(plan = null, test = null) {
     (test?.segments && typeof test.segments === 'object' && test.segments) ||
     {};
   const customer = audienceUi.segment || segments.customer || 'all';
+  const countryLists = resolveCountryLists({
+    countries: Array.isArray(audience.countries)
+      ? audience.countries
+      : Array.isArray(segments.countries)
+        ? segments.countries
+        : Array.isArray(audienceUi.countries)
+          ? audienceUi.countries
+          : [],
+    includeCountries:
+      audience.include_countries ||
+      audience.includeCountries ||
+      audienceUi.includeCountries ||
+      audienceUi.include_countries,
+    excludeCountries:
+      audience.exclude_countries ||
+      audience.excludeCountries ||
+      audienceUi.excludeCountries ||
+      audienceUi.exclude_countries,
+    countryMode: audience.country_mode || audienceUi.countryMode || 'include',
+  });
 
   return {
     devices: Array.isArray(audience.devices)
@@ -1260,17 +1281,12 @@ export function buildAudienceSummary(plan = null, test = null) {
         ? audienceUi.sources
         : [],
     sourceMode: audience.source_mode || audienceUi.sourceMode || 'include',
-    countries: collapseCountrySelection(
-      Array.isArray(audience.countries)
-        ? audience.countries
-        : Array.isArray(segments.countries)
-          ? segments.countries
-          : Array.isArray(audienceUi.countries)
-            ? audienceUi.countries
-            : [],
-      audience.country_mode || audienceUi.countryMode || 'include'
-    ),
-    countryMode: audience.country_mode || audienceUi.countryMode || 'include',
+    countries: countryLists.countryMode === 'exclude'
+      ? countryLists.excludeCountries
+      : countryLists.includeCountries,
+    includeCountries: countryLists.includeCountries,
+    excludeCountries: countryLists.excludeCountries,
+    countryMode: countryLists.countryMode,
     trafficAllocation:
       audience.traffic_allocation ??
       audienceUi.trafficAllocation ??
@@ -1297,16 +1313,29 @@ export function buildMetricsSummary(plan = null, test = null) {
     testGoal.metric ||
     plan?.objective ||
     'conversion_rate';
-  const secondary = Array.isArray(planGoal.secondary)
+  const secondaryRaw = Array.isArray(planGoal.secondary)
     ? planGoal.secondary
     : Array.isArray(testGoal.secondary)
       ? testGoal.secondary
       : [];
-  const secondaryEvents = Array.isArray(planGoal.secondary_events)
+  const primaryKey = String(primary || '')
+    .trim()
+    .toLowerCase();
+  const secondary = secondaryRaw.filter(item => {
+    const role = String(item?.metric_role || '').toLowerCase();
+    const name = String(item?.event_name || item || '')
+      .trim()
+      .toLowerCase();
+    return role !== 'primary' && name !== primaryKey;
+  });
+  const secondaryEventsRaw = Array.isArray(planGoal.secondary_events)
     ? planGoal.secondary_events
     : Array.isArray(testGoal.secondary_events)
       ? testGoal.secondary_events
       : secondary.map(item => item?.event_name).filter(Boolean);
+  const secondaryEvents = secondaryEventsRaw.filter(
+    eventName => String(eventName || '').trim().toLowerCase() !== primaryKey
+  );
 
   return {
     primaryMetric: primary,
@@ -1328,15 +1357,28 @@ export function buildMetricsSummary(plan = null, test = null) {
   };
 }
 
+function qaRunTitle(status) {
+  const key = String(status || '')
+    .trim()
+    .toLowerCase();
+  if (key === 'pass' || key === 'passed' || key === 'success') return 'Self-QA passed';
+  if (key === 'fail' || key === 'failed' || key === 'error') return 'Self-QA failed';
+  if (key === 'running' || key === 'queued') return 'Self-QA running';
+  return status ? `Self-QA ${status}` : 'Self-QA run';
+}
+
 export function buildActivityTimeline({
   plan = null,
   test = null,
   analytics = null,
   qaRuns = [],
+  plans = [],
 } = {}) {
   const items = [];
   const actor =
     String(plan?.owner_name || plan?.created_by_name || '').trim() || 'You';
+  const catalog = Array.isArray(plans) && plans.length ? plans : plan ? [plan] : [];
+  const productCount = catalog.length;
   const createdAt = plan?.created_at || test?.created_at;
   if (createdAt) {
     items.push({
@@ -1345,6 +1387,12 @@ export function buildActivityTimeline({
       title: 'Created experiment',
       kind: 'created',
       actor,
+      detail:
+        productCount > 1
+          ? `${productCount} products in this experiment`
+          : productCount === 1
+            ? '1 product in this experiment'
+            : '',
     });
   }
   const startedAt = test?.started_at || test?.startedAt;
@@ -1355,6 +1403,7 @@ export function buildActivityTimeline({
       title: 'Launched experiment',
       kind: 'started',
       actor,
+      detail: plan?.test_id || test?.id ? `Test ${plan?.test_id || test.id}` : '',
     });
   } else if (
     plan?.test_id &&
@@ -1370,13 +1419,25 @@ export function buildActivityTimeline({
     });
   }
 
+  if (plan?.status === 'queued') {
+    items.push({
+      id: 'queued',
+      at: plan?.updated_at || plan?.created_at,
+      title: 'Queued for launch',
+      kind: 'queued',
+      actor,
+      detail: 'Waiting for a free launch slot',
+    });
+  }
+
   for (const run of Array.isArray(qaRuns) ? qaRuns : []) {
     items.push({
       id: `qa_${run.id || run.created_at}`,
       at: run.finished_at || run.created_at || run.started_at,
-      title: `Self-QA ${run.status || 'run'}`,
+      title: qaRunTitle(run.status),
       kind: 'qa',
       actor,
+      status: run.status || '',
       detail:
         run.verdict_summary || run.verdict_json?.ai_summary?.headline || run.trigger || 'QA check',
     });
@@ -1416,28 +1477,44 @@ export function buildActivityTimeline({
     });
   }
 
-  if (test?.status === 'stopped' || test?.status === 'paused' || plan?.status === 'paused') {
+  const planStatus = String(plan?.status || '')
+    .trim()
+    .toLowerCase();
+  if (planStatus === 'winner_ready') {
+    items.push({
+      id: 'winner_ready',
+      at: test?.stopped_at || plan?.updated_at,
+      title: isOffer ? 'Result ready' : 'Winner ready',
+      kind: 'winner_ready',
+      actor,
+      detail: isOffer ? 'Leading variation identified' : 'Waiting for winner rollout decision',
+    });
+  } else if (test?.status === 'stopped' || test?.status === 'paused' || planStatus === 'paused') {
     const pausedAt = test?.stopped_at || test?.updated_at || plan?.updated_at || null;
     if (pausedAt) {
       items.push({
         id: 'paused',
         at: pausedAt,
-        title: plan?.status === 'winner_ready' ? 'Test stopped' : 'Experiment paused',
-        kind: plan?.status === 'winner_ready' ? 'complete' : 'paused',
+        title: 'Experiment paused',
+        kind: 'paused',
         actor,
-        detail:
-          plan?.status === 'winner_ready'
-            ? isOffer
-              ? 'Leading variation identified'
-              : 'Waiting for winner rollout decision'
-            : 'Traffic assignment stopped',
+        detail: 'Traffic assignment stopped',
       });
     }
   }
 
-  return items
-    .filter(item => item.at)
-    .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
+  if (plan?.archived || plan?.archived_at) {
+    items.push({
+      id: 'archived',
+      at: plan.archived_at || plan.updated_at,
+      title: 'Experiment archived',
+      kind: 'archived',
+      actor,
+      detail: 'Hidden from the active experiments list',
+    });
+  }
+
+  return mergeActivityTimeline(items, collectActivityLogs(catalog, actor));
 }
 
 export function buildSettingsSummary(plan = null, test = null, shopGuardrails = null) {

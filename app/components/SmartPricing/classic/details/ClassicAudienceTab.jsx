@@ -1,6 +1,6 @@
 import React from 'react';
 import { Button } from '@shopify/polaris';
-import { formatCountryAudienceValue } from '../countrySelection';
+import { formatSplitCountryAudienceLabel, resolveCountryLists } from '../countrySelection';
 import { formatAudienceFactValue } from '../classicExperimentDetailsHelpers';
 import styles from '../SmartPricingClassic.module.css';
 
@@ -63,7 +63,10 @@ export default function ClassicAudienceTab({ audience, onEdit }) {
       />
       <FactCard
         label="Countries"
-        value={formatCountryAudienceValue(audience.countries, audience.countryMode)}
+        value={(() => {
+          const lists = resolveCountryLists(audience);
+          return formatSplitCountryAudienceLabel(lists.includeCountries, lists.excludeCountries);
+        })()}
         action={onEdit ? 'Edit' : null}
         actionLabel="Edit countries"
         onAction={onEdit}

@@ -1,13 +1,13 @@
-export const TERMS_UPDATED = '14 August 2026';
+export const TERMS_UPDATED = '24 August 2026';
 
 export const TERMS_INTRO =
-  'These terms describe how merchants use RipsPriceX on Shopify. They are a product notice for this website, not a substitute for Shopify’s terms or legal advice.';
+  'These terms describe how merchants use Pricify on Shopify. They are a product notice for this website, not a substitute for Shopify’s terms or legal advice.';
 
 export const TERMS_SECTIONS = [
   {
     title: 'The service',
     paragraphs: [
-      'RipsPriceX is Classic Smart Pricing inside Shopify Admin: price experiments, theme price mapping, checkout readiness, and applying a winner. It is not RipX, and it does not include other RipX test types.',
+      'Pricify is the Shopify price-testing app used in Admin: price experiments, theme price mapping, checkout readiness, and applying a winner. RipX AI is the in-app assistant for questions and suggestions — not a separate login.',
     ],
   },
   {
@@ -39,7 +39,7 @@ export const TERMS_SECTIONS = [
   {
     title: 'Contact',
     paragraphs: [
-      'Questions about these terms: use the Contact page or the App Store listing.',
+      'Questions about these terms: installed merchants can use Help in the app. Others can use the Contact page or the App Store listing.',
     ],
   },
 ];

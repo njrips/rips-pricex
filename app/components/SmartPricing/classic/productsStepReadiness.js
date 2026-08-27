@@ -91,6 +91,54 @@ export function formatCatalogLoadError(err) {
   return raw;
 }
 
+export function normalizeAiPriceBand(minRaw, maxRaw) {
+  const min = Math.abs(Number(minRaw));
+  const max = Math.abs(Number(maxRaw));
+  if (!Number.isFinite(min) || !Number.isFinite(max)) return null;
+  if (min === 0 && max === 0) return null;
+  return min <= max ? { min, max } : { min: max, max: min };
+}
+
+export function armHasAiPrices({ rows = [], armId, priceOverrides = {} } = {}) {
+  const arm = String(armId || '').trim();
+  if (!arm) return false;
+  return (rows || []).some(row => {
+    const raw = priceOverrides[`${row?.variant_id}::${arm}`];
+    return raw !== undefined && raw !== null && String(raw).trim() !== '';
+  });
+}
+
+export function getAiSuggestCopy({
+  hasProducts = false,
+  suggested = false,
+  hasArmPrices = false,
+  summary = '',
+  busy = false,
+} = {}) {
+  if (!hasProducts) {
+    return {
+      body: 'Select products above, set a min/max band, then click Suggest.',
+      button: busy ? 'Suggesting…' : 'Suggest',
+    };
+  }
+  if (hasArmPrices && !suggested) {
+    return {
+      body: 'Band updated — click Suggest to apply new prices inside this range.',
+      button: busy ? 'Suggesting…' : 'Re-suggest',
+    };
+  }
+  if (suggested && summary) {
+    return {
+      body: summary,
+      button: busy ? 'Suggesting…' : 'Re-suggest',
+    };
+  }
+  return {
+    body: 'Set the min/max band first, then click Suggest. Prices stay empty until you do.',
+    button: busy ? 'Suggesting…' : 'Suggest',
+  };
+}
+
 export function getProductsStepContinueState({
   loadingProducts = false,
   productsLoadError = '',
@@ -102,6 +150,7 @@ export function getProductsStepContinueState({
   priceOverrides = {},
   experimentType = 'price_test',
   offerByArm = {},
+  priceMode = 'manual',
 } = {}) {
   const hasCatalog = (opportunities || []).some(row => row?.variant_id);
   if (loadingProducts && !hasCatalog) {
@@ -151,7 +200,10 @@ export function getProductsStepContinueState({
     return {
       disabled: true,
       reason: 'no_price_change',
-      hint: 'Set at least one test price that differs from the current store price.',
+      hint:
+        priceMode === 'ai'
+          ? 'Set the min/max band, then click Suggest to apply test prices.'
+          : 'Set at least one test price that differs from the current store price.',
     };
   }
   return { disabled: false, reason: null, hint: '' };

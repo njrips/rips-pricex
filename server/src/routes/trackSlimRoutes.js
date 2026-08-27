@@ -12,11 +12,16 @@ const {
   buildEarlyStorefrontAntiFlickerBootstrap,
   getStorefrontScriptCacheControl,
   mapTestToStorefrontPayload,
+  isStorefrontEmbeddedTestType,
   SCRIPT_VERSION,
 } = require('../utils/storefrontScriptRuntime');
 const { listGoalMetricDefinitions } = require('../models/goalMetricDefinition');
 const { getShopPriceSurfaceMappings } = require('../services/priceSurfaceRegistryService');
 const abTestEngine = require('../services/abTestEngine');
+const {
+  assignmentContextFromQuery,
+  jsTargetingOverridesFromQuery,
+} = require('../utils/storefrontAssignmentContext');
 const logger = require('../utils/logger');
 
 const router = express.Router();
@@ -56,7 +61,7 @@ async function serveScript(req, res) {
         listGoalMetricDefinitions(shop).catch(() => []),
         getShopPriceSurfaceMappings(shop).catch(() => []),
       ]);
-      activeTests = (tests || []).filter((t) => t.type === 'price' || t.type === 'pricing');
+      activeTests = (tests || []).filter((t) => isStorefrontEmbeddedTestType(t.type));
       goalMetricDefinitions = goals || [];
       shopPriceSurfaceMappings = surfaces || [];
     }
@@ -113,12 +118,17 @@ router.get('/variants', async (req, res) => {
     if (!shop || !testIds.length) {
       return res.status(400).json({ error: 'shop and test_id(s) required' });
     }
-    const context = {
-      url: req.query.url || req.query.page_url || '',
-      path: req.query.path || '',
-      preview: req.query.preview === '1' || req.query.ab_preview === '1',
-    };
-    const result = await abTestEngine.getVariantsBatch(testIds, userId, shop, context);
+    const context = assignmentContextFromQuery(req.query, {
+      userAgent: req.get('user-agent'),
+      userIp: req.ip,
+    });
+    const result = await abTestEngine.getVariantsBatch(
+      testIds,
+      userId,
+      shop,
+      context,
+      jsTargetingOverridesFromQuery(req.query)
+    );
     res.json({ success: true, variants: result, user_id: userId });
   } catch (err) {
     logger.error('variants failed', { message: err.message });
@@ -134,12 +144,17 @@ router.get('/variant', async (req, res) => {
     if (!shop || !testId) {
       return res.status(400).json({ error: 'shop and test_id required' });
     }
-    const context = {
-      url: req.query.url || '',
-      path: req.query.path || '',
-      preview: req.query.preview === '1',
-    };
-    const result = await abTestEngine.getVariantsBatch([testId], userId, shop, context);
+    const context = assignmentContextFromQuery(req.query, {
+      userAgent: req.get('user-agent'),
+      userIp: req.ip,
+    });
+    const result = await abTestEngine.getVariantsBatch(
+      [testId],
+      userId,
+      shop,
+      context,
+      jsTargetingOverridesFromQuery(req.query)
+    );
     res.json({ success: true, variant: result?.[testId] || null, variants: result, user_id: userId });
   } catch (err) {
     res.status(500).json({ error: err.message });

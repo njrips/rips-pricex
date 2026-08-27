@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Select, TextField } from '@shopify/polaris';
 import { ensureSmartPricingPlanPreviewTest } from '../../../../services/smartPricingApi';
 import { formatCurrency } from '../../smartPricingConstants';
-import { formatOfferRule, formatOfferSummary } from '../offerSelection';
+import { formatOfferRule, resolveOfferPdpDisplayText } from '../offerSelection';
 import {
   VARIATION_PRODUCTS_PAGE_SIZE,
   VARIATION_PRODUCTS_PAGE_SIZES,
@@ -466,7 +466,7 @@ function VariationCard({
   };
 
   const offerLabel = arm?.offer ? formatOfferRule(arm.offer, currency) : '';
-  const offerSummary = arm?.offer ? formatOfferSummary(arm.offer, currency) : '';
+  const pdpMessage = arm?.offer ? resolveOfferPdpDisplayText(arm.offer, currency) : '';
   const priceLabel =
     isOfferTest || (offerLabel && offerLabel !== 'No offer')
       ? arm.isControl
@@ -498,9 +498,9 @@ function VariationCard({
         </h3>
         <strong>{priceLabel}</strong>
       </div>
-      {isOfferTest && !arm.isControl && offerSummary && offerSummary !== offerLabel ? (
+      {isOfferTest && !arm.isControl && pdpMessage ? (
         <p className={styles.help} style={{ marginTop: 0 }}>
-          {arm.offer?.offer_message}
+          Shoppers see “{pdpMessage}” under the product price.
         </p>
       ) : null}
 

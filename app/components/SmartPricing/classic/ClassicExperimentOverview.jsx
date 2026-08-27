@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router';
 import { Badge, Button, Modal } from '@shopify/polaris';
 import PageShell from '../../shared/PageShell';
@@ -29,7 +29,19 @@ import ClassicAudienceTab from './details/ClassicAudienceTab';
 import ClassicMetricsTab from './details/ClassicMetricsTab';
 import ClassicActivityTab from './details/ClassicActivityTab';
 import ClassicSettingsTab from './details/ClassicSettingsTab';
-import { formatClassicStatusLabel } from './classicExperimentHelpers';
+import ClassicAudienceMetricsEditModal from './details/ClassicAudienceMetricsEditModal';
+import {
+  applyAudienceUiToPlans,
+  audienceUiFromSummaries,
+  canEditClassicAudienceMetrics,
+  validateClassicAudienceUi,
+} from './classicAudienceEdit';
+import { appendActivityToPlans, createActivityEntry } from './classicActivity';
+import {
+  formatClassicStatusLabel,
+  readClassicWizardDraft,
+  writeClassicWizardDraft,
+} from './classicExperimentHelpers';
 import {
   buildClassicExperimentDeleteConfirmMessage,
   deleteClassicExperimentSynchronized,
@@ -62,6 +74,10 @@ export default function ClassicExperimentOverview() {
   const [moreOpen, setMoreOpen] = useState(false);
   const [winnerModalOpen, setWinnerModalOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const [editFocus, setEditFocus] = useState('audience');
+  const [editSeed, setEditSeed] = useState(null);
+  const [editSaving, setEditSaving] = useState(false);
   const moreRef = useRef(null);
 
   const details = useClassicExperimentDetails(shopDomain, planId);
@@ -89,7 +105,7 @@ export default function ClassicExperimentOverview() {
     experimentPlans,
     experimentTestIds,
     refresh,
-    patchExperimentPlansLocal,
+    replaceExperimentPlansLocal,
   } = details;
 
   const { applying, previewLoadingPlanId, preview, loadPreview, clearPreview, applyWinner } =
@@ -160,6 +176,20 @@ export default function ClassicExperimentOverview() {
     setMessage(text);
   };
 
+  const activityActor = plan?.owner_name || plan?.created_by_name || 'You';
+  const stampPlans = (plans, entry, patch = {}) =>
+    appendActivityToPlans(
+      (Array.isArray(plans) ? plans : []).map(row => ({
+        ...row,
+        ...patch,
+        metadata: {
+          ...(row.metadata || {}),
+          ...(patch.metadata && typeof patch.metadata === 'object' ? patch.metadata : {}),
+        },
+      })),
+      createActivityEntry({ actor: activityActor, ...entry })
+    );
+
   const handlePause = async () => {
     if (!linkedTestIds.length || busyAction) return;
     setBusyAction('pause');
@@ -167,7 +197,13 @@ export default function ClassicExperimentOverview() {
       await Promise.all(
         linkedTestIds.map(id => apiPost(`/tests/${encodeURIComponent(id)}/stop`, {}))
       );
-      await patchExperimentPlansLocal({ status: 'paused' });
+      await replaceExperimentPlansLocal(
+        stampPlans(experimentPlans, {
+          kind: 'paused',
+          title: 'Experiment paused',
+          detail: 'Traffic assignment stopped',
+        }, { status: 'paused' })
+      );
       showSuccess('Experiment paused.');
       await sleep(450);
       refresh({
@@ -194,7 +230,13 @@ export default function ClassicExperimentOverview() {
           })
         )
       );
-      await patchExperimentPlansLocal({ status: 'running' });
+      await replaceExperimentPlansLocal(
+        stampPlans(experimentPlans, {
+          kind: 'resumed',
+          title: 'Experiment resumed',
+          detail: 'Traffic assignment started again',
+        }, { status: 'running' })
+      );
       showSuccess('Experiment resumed.');
       refresh({
         quiet: true,
@@ -212,10 +254,20 @@ export default function ClassicExperimentOverview() {
     setBusyAction('archive');
     setMoreOpen(false);
     try {
-      await patchExperimentPlansLocal({
-        archived: true,
-        archived_at: new Date().toISOString(),
-      });
+      const archivedAt = new Date().toISOString();
+      await replaceExperimentPlansLocal(
+        stampPlans(
+          experimentPlans,
+          {
+            id: 'archived',
+            kind: 'archived',
+            title: 'Experiment archived',
+            detail: 'Hidden from the active experiments list',
+            at: archivedAt,
+          },
+          { archived: true, archived_at: archivedAt }
+        )
+      );
       showSuccess('Experiment archived.');
       navigate(`${ROUTES.appSmartPricing(shopDomain)}?tab=archived`);
     } catch (err) {
@@ -230,7 +282,17 @@ export default function ClassicExperimentOverview() {
     setBusyAction('restore');
     setMoreOpen(false);
     try {
-      await patchExperimentPlansLocal({ archived: false, archived_at: null });
+      await replaceExperimentPlansLocal(
+        stampPlans(
+          experimentPlans,
+          {
+            kind: 'restored',
+            title: 'Experiment restored',
+            detail: 'Moved back to the active experiments list',
+          },
+          { archived: false, archived_at: null }
+        )
+      );
       showSuccess('Experiment restored.');
       refresh({
         quiet: true,
@@ -290,6 +352,25 @@ export default function ClassicExperimentOverview() {
   const handleConfirmWinner = async () => {
     try {
       await applyWinner(plan, { publishToShopify: true });
+      const appliedAt = new Date().toISOString();
+      await replaceExperimentPlansLocal(
+        stampPlans(
+          experimentPlans,
+          {
+            id: 'winner_applied',
+            kind: 'complete',
+            title: isOfferTest ? 'Test completed' : 'Winner rolled out',
+            detail: isOfferTest
+              ? 'Offer test finished — catalog prices were not changed'
+              : 'Winning price applied to Shopify',
+            at: appliedAt,
+          },
+          {
+            status: 'applied',
+            winner_applied_at: appliedAt,
+          }
+        )
+      );
       setWinnerModalOpen(false);
       clearPreview();
       showSuccess('Winner rolled out to Shopify.');
@@ -299,12 +380,67 @@ export default function ClassicExperimentOverview() {
     }
   };
 
-  const handleEditAudienceOrMetrics = () => {
-    if (isDraft && resumeId) {
-      navigate(buildClassicWizardResumePath(resumeId, 'audience'));
+  const closeAudienceMetricsEditor = useCallback(() => {
+    setEditOpen(false);
+  }, []);
+
+  const openAudienceMetricsEditor = focus => {
+    if (!experimentPlans.length) {
+      showError(null, 'No plans to update.');
       return;
     }
-    selectTab('Settings');
+    setEditFocus(focus === 'metrics' ? 'metrics' : 'audience');
+    setEditSeed(audienceUiFromSummaries(audience, metrics, plan?.metadata?.audience_ui));
+    setEditOpen(true);
+  };
+
+  const handleSaveAudienceMetrics = async audienceState => {
+    if (!canEditClassicAudienceMetrics(status) || editSaving) return;
+    if (!experimentPlans.length) {
+      showError(null, 'No plans to update.');
+      return;
+    }
+    const check = validateClassicAudienceUi(audienceState);
+    if (!check.ok) {
+      showError(null, check.message);
+      return;
+    }
+    setEditSaving(true);
+    try {
+      const nextPlans = appendActivityToPlans(
+        applyAudienceUiToPlans(experimentPlans, audienceState, {
+          experimentId: resumeId,
+          experimentTitle: experiment?.title || plan?.metadata?.experiment_title || '',
+          hypothesis: plan?.hypothesis || plan?.metadata?.hypothesis || '',
+          experimentType:
+            plan?.experiment_type || plan?.metadata?.experiment_type || experiment?.experimentType,
+        }),
+        createActivityEntry({
+          kind: 'updated',
+          title: editFocus === 'metrics' ? 'Metrics updated' : 'Audience updated',
+          detail:
+            editFocus === 'metrics'
+              ? 'Primary metric, secondary goals, or guardrails changed'
+              : 'Targeting, traffic, or sample size changed',
+          actor: activityActor,
+        })
+      );
+      await replaceExperimentPlansLocal(nextPlans);
+      const draft = readClassicWizardDraft(shopDomain);
+      if (draft && String(draft.experiment_id || '') === String(resumeId || '')) {
+        writeClassicWizardDraft(shopDomain, { ...draft, audience: audienceState });
+      }
+      setEditOpen(false);
+      showSuccess(
+        isRunning
+          ? 'Audience and metrics saved on the plan. Live assignment stays as launched until you pause and relaunch.'
+          : 'Audience and metrics updated.'
+      );
+    } catch (err) {
+      showError(err, 'Could not save audience and metrics.');
+    } finally {
+      setEditSaving(false);
+    }
   };
 
   const copyTestId = async () => {
@@ -560,17 +696,50 @@ export default function ClassicExperimentOverview() {
             />
           ) : null}
           {tab === 'Audience' ? (
-            <ClassicAudienceTab audience={audience} onEdit={handleEditAudienceOrMetrics} />
+            <ClassicAudienceTab
+              audience={audience}
+              onEdit={() => openAudienceMetricsEditor('audience')}
+            />
           ) : null}
           {tab === 'Metrics' ? (
-            <ClassicMetricsTab metrics={metrics} onEdit={handleEditAudienceOrMetrics} />
+            <ClassicMetricsTab
+              metrics={metrics}
+              onEdit={() => openAudienceMetricsEditor('metrics')}
+            />
           ) : null}
           {tab === 'Activity' ? <ClassicActivityTab activity={activity} /> : null}
           {tab === 'Settings' ? (
-            <ClassicSettingsTab settings={settings} audience={audience} metrics={metrics} />
+            <ClassicSettingsTab
+              settings={settings}
+              audience={audience}
+              metrics={metrics}
+              onEdit={() => openAudienceMetricsEditor('audience')}
+              onEditMetrics={() => openAudienceMetricsEditor('metrics')}
+            />
           ) : null}
         </div>
       </div>
+
+      <ClassicAudienceMetricsEditModal
+        open={editOpen}
+        focus={editFocus}
+        initialValue={editSeed}
+        shopDomain={shopDomain}
+        readOnly={!canEditClassicAudienceMetrics(status)}
+        readOnlyReason={
+          canEditClassicAudienceMetrics(status)
+            ? ''
+            : 'Audience and metrics are locked after this experiment ends. Start a new experiment to test different targeting or a different goal.'
+        }
+        liveWarning={
+          (isRunning || isPaused) && linkedTestIds.length
+            ? 'This updates the saved plan. The live test keeps launch targeting until you relaunch.'
+            : ''
+        }
+        saving={editSaving}
+        onClose={closeAudienceMetricsEditor}
+        onSave={handleSaveAudienceMetrics}
+      />
 
       <WinnerApplyModal
         open={winnerModalOpen}

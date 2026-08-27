@@ -46,7 +46,8 @@ export default function OfferArmsEditor({
       <div className={styles.sectionLabel}>Offers for each variation</div>
       <p className={styles.help}>
         Control stays at the catalog price with no discount. Each test variation applies one offer
-        to every selected product. Message is optional and can appear on cart.
+        to every selected product. The message always appears under the product price for that
+        variation. If you leave it empty, shoppers still see the offer amount under the price.
       </p>
       {(variations || []).map((arm, index) => {
         const isControl = index === 0 || arm.id === 'control';
@@ -98,8 +99,9 @@ export default function OfferArmsEditor({
                   onChange={value => patchArm(arm.id, { offer_message: value })}
                   autoComplete="off"
                   maxLength={120}
+                  showCharacterCount
                   placeholder="e.g. Limited-time 10% off"
-                  helpText="Shown on cart when this variation is assigned. Leave empty for no message."
+                  helpText="Shown under the product price (and on cart) when this variation is assigned. Leave empty to show the offer amount only."
                 />
               </div>
             )}

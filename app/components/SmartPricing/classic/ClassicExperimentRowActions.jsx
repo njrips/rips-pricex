@@ -9,6 +9,7 @@ import { readInboxPlans, writeInboxPlans } from '../smartPricingConstants';
 import { persistInboxPlansNow } from '../smartPricingInboxPersistence';
 import { ButtonIconMore } from './classicIcons';
 import { enrichInboxPlansForLaunch, rollupExperimentStatus } from './classicExperimentHelpers';
+import { appendActivityToPlans, createActivityEntry } from './classicActivity';
 import {
   buildClassicWizardResumePath,
   collectExperimentTestIds,
@@ -189,7 +190,15 @@ export default function ClassicExperimentRowActions({
         throw new Error('No linked test to pause.');
       }
       await Promise.all(testIds.map(id => apiPost(`/tests/${encodeURIComponent(id)}/stop`, {})));
-      await patchExperimentPlans(plan => ({ ...plan, status: 'paused' }));
+      const pauseEntry = createActivityEntry({
+        kind: 'paused',
+        title: 'Experiment paused',
+        detail: 'Traffic assignment stopped',
+        actor: experiment?.representative?.owner_name || experiment?.representative?.created_by_name || 'You',
+      });
+      await patchExperimentPlans(plan =>
+        appendActivityToPlans([{ ...plan, status: 'paused' }], pauseEntry)[0]
+      );
       await sleep(450);
       notify('success', 'Experiment paused.');
       await refreshList({ preferLocalIds: planIds, quiet: true });
@@ -209,7 +218,15 @@ export default function ClassicExperimentRowActions({
           })
         )
       );
-      await patchExperimentPlans(plan => ({ ...plan, status: 'running' }));
+      const resumeEntry = createActivityEntry({
+        kind: 'resumed',
+        title: 'Experiment resumed',
+        detail: 'Traffic assignment started again',
+        actor: experiment?.representative?.owner_name || experiment?.representative?.created_by_name || 'You',
+      });
+      await patchExperimentPlans(plan =>
+        appendActivityToPlans([{ ...plan, status: 'running' }], resumeEntry)[0]
+      );
       notify('success', 'Experiment resumed.');
       await refreshList({ preferLocalIds: planIds, quiet: true });
     });
@@ -217,22 +234,32 @@ export default function ClassicExperimentRowActions({
   const handleArchive = () =>
     runBusy('archive', async () => {
       const at = new Date().toISOString();
-      await patchExperimentPlans(plan => ({
-        ...plan,
-        archived: true,
-        archived_at: at,
-      }));
+      const archiveEntry = createActivityEntry({
+        id: 'archived',
+        kind: 'archived',
+        title: 'Experiment archived',
+        detail: 'Hidden from the active experiments list',
+        at,
+        actor: experiment?.representative?.owner_name || experiment?.representative?.created_by_name || 'You',
+      });
+      await patchExperimentPlans(plan =>
+        appendActivityToPlans([{ ...plan, archived: true, archived_at: at }], archiveEntry)[0]
+      );
       notify('success', 'Experiment archived.');
       await refreshList({ preferLocalIds: planIds, quiet: true });
     });
 
   const handleRestore = () =>
     runBusy('restore', async () => {
-      await patchExperimentPlans(plan => ({
-        ...plan,
-        archived: false,
-        archived_at: null,
-      }));
+      const restoreEntry = createActivityEntry({
+        kind: 'restored',
+        title: 'Experiment restored',
+        detail: 'Moved back to the active experiments list',
+        actor: experiment?.representative?.owner_name || experiment?.representative?.created_by_name || 'You',
+      });
+      await patchExperimentPlans(plan =>
+        appendActivityToPlans([{ ...plan, archived: false, archived_at: null }], restoreEntry)[0]
+      );
       notify('success', 'Experiment restored.');
       await refreshList({ preferLocalIds: planIds, quiet: true });
     });

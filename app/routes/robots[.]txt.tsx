@@ -11,10 +11,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     "Allow: /",
     "Allow: /privacy",
     "Allow: /terms",
-    "Allow: /faq",
+    "Allow: /faq", // redirects to /#faq
     "Allow: /contact",
     "Disallow: /app",
     "Disallow: /auth",
+    "Disallow: /staff",
     "Disallow: /webhooks",
     "Disallow: /api",
     `Sitemap: ${origin}/sitemap.xml`,

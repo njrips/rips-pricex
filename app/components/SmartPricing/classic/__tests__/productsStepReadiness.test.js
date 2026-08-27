@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest';
 import {
   formatCatalogLoadError,
   getProductsStepContinueState,
+  normalizeAiPriceBand,
+  armHasAiPrices,
+  getAiSuggestCopy,
   hasAnyTestPriceChange,
   hasProductSelection,
   resolvePricingRows,
@@ -122,5 +125,52 @@ describe('productsStepReadiness', () => {
         priceOverrides: { 'var-1::var_a': '24.00' },
       }).disabled
     ).toBe(false);
+    expect(
+      getProductsStepContinueState({
+        ...base,
+        selectedIds: ['var-1'],
+        priceMode: 'ai',
+      }).hint
+    ).toMatch(/click Suggest/i);
+  });
+
+  it('normalizes AI min/max bands and rejects empty ranges', () => {
+    expect(normalizeAiPriceBand('10', '20')).toEqual({ min: 10, max: 20 });
+    expect(normalizeAiPriceBand('20', '8')).toEqual({ min: 8, max: 20 });
+    expect(normalizeAiPriceBand('0', '0')).toBeNull();
+    expect(normalizeAiPriceBand('abc', '5')).toBeNull();
+  });
+
+  it('keeps AI suggest copy per variation instead of a shared summary', () => {
+    expect(
+      armHasAiPrices({
+        rows: [shirt],
+        armId: 'var_a',
+        priceOverrides: { 'var-1::var_a': '24.00' },
+      })
+    ).toBe(true);
+    expect(
+      armHasAiPrices({
+        rows: [shirt],
+        armId: 'var_b',
+        priceOverrides: { 'var-1::var_a': '24.00' },
+      })
+    ).toBe(false);
+    expect(
+      getAiSuggestCopy({
+        hasProducts: true,
+        suggested: false,
+        hasArmPrices: false,
+        summary: 'AI price suggestions applied.',
+      }).button
+    ).toBe('Suggest');
+    expect(
+      getAiSuggestCopy({
+        hasProducts: true,
+        suggested: false,
+        hasArmPrices: true,
+        summary: 'AI price suggestions applied.',
+      }).body
+    ).toMatch(/Band updated/);
   });
 });

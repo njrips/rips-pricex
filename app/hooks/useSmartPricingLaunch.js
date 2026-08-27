@@ -2,7 +2,24 @@ import { useCallback, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { ROUTES } from '../constants';
 import { launchSmartPricingPlan } from '../services/smartPricingApi';
-import { updateInboxPlan } from '../components/SmartPricing/smartPricingConstants';
+import { stampLaunchOnPlan } from '../components/SmartPricing/classic/classicActivity';
+import { readInboxPlans, updateInboxPlan } from '../components/SmartPricing/smartPricingConstants';
+
+function writeLaunchInboxPatch(shopDomain, plan, data) {
+  const testId = data?.inbox_plan?.test_id || data?.test?.id || null;
+  const current =
+    (readInboxPlans(shopDomain) || []).find(row => row.id === plan.id) || plan;
+  const stamped = stampLaunchOnPlan(current, {
+    status: data?.inbox_plan?.status || 'running',
+    testId,
+  });
+  updateInboxPlan(shopDomain, plan.id, {
+    status: stamped.status,
+    test_id: stamped.test_id,
+    metadata: stamped.metadata,
+  });
+  return testId;
+}
 
 export function useSmartPricingLaunch(shopDomain) {
   const navigate = useNavigate();
@@ -13,12 +30,7 @@ export function useSmartPricingLaunch(shopDomain) {
       setLaunching(true);
       try {
         const data = await launchSmartPricingPlan(shopDomain, plan, { autoStart: true });
-        const testId = data?.test?.id;
-        const inboxPatch = data?.inbox_plan || {};
-        updateInboxPlan(shopDomain, plan.id, {
-          status: inboxPatch.status || 'running',
-          test_id: inboxPatch.test_id || testId || null,
-        });
+        const testId = writeLaunchInboxPatch(shopDomain, plan, data);
         if (openTest && plan?.id) {
           navigate(ROUTES.appSmartPricingPlan(shopDomain, plan.id));
         }
@@ -48,10 +60,7 @@ export function useSmartPricingLaunch(shopDomain) {
             break;
           }
           const data = await launchSmartPricingPlan(shopDomain, plan, { autoStart: true });
-          updateInboxPlan(shopDomain, plan.id, {
-            status: data?.inbox_plan?.status || 'running',
-            test_id: data?.inbox_plan?.test_id || data?.test?.id || null,
-          });
+          writeLaunchInboxPatch(shopDomain, plan, data);
           launched += 1;
         }
         return { launched, stoppedEarly, requested: list.length };

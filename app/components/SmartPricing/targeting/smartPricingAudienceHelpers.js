@@ -4,7 +4,7 @@
  */
 
 import { resolveCountryToCode } from '../../../utils/iso3166CountryDisplay';
-import { collapseCountrySelection } from '../classic/countrySelection';
+import { resolveCountryLists } from '../classic/countrySelection';
 
 export const DEVICE_OPTIONS = [
   { label: 'All devices', value: 'all' },
@@ -103,19 +103,21 @@ export function normalizeClassicAudienceTargeting(state = {}) {
       ? source.sources.map(String)
       : [...CLASSIC_SOURCE_OPTIONS]
     : [...CLASSIC_SOURCE_OPTIONS];
-  const countryMode = normalizeMode(source.countryMode || source.country_mode);
-  const countries = collapseCountrySelection(
-    Array.isArray(source.countries) ? source.countries : [],
-    countryMode
-  );
+  const countryLists = resolveCountryLists(source);
+  const countries =
+    countryLists.countryMode === 'exclude'
+      ? countryLists.excludeCountries
+      : countryLists.includeCountries;
 
   return {
     devices,
     sources,
     countries,
+    includeCountries: countryLists.includeCountries,
+    excludeCountries: countryLists.excludeCountries,
     deviceMode: normalizeMode(source.deviceMode || source.device_mode),
     sourceMode: normalizeMode(source.sourceMode || source.source_mode),
-    countryMode,
+    countryMode: countryLists.countryMode,
   };
 }
 
@@ -126,6 +128,10 @@ export function stripClassicAudienceTargetingFields(audience = {}) {
     devices: _devices,
     sources: _sources,
     countries: _countries,
+    includeCountries: _includeCountries,
+    include_countries: _includeCountriesSnake,
+    excludeCountries: _excludeCountries,
+    exclude_countries: _excludeCountriesSnake,
     deviceMode: _deviceMode,
     device_mode: _deviceModeSnake,
     sourceMode: _sourceMode,
@@ -656,10 +662,13 @@ export function classicAudienceToSegments(audienceUi = {}, baseSegments = {}) {
   const base = normalizeAudienceSegments(baseSegments);
   const deviceMode = normalizeMode(audienceUi.deviceMode);
   const sourceMode = normalizeMode(audienceUi.sourceMode);
-  const countryMode = normalizeMode(audienceUi.countryMode);
+  const countryLists = resolveCountryLists(audienceUi);
   const devices = mapClassicDevicesToEngine(audienceUi.devices);
   const sourceValues = expandClassicSources(audienceUi.sources);
-  const countries = collapseCountrySelection(audienceUi.countries, countryMode);
+  const includeCountries = countryLists.includeCountries;
+  const excludeCountries = countryLists.excludeCountries;
+  const excludeSet = new Set(excludeCountries);
+  const countries = includeCountries.filter(code => !excludeSet.has(code));
   const traffic = clampTrafficPercent(audienceUi.trafficAllocation);
 
   const out = {
@@ -703,18 +712,16 @@ export function classicAudienceToSegments(audienceUi = {}, baseSegments = {}) {
   }
 
   if (countries.length > 0) {
-    if (countryMode === 'include') {
-      out.countries = countries;
-    } else {
-      out.countries = [];
-      out.audience_rules = [
-        {
-          type: 'exclude',
-          field: 'country',
-          value: countries,
-        },
-      ];
-    }
+    out.countries = countries;
+  }
+  if (excludeCountries.length > 0) {
+    out.audience_rules = [
+      {
+        type: 'exclude',
+        field: 'country',
+        value: excludeCountries,
+      },
+    ];
   }
 
   return out;
@@ -870,7 +877,17 @@ export function mergeAudienceAiIntoState(prev = {}, audiencePayload = {}, meta =
       ...prev,
       ...(Array.isArray(a.devices) ? { devices: a.devices } : {}),
       ...(Array.isArray(a.sources) ? { sources: a.sources } : {}),
-      ...(Array.isArray(a.countries) ? { countries: a.countries } : {}),
+      ...(Array.isArray(a.includeCountries) || Array.isArray(a.include_countries)
+        ? { includeCountries: a.includeCountries || a.include_countries }
+        : {}),
+      ...(Array.isArray(a.excludeCountries) || Array.isArray(a.exclude_countries)
+        ? { excludeCountries: a.excludeCountries || a.exclude_countries }
+        : {}),
+      ...(Array.isArray(a.countries)
+        ? String(a.countryMode || a.country_mode || '').toLowerCase() === 'exclude'
+          ? { excludeCountries: a.countries, countries: a.countries, countryMode: 'exclude' }
+          : { includeCountries: a.countries, countries: a.countries, countryMode: 'include' }
+        : {}),
       deviceMode: a.deviceMode || a.device_mode || prev.deviceMode,
       sourceMode: a.sourceMode || a.source_mode || prev.sourceMode,
       countryMode: a.countryMode || a.country_mode || prev.countryMode,

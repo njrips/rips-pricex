@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   formatOfferRule,
   formatOfferSummary,
+  resolveOfferPdpDisplayText,
   hasAnyTestOfferConfigured,
   offerByArmFromPlanArms,
   isActionableOfferConfig,
@@ -24,6 +25,16 @@ describe('offerSelection', () => {
 
   it('formats offer rules and slugs code names', () => {
     expect(formatOfferRule({ discount_type: 'percent', discount_value: 10 })).toBe('10% off');
+    expect(
+      resolveOfferPdpDisplayText({
+        discount_type: 'percent',
+        discount_value: 10,
+        offer_message: 'Save 10%',
+      })
+    ).toBe('Save 10%');
+    expect(resolveOfferPdpDisplayText({ discount_type: 'percent', discount_value: 15 })).toBe(
+      '15% off'
+    );
     expect(
       formatOfferSummary({
         discount_type: 'percent',

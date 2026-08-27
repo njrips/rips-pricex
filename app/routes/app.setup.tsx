@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link, useNavigate, useOutletContext } from 'react-router';
+import { Link, useNavigate, useOutletContext, useSearchParams } from 'react-router';
+import { withCurrentEmbeddedSearch } from '../utils/shopifyEmbeddedSearch';
 import { Badge, Banner, Button } from '@shopify/polaris';
 import type { AppOutletContext } from '../lib/api.client';
 import { rpxApi } from '../lib/api.client';
@@ -31,6 +32,7 @@ function embedBadgeLabel(status: 'enabled' | 'disabled' | 'unknown', hasDeepLink
 export default function SetupPage() {
   const ctx = useOutletContext<AppOutletContext>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [hints, setHints] = useState<string[]>([]);
   const [surface, setSurface] = useState({ ready: false, configured: 0, message: '' });
   const [embedStatus, setEmbedStatus] = useState<'enabled' | 'disabled' | 'unknown'>('unknown');
@@ -306,7 +308,8 @@ export default function SetupPage() {
         App proxy: <code>/apps/ripspricex/script.js</code> ·{' '}
         <Link to="/app/settings?tab=plan">Plan</Link> ·{' '}
         <Link to="/app/settings?tab=installation">Installation</Link> ·{' '}
-        <Link to="/app/settings?tab=price-surfaces">Price surfaces</Link>
+        <Link to="/app/settings?tab=price-surfaces">Price surfaces</Link> ·{' '}
+        <Link to={withCurrentEmbeddedSearch(searchParams, '/app/help')}>Get support</Link>
       </p>
     </ClassicAdminShell>
   );

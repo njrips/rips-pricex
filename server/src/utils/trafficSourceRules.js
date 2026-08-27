@@ -1,5 +1,8 @@
 const TRAFFIC_SOURCE_GROUPS = {
   organic: ['organic', 'direct', 'organic_search', 'organic_social', 'google'],
+  // Storefront getTrafficSource() still returns "google" for Google organic.
+  // Classic Search writes organic_search — treat that alias as the same bucket.
+  organic_search: ['organic_search', 'google'],
   paid: ['paid', 'paid_search', 'paid_social', 'paid_shopping'],
   social: [
     'social',

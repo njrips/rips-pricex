@@ -44,7 +44,14 @@ export default async function handleRequest(
           reject(error);
         },
         onError(error) {
-          responseStatusCode = 500;
+          // Keep App Bridge session-token bounces (401/410) intact.
+          const status =
+            error && typeof error === "object" && "status" in error
+              ? Number((error as { status?: number }).status)
+              : 0;
+          if (status !== 401 && status !== 410) {
+            responseStatusCode = 500;
+          }
           console.error(error);
         },
       }

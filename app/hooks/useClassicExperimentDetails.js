@@ -16,6 +16,8 @@ import {
   findExperimentByPlanId,
   findPlanInCatalog,
 } from '../components/SmartPricing/classic/classicExperimentHelpers';
+import { mergeInboxPlansById } from '../components/SmartPricing/classic/classicAudienceEdit';
+import { mergeQaRuns } from '../components/SmartPricing/classic/classicActivity';
 import {
   buildActivityTimeline,
   buildAudienceSummary,
@@ -250,25 +252,25 @@ export function useClassicExperimentDetails(shopDomain, planId) {
         const merged = mergeExperimentAnalytics(nextByTestId, primaryAnalytics);
         setAnalytics(merged);
 
-        const [testRes, qaRes] = await Promise.all([
+        const [testRes, ...qaLists] = await Promise.all([
           testId
             ? apiGet(`/tests/${encodeURIComponent(testId)}`)
                 .then(res => unwrapTest(unwrapData(res)))
                 .catch(() => null)
             : Promise.resolve(null),
-          testId
-            ? apiGet(`/qa/tests/${encodeURIComponent(testId)}/runs`)
-                .then(res => {
-                  const body = unwrapData(res);
-                  const runs = body?.runs || body;
-                  return Array.isArray(runs) ? runs.slice(0, 8) : [];
-                })
-                .catch(() => [])
-            : Promise.resolve([]),
+          ...experimentTestIds.map(id =>
+            apiGet(`/qa/tests/${encodeURIComponent(id)}/runs`)
+              .then(res => {
+                const body = unwrapData(res);
+                const runs = body?.runs || body;
+                return Array.isArray(runs) ? runs : [];
+              })
+              .catch(() => [])
+          ),
         ]);
         if (cancelled) return;
         setTest(testRes);
-        setQaRuns(qaRes);
+        setQaRuns(mergeQaRuns(qaLists, 16));
         // Surface hard failures, but avoid toast spam for transient/empty analytics.
         if (
           analyticsError &&
@@ -324,8 +326,8 @@ export function useClassicExperimentDetails(shopDomain, planId) {
   const audience = useMemo(() => buildAudienceSummary(plan, test), [plan, test]);
   const metrics = useMemo(() => buildMetricsSummary(plan, test), [plan, test]);
   const activity = useMemo(
-    () => buildActivityTimeline({ plan, test, analytics, qaRuns }),
-    [plan, test, analytics, qaRuns]
+    () => buildActivityTimeline({ plan, test, analytics, qaRuns, plans: experimentPlans }),
+    [plan, test, analytics, qaRuns, experimentPlans]
   );
   const settings = useMemo(
     () => buildSettingsSummary(plan, test, shopGuardrails),
@@ -361,6 +363,27 @@ export function useClassicExperimentDetails(shopDomain, planId) {
     [experimentPlans, shopDomain]
   );
 
+  const replaceExperimentPlansLocal = useCallback(
+    async (nextPlans, { persist = true } = {}) => {
+      const updates = (Array.isArray(nextPlans) ? nextPlans : []).filter(row => row?.id);
+      if (!updates.length || !shopDomain) {
+        throw new Error('No plans to update.');
+      }
+      setAllPlans(prev => mergeInboxPlansById(prev, updates));
+      const current = readInboxPlans(shopDomain) || [];
+      const baseline = current.length ? current : updates;
+      const next = mergeInboxPlansById(baseline, updates);
+      if (!next.length) {
+        throw new Error('No plans to update.');
+      }
+      writeInboxPlans(shopDomain, next, { persist: false });
+      if (persist) {
+        await persistInboxPlansNow(shopDomain, next);
+      }
+    },
+    [shopDomain]
+  );
+
   return {
     loading,
     analyticsLoading,
@@ -390,5 +413,6 @@ export function useClassicExperimentDetails(shopDomain, planId) {
     refresh,
     patchPlanLocal,
     patchExperimentPlansLocal,
+    replaceExperimentPlansLocal,
   };
 }

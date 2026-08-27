@@ -1,6 +1,6 @@
 import React from 'react';
 import { Badge, Banner, Button } from '@shopify/polaris';
-import { formatCountryAudienceLabel } from './countrySelection';
+import { formatSplitCountryAudienceLabel, resolveCountryLists } from './countrySelection';
 import {
   formatOfferRule,
   formatOfferSummary,
@@ -63,7 +63,8 @@ export default function ReviewLaunchStepPanel({
   pricingByArm = null,
   offerByArm = {},
   audience,
-  estimatedDays = 7,
+  estimatedDays = null,
+  estimatedTimeDetail = '',
   checkoutReady = true,
   checkoutLoading = false,
   checkoutReadiness = null,
@@ -125,8 +126,18 @@ export default function ReviewLaunchStepPanel({
 
   return (
     <div className={styles.reviewStack}>
-      <Banner tone="info" title={`Estimated time to significance: ~${estimatedDays} days`}>
-        <p>Based on {audience?.trafficAllocation ?? 50}% traffic and typical visitor volume.</p>
+      <Banner
+        tone={estimatedDays && Number(estimatedDays) >= 42 ? 'warning' : 'info'}
+        title={
+          estimatedDays
+            ? `Estimated time to significance: ~${estimatedDays} days`
+            : 'Estimated time to significance'
+        }
+      >
+        <p>
+          {estimatedTimeDetail ||
+            `Based on ${audience?.trafficAllocation ?? 50}% traffic, minimum sample size, variation count, and selected product traffic.`}
+        </p>
       </Banner>
 
       {checkoutLoading ? (
@@ -255,6 +266,12 @@ export default function ReviewLaunchStepPanel({
           </Badge>
           <Badge tone="info">{selectedCount || plans.length} products</Badge>
         </div>
+        {isOfferTest ? (
+          <p className={styles.help}>
+            Assigned shoppers see the offer message under the product price. If a variation has no
+            message, they still see the offer amount there.
+          </p>
+        ) : null}
         {plans.length ? (
           <div className={styles.reviewProductList}>
             {plans.slice(0, 8).map(plan => {
@@ -390,7 +407,13 @@ export default function ReviewLaunchStepPanel({
           <div className={styles.reviewRow}>
             <div className={styles.kvLabel}>Countries</div>
             <p className={styles.kvValue}>
-              {formatCountryAudienceLabel(audience?.countries, audience?.countryMode)}
+              {(() => {
+                const lists = resolveCountryLists(audience);
+                return formatSplitCountryAudienceLabel(
+                  lists.includeCountries,
+                  lists.excludeCountries
+                );
+              })()}
             </p>
           </div>
         </div>

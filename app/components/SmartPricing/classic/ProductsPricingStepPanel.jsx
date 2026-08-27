@@ -3,6 +3,7 @@ import { Banner, Button, Select, TextField } from '@shopify/polaris';
 import ClassicProductPickerModal from './ClassicProductPickerModal';
 import OfferArmsEditor from './OfferArmsEditor';
 import { isOfferExperimentType } from './offerSelection';
+import { armHasAiPrices, getAiSuggestCopy, normalizeAiPriceBand } from './productsStepReadiness';
 import {
   ButtonIconSearch,
   ButtonIconSelect,
@@ -215,6 +216,10 @@ export default function ProductsPricingStepPanel({
   onAiSuggest,
   aiSuggestBusy = false,
   aiSuggestSummary = null,
+  aiSuggested = false,
+  onAiBandDirty,
+  aiUnit = 'percent',
+  onAiUnitChange,
   aiMinPct = '10',
   aiMaxPct = '20',
   onAiMinPctChange,
@@ -237,7 +242,6 @@ export default function ProductsPricingStepPanel({
   const [pricingPageSize, setPricingPageSize] = useState(PRICING_TABLE_PAGE_SIZES[0]);
   const [expanded, setExpanded] = useState(() => new Set());
   const [bulkUnit, setBulkUnit] = useState('percent');
-  const [aiUnit, setAiUnit] = useState('percent');
   const [localBulkNotice, setLocalBulkNotice] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
   const [groupTab, setGroupTab] = useState('collections'); // collections | categories
@@ -405,10 +409,6 @@ export default function ProductsPricingStepPanel({
 
   const activeArm = variations[activeArmIndex] || variations[0];
   const isControlArm = activeArmIndex === 0 || activeArm?.id === 'control';
-  /** Per-arm auto-suggest latch — do not clear when briefly viewing Control (priceMode looks manual). */
-  const didAutoAiByArm = useRef({});
-  const onAiSuggestRef = useRef(onAiSuggest);
-  onAiSuggestRef.current = onAiSuggest;
 
   // Pricing table is product-grouped: include every catalog variant for selected products
   // (so accordion can show Size S/M/L…), and for All mode limit by product count not SKU count.
@@ -425,33 +425,6 @@ export default function ProductsPricingStepPanel({
     if (!selectedProductKeys.size) return [];
     return allRows.filter(row => selectedProductKeys.has(productKey(row)));
   }, [pickMode, opportunities, selectedIds, maxSelection, selectedSet]);
-
-  // Reset latch only when this arm leaves AI mode (Manual/Bulk), not when switching tabs.
-  useEffect(() => {
-    const armKey = activeArm?.id;
-    if (!armKey || armKey === 'control') return;
-    if (priceMode !== 'ai') {
-      didAutoAiByArm.current[armKey] = false;
-    }
-  }, [priceMode, activeArm?.id]);
-
-  // Seed AI suggestions when entering AI mode (per active variation).
-  useEffect(() => {
-    if (priceMode !== 'ai' || isControlArm) return;
-    const armKey = activeArm?.id;
-    if (!armKey) return;
-    if (didAutoAiByArm.current[armKey]) return;
-    if (!pricingSource.length || aiSuggestBusy) return;
-    didAutoAiByArm.current[armKey] = true;
-    onAiSuggestRef.current?.({ unit: aiUnit });
-  }, [
-    priceMode,
-    isControlArm,
-    pricingSource.length,
-    activeArm?.id,
-    aiUnit,
-    aiSuggestBusy,
-  ]);
 
   const pricingGroups = useMemo(() => {
     const q = tableFilter.trim().toLowerCase();
@@ -567,6 +540,19 @@ export default function ProductsPricingStepPanel({
 
   const deltaDisplayUnit =
     priceMode === 'ai' ? aiUnit : priceMode === 'bulk' ? bulkUnit : 'percent';
+  const aiBand = normalizeAiPriceBand(aiMinPct, aiMaxPct);
+  const activeArmHasAiPrices = armHasAiPrices({
+    rows: pricingSource,
+    armId: activeArm?.id,
+    priceOverrides,
+  });
+  const aiSuggestCopy = getAiSuggestCopy({
+    hasProducts: Boolean(pricingSource.length),
+    suggested: aiSuggested,
+    hasArmPrices: activeArmHasAiPrices,
+    summary: aiSuggestSummary,
+    busy: aiSuggestBusy,
+  });
 
   const getTestPrice = (row, armId) => {
     const id = row.variant_id;
@@ -575,8 +561,10 @@ export default function ProductsPricingStepPanel({
     const override = priceOverrides[key];
     if (override !== null && override !== undefined && String(override).trim() !== '') {
       const n = Number(override);
-      return Number.isFinite(n) ? n : base;
+      return Number.isFinite(n) ? n : null;
     }
+    // AI mode waits for Suggest — do not pretfill the store price as a test price.
+    if (priceMode === 'ai' && !aiSuggested) return null;
     return base;
   };
 
@@ -590,6 +578,9 @@ export default function ProductsPricingStepPanel({
   };
 
   const renderDeltaCell = (base, test, rowCurrency = currency) => {
+    if (test === null || test === undefined || test === '') {
+      return <span className={styles.deltaPlainEmpty}>—</span>;
+    }
     if (deltaDisplayUnit === 'amount') {
       const amountLabel = formatAmountDeltaLabel(base, test, rowCurrency);
       if (!amountLabel) return <span className={styles.deltaPlainEmpty}>—</span>;
@@ -629,6 +620,7 @@ export default function ProductsPricingStepPanel({
       override !== null && override !== undefined && String(override).trim() !== ''
         ? formatPriceInputValue(override)
         : formatPriceInputValue(Number.isFinite(test) ? test : '');
+    const pendingAiPrice = priceMode === 'ai' && !aiSuggested && !String(override || '').trim();
     return (
       <tr key={`${id}-${armId}-v`} className={styles.variantRow}>
         <td>
@@ -648,6 +640,7 @@ export default function ProductsPricingStepPanel({
               type="text"
               inputMode="decimal"
               value={isControlArm ? formatPriceInputValue(base) : inputValue}
+              placeholder={pendingAiPrice ? 'Suggest' : undefined}
               onChange={e => {
                 if (isControlArm) return;
                 onPriceOverrideChange?.(key, e.target.value);
@@ -685,10 +678,16 @@ export default function ProductsPricingStepPanel({
       if (override !== null && override !== undefined && String(override).trim() !== '') {
         return String(override);
       }
-      return String(getTestPrice(v, armId));
+      const next = getTestPrice(v, armId);
+      return Number.isFinite(next) ? String(next) : '';
     });
-    const numericTests = testValues.map(v => Number(v)).filter(n => Number.isFinite(n));
-    const avgTest = numericTests.reduce((a, b) => a + b, 0) / (numericTests.length || 1);
+    const numericTests = testValues
+      .filter(v => String(v).trim() !== '')
+      .map(v => Number(v))
+      .filter(n => Number.isFinite(n));
+    const avgTest = numericTests.length
+      ? numericTests.reduce((a, b) => a + b, 0) / numericTests.length
+      : null;
     const allSame = testValues.length > 0 && testValues.every(v => v === testValues[0]);
     const mixed = multi && !allSame && !isControlArm;
     const parentDisplay = isControlArm
@@ -748,7 +747,13 @@ export default function ProductsPricingStepPanel({
                 type="text"
                 inputMode="decimal"
                 value={parentDisplay}
-                placeholder={mixed ? 'Mixed' : undefined}
+                placeholder={
+                  mixed
+                    ? 'Mixed'
+                    : priceMode === 'ai' && !aiSuggested && !parentDisplay
+                      ? 'Suggest'
+                      : undefined
+                }
                 onChange={e => {
                   if (isControlArm) return;
                   const next = e.target.value;
@@ -1277,12 +1282,7 @@ export default function ProductsPricingStepPanel({
             <IconWand size={16} />
             AI Price Suggestions
           </div>
-          <p className={styles.aiSuggestBody}>
-            {!pricingSource.length
-              ? 'Select products above, then AI can suggest test prices within your min/max band.'
-              : aiSuggestSummary ||
-                'AI recommends test prices from sales, margin, opportunity score, and your min/max band — clamped to shop guardrails.'}
-          </p>
+          <p className={styles.aiSuggestBody}>{aiSuggestCopy.body}</p>
           <div className={styles.aiBar}>
             <span className={styles.aiBarLabel}>
               <IconWand size={16} /> Let AI suggest within
@@ -1323,7 +1323,10 @@ export default function ProductsPricingStepPanel({
                   className={`${styles.segmentBtn} ${
                     aiUnit === 'percent' ? styles.segmentBtnActive : ''
                   }`}
-                  onClick={() => setAiUnit('percent')}
+                  onClick={() => {
+                    onAiUnitChange?.('percent');
+                    onAiBandDirty?.();
+                  }}
                   disabled={aiSuggestBusy}
                 >
                   %
@@ -1333,7 +1336,10 @@ export default function ProductsPricingStepPanel({
                   className={`${styles.segmentBtn} ${
                     aiUnit === 'amount' ? styles.segmentBtnActive : ''
                   }`}
-                  onClick={() => setAiUnit('amount')}
+                  onClick={() => {
+                    onAiUnitChange?.('amount');
+                    onAiBandDirty?.();
+                  }}
                   disabled={aiSuggestBusy}
                 >
                   $
@@ -1342,10 +1348,10 @@ export default function ProductsPricingStepPanel({
               <Button
                 variant="primary"
                 onClick={() => onAiSuggest?.({ unit: aiUnit })}
-                disabled={aiSuggestBusy || loading || !pricingSource.length}
+                disabled={aiSuggestBusy || loading || !pricingSource.length || !aiBand}
                 loading={aiSuggestBusy}
               >
-                {aiSuggestBusy ? 'Suggesting…' : aiSuggestSummary ? 'Re-suggest' : 'Suggest'}
+                {aiSuggestCopy.button}
               </Button>
             </div>
           </div>
