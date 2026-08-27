@@ -11581,6 +11581,7 @@
   var OFFER_PDP_STACK_ATTR = 'data-ripx-offer-pdp';
   var OFFER_PDP_CUTOUT_ATTR = 'data-ripx-offer-pdp-cutout';
   var OFFER_PDP_HOST_PAINTED_ATTR = 'data-ripx-offer-cutout-painted';
+  var OFFER_PDP_HOST_HIDDEN_ATTR = 'data-ripx-offer-cutout-hidden';
   var OFFER_PDP_STYLE_ID = 'ripx-offer-pdp-message-style';
   var OFFER_PDP_RELATED_SEL =
     '.recommended-products,.related-products,product-recommendations,.product-recommendations,[data-section-type="recently-viewed"],[id*="related"],[id*="recommend"],[id*="complementary"],.complementary-products';
@@ -11601,6 +11602,7 @@
         '[data-ripx-offer-pdp]{display:block;flex-basis:100%;width:100%;max-width:36em;margin:.4em 0 0;padding:0;}' +
         '[data-ripx-offer-pdp-cutout]{display:flex;flex-wrap:wrap;align-items:baseline;gap:.45em .7em;margin:0 0 .2em;font:inherit;font-weight:600;line-height:1.3;}' +
         '[data-ripx-offer-pdp-cutout] s{opacity:.72;font-weight:500;}' +
+        '[data-ripx-offer-cutout-hidden]{display:none !important;}' +
         '[data-ripx-offer-pdp-message]{display:block;flex-basis:100%;width:100%;max-width:36em;margin:.4em 0 0;padding:0;font:inherit;font-size:.9em;line-height:1.35;font-weight:600;color:inherit;letter-spacing:normal;}' +
         '[data-ripx-offer-pdp] [data-ripx-offer-pdp-message]{margin:.15em 0 0;}';
       (document.head || document.documentElement).appendChild(style);
@@ -11649,8 +11651,18 @@
     return false;
   }
 
+  function isOfferPdpHiddenControlHost(el) {
+    if (!el) return false;
+    try {
+      if (el.hasAttribute && el.hasAttribute(OFFER_PDP_HOST_HIDDEN_ATTR)) return true;
+      if (el.closest && el.closest('[' + OFFER_PDP_HOST_HIDDEN_ATTR + ']')) return true;
+    } catch (eHidden) {}
+    return false;
+  }
+
   function isOfferPdpNodeVisible(el) {
     if (!el) return false;
+    if (isOfferPdpHiddenControlHost(el)) return true;
     try {
       if (el.getClientRects && el.getClientRects().length > 0) {
         var selfStyle = window.getComputedStyle ? window.getComputedStyle(el) : null;
@@ -11747,6 +11759,29 @@
     el.removeAttribute('data-ripx-offer-orig-text');
   }
 
+  function hideOfferPdpControlPrice(host, testId) {
+    if (!host || !host.setAttribute) return;
+    if (host.getAttribute('data-ripx-offer-orig-display') == null) {
+      host.setAttribute('data-ripx-offer-orig-display', host.style.display || '');
+    }
+    host.setAttribute(OFFER_PDP_HOST_HIDDEN_ATTR, '1');
+    host.setAttribute('data-ripx-offer-cutout-test', String(testId || ''));
+    try {
+      host.style.setProperty('display', 'none', 'important');
+    } catch (eHide) {}
+  }
+
+  function revealOfferPdpControlPrice(host) {
+    if (!host || !host.removeAttribute) return;
+    var origDisplay = host.getAttribute('data-ripx-offer-orig-display');
+    host.removeAttribute(OFFER_PDP_HOST_HIDDEN_ATTR);
+    host.removeAttribute('data-ripx-offer-orig-display');
+    try {
+      if (origDisplay) host.style.setProperty('display', origDisplay);
+      else host.style.removeProperty('display');
+    } catch (eReveal) {}
+  }
+
   function paintThemeOfferCutout(host, wasDisplay, nowDisplay, testId) {
     if (!host || !wasDisplay || !nowDisplay) return false;
     var priceRoot = host;
@@ -11832,19 +11867,26 @@
     var root = document.documentElement || document.body;
     if (!root) return;
     var id = String(testId || '').replace(/"/g, '');
-    var sel = id
-      ? '[' +
-        OFFER_PDP_HOST_PAINTED_ATTR +
-        '][data-ripx-offer-cutout-test="' +
-        id +
-        '"]'
-      : '[' + OFFER_PDP_HOST_PAINTED_ATTR + ']';
+    var selectors = id
+      ? [
+          '[' + OFFER_PDP_HOST_PAINTED_ATTR + '][data-ripx-offer-cutout-test="' + id + '"]',
+          '[' + OFFER_PDP_HOST_HIDDEN_ATTR + '][data-ripx-offer-cutout-test="' + id + '"]',
+        ]
+      : ['[' + OFFER_PDP_HOST_PAINTED_ATTR + ']', '[' + OFFER_PDP_HOST_HIDDEN_ATTR + ']'];
     var hosts = [];
-    try {
-      hosts = querySelectorAllWithShadowRoots(root, sel);
-    } catch (eHosts) {}
+    var seen = [];
+    selectors.forEach(function (sel) {
+      try {
+        querySelectorAllWithShadowRoots(root, sel).forEach(function (host) {
+          if (!host || seen.indexOf(host) !== -1) return;
+          seen.push(host);
+          hosts.push(host);
+        });
+      } catch (eHosts) {}
+    });
     hosts.forEach(function (host) {
       if (!host) return;
+      revealOfferPdpControlPrice(host);
       if (host.getAttribute('data-ripx-offer-added-onsale') === '1' && host.classList) {
         host.classList.remove('price--on-sale');
         host.removeAttribute('data-ripx-offer-added-onsale');
@@ -12201,6 +12243,13 @@
     var paintedTheme = false;
     if (cutout && wasDisplay && nowDisplay) {
       paintedTheme = paintThemeOfferCutout(host, wasDisplay, nowDisplay, testId);
+      if (paintedTheme) {
+        revealOfferPdpControlPrice(host);
+      } else {
+        // Injected stack sits after the theme price. Hide the catalog amount so
+        // shoppers only see the offer cutout, not a duplicate control price.
+        hideOfferPdpControlPrice(host, testId);
+      }
     } else {
       restoreThemeOfferCutout(testId);
     }
@@ -15176,6 +15225,8 @@
     window.__RIPX_TEST_HOOKS__.resolveOfferPdpLightHost = resolveOfferPdpLightHost;
     window.__RIPX_TEST_HOOKS__.computeOfferPdpCutoutPrices = computeOfferPdpCutoutPrices;
     window.__RIPX_TEST_HOOKS__.paintThemeOfferCutout = paintThemeOfferCutout;
+    window.__RIPX_TEST_HOOKS__.hideOfferPdpControlPrice = hideOfferPdpControlPrice;
+    window.__RIPX_TEST_HOOKS__.revealOfferPdpControlPrice = revealOfferPdpControlPrice;
     window.__RIPX_TEST_HOOKS__.upsertOfferPdpMessage = upsertOfferPdpMessage;
     window.__RIPX_TEST_HOOKS__.shouldShowOfferMessageOnPdp = shouldShowOfferMessageOnPdp;
     window.__RIPX_TEST_HOOKS__.isPrimaryOfferPdpTest = isPrimaryOfferPdpTest;

@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { computeOfferPdpCutout, resolveOfferPdpDisplayText } from '../offerSelection.js';
 import {
   OFFER_PDP_CUTOUT_ATTR,
+  OFFER_PDP_HOST_HIDDEN_ATTR,
   OFFER_PDP_HOST_PAINTED_ATTR,
   OFFER_PDP_MESSAGE_ATTR,
   OFFER_PDP_RELATED_SEL,
@@ -145,6 +146,9 @@ describe('offer PDP message', () => {
     assert.match(storefrontSrc, new RegExp(OFFER_PDP_STACK_ATTR.replace(/-/g, '\\-')));
     assert.match(storefrontSrc, new RegExp(OFFER_PDP_CUTOUT_ATTR.replace(/-/g, '\\-')));
     assert.match(storefrontSrc, new RegExp(OFFER_PDP_HOST_PAINTED_ATTR.replace(/-/g, '\\-')));
+    assert.match(storefrontSrc, new RegExp(OFFER_PDP_HOST_HIDDEN_ATTR.replace(/-/g, '\\-')));
+    assert.match(storefrontSrc, /function hideOfferPdpControlPrice\s*\(/);
+    assert.match(storefrontSrc, /function revealOfferPdpControlPrice\s*\(/);
     assert.match(storefrontSrc, /price--on-sale/);
     assert.match(storefrontSrc, /alreadyOnSale/);
     assert.match(storefrontSrc, /Never add price--on-sale/);

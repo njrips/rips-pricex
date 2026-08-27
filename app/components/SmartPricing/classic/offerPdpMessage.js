@@ -4,6 +4,7 @@ export const OFFER_PDP_TEST_ATTR = 'data-ripx-offer-test';
 export const OFFER_PDP_STACK_ATTR = 'data-ripx-offer-pdp';
 export const OFFER_PDP_CUTOUT_ATTR = 'data-ripx-offer-pdp-cutout';
 export const OFFER_PDP_HOST_PAINTED_ATTR = 'data-ripx-offer-cutout-painted';
+export const OFFER_PDP_HOST_HIDDEN_ATTR = 'data-ripx-offer-cutout-hidden';
 
 /** Horizon `product-price`, then Dawn `.price`, then common wrappers. */
 export const OFFER_PDP_HOST_SELECTOR =

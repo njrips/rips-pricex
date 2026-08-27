@@ -4,7 +4,7 @@
   Important: do not hardcode temporary local tunnel URLs in schema defaults.
   Keep fallback empty by default and set it manually only for local/dev debugging sessions.
   target: head — the primary runtime is parser-blocking so the server bootstrap can run before body paint.
-  ?v= must stay in sync with backend storefrontScriptRuntime.js SCRIPT_VERSION (currently 1.0.59).
+  ?v= must stay in sync with backend storefrontScriptRuntime.js SCRIPT_VERSION (currently 1.0.60).
   Strict anti-flicker CSS contract: html[data-ripx-af="strict"] body{opacity:0 !important;}
 {% endcomment %}
 
@@ -12,7 +12,7 @@
   (function () {
     var storageKey = '__ripx_price_af_hint_v1__';
     var shopHost = '{{ request.host }}';
-    var version = '1.0.59';
+    var version = '1.0.60';
     var styleId = 'ripx-anti-flicker-style';
     var defaultPriceSelectors = [
       '.price',
@@ -150,8 +150,8 @@
 <script>
   (function () {
     var shopHost = '{{ request.host }}';
-    var version = '1.0.59';
-    var scriptUrl = 'https://' + shopHost + '/apps/ripspricex/script.js?v=1.0.59';
+    var version = '1.0.60';
+    var scriptUrl = 'https://' + shopHost + '/apps/ripspricex/script.js?v=1.0.60';
     try {
       var params = new URLSearchParams(window.location.search || '');
       var isPreview =
@@ -177,7 +177,7 @@
 <script id="ripx-app-embed-config" type="application/json">
   {
     "shopHost": {{ request.host | json }},
-    "version": "1.0.59",
+    "version": "1.0.60",
     "directScriptBaseUrl": {{ block.settings.direct_script_base_url | default: "__RIPX_UNSET__" | json }}
   }
 </script>
@@ -188,8 +188,8 @@
     window.__RIPX_APP_EMBED_LOADER__ = true;
 
     var shopHost = '{{ request.host }}';
-    var version = '1.0.59';
-    var primarySrc = 'https://' + shopHost + '/apps/ripspricex/script.js?v=1.0.59';
+    var version = '1.0.60';
+    var primarySrc = 'https://' + shopHost + '/apps/ripspricex/script.js?v=1.0.60';
     var directScriptBaseUrl = {{ block.settings.direct_script_base_url | default: "__RIPX_UNSET__" | json }};
     function normalizeDirectScriptBaseUrl(value) {
       var trimmed = String(value || '').trim();
