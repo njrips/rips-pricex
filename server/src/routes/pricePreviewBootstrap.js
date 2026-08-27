@@ -231,12 +231,32 @@ function buildPricePreviewHtml({
 
         function isPasswordPageHtml(htmlText) {
           try {
-            var lower = String(htmlText || '').toLowerCase();
-            return (
-              lower.indexOf('storefront_password') !== -1 ||
+            var html = String(htmlText || '');
+            var lower = html.toLowerCase();
+            var hasForm =
+              /name=["']form_type["'][^>]*value=["']storefront_password["']/i.test(html) ||
+              /value=["']storefront_password["'][^>]*name=["']form_type["']/i.test(html) ||
+              (/name=["']password["']/i.test(html) &&
+                (/id=["']password["']/i.test(html) || /enter store password/i.test(html)));
+            var hasCopy =
               lower.indexOf('this store is password protected') !== -1 ||
-              lower.indexOf('enter store password') !== -1
-            );
+              lower.indexOf('enter store password') !== -1;
+            // Require form + copy so theme scripts that mention storefront_password
+            // do not look like the password gate.
+            return hasForm && hasCopy;
+          } catch (_e) {
+            return false;
+          }
+        }
+
+        function isPasswordGateResponse(result) {
+          if (isPasswordPageHtml(result && result.htmlText)) return true;
+          try {
+            var path = new URL(
+              (result && result.finalUrl) || '',
+              window.location.origin
+            ).pathname.toLowerCase();
+            return path === '/password' || /\/password\/?$/.test(path);
           } catch (_e) {
             return false;
           }
@@ -266,8 +286,10 @@ function buildPricePreviewHtml({
               openPw.style.cssText =
                 'padding:10px 14px;border:0;border-radius:9px;background:#111827;color:white;cursor:pointer;margin-right:10px;';
               openPw.onclick = function () {
+                // Keep this preview tab. The Pricefy server cannot use storefront
+                // cookies, so unlock must happen in the browser, then Retry.
                 try {
-                  window.location.replace('/password');
+                  window.open('/password', '_blank', 'noopener');
                 } catch (_e) {
                   window.location.href = '/password';
                 }
@@ -278,7 +300,7 @@ function buildPricePreviewHtml({
             retry.textContent = 'Retry preview';
             retry.style.cssText =
               'padding:10px 14px;border:0;border-radius:9px;background:#111827;color:white;cursor:pointer;margin-right:10px;';
-            retry.onclick = reloadPreview;
+            retry.onclick = opts.retryWithClientFetch ? loadPreview : reloadPreview;
             var openProduct = document.createElement('button');
             openProduct.textContent = 'Open product URL';
             openProduct.style.cssText =
@@ -299,8 +321,8 @@ function buildPricePreviewHtml({
         function showPasswordHelp() {
           showFatalError(
             'Storefront password required',
-            'This Shopify store is password protected. Enter the storefront password once, then reopen this preview link.',
-            { showPasswordButton: true }
+            'This Shopify store is password protected. Open the password page, enter the Online Store password (not your Shopify admin login), then click Retry preview.',
+            { showPasswordButton: true, retryWithClientFetch: true }
           );
         }
 
@@ -633,11 +655,8 @@ function buildPricePreviewHtml({
             }
             return;
           }
-          if (prefetchError === 'password_required') {
-            lastError = 'password_required';
-            showPasswordHelp();
-            return;
-          }
+          // Server prefetch cannot use the shopper's storefront_digest cookie.
+          // password_required from Pricefy must still try a same-origin fetch.
           if (prefetchError === 'fetch_failed_404' || prefetchError === '404') {
             lastError = 'target_fetch_failed_404';
             showNotFoundHelp();
@@ -647,13 +666,22 @@ function buildPricePreviewHtml({
           fetch(target, { method: 'GET', credentials: 'include', redirect: 'follow' })
             .then(function (response) {
               var status = response && response.status ? response.status : 0;
+              var finalUrl = '';
+              try {
+                finalUrl = String(response && response.url ? response.url : '');
+              } catch (_eUrl) {}
               return response.text().then(function (htmlText) {
-                return { status: status, ok: !!(response && response.ok), htmlText: htmlText };
+                return {
+                  status: status,
+                  ok: !!(response && response.ok),
+                  htmlText: htmlText,
+                  finalUrl: finalUrl,
+                };
               });
             })
             .then(function (result) {
               if (!result) throw new Error('target_fetch_failed');
-              if (isPasswordPageHtml(result.htmlText)) {
+              if (isPasswordGateResponse(result)) {
                 lastError = 'password_required';
                 showPasswordHelp();
                 return;
