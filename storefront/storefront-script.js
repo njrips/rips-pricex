@@ -11056,8 +11056,10 @@
       return toProductGid(window.meta.product.id);
     }
     var productIdInput =
-      document.querySelector('form[action*="/cart/add"] input[name="product-id"]') ||
-      document.querySelector('input[name="product-id"]');
+      document.querySelector('product-info input[name="product-id"]') ||
+      document.querySelector('.product-form input[name="product-id"]') ||
+      document.querySelector('form[data-type="add-to-cart-form"] input[name="product-id"]') ||
+      document.querySelector('main product-form input[name="product-id"]');
     if (productIdInput && productIdInput.value) {
       return toProductGid(productIdInput.value);
     }
@@ -11776,12 +11778,15 @@
         horizonNow = queryInOfferPdpHost(priceRoot, '.price')[0];
       }
     } catch (eHz) {}
+    var alreadyOnSale = !!(priceRoot.classList && priceRoot.classList.contains('price--on-sale'));
+
+    // Never add price--on-sale on a regular-price PDP. Dawn then hides
+    // .price__regular; if .price__sale nodes are empty/hidden the price goes blank.
+    if ((saleNow || saleWas) && !alreadyOnSale) {
+      return false;
+    }
 
     if (saleNow || saleWas) {
-      if (priceRoot.classList && !priceRoot.classList.contains('price--on-sale')) {
-        priceRoot.classList.add('price--on-sale');
-        priceRoot.setAttribute('data-ripx-offer-added-onsale', '1');
-      }
       if (saleWas) {
         rememberOfferPdpOrigText(saleWas);
         saleWas.textContent = wasDisplay;
@@ -11867,6 +11872,9 @@
   function shouldShowOfferMessageOnPdp(test) {
     if (!testTypeIsOffer(test)) return false;
     if (!isPdpProductPath()) return false;
+    if (PREVIEW_MODE && PREVIEW_TEST_ID && String(test.id) === String(PREVIEW_TEST_ID)) {
+      return true;
+    }
     var tt = getNormalizedTargetType(test);
     if (!isProductScopeTargetType(tt) && tt !== 'collection') return false;
     var current = getCurrentProductId();
@@ -12937,6 +12945,15 @@
    */
   function shouldRunPriceTestOnCurrentPage(test) {
     if (!test) return false;
+    if (
+      testTypeIsOffer(test) &&
+      PREVIEW_MODE &&
+      PREVIEW_TEST_ID &&
+      String(test.id) === String(PREVIEW_TEST_ID) &&
+      isPdpProductPath()
+    ) {
+      return true;
+    }
     if (matchesTarget(test)) return true;
     if (testTypeIsOffer(test) && shouldShowOfferCodeOnCart(test)) return true;
     if (testTypeIsOffer(test) && shouldShowOfferMessageOnPdp(test)) return true;

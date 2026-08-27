@@ -4,7 +4,7 @@
  */
 
 /** Bump when embedded runtime config or script contract changes. Keep ?v= in sync: extensions/ripspricex-theme/blocks/ripspricex-app-embed.liquid. */
-const SCRIPT_VERSION = '1.0.58';
+const SCRIPT_VERSION = '1.0.59';
 
 /**
  * DB/API may use "pricing"; storefront logic expects "price".

@@ -146,7 +146,10 @@ describe('offer PDP message', () => {
     assert.match(storefrontSrc, new RegExp(OFFER_PDP_CUTOUT_ATTR.replace(/-/g, '\\-')));
     assert.match(storefrontSrc, new RegExp(OFFER_PDP_HOST_PAINTED_ATTR.replace(/-/g, '\\-')));
     assert.match(storefrontSrc, /price--on-sale/);
-    assert.match(storefrontSrc, /input\[name="product-id"\]/);
+    assert.match(storefrontSrc, /alreadyOnSale/);
+    assert.match(storefrontSrc, /Never add price--on-sale/);
+    assert.match(storefrontSrc, /product-info input\[name="product-id"\]/);
+    assert.doesNotMatch(storefrontSrc, /document\.querySelector\('input\[name="product-id"\]'\)/);
     assert.match(storefrontSrc, /window\.meta/);
     assert.match(storefrontSrc, /function insertOfferPdpMessageAfterHost\s*\(/);
     assert.match(storefrontSrc, /function installOfferPdpThemeListeners\s*\(/);
