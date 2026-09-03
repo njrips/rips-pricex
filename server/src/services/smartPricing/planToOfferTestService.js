@@ -111,17 +111,27 @@ function buildOfferTestPayloadFromPlan(plan = {}, options = {}) {
 
   const title = String(plan.title || 'Product').trim();
   const experimentName = String(plan.metadata?.experiment_title || title).trim();
-  const variants = arms.map((arm, index) => ({
-    name: formatOfferArmName(arm, index, currency),
-    allocation: Number(arm.allocation_percent) || Math.floor(100 / arms.length),
-    config: isControlArm(arm, index)
-      ? {}
-      : buildOfferVariantConfig(arm, { experimentName, currency }),
-  }));
+  const variants = arms.map((arm, index) => {
+    const rawAllocation = arm.allocation_percent;
+    const allocation =
+      rawAllocation === null || rawAllocation === undefined || rawAllocation === ''
+        ? Math.floor(100 / arms.length)
+        : Number(rawAllocation);
+    if (!Number.isFinite(allocation) || allocation <= 0) {
+      throw new Error('Every Smart Pricing variation must receive more than 0% traffic');
+    }
+    return {
+      name: formatOfferArmName(arm, index, currency),
+      allocation,
+      config: isControlArm(arm, index)
+        ? {}
+        : buildOfferVariantConfig(arm, { experimentName, currency }),
+    };
+  });
 
   const allocationTotal = variants.reduce((sum, v) => sum + (Number(v.allocation) || 0), 0);
-  if (allocationTotal !== 100 && variants.length > 0) {
-    variants[0].allocation += 100 - allocationTotal;
+  if (Math.abs(allocationTotal - 100) > 0.001) {
+    throw new Error('Smart Pricing variation traffic must total 100%');
   }
 
   const segments = resolvePlanSegments(plan, guardrails);
@@ -155,6 +165,10 @@ function buildOfferTestPayloadFromPlan(plan = {}, options = {}) {
       current_price: plan.current_price ?? null,
       currency,
       launch_preferences: launchPrefs,
+      statistical_design:
+        plan.statistical_design && typeof plan.statistical_design === 'object'
+          ? plan.statistical_design
+          : null,
       price_arms: arms.map(arm => ({
         id: arm.id,
         role: arm.role,

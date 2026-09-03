@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router';
 import { Badge, Button, Modal } from '@shopify/polaris';
 import PageShell from '../../shared/PageShell';
@@ -29,6 +29,7 @@ import ClassicAudienceTab from './details/ClassicAudienceTab';
 import ClassicMetricsTab from './details/ClassicMetricsTab';
 import ClassicActivityTab from './details/ClassicActivityTab';
 import ClassicSettingsTab from './details/ClassicSettingsTab';
+import ClassicProductDetailPanel from './details/ClassicProductDetailPanel';
 import ClassicAudienceMetricsEditModal from './details/ClassicAudienceMetricsEditModal';
 import {
   applyAudienceUiToPlans,
@@ -39,7 +40,9 @@ import {
 import { appendActivityToPlans, createActivityEntry } from './classicActivity';
 import {
   formatClassicStatusLabel,
+  normalizePlanStatus,
   readClassicWizardDraft,
+  rollupExperimentStatus,
   writeClassicWizardDraft,
 } from './classicExperimentHelpers';
 import {
@@ -48,6 +51,11 @@ import {
 } from './classicExperimentDelete';
 import { buildClassicWizardResumePath, getClassicExperimentResumeId, isClassicExperimentEnded, resolveClassicDetailsTab } from './classicExperimentListActions';
 import { isOfferExperimentType } from './offerSelection';
+import {
+  applyReadySmartPricingProducts,
+  applySmartPricingWinner,
+  finishSmartPricingProduct,
+} from '../../../services/smartPricingApi';
 import styles from './SmartPricingClassic.module.css';
 
 function sleep(ms) {
@@ -69,7 +77,10 @@ export default function ClassicExperimentOverview() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const shopDomain = useClassicShopDomain();
-  const [tab, setTab] = useState(() => resolveClassicDetailsTab(searchParams.get('tab')));
+  // The URL is the single source of truth for the active tab, so back/forward
+  // and deep links land on the right one without a state copy to resync.
+  const tab = resolveClassicDetailsTab(searchParams.get('tab'));
+  const selectedProductId = String(searchParams.get('product') || '').trim();
   const [busyAction, setBusyAction] = useState('');
   const [moreOpen, setMoreOpen] = useState(false);
   const [winnerModalOpen, setWinnerModalOpen] = useState(false);
@@ -78,6 +89,8 @@ export default function ClassicExperimentOverview() {
   const [editFocus, setEditFocus] = useState('audience');
   const [editSeed, setEditSeed] = useState(null);
   const [editSaving, setEditSaving] = useState(false);
+  const [rolloutBusyTestId, setRolloutBusyTestId] = useState('');
+  const [rolloutApplyingAll, setRolloutApplyingAll] = useState(false);
   const moreRef = useRef(null);
 
   const details = useClassicExperimentDetails(shopDomain, planId);
@@ -93,6 +106,7 @@ export default function ClassicExperimentOverview() {
     conversionRows,
     variationAverages,
     productPerformanceRows,
+    rolloutRows,
     variations,
     audience,
     metrics,
@@ -106,6 +120,7 @@ export default function ClassicExperimentOverview() {
     experimentTestIds,
     refresh,
     replaceExperimentPlansLocal,
+    shopGuardrails,
   } = details;
 
   const { applying, previewLoadingPlanId, preview, loadPreview, clearPreview, applyWinner } =
@@ -129,13 +144,6 @@ export default function ClassicExperimentOverview() {
     };
   }, [moreOpen]);
 
-  const tabParam = searchParams.get('tab');
-
-  useEffect(() => {
-    const next = resolveClassicDetailsTab(tabParam);
-    setTab(current => (current === next ? current : next));
-  }, [tabParam]);
-
   const status = resolveStatus(plan, test, experiment);
   const isArchived = Boolean(experiment?.archived) || status === 'archived';
   const isDraft = !isArchived && (status === 'draft' || status === 'queued');
@@ -147,11 +155,13 @@ export default function ClassicExperimentOverview() {
     : testId
       ? [testId]
       : [];
-  // Only enable when analytics declared a promoteable winner arm.
   const isOfferTest = isOfferExperimentType(
     plan?.experiment_type || plan?.metadata?.experiment_type || test?.type
   );
-  const canRollOut = Boolean(testId && analytics?.winner_arm_id) && !isOfferTest;
+  const leftoverWinnerPlan = (Array.isArray(experimentPlans) ? experimentPlans : []).find(
+    row => normalizePlanStatus(row) === 'winner_ready'
+  );
+  const canRollOut = Boolean(leftoverWinnerPlan?.test_id) && !isOfferTest;
 
   const experimentTitle = experiment?.title || plan?.title || 'Experiment';
   const currency = plan?.currency || analytics?.currency || 'USD';
@@ -159,11 +169,63 @@ export default function ClassicExperimentOverview() {
 
   const selectTab = nextTab => {
     const resolved = resolveClassicDetailsTab(nextTab);
-    setTab(resolved);
     const params = new URLSearchParams(searchParams);
     if (resolved === 'Overview') params.delete('tab');
     else params.set('tab', resolved.toLowerCase());
+    // Leaving a product drill-down when switching tabs keeps the URL honest.
+    params.delete('product');
     setSearchParams(params, { replace: true });
+  };
+
+  const openProduct = useCallback(
+    nextPlanId => {
+      const id = String(nextPlanId || '').trim();
+      if (!id) return;
+      const params = new URLSearchParams(searchParams);
+      if (!params.get('tab') || params.get('tab') === 'overview') {
+        params.set('tab', 'performance');
+      }
+      params.set('product', id);
+      setSearchParams(params, { replace: true });
+    },
+    [searchParams, setSearchParams]
+  );
+
+  const closeProduct = useCallback(() => {
+    const params = new URLSearchParams(searchParams);
+    params.delete('product');
+    setSearchParams(params, { replace: true });
+  }, [searchParams, setSearchParams]);
+
+  const selectedProductRow = useMemo(() => {
+    if (!selectedProductId) return null;
+    const fromRollout = (Array.isArray(rolloutRows) ? rolloutRows : []).find(
+      row => String(row.planId || '') === selectedProductId
+    );
+    if (fromRollout) return fromRollout;
+    return (
+      (Array.isArray(productPerformanceRows) ? productPerformanceRows : []).find(
+        row => String(row.planId || row.plan?.id || '') === selectedProductId
+      ) || { planId: selectedProductId }
+    );
+  }, [selectedProductId, rolloutRows, productPerformanceRows]);
+
+  // Arrow keys live on the tabs, not the tablist: with a roving tabindex the
+  // container is deliberately not focusable, so a handler there only ever sees
+  // events bubbling up from the focused tab anyway. Focus follows the
+  // selection, which is what makes the arrow keys usable at all.
+  const onTabKeyDown = (event, fromTab) => {
+    const ids = TABS.map(item => item.id);
+    const index = ids.indexOf(fromTab);
+    let nextTab = null;
+    if (event.key === 'ArrowRight') nextTab = ids[(index + 1) % ids.length];
+    else if (event.key === 'ArrowLeft') nextTab = ids[(index - 1 + ids.length) % ids.length];
+    else if (event.key === 'Home') nextTab = ids[0];
+    else if (event.key === 'End') nextTab = ids[ids.length - 1];
+    if (!nextTab) return;
+    event.preventDefault();
+    selectTab(nextTab);
+    document.getElementById(`classic-tab-${nextTab}`)?.focus();
   };
 
   const showError = (err, fallback) => {
@@ -189,6 +251,133 @@ export default function ClassicExperimentOverview() {
       })),
       createActivityEntry({ actor: activityActor, ...entry })
     );
+
+  /**
+   * Records a rollout on the one plan it touched.
+   *
+   * The Activity tab reads these logs, so a per-product rollout that skipped
+   * them would leave no trace of the most consequential action in the app.
+   */
+  const stampRolloutOnPlan = async (testId, entry, patch = {}) => {
+    const target = (Array.isArray(experimentPlans) ? experimentPlans : []).filter(
+      row => String(row?.test_id || '') === String(testId)
+    );
+    if (!target.length) return;
+    await replaceExperimentPlansLocal(stampPlans(target, entry, patch)).catch(() => null);
+  };
+
+  /**
+   * Rolls out one product without ending its siblings.
+   *
+   * Every product in an experiment is a separate test, so applying a finished
+   * one stops that test alone. `stopIfRunning` lets the server do the stop as
+   * part of the apply, which is what keeps the rest of the experiment collecting.
+   */
+  const handleApplyProduct = async row => {
+    if (!row?.testId || rolloutBusyTestId || rolloutApplyingAll) return;
+    setRolloutBusyTestId(row.testId);
+    try {
+      const result = await applySmartPricingWinner(shopDomain, row.testId, {
+        publishToShopify: true,
+        stopIfRunning: true,
+      });
+      const updated = result?.publish?.summary?.updated_count ?? 0;
+      await stampRolloutOnPlan(
+        row.testId,
+        {
+          kind: 'complete',
+          title: 'Winning price applied',
+          detail: row.decision?.winner?.label
+            ? `${row.decision.winner.label} written to Shopify`
+            : 'Winner written to Shopify',
+        },
+        { status: 'applied', winner_applied_at: new Date().toISOString() }
+      );
+      showSuccess(
+        updated > 0
+          ? `${row.productTitle}: winning price written to ${updated} Shopify variant${updated === 1 ? '' : 's'}.`
+          : `${row.productTitle}: winner applied. Shopify prices were already in sync.`
+      );
+      await sleep(450);
+      refresh({ quiet: true });
+    } catch (err) {
+      showError(err, `Could not apply the winner for ${row.productTitle}.`);
+    } finally {
+      setRolloutBusyTestId('');
+    }
+  };
+
+  const handleFinishProduct = async row => {
+    if (!row?.testId || rolloutBusyTestId || rolloutApplyingAll) return;
+    setRolloutBusyTestId(row.testId);
+    try {
+      const result = await finishSmartPricingProduct(shopDomain, row.testId);
+      await stampRolloutOnPlan(
+        row.testId,
+        {
+          kind: 'complete',
+          title: result?.control_retained ? 'Finished on control price' : 'Finished on winning offer',
+          detail: 'No catalog price was changed',
+        },
+        { status: 'completed' }
+      );
+      showSuccess(`${row.productTitle}: test finished. No catalog price was changed.`);
+      await sleep(450);
+      refresh({ quiet: true });
+    } catch (err) {
+      showError(err, `Could not finish ${row.productTitle}.`);
+    } finally {
+      setRolloutBusyTestId('');
+    }
+  };
+
+  const handleApplyAllReady = async testIds => {
+    if (!Array.isArray(testIds) || !testIds.length || rolloutApplyingAll) return;
+    setRolloutApplyingAll(true);
+    try {
+      const result = await applyReadySmartPricingProducts(shopDomain, testIds);
+      const applied = (result?.results || []).filter(entry => entry.applied);
+      const failures = (result?.results || []).filter(entry => !entry.applied);
+      for (const entry of applied) {
+        await stampRolloutOnPlan(
+          entry.test_id,
+          {
+            kind: 'complete',
+            title:
+              entry.action === 'apply_price'
+                ? 'Winning price applied'
+                : 'Finished without a price change',
+            detail: 'Applied with the rest of the ready products',
+          },
+          entry.action === 'apply_price'
+            ? { status: 'applied', winner_applied_at: new Date().toISOString() }
+            : { status: 'completed' }
+        );
+      }
+      const deferred = Number(result?.deferred) || 0;
+      const more = deferred > 0 ? ` ${deferred} were left for a second batch.` : '';
+      if (failures.length) {
+        // A partial result is reported as an error rather than a success: the
+        // toast is green or red only, and green would hide the failures.
+        showError(
+          new Error(
+            `Applied ${applied.length} of ${testIds.length - deferred} products. ${failures.length} could not be applied: ${failures[0].error}${more}`
+          ),
+          'Some products could not be applied.'
+        );
+      } else {
+        showSuccess(
+          `Applied ${applied.length} product${applied.length === 1 ? '' : 's'}.${more}`
+        );
+      }
+      await sleep(450);
+      refresh({ quiet: true });
+    } catch (err) {
+      showError(err, 'Could not apply the ready products.');
+    } finally {
+      setRolloutApplyingAll(false);
+    }
+  };
 
   const handlePause = async () => {
     if (!linkedTestIds.length || busyAction) return;
@@ -337,10 +526,11 @@ export default function ClassicExperimentOverview() {
   };
 
   const handleRollOut = async () => {
-    if (!plan?.test_id || busyAction) return;
+    const target = leftoverWinnerPlan || plan;
+    if (!target?.test_id || busyAction) return;
     setBusyAction('winner');
     try {
-      await loadPreview(plan);
+      await loadPreview(target);
       setWinnerModalOpen(true);
     } catch (err) {
       showError(err, 'Could not load winner preview.');
@@ -350,24 +540,25 @@ export default function ClassicExperimentOverview() {
   };
 
   const handleConfirmWinner = async () => {
+    const target = leftoverWinnerPlan || plan;
     try {
-      await applyWinner(plan, { publishToShopify: true });
+      await applyWinner(target, { publishToShopify: true });
       const appliedAt = new Date().toISOString();
       await replaceExperimentPlansLocal(
         stampPlans(
-          experimentPlans,
+          (Array.isArray(experimentPlans) ? experimentPlans : []).map(row =>
+            String(row.id) === String(target.id)
+              ? { ...row, status: 'applied', winner_applied_at: appliedAt }
+              : row
+          ),
           {
             id: 'winner_applied',
             kind: 'complete',
-            title: isOfferTest ? 'Test completed' : 'Winner rolled out',
+            title: isOfferTest ? 'Test completed' : 'Winning price applied',
             detail: isOfferTest
               ? 'Offer test finished — catalog prices were not changed'
-              : 'Winning price applied to Shopify',
+              : 'This product’s winning variation was written to Shopify',
             at: appliedAt,
-          },
-          {
-            status: 'applied',
-            winner_applied_at: appliedAt,
           }
         )
       );
@@ -405,6 +596,10 @@ export default function ClassicExperimentOverview() {
       showError(null, check.message);
       return;
     }
+    if (shopGuardrails == null) {
+      showError(null, 'Still loading shop experiment defaults. Try again in a moment.');
+      return;
+    }
     setEditSaving(true);
     try {
       const nextPlans = appendActivityToPlans(
@@ -414,12 +609,20 @@ export default function ClassicExperimentOverview() {
           hypothesis: plan?.hypothesis || plan?.metadata?.hypothesis || '',
           experimentType:
             plan?.experiment_type || plan?.metadata?.experiment_type || experiment?.experimentType,
+          shopGuardrails,
         }),
         createActivityEntry({
           kind: 'updated',
-          title: editFocus === 'metrics' ? 'Metrics updated' : 'Audience updated',
+          title:
+            editFocus === 'guardrail'
+              ? 'Revenue guardrail updated'
+              : editFocus === 'metrics'
+                ? 'Metrics updated'
+                : 'Audience updated',
           detail:
-            editFocus === 'metrics'
+            editFocus === 'guardrail'
+              ? 'Revenue per visitor pause threshold changed'
+              : editFocus === 'metrics'
               ? 'Primary metric, secondary goals, or guardrails changed'
               : 'Targeting, traffic, or sample size changed',
           actor: activityActor,
@@ -551,13 +754,16 @@ export default function ClassicExperimentOverview() {
                     Resume
                   </Button>
                 ) : null}
-                {isOfferTest || isArchived ? null : (
+                {isOfferTest || isArchived || !canRollOut ? null : (
                   <Button
                     variant="primary"
                     icon={ButtonIconTrophy}
-                    disabled={Boolean(busyAction) || !canRollOut}
+                    disabled={Boolean(busyAction)}
                     onClick={handleRollOut}
-                    loading={busyAction === 'winner' || previewLoadingPlanId === plan?.id}
+                    loading={
+                      busyAction === 'winner' ||
+                      previewLoadingPlanId === (leftoverWinnerPlan?.id || plan?.id)
+                    }
                   >
                     Roll out winner
                   </Button>
@@ -616,28 +822,7 @@ export default function ClassicExperimentOverview() {
         </div>
         </div>
 
-        <div
-          className={styles.overviewTabs}
-          role="tablist"
-          aria-label="Experiment sections"
-          onKeyDown={event => {
-            const ids = TABS.map(item => item.id);
-            const index = ids.indexOf(tab);
-            if (event.key === 'ArrowRight') {
-              event.preventDefault();
-              selectTab(ids[(index + 1) % ids.length]);
-            } else if (event.key === 'ArrowLeft') {
-              event.preventDefault();
-              selectTab(ids[(index - 1 + ids.length) % ids.length]);
-            } else if (event.key === 'Home') {
-              event.preventDefault();
-              selectTab(ids[0]);
-            } else if (event.key === 'End') {
-              event.preventDefault();
-              selectTab(ids[ids.length - 1]);
-            }
-          }}
-        >
+        <div className={styles.overviewTabs} role="tablist" aria-label="Experiment sections">
           {TABS.map(item => {
             const Icon = item.icon;
             const selected = tab === item.id;
@@ -652,6 +837,7 @@ export default function ClassicExperimentOverview() {
                 tabIndex={selected ? 0 : -1}
                 className={`${styles.overviewTab} ${selected ? styles.overviewTabActive : ''}`}
                 onClick={() => selectTab(item.id)}
+                onKeyDown={event => onTabKeyDown(event, item.id)}
               >
                 <Icon />
                 {item.id}
@@ -675,25 +861,57 @@ export default function ClassicExperimentOverview() {
             />
           ) : null}
           {tab === 'Performance' ? (
-            <ClassicPerformanceTab
-              analytics={analytics}
-              analyticsLoading={analyticsLoading}
-              currency={currency}
-              variationAverages={variationAverages}
-              productPerformanceRows={productPerformanceRows}
-              variations={variations}
-              isOfferTest={isOfferTest}
-            />
+            selectedProductId ? (
+              <ClassicProductDetailPanel
+                shopDomain={shopDomain}
+                planId={selectedProductId}
+                row={selectedProductRow}
+                sharedTest={Boolean(selectedProductRow?.sharedTest)}
+                currency={currency}
+                onClose={closeProduct}
+                onChanged={refresh}
+              />
+            ) : (
+              <ClassicPerformanceTab
+                analytics={analytics}
+                analyticsLoading={analyticsLoading}
+                currency={currency}
+                variationAverages={variationAverages}
+                productPerformanceRows={productPerformanceRows}
+                rolloutRows={rolloutRows}
+                variations={variations}
+                isOfferTest={isOfferTest}
+                onApplyProduct={handleApplyProduct}
+                onFinishProduct={handleFinishProduct}
+                onApplyAllReady={handleApplyAllReady}
+                onOpenProduct={openProduct}
+                rolloutBusyTestId={rolloutBusyTestId}
+                rolloutApplyingAll={rolloutApplyingAll}
+              />
+            )
           ) : null}
           {tab === 'Variations' ? (
-            <ClassicVariationsTab
-              variations={variations}
-              currency={currency}
-              shopDomain={shopDomain}
-              testId={testId}
-              isOfferTest={isOfferTest}
-              inboxPlans={experimentPlans}
-            />
+            selectedProductId ? (
+              <ClassicProductDetailPanel
+                shopDomain={shopDomain}
+                planId={selectedProductId}
+                row={selectedProductRow}
+                sharedTest={Boolean(selectedProductRow?.sharedTest)}
+                currency={currency}
+                onClose={closeProduct}
+                onChanged={refresh}
+              />
+            ) : (
+              <ClassicVariationsTab
+                variations={variations}
+                currency={currency}
+                shopDomain={shopDomain}
+                testId={testId}
+                isOfferTest={isOfferTest}
+                inboxPlans={experimentPlans}
+                onOpenProduct={openProduct}
+              />
+            )
           ) : null}
           {tab === 'Audience' ? (
             <ClassicAudienceTab
@@ -714,7 +932,7 @@ export default function ClassicExperimentOverview() {
               audience={audience}
               metrics={metrics}
               onEdit={() => openAudienceMetricsEditor('audience')}
-              onEditMetrics={() => openAudienceMetricsEditor('metrics')}
+              onEditMetrics={() => openAudienceMetricsEditor('guardrail')}
             />
           ) : null}
         </div>
@@ -725,6 +943,10 @@ export default function ClassicExperimentOverview() {
         focus={editFocus}
         initialValue={editSeed}
         shopDomain={shopDomain}
+        plans={experimentPlans}
+        variations={variations}
+        shopGuardrails={shopGuardrails || {}}
+        shopMaxRevenueDropPercent={shopGuardrails?.max_revenue_drop_percent}
         readOnly={!canEditClassicAudienceMetrics(status)}
         readOnlyReason={
           canEditClassicAudienceMetrics(status)
@@ -737,15 +959,18 @@ export default function ClassicExperimentOverview() {
             : ''
         }
         saving={editSaving}
+        shopDefaultsReady={shopGuardrails != null}
         onClose={closeAudienceMetricsEditor}
         onSave={handleSaveAudienceMetrics}
       />
 
       <WinnerApplyModal
         open={winnerModalOpen}
-        plan={plan}
+        plan={leftoverWinnerPlan || plan}
         preview={preview?.data || null}
-        loadingPreview={previewLoadingPlanId === plan?.id}
+        loadingPreview={
+          previewLoadingPlanId === (leftoverWinnerPlan?.id || plan?.id)
+        }
         applying={applying}
         onClose={() => {
           setWinnerModalOpen(false);
@@ -783,6 +1008,10 @@ export default function ClassicExperimentOverview() {
 
 function resolveStatus(plan, test, experiment) {
   if (experiment?.archived || plan?.archived) return 'archived';
+  const experimentPlans = Array.isArray(experiment?.plans) ? experiment.plans : [];
+  if (experimentPlans.length > 1) {
+    return rollupExperimentStatus(experimentPlans);
+  }
   const planStatus = String(plan?.status || experiment?.status || '')
     .trim()
     .toLowerCase();
@@ -793,7 +1022,8 @@ function resolveStatus(plan, test, experiment) {
   // Prefer inbox merchant pause over raw stopped → winner_ready race.
   if (planStatus === 'paused') return 'paused';
   if (planStatus === 'winner_ready') return 'winner_ready';
-  if (planStatus === 'applied' || planStatus === 'completed') return 'applied';
+  if (planStatus === 'applied') return 'applied';
+  if (planStatus === 'completed') return 'completed';
   if (testStatus === 'running' || testStatus === 'active' || planStatus === 'running') {
     return 'running';
   }
@@ -807,7 +1037,8 @@ function statusLabel(status, experimentType) {
   if (status === 'running') return 'Running';
   if (status === 'paused' || status === 'stopped') return 'Paused';
   if (status === 'winner_ready') return formatClassicStatusLabel(status, experimentType);
-  if (status === 'applied') return 'Applied';
+  if (status === 'applied') return formatClassicStatusLabel(status, experimentType);
+  if (status === 'completed') return formatClassicStatusLabel(status, experimentType);
   if (status === 'queued') return 'Queued';
   return 'Draft';
 }

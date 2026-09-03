@@ -1,4 +1,3 @@
-import React from 'react';
 import { IconTrophy } from '../classicIcons';
 import { formatNumber, formatPct, formatRate } from '../classicExperimentDetailsHelpers';
 import styles from '../SmartPricingClassic.module.css';
@@ -48,7 +47,7 @@ export default function ClassicOverviewTab({
                 : '—'}
           </div>
           <div className={styles.productSub}>
-            {kpis.significant ? 'Statistically significant' : 'Collecting data'}
+            {kpis.decisionCaption || (kpis.significant ? 'Winner called' : 'Collecting data')}
           </div>
         </div>
       </div>

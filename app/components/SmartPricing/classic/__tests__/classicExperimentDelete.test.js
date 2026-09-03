@@ -1,15 +1,17 @@
-jest.mock('../../../../services', () => ({
-  apiDelete: jest.fn(),
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+vi.mock('../../../../services', () => ({
+  apiDelete: vi.fn(),
 }));
 
-jest.mock('../../smartPricingConstants', () => ({
-  readInboxPlans: jest.fn(),
-  writeInboxPlans: jest.fn(),
+vi.mock('../../smartPricingConstants', () => ({
+  readInboxPlans: vi.fn(),
+  writeInboxPlans: vi.fn(),
 }));
 
-jest.mock('../../smartPricingInboxPersistence', () => ({
-  deletePersistedInboxPlan: jest.fn(),
-  persistInboxPlansNow: jest.fn(),
+vi.mock('../../smartPricingInboxPersistence', () => ({
+  deletePersistedInboxPlan: vi.fn(),
+  persistInboxPlansNow: vi.fn(),
 }));
 
 import { apiDelete } from '../../../../services';
@@ -31,7 +33,7 @@ describe('classicExperimentDelete', () => {
   };
 
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
     readInboxPlans.mockReturnValue([{ id: 'p1' }, { id: 'p2' }, { id: 'p3' }]);
     deletePersistedInboxPlan.mockResolvedValue({ ok: true, revision: 'rev-1' });
     persistInboxPlansNow.mockResolvedValue({ revision: 'rev-2' });
@@ -47,7 +49,7 @@ describe('classicExperimentDelete', () => {
   });
 
   it('mentions linked tests in the confirm message', () => {
-    expect(buildClassicExperimentDeleteConfirmMessage(experiment)).toContain('2 linked RipX tests');
+    expect(buildClassicExperimentDeleteConfirmMessage(experiment)).toContain('2 linked Pricify tests');
   });
 
   it('deletes inbox plans locally, on server, and linked tests', async () => {

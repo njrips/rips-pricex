@@ -3,7 +3,8 @@
  * A deployed function does nothing until this binding exists.
  */
 
-const DEFAULT_DISCOUNT_TITLE = 'RipsPriceX Offer Checkout Function';
+const DEFAULT_DISCOUNT_TITLE = 'Pricify Offer Checkout Function';
+const LEGACY_DISCOUNT_TITLES = ['RipsPriceX Offer Checkout Function'];
 const DEFAULT_DISCOUNT_CLASSES = ['PRODUCT'];
 const CHECKOUT_DISCOUNT_FUNCTION_HANDLE = 'ripspricex-checkout-discount';
 const ENSURE_TIMEOUT_MS = 20000;
@@ -77,6 +78,7 @@ function pickCheckoutDiscountFunction(functionsList = []) {
       .trim()
       .toLowerCase();
     return (
+      title.includes('pricify') ||
       title.includes('ripspricex') ||
       title.includes('rips price') ||
       title.includes('ripx')
@@ -108,6 +110,15 @@ function matchDiscountsToFunction(discounts = [], ...needles) {
   return (Array.isArray(discounts) ? discounts : []).filter(discount =>
     identifiersOfDiscount(discount).some(id => ids.has(normalizeShopifyIdentifier(id)))
   );
+}
+
+function findKnownOfferDiscount(discounts = [], preferredTitle = DEFAULT_DISCOUNT_TITLE) {
+  const titles = [preferredTitle, ...LEGACY_DISCOUNT_TITLES];
+  for (const title of titles) {
+    const found = findDiscountByTitle(discounts, title);
+    if (found) return found;
+  }
+  return null;
 }
 
 function findDiscountByTitle(discounts = [], title = DEFAULT_DISCOUNT_TITLE) {
@@ -321,7 +332,7 @@ async function getOfferCheckoutDiscountStatus({
     CHECKOUT_DISCOUNT_FUNCTION_HANDLE
   );
   if (!matched.length) {
-    const titled = findDiscountByTitle(discounts, DEFAULT_DISCOUNT_TITLE);
+    const titled = findKnownOfferDiscount(discounts);
     if (titled) matched = [titled];
   }
   return {
@@ -421,7 +432,7 @@ async function ensureOfferCheckoutDiscount({
   }
   if (!accessToken) {
     const err = new Error(
-      'Missing Shopify access token. Re-open RipsPriceX from Shopify Admin and try again.'
+      'Missing Shopify access token. Re-open Pricify from Shopify Admin and try again.'
     );
     err.code = 'TOKEN_MISSING';
     throw err;
@@ -465,8 +476,7 @@ async function ensureOfferCheckoutDiscount({
           status.function?.handle,
           CHECKOUT_DISCOUNT_FUNCTION_HANDLE
         )[0] ||
-        findDiscountByTitle(discounts, title) ||
-        findDiscountByTitle(discounts, DEFAULT_DISCOUNT_TITLE) ||
+        findKnownOfferDiscount(discounts, title) ||
         null
       );
     };
@@ -563,6 +573,7 @@ module.exports = {
   normalizeShopifyIdentifier,
   discountRecordId,
   findDiscountByTitle,
+  findKnownOfferDiscount,
   getOfferCheckoutDiscountStatus,
   ensureOfferCheckoutDiscount,
 };

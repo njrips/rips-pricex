@@ -214,8 +214,16 @@ export function mergeInboxSyncStatuses(domain, syncPlans = []) {
     };
     if (sync.winner_applied || sync.inbox_status === 'applied') {
       patch.status = 'applied';
+      patch.winner_applied_at = sync.winner_applied_at || new Date().toISOString();
+    } else if (sync.inbox_status === 'paused') {
+      patch.status = 'paused';
+    } else if (sync.inbox_status === 'completed') {
+      patch.status = 'completed';
+      if (sync.auto_decision === 'control') {
+        patch.control_retained_at = sync.control_retained_at || new Date().toISOString();
+      }
     } else if (sync.winner_ready || sync.inbox_status === 'winner_ready') {
-      patch.status = 'winner_ready';
+      patch.status = plan.status === 'paused' ? 'paused' : 'winner_ready';
     } else if (sync.inbox_status === 'running') {
       patch.status = 'running';
     }

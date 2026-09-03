@@ -3,6 +3,7 @@ import { PUBLIC_ROUTES } from "../constants/publicRoutes";
 
 const PATHS = [
   PUBLIC_ROUTES.home,
+  PUBLIC_ROUTES.docs,
   PUBLIC_ROUTES.privacy,
   PUBLIC_ROUTES.terms,
   PUBLIC_ROUTES.contact,

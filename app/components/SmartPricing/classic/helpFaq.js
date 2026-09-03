@@ -9,7 +9,15 @@ export const HELP_FAQ_ITEMS = [
   },
   {
     q: 'Preview, QR, or copy link is wrong',
-    a: 'Preview opens the storefront product page with a preview query so you see that variation only. Offer tests show the sale cutout and the assigned message or offer amount under the product price. If either is missing, confirm the theme embed is enabled and the PDP price selector is mapped, then retry Preview from the Variations tab.',
+    a: 'Preview and Open land on the storefront product page (not an app URL). Each click clears the previous preview bucket for that browser, then keeps the new variation in session storage and a session cookie so theme navigation stays on that arm. Price tests keep the anti-flicker guard on the PDP. Offer tests show the sale cutout and the assigned message or offer amount under the product price. If either is missing, confirm the theme embed is enabled and the PDP price selector is mapped, then retry Preview from the Variations tab.',
+  },
+  {
+    q: 'How does sample size and significance work?',
+    a: 'A result needs two floors per variation: a minimum number of visitors and a minimum number of conversions. Visitors alone cannot settle a price test, because the comparison is between conversion rates and revenue per visitor, and both are driven by order counts — 5,000 visitors at a 0.4% conversion rate is 20 orders, and a lift measured on 20 orders usually disappears as the test continues. Review shows a 2–8 week collection range only when measured or modeled traffic makes that window realistic, timed from whichever floor takes longer to reach; otherwise it shows the traffic needed instead of a multi-year forecast. AI can broaden a low-traffic audience but never lowers either floor to manufacture a shorter answer. Results are read with a sequential boundary so checking them early does not inflate false positives. Open Guides from a Settings info icon for the full explanation.',
+  },
+  {
+    q: 'How does AI price Suggest work?',
+    a: 'On Products, AI suggested mode fills higher test-variation prices inside your min–max band, then clamps them to shop max price change and a cost-aware min-margin floor. Control stays at the catalog price. Open the info icon next to AI Price Suggestions for the full calculation.',
   },
   {
     q: 'I edited audience or metrics on a live test',
@@ -17,7 +25,11 @@ export const HELP_FAQ_ITEMS = [
   },
   {
     q: 'Pause, resume, or apply a winner',
-    a: 'Pause stops new assignments. Resume continues the same test. Apply winner writes the winning price to the catalog when you confirm — it does not happen automatically. Check the Activity tab for those events.',
+    a: 'Pause stops new assignments. Resume continues the same test. Roll out winner is available as soon as a result clears its sample floors, and you should still review effect size and guardrails before using it. A price is written automatically only for conversion-rate results that an exact boundary confirms, after 14 days and with a healthy traffic split; revenue and profit metrics always wait for your manual review. A control decision leaves the catalog price unchanged. Offer tests end that product without changing catalog prices. Check the Activity tab for those events.',
+  },
+  {
+    q: 'One product finished but the others have not — do I have to end the whole test?',
+    a: 'No. Every product in an experiment is its own test and finishes on its own schedule. The rollout queue at the top of the Performance tab lists them by what needs you: ready first, then anything blocked by a traffic-split fault, then the ones still collecting with the nearest to their floors first. Apply on a row writes that product’s price and stops only that product; Apply all ready does every finished one at once and leaves the rest running. Products where control won, or offer tests, finish without a catalog change. You are emailed once per product the first time it reaches a decision, and if automatic writes are on there is a review window — three days by default — before Pricify applies anything itself.',
   },
   {
     q: 'Create is locked',

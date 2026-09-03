@@ -32,14 +32,20 @@ async function run() {
     }
     const sql = fs.readFileSync(path.join(dir, file), 'utf8');
     console.log(`apply ${file}`);
-    await pool.query('BEGIN');
+    // One dedicated connection for the whole migration: pool.query() can hand
+    // out a different client per statement, which would let the DDL commit
+    // while the schema_migrations row rolls back (or the reverse).
+    const client = await pool.connect();
     try {
-      await pool.query(sql);
-      await pool.query('INSERT INTO schema_migrations (filename) VALUES ($1)', [file]);
-      await pool.query('COMMIT');
+      await client.query('BEGIN');
+      await client.query(sql);
+      await client.query('INSERT INTO schema_migrations (filename) VALUES ($1)', [file]);
+      await client.query('COMMIT');
     } catch (err) {
-      await pool.query('ROLLBACK');
+      await client.query('ROLLBACK').catch(() => {});
       throw err;
+    } finally {
+      client.release();
     }
   }
   await pool.end();

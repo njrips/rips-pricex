@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useOutletContext, useSearchParams } from 'react-router';
-import { Badge, Banner, Button, Checkbox, Select, TextField } from '@shopify/polaris';
+import { Badge, Banner, Button } from '@shopify/polaris';
 import type { AppOutletContext } from '../lib/api.client';
 import { rpxApi } from '../lib/api.client';
 import { useThemeEmbedRedirect } from '../lib/useThemeEmbedRedirect';
 import { apiGet, getShopDomain } from '../services/api';
+import SettingsGuardrailsPanel from '../components/Settings/sections/SettingsGuardrailsPanel';
 import { StoreSettingsPriceSurfacesSection } from '../components/Settings/sections/StoreSettingsPriceSurfacesSection';
 import SettingsPlanPanel, {
   usePlanBillingState,
@@ -12,6 +13,7 @@ import SettingsPlanPanel, {
 import useCartTransformStatus from '../hooks/useCartTransformStatus';
 import useCheckoutDiscountStatus from '../hooks/useCheckoutDiscountStatus';
 import ClassicAdminShell from '../components/SmartPricing/classic/ClassicAdminShell';
+import { useKeyedState } from '../hooks/useKeyedState';
 import { withCurrentEmbeddedSearch } from '../utils/shopifyEmbeddedSearch';
 import styles from '../components/SmartPricing/classic/SmartPricingClassic.module.css';
 
@@ -30,7 +32,7 @@ const TABS: { id: TabId; label: string; title: string; subtitle: string }[] = [
     label: 'Guardrails',
     title: 'Price guardrails',
     subtitle:
-      'Caps AI and manual test prices shop-wide. Changes apply to new suggestions and launches.',
+      'Shop defaults for new tests. Open a guide from the info icon — changes apply to new launches.',
   },
   {
     id: 'installation',
@@ -65,10 +67,17 @@ export default function SettingsPage() {
   const ctx = useOutletContext<AppOutletContext>();
   const navigate = useNavigate();
   const shopDomain = ctx.shop || getShopDomain();
+  const target = useMemo(
+    () => ({ shop: ctx.shop, apiBase: ctx.apiBase }),
+    [ctx.shop, ctx.apiBase]
+  );
   const [searchParams, setSearchParams] = useSearchParams();
   const tab = normalizeTab(searchParams.get('tab'));
   const automap = searchParams.get('automap') === '1';
-  const [autoMapToken, setAutoMapToken] = useState(0);
+  // Auto-map is a one-shot request carried in the URL by links from Setup, the
+  // dashboard, and the wizard. Latch it at mount so the effect below can strip
+  // the param — a reload should not rescan — without withdrawing the request.
+  const [autoMapToken] = useState(() => (automap ? 1 : 0));
   const planState = usePlanBillingState(ctx, { enabled: tab === 'plan' });
 
   const [maxChange, setMaxChange] = useState('15');
@@ -77,10 +86,21 @@ export default function SettingsPage() {
   const [defaultCogs, setDefaultCogs] = useState('55');
   const [scenarioPreset, setScenarioPreset] = useState('recommended');
   const [autoRound2, setAutoRound2] = useState(true);
-  const [message, setMessage] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [maxLearningRounds, setMaxLearningRounds] = useState('3');
+  const [autoApplyWinner, setAutoApplyWinner] = useState(false);
+  const [autoApplyDelayDays, setAutoApplyDelayDays] = useState('3');
+  const [winnerReadyNotify, setWinnerReadyNotify] = useState(true);
+  const [notificationEmail, setNotificationEmail] = useState('');
+  const [confidenceLevel, setConfidenceLevel] = useState('90');
+  const [statisticalPower, setStatisticalPower] = useState('80');
+  const [mdePercent, setMdePercent] = useState('10');
+  const [minSampleSize, setMinSampleSize] = useState('5000');
+  const [minConversions, setMinConversions] = useState('100');
+  // Save feedback belongs to the tab that produced it.
+  const [message, setMessage] = useKeyedState<TabId, string | null>(tab, null);
+  const [error, setError] = useKeyedState<TabId, string | null>(tab, null);
   const [saving, setSaving] = useState(false);
-  const [guardrailsLoading, setGuardrailsLoading] = useState(true);
+  const [guardrailsLoading, setGuardrailsLoading] = useKeyedState(target, true);
 
   const [installSnippet, setInstallSnippet] = useState('');
   const [scriptUrl, setScriptUrl] = useState('');
@@ -115,7 +135,6 @@ export default function SettingsPage() {
 
   useEffect(() => {
     if (tab !== 'price-surfaces' || !automap) return;
-    setAutoMapToken(n => n + 1);
     setSearchParams(
       prev => {
         const params = new URLSearchParams(prev);
@@ -127,10 +146,11 @@ export default function SettingsPage() {
   }, [tab, automap, setSearchParams]);
 
   useEffect(() => {
-    setGuardrailsLoading(true);
+    let cancelled = false;
     rpxApi
-      .getGuardrails(ctx)
+      .getGuardrails(target)
       .then((data: unknown) => {
+        if (cancelled) return;
         const root = data as { guardrails?: Record<string, unknown> };
         const g = (root?.guardrails || data || {}) as Record<string, unknown>;
         if (g.max_price_change_percent != null) setMaxChange(String(g.max_price_change_percent));
@@ -141,15 +161,31 @@ export default function SettingsPage() {
           setScenarioPreset(String(g.default_scenario_preset));
         }
         if (typeof g.auto_round2_default === 'boolean') setAutoRound2(g.auto_round2_default);
+        if (g.max_learning_rounds != null) setMaxLearningRounds(String(g.max_learning_rounds));
+        if (typeof g.auto_apply_winner === 'boolean') setAutoApplyWinner(g.auto_apply_winner);
+        if (g.auto_apply_delay_days != null) setAutoApplyDelayDays(String(g.auto_apply_delay_days));
+        if (typeof g.winner_ready_notify === 'boolean') {
+          setWinnerReadyNotify(g.winner_ready_notify);
+        }
+        if (g.notification_email != null) setNotificationEmail(String(g.notification_email));
+        if (g.confidence_level != null) setConfidenceLevel(String(g.confidence_level));
+        if (g.statistical_power != null) setStatisticalPower(String(g.statistical_power));
+        if (g.mde_percent != null) setMdePercent(String(g.mde_percent));
+        if (g.min_sample_size_per_variation != null) {
+          setMinSampleSize(String(g.min_sample_size_per_variation));
+        }
+        if (g.min_conversions_per_variation != null) {
+          setMinConversions(String(g.min_conversions_per_variation));
+        }
       })
       .catch(() => {})
-      .finally(() => setGuardrailsLoading(false));
-  }, [ctx.shop]);
-
-  useEffect(() => {
-    setMessage(null);
-    setError(null);
-  }, [tab]);
+      .finally(() => {
+        if (!cancelled) setGuardrailsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [target, setGuardrailsLoading]);
 
   useEffect(() => {
     if (tab !== 'installation') return;
@@ -189,22 +225,74 @@ export default function SettingsPage() {
     setError(null);
     setSaving(true);
     try {
-      const result = (await rpxApi.saveGuardrails(ctx, {
+      const payload = {
         max_price_change_percent: Number(maxChange),
         max_revenue_drop_percent: Number(maxRevenueDrop),
         min_margin_percent: Number(minMargin),
         default_cogs_percent: Number(defaultCogs),
         default_scenario_preset: scenarioPreset,
         auto_round2_default: autoRound2,
-      })) as { guardrails?: Record<string, unknown> };
+        max_learning_rounds: Number(maxLearningRounds),
+        auto_apply_winner: autoApplyWinner,
+        auto_apply_delay_days: Number(autoApplyDelayDays),
+        winner_ready_notify: winnerReadyNotify,
+        notification_email: notificationEmail,
+        confidence_level: Number(confidenceLevel),
+        mde_percent: Number(mdePercent),
+        min_sample_size_per_variation: Number(minSampleSize),
+        min_conversions_per_variation: Number(minConversions),
+        analysis_method: 'sequential',
+        statistical_power: Number(statisticalPower),
+      };
+      const result = (await rpxApi.saveGuardrails(target, payload)) as {
+        guardrails?: Record<string, unknown>;
+      };
       const g = (result?.guardrails || {}) as Record<string, unknown>;
-      if (g.max_price_change_percent != null) setMaxChange(String(g.max_price_change_percent));
-      if (g.max_revenue_drop_percent != null) setMaxRevenueDrop(String(g.max_revenue_drop_percent));
-      if (g.min_margin_percent != null) setMinMargin(String(g.min_margin_percent));
-      if (g.default_cogs_percent != null) setDefaultCogs(String(g.default_cogs_percent));
+
+      // The server clamps every limit to a safe range. Show what it actually
+      // stored and name anything it changed, so a value that was rejected or
+      // narrowed cannot be mistaken for the one that was typed.
+      const adjusted: string[] = [];
+      const numericFields: Array<[keyof typeof payload, string, (value: string) => void]> = [
+        ['max_price_change_percent', 'Max price change', setMaxChange],
+        ['max_revenue_drop_percent', 'Max revenue drop', setMaxRevenueDrop],
+        ['min_margin_percent', 'Min margin', setMinMargin],
+        ['default_cogs_percent', 'Default COGS', setDefaultCogs],
+        ['auto_apply_delay_days', 'Review window', setAutoApplyDelayDays],
+        ['max_learning_rounds', 'Maximum learning rounds', setMaxLearningRounds],
+        ['confidence_level', 'Confidence level', setConfidenceLevel],
+        ['statistical_power', 'Planning power', setStatisticalPower],
+        ['mde_percent', 'Target lift', setMdePercent],
+        ['min_sample_size_per_variation', 'Minimum sample', setMinSampleSize],
+        ['min_conversions_per_variation', 'Minimum conversions', setMinConversions],
+      ];
+      numericFields.forEach(([key, label, setValue]) => {
+        const stored = g[key];
+        if (stored == null) return;
+        setValue(String(stored));
+        const sent = Number(payload[key]);
+        if (Number.isFinite(sent) && Number(stored) !== sent) {
+          adjusted.push(`${label} was adjusted to ${stored}`);
+        }
+      });
+
       if (g.default_scenario_preset != null) setScenarioPreset(String(g.default_scenario_preset));
       if (typeof g.auto_round2_default === 'boolean') setAutoRound2(g.auto_round2_default);
-      setMessage('Guardrails saved');
+      if (typeof g.auto_apply_winner === 'boolean') setAutoApplyWinner(g.auto_apply_winner);
+      if (typeof g.winner_ready_notify === 'boolean') setWinnerReadyNotify(g.winner_ready_notify);
+      if (g.notification_email != null) {
+        const storedEmail = String(g.notification_email);
+        setNotificationEmail(storedEmail);
+        if (notificationEmail.trim() && !storedEmail) {
+          adjusted.push(
+            'Notification email was not a valid address, so alerts will go to your Shopify contact email'
+          );
+        }
+      }
+
+      setMessage(
+        adjusted.length ? `Guardrails saved. ${adjusted.join('. ')}.` : 'Guardrails saved'
+      );
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Save failed');
     } finally {
@@ -226,7 +314,7 @@ export default function SettingsPage() {
     tab === 'plan'
       ? {
           label: planState.entitled ? 'Manage plan' : 'Upgrade',
-          onClick: planState.upgrade,
+          onClick: () => planState.upgrade(),
           busy: planState.loading,
           busyLabel: 'Loading…',
           disabled: !planState.canOpenPricing,
@@ -284,95 +372,44 @@ export default function SettingsPage() {
       {tab === 'plan' ? <SettingsPlanPanel ctx={ctx} planState={planState} /> : null}
 
       {tab === 'guardrails' ? (
-        <div>
-          {guardrailsLoading ? (
-            <div style={{ marginBottom: 16 }}>
-              <Banner tone="info" title="Loading guardrails…" />
-            </div>
-          ) : null}
-          {message ? (
-            <div style={{ marginBottom: 16 }}>
-              <Banner tone="success" title={message} />
-            </div>
-          ) : null}
-          {error ? <p className={styles.error}>{error}</p> : null}
-          <div className={styles.field}>
-            <TextField
-              id="max-change"
-              label="Max price change %"
-              type="number"
-              min={0}
-              max={100}
-              value={String(maxChange ?? '')}
-              disabled={guardrailsLoading || saving}
-              onChange={setMaxChange}
-              autoComplete="off"
-              helpText="Absolute band vs current price (typically 3–30)."
-            />
-          </div>
-          <div className={styles.field}>
-            <TextField
-              id="max-revenue-drop"
-              label="Max revenue drop %"
-              type="number"
-              min={3}
-              max={50}
-              value={String(maxRevenueDrop ?? '')}
-              disabled={guardrailsLoading || saving}
-              onChange={setMaxRevenueDrop}
-              autoComplete="off"
-              helpText="Always on for price and offer tests. Pauses a running test if any variation’s revenue per visitor drops more than this versus control (after ~100 visitors per arm)."
-            />
-          </div>
-          <div className={styles.field}>
-            <TextField
-              id="min-margin"
-              label="Min margin %"
-              type="number"
-              min={0}
-              max={100}
-              value={String(minMargin ?? '')}
-              disabled={guardrailsLoading || saving}
-              onChange={setMinMargin}
-              autoComplete="off"
-              helpText="Suggested prices stay above this when COGS is known."
-            />
-          </div>
-          <div className={styles.field}>
-            <TextField
-              id="default-cogs"
-              label="Default COGS %"
-              type="number"
-              min={0}
-              max={100}
-              value={String(defaultCogs ?? '')}
-              disabled={guardrailsLoading || saving}
-              onChange={setDefaultCogs}
-              autoComplete="off"
-              helpText="Used when a product has no unit cost."
-            />
-          </div>
-          <div className={styles.field}>
-            <Select
-              id="scenario"
-              label="Default scenario preset"
-              options={[
-                { label: 'Conservative', value: 'conservative' },
-                { label: 'Recommended', value: 'recommended' },
-                { label: 'Aggressive', value: 'aggressive' },
-              ]}
-              value={scenarioPreset}
-              disabled={guardrailsLoading || saving}
-              onChange={setScenarioPreset}
-            />
-          </div>
-          <Checkbox
-            label="Auto-start round 2 by default"
-            checked={autoRound2}
-            disabled={guardrailsLoading || saving}
-            onChange={setAutoRound2}
-          />
-        </div>
+        <SettingsGuardrailsPanel
+          loading={guardrailsLoading}
+          saving={saving}
+          message={message}
+          error={error}
+          maxChange={maxChange}
+          onMaxChange={setMaxChange}
+          maxRevenueDrop={maxRevenueDrop}
+          onMaxRevenueDrop={setMaxRevenueDrop}
+          minMargin={minMargin}
+          onMinMargin={setMinMargin}
+          defaultCogs={defaultCogs}
+          onDefaultCogs={setDefaultCogs}
+          confidenceLevel={confidenceLevel}
+          onConfidenceLevel={setConfidenceLevel}
+          statisticalPower={statisticalPower}
+          onStatisticalPower={setStatisticalPower}
+          mdePercent={mdePercent}
+          onMdePercent={setMdePercent}
+          minSampleSize={minSampleSize}
+          onMinSampleSize={setMinSampleSize}
+          minConversions={minConversions}
+          onMinConversions={setMinConversions}
+          scenarioPreset={scenarioPreset}
+          onScenarioPreset={setScenarioPreset}
+          autoRound2={autoRound2}
+          onAutoRound2={setAutoRound2}
+          maxLearningRounds={maxLearningRounds}
+          onMaxLearningRounds={setMaxLearningRounds}
+          autoApplyWinner={autoApplyWinner}
+          onAutoApplyWinner={setAutoApplyWinner}
+          autoApplyDelayDays={autoApplyDelayDays}
+          onAutoApplyDelayDays={setAutoApplyDelayDays}
+          winnerReadyNotify={winnerReadyNotify}
+          onWinnerReadyNotify={setWinnerReadyNotify}
+          notificationEmail={notificationEmail}
+          onNotificationEmail={setNotificationEmail}
+        />
       ) : null}
 
       {tab === 'installation' ? (
@@ -396,7 +433,7 @@ export default function SettingsPage() {
               </Badge>
             </div>
             <p className={styles.adminRowBody}>
-              Enable the RipsPriceX theme app embed for PDP paint. The app proxy serves{' '}
+              Enable the Pricify theme app embed for PDP paint. The app proxy serves{' '}
               <code>/apps/ripspricex/script.js</code> when the embed cannot load the script.
               {themeName || liveThemeName ? (
                 <>

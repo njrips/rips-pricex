@@ -151,6 +151,33 @@
   max-width: 148px;
 }
 
+button.stepItem {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+}
+
+.stepItemClickable {
+  cursor: pointer;
+  border-radius: 8px;
+}
+
+.stepItemClickable:hover .stepLabel,
+.stepItemClickable:focus-visible .stepLabel {
+  color: var(--classic-orange-deep, #1a1a1a);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.stepItemClickable:focus-visible {
+  outline: 2px solid var(--classic-orange);
+  outline-offset: 3px;
+}
+
 .stepConnector {
   /* Figma Horizontal Divider: fixed 24×1 (short tick, not a full flex rule) */
   flex: 0 0 24px;
@@ -708,17 +735,6 @@
   border-radius: 0;
 }
 
-.choiceCardDisabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
-
-.choiceCardTooltipWrap,
-.choiceCardTooltipTarget {
-  display: block;
-  min-width: 0;
-}
-
 .offerArmsStack {
   display: flex;
   flex-direction: column;
@@ -1007,6 +1023,9 @@
 }
 
 .trafficBannerText {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   color: var(--classic-muted);
   font-weight: var(--classic-fw-regular);
   line-height: 20px;
@@ -1064,6 +1083,13 @@
   background: var(--classic-orange-soft);
   color: var(--classic-orange-deep, #1a1a1a);
   flex-shrink: 0;
+}
+
+.controlVariationMarker {
+  box-sizing: border-box;
+  background: var(--classic-wash);
+  color: var(--classic-muted);
+  border: 1px solid var(--classic-line);
 }
 
 .letterAlt {
@@ -1541,21 +1567,43 @@
   margin-bottom: 14px;
   padding: 14px 16px;
   background: var(--classic-orange-soft);
-  border: 1px solid rgba(48, 48, 48, 0.2);
+  border: 1px solid var(--classic-line);
   border-radius: 6px;
 }
 
 .aiSuggestTitle {
-  display: inline-flex;
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
+  width: 100%;
   color: var(--classic-orange-deep, #1a1a1a);
   font-size: 14px;
   font-weight: var(--classic-fw-semibold);
   line-height: 20px;
 }
 
-.aiSuggestTitle svg {
+.panelHeadingGroup {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.panelHeadingGroup .panelTitle {
+  margin: 0;
+}
+
+.aiSuggestTitleLead {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.aiSuggestTitleLead svg {
   color: var(--classic-orange);
   flex-shrink: 0;
 }
@@ -1576,8 +1624,49 @@
   margin-bottom: 8px;
 }
 
-.labelRow .label {
+.labelRow .label,
+.labelRow .sectionLabel {
+  flex: 1 1 auto;
+  min-width: 0;
   margin-bottom: 0;
+}
+
+.infoIconLink {
+  position: relative;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--p-color-text-secondary, #616161);
+  border-radius: 99px;
+  text-decoration: none;
+  pointer-events: auto;
+  cursor: pointer;
+  appearance: none;
+}
+
+.infoIconLink:hover,
+.infoIconLink:focus-visible {
+  color: var(--p-color-text, #202223);
+  background: var(--p-color-bg-surface-hover, rgba(0, 0, 0, 0.04));
+}
+
+.guideFullLink {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  color: var(--classic-orange, #303030);
+  font-size: 13px;
+  font-weight: var(--classic-fw-semibold);
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .aiTextBtn {
@@ -2355,6 +2444,12 @@
   color: var(--classic-muted);
 }
 
+.selectionBar > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .selectionBarActions {
   display: inline-flex;
   align-items: center;
@@ -2843,100 +2938,108 @@
   color: var(--classic-ink);
 }
 
-.guardTable {
-  width: 100%;
-  border-collapse: separate;
-  border-spacing: 0;
-  font-size: var(--classic-fs-meta);
+/* Revenue guardrail is a single always-on setting, so it reads as one card with
+   the rule spelled out in a sentence — a 3-column table for one row forces the
+   reader to map headers onto values for no benefit. */
+.guardrailCard {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
   margin-top: 8px;
+  padding: 14px 16px;
   border: 1px solid var(--classic-line);
   border-radius: var(--classic-radius-sm);
-  overflow: hidden;
   background: var(--classic-card);
 }
 
-.guardTable th,
-.guardTable td {
-  padding: 12px;
-  border-bottom: 1px solid var(--classic-line);
-  text-align: left;
-  vertical-align: middle;
+.guardrailCardHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 
-.guardTable tr:last-child td {
-  border-bottom: 0;
-}
-
-.guardTable th {
-  font-size: 11px;
-  font-weight: var(--classic-fw-medium);
-  letter-spacing: 0.55px;
-  text-transform: uppercase;
-  color: var(--classic-muted);
-  background: var(--classic-table-head);
-  padding: 8px 12px;
-}
-
-.guardTable th:nth-child(3),
-.guardTable td:nth-child(3) {
-  text-align: right;
-  padding-right: 16px;
-}
-
-.guardTable th:nth-child(4),
-.guardTable td:nth-child(4) {
-  text-align: center;
-  width: 64px;
-  padding-left: 8px;
-  padding-right: 12px;
-}
-
-.guardMetricHead {
+.guardrailCardTitle {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  color: inherit;
-  font: inherit;
-  letter-spacing: inherit;
-  text-transform: inherit;
+  min-width: 0;
+  color: var(--classic-ink);
+  font-size: var(--classic-fs-label);
+  font-weight: var(--classic-fw-semibold);
 }
 
-.guardThresholdCell {
-  text-align: right;
+.guardrailCardTitle svg {
+  color: var(--classic-orange);
+  flex-shrink: 0;
 }
 
-.guardThresholdCell .thresholdInput {
-  margin-left: auto;
-  display: inline-block;
+.guardrailRule {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  color: var(--classic-ink);
+  font-size: var(--classic-fs-meta);
+  line-height: 28px;
 }
 
-.guardOnCell {
-  text-align: center;
-  vertical-align: middle;
+.guardrailRuleValue {
+  font-weight: var(--classic-fw-semibold);
 }
 
-.guardOnCell .toggle {
-  margin: 0 auto;
-  display: inline-block;
-  vertical-align: middle;
+.guardrailInputWrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
 }
 
-.thresholdInput {
-  width: 80px;
+.guardrailInput {
+  width: 70px;
+  padding: 4px 24px 4px 9px;
   border: 1px solid var(--classic-line);
   border-radius: 10px;
-  padding: 5px 9px;
   font: inherit;
   font-size: var(--classic-fs-label);
   text-align: right;
   color: var(--classic-ink);
   background: var(--classic-card);
+  /* Native spinners would sit on top of the % suffix. */
+  appearance: textfield;
+  -moz-appearance: textfield;
 }
 
-.thresholdInput:focus {
-  border-color: var(--classic-orange);
+.guardrailInput::-webkit-outer-spin-button,
+.guardrailInput::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  appearance: none;
+  margin: 0;
+}
+
+.guardrailInput:focus {
   outline: none;
-  box-shadow: 0 0 0 2px rgba(48, 48, 48, 0.15);
+  border-color: var(--classic-orange);
+  box-shadow: 0 0 0 2px var(--classic-orange-soft);
+}
+
+.guardrailInput:disabled {
+  color: var(--classic-muted);
+  cursor: not-allowed;
+}
+
+.guardrailInputSuffix {
+  position: absolute;
+  right: 10px;
+  color: var(--classic-muted);
+  font-size: var(--classic-fs-label);
+  pointer-events: none;
+}
+
+.guardrailHint {
+  margin: 0;
+  color: var(--classic-muted);
+  font-size: var(--classic-fs-help);
+  line-height: 1.45;
 }
 
 .toggle {
@@ -2949,10 +3052,6 @@
   cursor: pointer;
   flex-shrink: 0;
   padding: 0 4px 0 16px;
-}
-
-.thresholdInputDim {
-  opacity: 0.5;
 }
 
 .toggleOn {
@@ -3152,6 +3251,9 @@
 }
 
 .kvLabel {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   margin: 0 0 4px;
   font-size: var(--classic-fs-label);
   font-weight: var(--classic-fw-regular);
@@ -3199,6 +3301,9 @@
 }
 
 .panelTitle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   margin: 0;
   font-family: var(--ripx-font-classic, var(--ripx-font-ui, 'Inter', system-ui, sans-serif));
   font-size: var(--classic-fs-label);
@@ -4176,6 +4281,12 @@
   font-weight: var(--classic-fw-semibold);
 }
 
+.priceTab .controlVariationMarker {
+  background: var(--classic-wash);
+  color: var(--classic-muted);
+  border-color: var(--classic-line);
+}
+
 .variantRow td {
   padding-top: 10px;
   padding-bottom: 10px;
@@ -5054,7 +5165,7 @@
 :global([data-theme='dark']) .input,
 :global([data-theme='dark']) .textarea,
 :global([data-theme='dark']) .select,
-:global([data-theme='dark']) .thresholdInput,
+:global([data-theme='dark']) .guardrailInput,
 :global([data-theme='dark']) .variationInput,
 :global([data-theme='dark']) .ghostBtn,
 :global([data-theme='dark']) .iconGhostBtn,
@@ -5112,6 +5223,12 @@
 :global([data-theme='dark']) .armLetter,
 :global([data-theme='dark']) .stepItemActive .stepDot {
   color: var(--classic-orange-deep);
+}
+
+:global([data-theme='dark']) .controlVariationMarker {
+  background: var(--classic-wash);
+  color: var(--classic-muted);
+  border-color: var(--classic-line);
 }
 
 :global([data-theme='dark']) .pill:not(.pillActive),
@@ -5215,7 +5332,6 @@
 :global([data-theme='dark']) .trafficBanner,
 :global([data-theme='dark']) .segment,
 :global([data-theme='dark']) .table th,
-:global([data-theme='dark']) .guardTable th,
 :global([data-theme='dark']) .chipGrid {
   background: var(--classic-table-head, var(--classic-wash));
 }
@@ -5703,6 +5819,42 @@
 
 .detailFactCard .detailChipRow {
   margin-top: 0;
+}
+
+/* Rollout readiness queue: one row per product in a multi-product experiment. */
+.rolloutPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.rolloutPanel .table td {
+  vertical-align: top;
+}
+
+.rolloutProductLink {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-weight: var(--classic-fw-semibold);
+  color: var(--classic-ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.rolloutProductLink:hover {
+  text-decoration: underline;
+}
+
+.rolloutDecisionNote {
+  margin-top: 2px;
+  max-width: 380px;
+  white-space: normal;
+}
+
+.rolloutProgress {
+  min-width: 140px;
 }
 
 .detailTableWrap {

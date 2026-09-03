@@ -38,6 +38,9 @@
  * @property {number} estimated_duration_days
  * @property {number} daily_visitors_to_sku
  * @property {PowerRating} power_rating
+ * @property {'practical'|'not_feasible'|'insufficient_data'} duration_feasibility
+ * @property {number} practical_window_min_days
+ * @property {number} practical_window_max_days
  * @property {string[]} feasibility_notes
  *
  * @typedef {Object} LearningPathRound

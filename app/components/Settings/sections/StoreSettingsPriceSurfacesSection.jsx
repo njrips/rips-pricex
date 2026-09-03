@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useOutletContext } from 'react-router';
 import { Banner, BlockStack, Box, Card, Text, TextField } from '@shopify/polaris';
 import { ProductIcon } from '@shopify/polaris-icons';
@@ -20,6 +20,7 @@ import {
   resolveStorefrontPasswordForPreview,
 } from '../../../utils/previewUrl';
 import { apiGet, getApiBaseUrl } from '../../../services';
+import { useKeyedState } from '../../../hooks/useKeyedState';
 import classicStyles from '../../SmartPricing/classic/SmartPricingClassic.module.css';
 import styles from '../Settings.module.css';
 
@@ -41,12 +42,21 @@ export function StoreSettingsPriceSurfacesSection({
   const envPassword = String(
     outletCtx.devStorefrontPassword || getDevStorefrontPasswordDefault() || ''
   ).trim();
-  const [storefrontPassword, setStorefrontPassword] = useState(() =>
-    envPassword || resolveStorefrontPasswordForPreview(shopDomain || '', '')
+  // The password is stored per shop, so a shop switch (or a newly provided .env
+  // value) starts over from whatever is on record for that shop.
+  const passwordKey = `${envPassword}:${shopDomain}`;
+  const initialPassword = useMemo(
+    () => envPassword || resolveStorefrontPasswordForPreview(shopDomain || '', ''),
+    [envPassword, shopDomain]
   );
+  const [storefrontPassword, setStorefrontPassword] = useKeyedState(passwordKey, initialPassword);
   const [pickTarget, setPickTarget] = useState(null);
-  const [pickerProductPath, setPickerProductPath] = useState('');
-  const [pickerProductLoading, setPickerProductLoading] = useState(false);
+  const initialPickerProduct = useMemo(
+    () => ({ path: '', loading: Boolean(String(shopDomain || '').trim()) }),
+    [shopDomain]
+  );
+  const [pickerProduct, setPickerProduct] = useKeyedState(shopDomain, initialPickerProduct);
+  const { path: pickerProductPath, loading: pickerProductLoading } = pickerProduct;
   const [manualProductPath, setManualProductPath] = useState('');
   const pickTargetRef = useRef(null);
   const shopPickHandlerRef = useRef(null);
@@ -56,19 +66,8 @@ export function StoreSettingsPriceSurfacesSection({
       setStorefrontPassword(value);
       persistStorefrontPassword(shopDomain || '', value);
     },
-    [shopDomain]
+    [shopDomain, setStorefrontPassword]
   );
-
-  useEffect(() => {
-    if (envPassword) {
-      setStorefrontPassword(envPassword);
-      return;
-    }
-    const resolved = resolveStorefrontPasswordForPreview(shopDomain || '', '');
-    if (resolved) {
-      setStorefrontPassword(prev => (String(prev || '').trim() ? prev : resolved));
-    }
-  }, [shopDomain, envPassword]);
 
   useEffect(() => {
     pickTargetRef.current = pickTarget;
@@ -76,30 +75,23 @@ export function StoreSettingsPriceSurfacesSection({
 
   useEffect(() => {
     const domain = String(shopDomain || '').trim();
-    if (!domain) {
-      setPickerProductPath('');
-      return undefined;
-    }
+    if (!domain) return undefined;
     let cancelled = false;
-    setPickerProductLoading(true);
     apiGet('/shopify/store-resources?type=product&first=1', { shop: domain })
       .then(res => {
         if (cancelled) return;
         const product = Array.isArray(res?.data?.resources)
           ? res.data.resources.find(p => p?.handle)
           : null;
-        setPickerProductPath(productPathFromResource(product));
+        setPickerProduct({ path: productPathFromResource(product), loading: false });
       })
       .catch(() => {
-        if (!cancelled) setPickerProductPath('');
-      })
-      .finally(() => {
-        if (!cancelled) setPickerProductLoading(false);
+        if (!cancelled) setPickerProduct({ path: '', loading: false });
       });
     return () => {
       cancelled = true;
     };
-  }, [shopDomain]);
+  }, [shopDomain, setPickerProduct]);
 
   const resolvedProductPath = useMemo(() => {
     const manual = String(manualProductPath || '').trim();
@@ -244,7 +236,7 @@ export function StoreSettingsPriceSurfacesSection({
 
   const sectionSummary = useMemo(
     () =>
-      'Shop defaults apply to every Classic Smart Pricing test. When a visitor is bucketed, RipsPriceX paints mapped selectors on PDP, listings, and cart.',
+      'Shop defaults apply to every Classic Smart Pricing test. When a visitor is bucketed, Pricify paints mapped selectors on PDP, listings, and cart.',
     []
   );
 

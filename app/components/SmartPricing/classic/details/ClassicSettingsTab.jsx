@@ -1,8 +1,9 @@
-import React from 'react';
 import { Badge, Button } from '@shopify/polaris';
+import SettingsInfoLink from '../../../Settings/SettingsInfoLink';
 import { IconShield } from '../classicIcons';
 import { formatSplitCountryAudienceLabel, resolveCountryLists } from '../countrySelection';
 import { formatAudienceFactValue } from '../classicExperimentDetailsHelpers';
+import { ensureRevenueGuardrailRows } from '../revenueGuardrail';
 import styles from '../SmartPricingClassic.module.css';
 
 function OnOff({ on }) {
@@ -25,7 +26,10 @@ export default function ClassicSettingsTab({
     );
   }
 
-  const guardrails = Array.isArray(metrics?.guardrails) ? metrics.guardrails : [];
+  const guardrails = ensureRevenueGuardrailRows(
+    metrics?.guardrails,
+    metrics?.max_revenue_drop_percent
+  );
   const sourceFallback =
     audience?.trafficSource && String(audience.trafficSource).toLowerCase() !== 'all'
       ? formatAudienceFactValue([audience.trafficSource], 'All sources')
@@ -57,8 +61,15 @@ export default function ClassicSettingsTab({
         </div>
         <div className={styles.selectionBar}>
           <span>Auto-stop</span>
-          <strong>{settings.autoStopEnabled ? 'On' : 'Off'}</strong>
+          <strong>{settings.autoStopEnabled ? 'On · per product' : 'Off'}</strong>
         </div>
+        {settings.autoStopEnabled ? (
+          <p className={styles.help} style={{ marginTop: 0 }}>
+            {settings.experimentType === 'offer_test' || settings.experimentType === 'offer'
+              ? 'Each product ends on its own sequential call. Catalog prices are not changed.'
+              : 'Each product is decided on its own. A winning variation writes that Shopify price; a control win leaves the catalog unchanged. Other products keep running.'}
+          </p>
+        ) : null}
         <div className={styles.selectionBar}>
           <span>
             {settings.priceApplicationMethod === 'checkout_discount_function'
@@ -115,65 +126,113 @@ export default function ClassicSettingsTab({
             <span>Inherit shop defaults</span>
             <strong>{audience.inheritDefaults ? 'Yes' : 'No'}</strong>
           </div>
-          {audience.minSampleSize ? (
+          {audience.minSampleSize || metrics?.minSampleSize ? (
             <div className={styles.selectionBar}>
-              <span>Minimum sample per variation</span>
-              <strong>{audience.minSampleSize}</strong>
+              <span>
+                Minimum sample per variation
+                <SettingsInfoLink hash="min-sample" label="Minimum sample" />
+              </span>
+              <strong>{audience.minSampleSize || metrics.minSampleSize}</strong>
             </div>
           ) : null}
+          {metrics?.recommendedSampleSize ? (
+            <div className={styles.selectionBar}>
+              <span>
+                Planning reference per variation
+                <SettingsInfoLink hash="min-sample" label="Planning sample" />
+              </span>
+              <strong>{metrics.recommendedSampleSize}</strong>
+            </div>
+          ) : null}
+          {metrics?.durationFeasibility || metrics?.practicalDurationRange ? (
+            <div className={styles.selectionBar}>
+              <span>
+                Collection plan
+                <SettingsInfoLink hash="min-sample" label="Collection planning window" />
+              </span>
+              <strong>
+                {metrics.durationFeasibility === 'not_feasible'
+                  ? 'Needs more traffic for a practical 2–8 week test'
+                  : metrics.practicalDurationRange
+                    ? `Estimated ${metrics.practicalDurationRange}`
+                    : 'Needs qualified traffic data'}
+              </strong>
+            </div>
+          ) : null}
+          {metrics?.durationFeasibility === 'not_feasible' &&
+          Number(metrics.requiredDailyVisitorsForPracticalWindow) > 0 ? (
+            <div className={styles.selectionBar}>
+              <span>Eligible visitors needed</span>
+              <strong>
+                About{' '}
+                {Number(metrics.requiredDailyVisitorsForPracticalWindow).toLocaleString()}/day
+              </strong>
+            </div>
+          ) : null}
+          {metrics?.trafficEvidence ? (
+            <div className={styles.selectionBar}>
+              <span>Traffic evidence</span>
+              <strong>
+                {metrics.trafficEvidence === 'estimated'
+                  ? 'Estimated · verify with storefront history'
+                  : metrics.trafficEvidence === 'modeled'
+                    ? 'Modeled from order history'
+                    : 'Measured storefront traffic'}
+              </strong>
+            </div>
+          ) : null}
+          <div className={styles.selectionBar}>
+            <span>
+              Analysis
+              <SettingsInfoLink hash="sequential" label="Sequential testing" />
+            </span>
+            <strong>
+              {metrics?.analysisMethod === 'frequentist'
+                ? 'Fixed-horizon'
+                : 'Sequential directional evidence · manual winner review'}
+              {metrics?.mdePercent ? ` · ${metrics.mdePercent}% relative lift reference` : ''}
+              {metrics?.confidenceLevel ? ` · ${metrics.confidenceLevel}% confidence` : ''}
+            </strong>
+          </div>
         </div>
       ) : null}
 
       {guardrails.length ? (
         <div className={styles.statCard}>
           <div className={styles.reviewHead}>
-            <h3 className={styles.panelTitle}>Guardrail metrics</h3>
+            <div className={styles.panelHeadingGroup}>
+              <h3 className={styles.panelTitle}>Revenue guardrail</h3>
+              <SettingsInfoLink hash="guardrail-metrics" label="Revenue guardrail" />
+            </div>
             {onEditMetrics ? (
               <Button
                 variant="plain"
-                accessibilityLabel="Edit guardrail metrics"
+                accessibilityLabel="Edit revenue guardrail"
                 onClick={onEditMetrics}
               >
                 Edit
               </Button>
             ) : null}
           </div>
-          <div className={styles.detailTableWrap}>
-            <table className={styles.guardTable}>
-              <thead>
-                <tr>
-                  <th>
-                    <span className={styles.guardMetricHead}>
-                      <IconShield size={14} />
-                      Metric
-                    </span>
-                  </th>
-                  <th>Rule</th>
-                  <th>Threshold</th>
-                  <th>On</th>
-                </tr>
-              </thead>
-              <tbody>
-                {guardrails.map(row => (
-                  <tr key={row.id || row.label}>
-                    <td>
-                      <strong>{row.label || row.id}</strong>
-                      {row.hint ? <div className={styles.productSub}>{row.hint}</div> : null}
-                    </td>
-                    <td>{row.rule || '—'}</td>
-                    <td>{row.threshold || '—'}</td>
-                    <td>
-                      {row.on || row.id === 'revenue' ? (
-                        <Badge tone="success">On</Badge>
-                      ) : (
-                        <Badge>Off</Badge>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          {guardrails.map(row => (
+            <div className={styles.guardrailCard} key={row.id || row.label}>
+              <div className={styles.guardrailCardHead}>
+                <span className={styles.guardrailCardTitle}>
+                  <IconShield size={14} />
+                  {row.label || row.id}
+                </span>
+                <span className={`${styles.badge} ${styles.badgeAccent}`}>Always on</span>
+              </div>
+              <div className={styles.guardrailRule}>
+                <span>Pauses the test if any variation drops more than</span>
+                <span className={styles.guardrailRuleValue}>
+                  {String(row.threshold || '').replace(/^-/, '') || '—'}
+                </span>
+                <span>versus control.</span>
+              </div>
+              {row.hint ? <p className={styles.guardrailHint}>{row.hint}</p> : null}
+            </div>
+          ))}
         </div>
       ) : null}
 

@@ -1,4 +1,4 @@
-import { describe, it } from 'node:test';
+import { describe, it } from 'vitest';
 import assert from 'node:assert/strict';
 import {
   HELP_FAQ_ITEMS,
@@ -31,6 +31,10 @@ describe('helpFaq', () => {
     assert.match(
       HELP_FAQ_ITEMS.find((item) => /Preview, QR/i.test(item.q))?.a || '',
       /under the product price/i
+    );
+    assert.match(
+      HELP_FAQ_ITEMS.find((item) => /apply a winner/i.test(item.q))?.a || '',
+      /manual review/i
     );
   });
 

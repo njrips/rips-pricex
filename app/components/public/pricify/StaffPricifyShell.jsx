@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Form, Link, useLocation } from 'react-router';
+import { useHydrated } from '../../../hooks/useHydrated';
 import PricifyLogo from './PricifyLogo';
 import { clearStaffOtpDraft } from './staffOtp';
 import { staffQueueBackHref } from './staffQueue';
@@ -24,8 +25,12 @@ export default function StaffPricifyShell({
 }) {
   const { pathname, search } = useLocation();
   const [scrolled, setScrolled] = useState(false);
-  const [queueTo, setQueueTo] = useState('/staff/support');
   const onQueue = pathname === '/staff/support';
+  // The remembered queue filters live in browser storage, so the link can only
+  // point back at them once hydrated; the server and the hydration pass both
+  // render the plain queue href they can agree on.
+  const hydrated = useHydrated();
+  const queueTo = onQueue || !hydrated ? '/staff/support' : staffQueueBackHref();
   const logoutNext = pathname.startsWith('/staff/support') ? `${pathname}${search}` : '/staff/support';
 
   useEffect(() => {
@@ -34,10 +39,6 @@ export default function StaffPricifyShell({
     window.addEventListener('scroll', onScroll, { passive: true });
     return () => window.removeEventListener('scroll', onScroll);
   }, []);
-
-  useEffect(() => {
-    setQueueTo(onQueue ? '/staff/support' : staffQueueBackHref());
-  }, [onQueue, pathname, search]);
 
   return (
     <div className="rpx-public staff-app" data-palette="pricify">

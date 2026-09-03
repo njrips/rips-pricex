@@ -1,4 +1,4 @@
-import { describe, it } from 'node:test';
+import { describe, it } from 'vitest';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {
@@ -89,7 +89,7 @@ describe('Pricify FAQ copy', () => {
     );
     assert.deepEqual(
       PUBLIC_HEADER_NAV.map((item) => item.label),
-      ['How it works', 'Features', 'FAQ']
+      ['How it works', 'Features', 'FAQ', 'Guides']
     );
     assert.equal(WALKTHROUGH_EYEBROW, 'Build your experiment');
     assert.match(WALKTHROUGH_STEPS[0].body, /timeframe/);
@@ -102,11 +102,13 @@ describe('Pricify FAQ copy', () => {
     assert.deepEqual(
       FOOTER_COLUMNS.map((column) => column.links.map((link) => link.label)),
       [
-        ['How it works', 'Features', 'FAQ'],
+        ['How it works', 'Features', 'FAQ', 'Guides'],
         ['Privacy Policy', 'Terms of Service'],
         ['Contact', 'Staff login', 'Install on Shopify'],
       ]
     );
+    assert.equal(PUBLIC_ROUTES.docs, '/docs');
+    assert.equal(PUBLIC_ROUTES.docsSettings, '/docs/settings');
     assert.equal(PUBLIC_ROUTES.staff, '/staff/login');
     assert.equal(
       FOOTER_COLUMNS.find((column) => column.heading === 'Support')?.links.find((link) => link.label === 'Staff login')

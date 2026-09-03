@@ -79,7 +79,7 @@ function attrPresent(html, name, value) {
 
 function extractLeadingTag(part) {
   const trimmed = String(part || '').trim();
-  const match = trimmed.match(/^([a-z][a-z0-9]*)(?=[.#\[:])/i);
+  const match = trimmed.match(/^([a-z][a-z0-9]*)(?=[.#[:])/i);
   return match ? match[1].toLowerCase() : '';
 }
 

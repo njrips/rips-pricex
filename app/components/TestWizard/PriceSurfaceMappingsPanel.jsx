@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Badge,
   Banner,
@@ -15,6 +15,7 @@ import {
 import { ChevronDownIcon } from '@shopify/polaris-icons';
 import { Icon } from '@shopify/polaris';
 import { apiGet, apiPost, apiPut, unwrapData } from '../../services/api';
+import { useKeyedState } from '../../hooks/useKeyedState';
 import { TooltipWrapper } from '../shared';
 import {
   MAX_PRICE_SURFACE_MAPPINGS,
@@ -83,6 +84,21 @@ const PRICE_SURFACE_GUIDES = [
 
 function buildMappingKey(row) {
   return `${row.surface}:${row.role}:${row.selector}`;
+}
+
+// Returns a result instead of writing state so the initial load can run from an
+// effect without setting state synchronously.
+async function fetchShopMappings(settingsPath) {
+  try {
+    const response = await apiGet(settingsPath);
+    const data = unwrapData(response);
+    return { mappings: normalizePriceSurfaceMappingsForEditor(data?.mappings), error: '' };
+  } catch (loadError) {
+    return {
+      mappings: null,
+      error: loadError?.message || 'Could not load shop price surface mappings.',
+    };
+  }
 }
 
 function PriceSurfaceMappingRows({
@@ -226,13 +242,21 @@ export default function PriceSurfaceMappingsPanel({
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [noticeTitle, setNoticeTitle] = useState('Saved');
-  const [expanded, setExpanded] = useState(shopOnly);
-  const [activeScopeTab, setActiveScopeTab] = useState(shopOnly ? 'shop' : 'test');
+  // Shop-only mode and each new expand request from the parent open the panel;
+  // the merchant can collapse it again until the next request arrives.
+  const [expandedByMerchant, setExpanded] = useKeyedState(
+    `${shopOnly ? 1 : 0}|${expandRequestToken}`,
+    shopOnly || expandRequestToken > 0
+  );
+  // A visual pick needs the rows on screen for its duration.
+  const expanded = expandedByMerchant || Boolean(pickTarget);
+  const [scopeTabChoice, setActiveScopeTab] = useState(null);
   const [previewPickError, setPreviewPickError] = useState('');
-  const [pickerModalOpen, setPickerModalOpen] = useState(false);
   const [pickerModalUrl, setPickerModalUrl] = useState('');
-  const autoScopeSelectionDoneRef = useRef(false);
   const lastAutoMapTokenRef = useRef(0);
+  // The iframe only makes sense while the parent has a live pick target, so a
+  // captured selector or a timeout over there closes it here too.
+  const pickerModalOpen = Boolean(pickTarget) && Boolean(pickerModalUrl);
 
   const resolvePickerLaunchUrl = useCallback(
     surface => {
@@ -251,23 +275,18 @@ export default function PriceSurfaceMappingsPanel({
       : '/settings/price-surfaces';
   }, [shopDomain]);
 
-  const loadShopMappings = useCallback(async () => {
-    setLoading(true);
-    setError('');
-    try {
-      const response = await apiGet(priceSurfaceSettingsPath());
-      const data = unwrapData(response);
-      setShopMappings(normalizePriceSurfaceMappingsForEditor(data?.mappings));
-    } catch (loadError) {
-      setError(loadError?.message || 'Could not load shop price surface mappings.');
-    } finally {
-      setLoading(false);
-    }
-  }, [priceSurfaceSettingsPath]);
-
   useEffect(() => {
-    loadShopMappings();
-  }, [loadShopMappings]);
+    let cancelled = false;
+    fetchShopMappings(priceSurfaceSettingsPath()).then(result => {
+      if (cancelled) return;
+      if (result.mappings) setShopMappings(result.mappings);
+      setError(result.error);
+      setLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [priceSurfaceSettingsPath]);
 
   useEffect(() => {
     if (!onRegisterShopPickHandler) {
@@ -285,28 +304,9 @@ export default function PriceSurfaceMappingsPanel({
     return () => onRegisterShopPickHandler(null);
   }, [onRegisterShopPickHandler]);
 
-  useEffect(() => {
-    if (pickTarget) {
-      setExpanded(true);
-    }
-  }, [pickTarget]);
-
-  useEffect(() => {
-    if (expandRequestToken > 0) {
-      setExpanded(true);
-    }
-  }, [expandRequestToken]);
-
   const closePickerModal = useCallback(() => {
-    setPickerModalOpen(false);
     setPickerModalUrl('');
   }, []);
-
-  useEffect(() => {
-    if (!pickTarget && pickerModalOpen) {
-      closePickerModal();
-    }
-  }, [pickTarget, pickerModalOpen, closePickerModal]);
 
   useEffect(() => {
     if (typeof document === 'undefined') {
@@ -365,7 +365,7 @@ export default function PriceSurfaceMappingsPanel({
     };
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
-  }, []);
+  }, [setExpanded]);
 
   const updateTestMapping = (index, patch) => {
     const next = normalizePriceSurfaceMappingsForEditor(testMappings).map((entry, idx) => {
@@ -470,29 +470,17 @@ export default function PriceSurfaceMappingsPanel({
     }
     onBeginVisualPick({ scope, index, surface });
     setPickerModalUrl(launchUrl);
-    setPickerModalOpen(true);
   };
 
   const testRows = normalizePriceSurfaceMappingsForEditor(testMappings);
   const shopRows = normalizePriceSurfaceMappingsForEditor(shopMappings);
 
-  useEffect(() => {
-    if (shopOnly) {
-      setActiveScopeTab('shop');
-      setExpanded(true);
-      return;
-    }
-    if (autoScopeSelectionDoneRef.current) {
-      return;
-    }
-    // On first load, prefer Shop defaults when test scope is empty but shop scope has mappings.
-    if (activeScopeTab === 'test' && testRows.length === 0 && shopRows.length > 0) {
-      setActiveScopeTab('shop');
-    }
-    if (testRows.length > 0 || shopRows.length > 0) {
-      autoScopeSelectionDoneRef.current = true;
-    }
-  }, [shopOnly, activeScopeTab, testRows.length, shopRows.length]);
+  // Until the merchant picks a scope, prefer Shop defaults when the test has no
+  // mappings of its own but the shop does.
+  const activeScopeTab = shopOnly
+    ? 'shop'
+    : scopeTabChoice || (testRows.length === 0 && shopRows.length > 0 ? 'shop' : 'test');
+
   const duplicateKeys = useMemo(() => {
     const counts = new Map();
     [...testRows, ...shopRows].forEach(row => {
@@ -622,7 +610,6 @@ export default function PriceSurfaceMappingsPanel({
       onBeginVisualPick({ scope, index: nextIndex, surface });
     }
     setPickerModalUrl(launchUrl);
-    setPickerModalOpen(true);
     setExpanded(true);
   };
 
@@ -755,7 +742,7 @@ export default function PriceSurfaceMappingsPanel({
     } finally {
       setAutoMapping(false);
     }
-  }, [priceSurfaceSettingsPath, productPath, storefrontPassword]);
+  }, [priceSurfaceSettingsPath, productPath, storefrontPassword, setExpanded]);
 
   useEffect(() => {
     const token = Number(autoMapRequestToken) || 0;
@@ -766,7 +753,7 @@ export default function PriceSurfaceMappingsPanel({
     setExpanded(true);
     setActiveScopeTab('shop');
     runAutoMap();
-  }, [autoMapRequestToken, runAutoMap]);
+  }, [autoMapRequestToken, runAutoMap, setExpanded]);
 
   const toggleAcceptedSlot = (surface, role) => {
     const key = `${surface}:${role}`;
@@ -911,7 +898,7 @@ export default function PriceSurfaceMappingsPanel({
                 </Badge>
               ) : null}
             </span>
-            <TooltipWrapper content="Map where RipsPriceX paints test prices on PDP and listing cards. Test overrides run before shop defaults.">
+            <TooltipWrapper content="Map where Pricify paints test prices on PDP and listing cards. Test overrides run before shop defaults.">
               <span className={styles.priceSurfaceHeaderHint}>{registryStatus.hint}</span>
             </TooltipWrapper>
             <span className={styles.priceSurfaceHeaderChevron} aria-hidden>
@@ -946,7 +933,7 @@ export default function PriceSurfaceMappingsPanel({
               </Badge>
             ) : null}
           </span>
-          <TooltipWrapper content="Shop defaults apply to every price test. When a visitor is bucketed, RipsPriceX paints these selectors on the storefront.">
+          <TooltipWrapper content="Shop defaults apply to every price test. When a visitor is bucketed, Pricify paints these selectors on the storefront.">
             <span className={styles.priceSurfaceHeaderHint}>{registryStatus.hint}</span>
           </TooltipWrapper>
         </div>
@@ -1062,7 +1049,7 @@ export default function PriceSurfaceMappingsPanel({
                   Smart selector coverage
                 </Text>
                 <Text as="p" variant="bodySm" tone="subdued">
-                  Pick only the surfaces you want RipsPriceX to paint. Missing surfaces stay untouched.
+                  Pick only the surfaces you want Pricify to paint. Missing surfaces stay untouched.
                 </Text>
               </div>
               <Badge tone={activeScopeTab === 'test' ? 'info' : undefined} size="small">
@@ -1427,7 +1414,7 @@ export default function PriceSurfaceMappingsPanel({
           </Text>
           {pickerModalUrl ? (
             <iframe
-              title="RipsPriceX price surface picker"
+              title="Pricify price surface picker"
               src={pickerModalUrl}
               className={styles.priceSurfacePickerIframe}
             />

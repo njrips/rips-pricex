@@ -1,4 +1,4 @@
-import { useEffect, type FormEvent } from "react";
+import { useEffect, useMemo, type FormEvent } from "react";
 import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import { Form, Link, useLoaderData } from "react-router";
 import { expressSupportFetch, supportErrorMessage } from "../utils/expressSupportApi.server";
@@ -199,12 +199,15 @@ export default function StaffSupportQueue() {
   const usingFilters = usingQueueFilters(data);
   const ticketCount = data.tickets.length;
   const needCount = countNeedsYou(data.tickets);
-  const filters = { status: data.status, shop: data.shop, q: data.q, sort: data.sort };
+  const filters = useMemo(
+    () => ({ status: data.status, shop: data.shop, q: data.q, sort: data.sort }),
+    [data.status, data.shop, data.q, data.sort]
+  );
   const emptyCopy = emptyQueueMessage(data);
 
   useEffect(() => {
     writeStaffQueueFilters(filters);
-  }, [data.status, data.shop, data.q, data.sort]);
+  }, [filters]);
 
   return (
     <section className="staff-panel">

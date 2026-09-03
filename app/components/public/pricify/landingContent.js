@@ -258,7 +258,7 @@ export const FAQ_ITEMS = [
   },
   {
     q: 'Can I stop an experiment?',
-    a: 'Yes. Pause or stop a test from the app at any time. When you are ready, you can apply a winning price to the catalog.',
+    a: 'Yes. Pause or stop a test from the app at any time. Price tests apply a winning variation to that product’s catalog price automatically, and leave the catalog unchanged when control wins.',
   },
   {
     q: 'Does Pricify work with my Shopify store?',
@@ -278,6 +278,7 @@ export const FOOTER_COLUMNS = [
       { label: 'How it works', hash: 'how-it-works' },
       { label: 'Features', hash: 'features' },
       { label: 'FAQ', hash: 'faq' },
+      { label: 'Guides', to: '/docs' },
     ],
   },
   {

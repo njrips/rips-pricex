@@ -20,7 +20,7 @@ export function buildClassicExperimentDeleteConfirmMessage(experiment) {
   }
   if (testIds.length) {
     parts.push(
-      `Also deletes ${testIds.length} linked RipX test${testIds.length === 1 ? '' : 's'}.`
+      `Also deletes ${testIds.length} linked Pricify test${testIds.length === 1 ? '' : 's'}.`
     );
   }
   parts.push('This cannot be undone.');

@@ -1,14 +1,18 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { collapseCountrySelection, resolveCountryLists } from './countrySelection';
 import { estimateSignificanceDuration } from './estimateSignificanceDuration';
+import { shopDesignFromGuardrails, stampStatisticalFields } from './sampleSizePolicy';
 import { useNavigate, useSearchParams } from 'react-router';
 import PageShell from '../../shared/PageShell';
 import { ROUTES } from '../../../constants';
 import { apiGet } from '../../../services';
 import useClassicShopDomain from '../../../hooks/useClassicShopDomain';
+import { useHydrated } from '../../../hooks/useHydrated';
+import { useKeyedState } from '../../../hooks/useKeyedState';
 import {
   createSmartPricingBatch,
   getSmartPricingGuardrails,
+  saveSmartPricingGuardrails,
   getSmartPricingOpportunities,
   suggestSmartPricingAudience,
   suggestSmartPricingGoals,
@@ -27,7 +31,7 @@ import {
   buildSecondaryGoalPayload,
   classicAudienceToSegments,
   createEmptyAudienceSegments,
-  mergeAudienceAiIntoState,
+  mergeAudienceAiIntoStatePreservingSample,
   normalizeAudienceSegments,
   normalizeClassicAudienceTargeting,
   normalizeCustomGoals,
@@ -42,7 +46,11 @@ import VariationsStepPanel, { createDefaultVariations, trafficTotal } from './Va
 import { variationsFromPlanArms } from './variationsStepHelpers';
 import ProductsPricingStepPanel from './ProductsPricingStepPanel';
 import AudienceSuccessStepPanel, { createDefaultAudienceState } from './AudienceSuccessStepPanel';
-import { ensureRevenueGuardrailRows } from './revenueGuardrail';
+import {
+  capRevenueGuardrailRows,
+  ensureRevenueGuardrailRows,
+  revenueGuardrailGoalConfig,
+} from './revenueGuardrail';
 import ReviewLaunchStepPanel from './ReviewLaunchStepPanel';
 import {
   clearClassicWizardDraft,
@@ -53,8 +61,17 @@ import {
   writeClassicWizardDraft,
 } from './classicExperimentHelpers';
 import {
+  DEFAULT_MIN_SAMPLE_SIZE,
+  resolveMinSampleSize,
+  validateClassicAudienceUi,
+} from './classicAudienceEdit';
+import {
   formatCatalogLoadError,
   getProductsStepContinueState,
+  capAiBandToShopMax,
+  clampAiBandValue,
+  describeAiBandCap,
+  describeGuardrailLimitedSuggestions,
   normalizeAiPriceBand,
   resolvePricingRows,
 } from './productsStepReadiness';
@@ -120,6 +137,48 @@ function rebuildPlanArmsFromVariations(
   });
 }
 
+function hasPositiveVariationTraffic(variations = []) {
+  return (
+    Array.isArray(variations) &&
+    variations.length >= 2 &&
+    variations.every(row => Number(row?.traffic) > 0)
+  );
+}
+
+// The two fetchers below return results instead of writing state, so effects can
+// start them without setting state synchronously.
+async function fetchShopGuardrails(shopDomain) {
+  try {
+    const data = await getSmartPricingGuardrails(shopDomain);
+    const g = data?.guardrails || data || {};
+    return { guardrails: g && typeof g === 'object' ? g : {}, ok: true };
+  } catch {
+    return { guardrails: {}, ok: false };
+  }
+}
+
+async function fetchCatalog(shopDomain) {
+  try {
+    // Classic wizard product picker needs the full catalog.
+    // `ai_pick` only returns recommended rows — empty when AI ranking fails or none are tagged.
+    const data = await getSmartPricingOpportunities(shopDomain, {
+      filter: 'all',
+      refresh: false,
+    });
+    const rows = Array.isArray(data?.opportunities) ? data.opportunities : [];
+    if (data?.error && !rows.length) {
+      throw new Error(String(data.error));
+    }
+    return {
+      rows,
+      defaults: data?.default_selected_variant_ids || rows.map(r => r.variant_id).filter(Boolean),
+      error: '',
+    };
+  } catch (err) {
+    return { rows: [], defaults: [], error: formatCatalogLoadError(err) };
+  }
+}
+
 export default function ClassicCreateWizard() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -127,19 +186,30 @@ export default function ClassicCreateWizard() {
   const resumeId = String(searchParams.get('resume') || '').trim();
   const stepParam = String(searchParams.get('step') || '').trim();
 
-  const [step, setStep] = useState(0);
+  // A ?step= deep link decides where the wizard opens; navigation inside the
+  // wizard takes over from there without rewriting the URL.
+  const urlStep = classicCreateStepIndex(stepParam);
+  const [step, setStep] = useKeyedState(stepParam, urlStep ?? 0);
   const [message, setMessage] = useState('');
   const [messageType, setMessageType] = useState('error');
   const [busy, setBusy] = useState(false);
   const [savingDraft, setSavingDraft] = useState(false);
-  // Stable on SSR + first client paint; assign a real id after mount (avoids hydration mismatch).
-  const [experimentId, setExperimentId] = useState('');
+  // Stable on SSR + first client paint; a real id appears once the draft has been
+  // read after mount, so server and client markup agree.
+  const [generatedExperimentId] = useState(createExperimentId);
+  const [draftExperimentId, setExperimentId] = useState('');
+  const hydrated = useHydrated();
   const [draftHydrated, setDraftHydrated] = useState(false);
+  const experimentId = draftExperimentId || (draftHydrated ? generatedExperimentId : '');
+  // Tracks whether a saved draft won: shop defaults must not overwrite values the
+  // merchant already chose.
+  const [appliedSavedDraft, setAppliedSavedDraft] = useState(false);
 
   const [name, setName] = useState('');
   const [hypothesis, setHypothesis] = useState('');
   const [experimentType, setExperimentType] = useState('price_test');
-  const [minSampleSize, setMinSampleSize] = useState('5000');
+  const [minSampleSize, setMinSampleSize] = useState('');
+  const [shopGuardrailsReady, setShopGuardrailsReady] = useState(false);
 
   const [variations, setVariations] = useState(createDefaultVariations);
 
@@ -152,7 +222,12 @@ export default function ClassicCreateWizard() {
   const [collectionOptions, setCollectionOptions] = useState([
     { label: 'All products', value: '' },
   ]);
-  const [loadingProducts, setLoadingProducts] = useState(false);
+  // Reaching the products step kicks off a catalog load, so the spinner is on
+  // from that first render instead of being switched on from an effect.
+  const [loadingProducts, setLoadingProducts] = useKeyedState(
+    `${shopDomain}|${step >= 2 ? 'on' : 'off'}`,
+    step >= 2
+  );
   const [productsLoadError, setProductsLoadError] = useState('');
   // Default to first test variation so Manual price inputs are editable (Control is read-only).
   const [activeArmIndex, setActiveArmIndex] = useState(1);
@@ -173,9 +248,20 @@ export default function ClassicCreateWizard() {
   const priceMode = activePricing.priceMode || 'manual';
   const bulkPercent = activePricing.bulkPercent ?? '10';
   const bulkDirection = activePricing.bulkDirection || 'increase';
-  const aiMinPct = activePricing.aiMinPct ?? '10';
-  const aiMaxPct = activePricing.aiMaxPct ?? '20';
-  const aiUnit = activePricing.aiUnit === 'amount' ? 'amount' : 'percent';
+  // The AI band describes the whole test: Suggest spreads one band across every
+  // AI variation. Reading it per-arm would let a tab show a band that did not
+  // produce the prices in front of you, so it is shared and written to all arms.
+  const sharedAiBand =
+    Object.values(pricingByArm).find(
+      entry =>
+        entry &&
+        (entry.aiMinPct !== undefined ||
+          entry.aiMaxPct !== undefined ||
+          entry.aiUnit !== undefined)
+    ) || {};
+  const aiMinPct = sharedAiBand.aiMinPct ?? '10';
+  const aiMaxPct = sharedAiBand.aiMaxPct ?? '20';
+  const aiUnit = sharedAiBand.aiUnit === 'amount' ? 'amount' : 'percent';
 
   const patchActivePricing = useCallback(
     patch => {
@@ -196,10 +282,29 @@ export default function ClassicCreateWizard() {
     [activeArmId]
   );
 
-  const setPriceMode = useCallback(
-    mode => patchActivePricing({ priceMode: mode }),
-    [patchActivePricing]
+  /** Band edits apply to every variation, since one band drives them all. */
+  const patchAiBand = useCallback(
+    patch => {
+      setPricingByArm(prev => {
+        const next = { ...prev };
+        new Set([...Object.keys(prev), activeArmId]).forEach(id => {
+          next[id] = {
+            priceMode: 'manual',
+            bulkPercent: '10',
+            bulkDirection: 'increase',
+            aiMinPct: '10',
+            aiMaxPct: '20',
+            aiUnit: 'percent',
+            ...(prev[id] || {}),
+            ...patch,
+          };
+        });
+        return next;
+      });
+    },
+    [activeArmId]
   );
+
   const markArmsAiSuggested = useCallback(armIds => {
     const ids = (armIds || []).map(id => String(id || '').trim()).filter(Boolean);
     if (!ids.length) return;
@@ -227,28 +332,18 @@ export default function ClassicCreateWizard() {
     value => patchActivePricing({ bulkDirection: value }),
     [patchActivePricing]
   );
-  const setAiMinPct = useCallback(
-    value => patchActivePricing({ aiMinPct: String(value), aiSuggested: false }),
-    [patchActivePricing]
-  );
-  const setAiMaxPct = useCallback(
-    value => patchActivePricing({ aiMaxPct: String(value), aiSuggested: false }),
-    [patchActivePricing]
-  );
-  const setAiUnit = useCallback(
-    value =>
-      patchActivePricing({
-        aiUnit: value === 'amount' ? 'amount' : 'percent',
-        aiSuggested: false,
-      }),
-    [patchActivePricing]
-  );
   const [hypothesisBusy, setHypothesisBusy] = useState(false);
   const [audienceAiBusy, setAudienceAiBusy] = useState(false);
   const [shopGuardrails, setShopGuardrails] = useState({});
+  const [raisingMaxPriceChange, setRaisingMaxPriceChange] = useState(false);
+  /** What the merchant typed when the shop cap forced a lower band value. */
+  const [aiBandAttempt, setAiBandAttempt] = useState({ min: null, max: null });
   const [scenarioPreset, setScenarioPreset] = useState('recommended');
 
   const [audience, setAudience] = useState(createDefaultAudienceState);
+  // Hoisted so the AI callbacks below depend on the metric itself rather than on
+  // every change to the audience object.
+  const primaryMetric = audience?.primaryMetric;
   const [globalAudience, setGlobalAudience] = useState(createEmptyAudienceSegments);
   const [goalByPlan, setGoalByPlan] = useState({});
   const [plans, setPlans] = useState([]);
@@ -334,96 +429,111 @@ export default function ClassicCreateWizard() {
     ]
   );
 
-  const applyWizardSnapshot = useCallback(snapshot => {
-    if (!snapshot || typeof snapshot !== 'object') return;
-    if (snapshot.experiment_id) setExperimentId(String(snapshot.experiment_id));
-    if (Number.isFinite(Number(snapshot.step))) setStep(Number(snapshot.step));
-    if (snapshot.name !== null && snapshot.name !== undefined) setName(String(snapshot.name));
-    if (snapshot.hypothesis !== null && snapshot.hypothesis !== undefined)
-      setHypothesis(String(snapshot.hypothesis));
-    if (snapshot.experimentType) setExperimentType(snapshot.experimentType);
-    if (snapshot.minSampleSize !== null && snapshot.minSampleSize !== undefined)
-      setMinSampleSize(String(snapshot.minSampleSize));
-    if (Array.isArray(snapshot.variations) && snapshot.variations.length) {
-      setVariations(snapshot.variations);
-    }
-    if (Array.isArray(snapshot.selectedIds)) setSelectedIds(snapshot.selectedIds);
-    if (snapshot.pickMode) setPickMode(snapshot.pickMode);
-    if (snapshot.productSearch !== null && snapshot.productSearch !== undefined)
-      setProductSearch(String(snapshot.productSearch));
-    if (snapshot.collectionId !== null && snapshot.collectionId !== undefined)
-      setCollectionId(String(snapshot.collectionId));
-    if (Number.isFinite(Number(snapshot.activeArmIndex))) {
-      setActiveArmIndex(Number(snapshot.activeArmIndex));
-    }
-    if (snapshot.pricingByArm && typeof snapshot.pricingByArm === 'object') {
-      setPricingByArm(snapshot.pricingByArm);
-    } else if (
-      snapshot.priceMode ||
-      (snapshot.bulkPercent !== null && snapshot.bulkPercent !== undefined) ||
-      snapshot.bulkDirection ||
-      (snapshot.aiMinPct !== null && snapshot.aiMinPct !== undefined) ||
-      (snapshot.aiMaxPct !== null && snapshot.aiMaxPct !== undefined)
-    ) {
-      // Migrate legacy single-arm draft fields onto the active arm.
-      const armKey =
-        (Array.isArray(snapshot.variations) &&
-          snapshot.variations[Number(snapshot.activeArmIndex) || 1]?.id) ||
-        'var_a';
-      setPricingByArm({
-        [armKey]: {
-          priceMode: snapshot.priceMode || 'manual',
-          bulkPercent:
-            snapshot.bulkPercent !== null && snapshot.bulkPercent !== undefined
-              ? String(snapshot.bulkPercent)
-              : '10',
-          bulkDirection: snapshot.bulkDirection || 'increase',
-          aiMinPct:
-            snapshot.aiMinPct !== null && snapshot.aiMinPct !== undefined
-              ? String(snapshot.aiMinPct)
-              : '10',
-          aiMaxPct:
-            snapshot.aiMaxPct !== null && snapshot.aiMaxPct !== undefined
-              ? String(snapshot.aiMaxPct)
-              : '20',
-        },
-      });
-    }
-    if (snapshot.priceOverrides && typeof snapshot.priceOverrides === 'object') {
-      setPriceOverrides(snapshot.priceOverrides);
-    }
-    if (snapshot.offerByArm && typeof snapshot.offerByArm === 'object') {
-      setOfferByArm(snapshot.offerByArm);
-    }
-    if (snapshot.scenarioPreset) setScenarioPreset(snapshot.scenarioPreset);
-    if (snapshot.audience) {
-      const nextAudience = {
-        ...createDefaultAudienceState(),
-        ...snapshot.audience,
-        ...normalizeClassicAudienceTargeting(snapshot.audience),
-        primaryMetric: normalizePrimaryMetric(snapshot.audience.primaryMetric),
-        secondaryMetrics: normalizeSecondaryEvents(snapshot.audience.secondaryMetrics),
-        customGoals: normalizeCustomGoals(snapshot.audience.customGoals),
-        primaryCustomGoal: snapshot.audience.primaryCustomGoal
-          ? normalizeCustomGoals([snapshot.audience.primaryCustomGoal])[0] || null
-          : null,
-        guardrails: ensureRevenueGuardrailRows(snapshot.audience.guardrails),
-      };
-      setAudience(nextAudience);
-      setGlobalAudience(segmentsFromClassicAudience(nextAudience, snapshot.globalAudience));
-    } else if (snapshot.globalAudience) {
-      setGlobalAudience(normalizeAudienceSegments(snapshot.globalAudience));
-    }
-    if (snapshot.goalByPlan && typeof snapshot.goalByPlan === 'object') {
-      setGoalByPlan(snapshot.goalByPlan);
-    }
-    if (Array.isArray(snapshot.plans)) setPlans(snapshot.plans);
-    if (typeof snapshot.autoRound2 === 'boolean') setAutoRound2(snapshot.autoRound2);
-  }, []);
+  const applyWizardSnapshot = useCallback(
+    snapshot => {
+      if (!snapshot || typeof snapshot !== 'object') return;
+      setAppliedSavedDraft(true);
+      if (snapshot.experiment_id) setExperimentId(String(snapshot.experiment_id));
+      if (urlStep == null && Number.isFinite(Number(snapshot.step))) {
+        setStep(Number(snapshot.step));
+      }
+      if (snapshot.name !== null && snapshot.name !== undefined) setName(String(snapshot.name));
+      if (snapshot.hypothesis !== null && snapshot.hypothesis !== undefined)
+        setHypothesis(String(snapshot.hypothesis));
+      if (snapshot.experimentType) setExperimentType(snapshot.experimentType);
+      if (snapshot.minSampleSize !== null && snapshot.minSampleSize !== undefined)
+        setMinSampleSize(String(snapshot.minSampleSize));
+      if (Array.isArray(snapshot.variations) && snapshot.variations.length) {
+        setVariations(snapshot.variations);
+      }
+      if (Array.isArray(snapshot.selectedIds)) setSelectedIds(snapshot.selectedIds);
+      if (snapshot.pickMode) setPickMode(snapshot.pickMode);
+      if (snapshot.productSearch !== null && snapshot.productSearch !== undefined)
+        setProductSearch(String(snapshot.productSearch));
+      if (snapshot.collectionId !== null && snapshot.collectionId !== undefined)
+        setCollectionId(String(snapshot.collectionId));
+      if (Number.isFinite(Number(snapshot.activeArmIndex))) {
+        setActiveArmIndex(Number(snapshot.activeArmIndex));
+      }
+      if (snapshot.pricingByArm && typeof snapshot.pricingByArm === 'object') {
+        setPricingByArm(snapshot.pricingByArm);
+      } else if (
+        snapshot.priceMode ||
+        (snapshot.bulkPercent !== null && snapshot.bulkPercent !== undefined) ||
+        snapshot.bulkDirection ||
+        (snapshot.aiMinPct !== null && snapshot.aiMinPct !== undefined) ||
+        (snapshot.aiMaxPct !== null && snapshot.aiMaxPct !== undefined)
+      ) {
+        // Migrate legacy single-arm draft fields onto the active arm.
+        const armKey =
+          (Array.isArray(snapshot.variations) &&
+            snapshot.variations[Number(snapshot.activeArmIndex) || 1]?.id) ||
+          'var_a';
+        setPricingByArm({
+          [armKey]: {
+            priceMode: snapshot.priceMode || 'manual',
+            bulkPercent:
+              snapshot.bulkPercent !== null && snapshot.bulkPercent !== undefined
+                ? String(snapshot.bulkPercent)
+                : '10',
+            bulkDirection: snapshot.bulkDirection || 'increase',
+            aiMinPct:
+              snapshot.aiMinPct !== null && snapshot.aiMinPct !== undefined
+                ? String(snapshot.aiMinPct)
+                : '10',
+            aiMaxPct:
+              snapshot.aiMaxPct !== null && snapshot.aiMaxPct !== undefined
+                ? String(snapshot.aiMaxPct)
+                : '20',
+            // Without this a legacy dollar band restores as a percent band, so
+            // "$10" silently becomes "10%".
+            aiUnit: snapshot.aiUnit === 'amount' ? 'amount' : 'percent',
+          },
+        });
+      }
+      if (snapshot.priceOverrides && typeof snapshot.priceOverrides === 'object') {
+        setPriceOverrides(snapshot.priceOverrides);
+      }
+      if (snapshot.offerByArm && typeof snapshot.offerByArm === 'object') {
+        setOfferByArm(snapshot.offerByArm);
+      }
+      if (snapshot.scenarioPreset) setScenarioPreset(snapshot.scenarioPreset);
+      if (snapshot.audience) {
+        const nextAudience = {
+          ...createDefaultAudienceState(),
+          ...snapshot.audience,
+          ...normalizeClassicAudienceTargeting(snapshot.audience),
+          primaryMetric: normalizePrimaryMetric(snapshot.audience.primaryMetric),
+          secondaryMetrics: normalizeSecondaryEvents(snapshot.audience.secondaryMetrics),
+          customGoals: normalizeCustomGoals(snapshot.audience.customGoals),
+          primaryCustomGoal: snapshot.audience.primaryCustomGoal
+            ? normalizeCustomGoals([snapshot.audience.primaryCustomGoal])[0] || null
+            : null,
+          guardrails: ensureRevenueGuardrailRows(snapshot.audience.guardrails),
+        };
+        setAudience(nextAudience);
+        setGlobalAudience(segmentsFromClassicAudience(nextAudience, snapshot.globalAudience));
+        if (nextAudience.minSampleSize !== null && nextAudience.minSampleSize !== undefined) {
+          setMinSampleSize(String(nextAudience.minSampleSize));
+        }
+      } else if (snapshot.globalAudience) {
+        setGlobalAudience(normalizeAudienceSegments(snapshot.globalAudience));
+      }
+      if (snapshot.goalByPlan && typeof snapshot.goalByPlan === 'object') {
+        setGoalByPlan(snapshot.goalByPlan);
+      }
+      if (Array.isArray(snapshot.plans)) setPlans(snapshot.plans);
+      if (typeof snapshot.autoRound2 === 'boolean') setAutoRound2(snapshot.autoRound2);
+    },
+    [urlStep, setStep]
+  );
 
-  useEffect(() => {
-    if (draftHydrated) return;
+  // Saved drafts live in browser storage, so they can only be read once the
+  // client has taken over. Seeding during that first post-hydration render (not
+  // from an effect) lets the restored wizard reach the screen in one commit.
+  if (hydrated && !draftHydrated) {
     const localDraft = readClassicWizardDraft(shopDomain);
+    setDraftHydrated(true);
     if (resumeId) {
       if (localDraft && String(localDraft.experiment_id) === resumeId) {
         applyWizardSnapshot(localDraft);
@@ -432,6 +542,7 @@ export default function ClassicCreateWizard() {
           plan => getPlanExperimentId(plan) === resumeId
         );
         if (inboxPlans.length) {
+          setAppliedSavedDraft(true);
           const first = inboxPlans[0];
           setExperimentId(resumeId);
           setName(
@@ -474,101 +585,115 @@ export default function ClassicCreateWizard() {
                 first.audience?.segments || createEmptyAudienceSegments()
               )
             );
+            if (nextAudience.minSampleSize !== null && nextAudience.minSampleSize !== undefined) {
+              setMinSampleSize(String(nextAudience.minSampleSize));
+            }
           }
-          setStep(inboxPlans.some(p => p.price_arms?.length) ? 4 : 2);
+          if (urlStep == null) {
+            setStep(inboxPlans.some(p => p.price_arms?.length) ? 4 : 2);
+          }
         } else if (localDraft) {
           applyWizardSnapshot(localDraft);
         }
       }
-      setDraftHydrated(true);
-      return;
     }
-    if (localDraft?.experiment_id && localDraft?.name) {
-      // Keep unfinished draft available but don't auto-hijack a fresh create.
-      setDraftHydrated(true);
-      return;
-    }
-    setDraftHydrated(true);
-  }, [shopDomain, resumeId, draftHydrated, applyWizardSnapshot]);
+    // Without ?resume= an unfinished draft stays available but must not hijack a
+    // fresh create, so nothing is seeded here.
+  }
 
-  useEffect(() => {
-    if (!draftHydrated) return;
-    const index = classicCreateStepIndex(stepParam);
-    if (index == null) return;
-    setStep(index);
-  }, [draftHydrated, stepParam]);
-
-  useEffect(() => {
-    if (!draftHydrated) return;
-    setExperimentId(prev => (prev ? prev : createExperimentId()));
-  }, [draftHydrated]);
-
-  const loadGuardrails = useCallback(async () => {
-    try {
-      const data = await getSmartPricingGuardrails(shopDomain);
-      const g = data?.guardrails || data || {};
-      setShopGuardrails(g && typeof g === 'object' ? g : {});
-      if (Number.isFinite(Number(g.max_revenue_drop_percent))) {
+  const applyShopGuardrails = useCallback(({ guardrails: g, ok }) => {
+    if (ok) {
+      setShopGuardrails(g);
+      const seedShopDefaults = !appliedSavedDraft;
+      const shopSample = Number(g.min_sample_size_per_variation);
+      const seededSample =
+        Number.isFinite(shopSample) && shopSample >= 1 ? String(Math.round(shopSample)) : null;
+      if (Number.isFinite(Number(g.max_revenue_drop_percent)) || (seededSample && seedShopDefaults)) {
         setAudience(prev => ({
           ...prev,
-          guardrails: ensureRevenueGuardrailRows(
-            prev?.guardrails,
-            Number(g.max_revenue_drop_percent)
-          ),
+          ...(seededSample && seedShopDefaults ? { minSampleSize: seededSample } : {}),
+          guardrails: Number.isFinite(Number(g.max_revenue_drop_percent))
+            ? ensureRevenueGuardrailRows(
+                seedShopDefaults ? [] : prev?.guardrails,
+                Number(g.max_revenue_drop_percent)
+              )
+            : prev?.guardrails,
         }));
       }
-      if (g.default_scenario_preset) setScenarioPreset(g.default_scenario_preset);
-      if (g.default_audience_template) {
+      if (seededSample && seedShopDefaults) setMinSampleSize(seededSample);
+      if (g.default_scenario_preset && seedShopDefaults) {
+        setScenarioPreset(g.default_scenario_preset);
+      }
+      if (g.default_audience_template && seedShopDefaults) {
         setGlobalAudience(normalizeAudienceSegments(g.default_audience_template));
       }
-      if (g.auto_round2_default === false) setAutoRound2(false);
-    } catch {
-      /* defaults */
+      if (g.auto_round2_default === false && seedShopDefaults) setAutoRound2(false);
+      if (seedShopDefaults && !seededSample) {
+        setMinSampleSize(prev => prev || String(DEFAULT_MIN_SAMPLE_SIZE));
+        setAudience(current =>
+          current?.minSampleSize
+            ? current
+            : { ...current, minSampleSize: String(DEFAULT_MIN_SAMPLE_SIZE) }
+        );
+      }
+    } else if (!appliedSavedDraft) {
+      setMinSampleSize(prev => (prev ? prev : String(DEFAULT_MIN_SAMPLE_SIZE)));
     }
-  }, [shopDomain]);
+    setShopGuardrailsReady(true);
+  }, [appliedSavedDraft]);
 
+  const loadGuardrails = useCallback(async () => {
+    applyShopGuardrails(await fetchShopGuardrails(shopDomain));
+  }, [shopDomain, applyShopGuardrails]);
+
+  // Read by the catalog load below, which must not restart when the mode flips.
   const pickModeRef = useRef(pickMode);
-  pickModeRef.current = pickMode;
+  useEffect(() => {
+    pickModeRef.current = pickMode;
+  }, [pickMode]);
+
+  const applyCatalog = useCallback(
+    ({ requestId, rows, defaults, error }) => {
+      if (productsLoadRequestId.current !== requestId) return;
+      if (error) {
+        setProductsLoadError(error);
+      } else {
+        setOpportunities(rows);
+        setProductsLoadError('');
+        setSelectedIds(prev => {
+          if (prev.length > 0) return prev;
+          if (pickModeRef.current !== 'all') return prev;
+          return defaults.length ? defaults.slice(0, maxSelection) : prev;
+        });
+      }
+      setLoadingProducts(false);
+    },
+    [maxSelection, setLoadingProducts]
+  );
 
   const loadOpportunities = useCallback(async () => {
     const requestId = productsLoadRequestId.current + 1;
     productsLoadRequestId.current = requestId;
     setLoadingProducts(true);
-    try {
-      // Classic wizard product picker needs the full catalog.
-      // `ai_pick` only returns recommended rows — empty when AI ranking fails or none are tagged.
-      const data = await getSmartPricingOpportunities(shopDomain, {
-        filter: 'all',
-        refresh: false,
-      });
-      if (productsLoadRequestId.current !== requestId) return;
-      const rows = Array.isArray(data?.opportunities) ? data.opportunities : [];
-      if (data?.error && !rows.length) {
-        throw new Error(String(data.error));
-      }
-      setOpportunities(rows);
-      setProductsLoadError('');
-      setSelectedIds(prev => {
-        if (prev.length > 0) return prev;
-        if (pickModeRef.current !== 'all') return prev;
-        const defaults =
-          data?.default_selected_variant_ids || rows.map(r => r.variant_id).filter(Boolean);
-        return defaults.length ? defaults.slice(0, maxSelection) : prev;
-      });
-    } catch (err) {
-      if (productsLoadRequestId.current !== requestId) return;
-      setProductsLoadError(formatCatalogLoadError(err));
-    } finally {
-      if (productsLoadRequestId.current === requestId) {
-        setLoadingProducts(false);
-      }
-    }
-  }, [shopDomain, maxSelection]);
+    applyCatalog({ requestId, ...(await fetchCatalog(shopDomain)) });
+  }, [shopDomain, applyCatalog, setLoadingProducts]);
 
   useEffect(() => {
-    loadGuardrails();
+    if (!draftHydrated) return undefined;
+    let cancelled = false;
+    fetchShopGuardrails(shopDomain).then(result => {
+      if (!cancelled) applyShopGuardrails(result);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [draftHydrated, shopDomain, applyShopGuardrails]);
+
+  useEffect(() => {
+    let cancelled = false;
     apiGet('/shopify/store-resources?type=collection&first=40', { shop: shopDomain })
       .then(res => {
+        if (cancelled) return;
         const list = res?.data?.resources || res?.resources || [];
         const options = [{ label: 'All products', value: '' }];
         list.forEach(item => {
@@ -577,11 +702,23 @@ export default function ClassicCreateWizard() {
         setCollectionOptions(options);
       })
       .catch(() => {});
-  }, [loadGuardrails, shopDomain]);
+    return () => {
+      cancelled = true;
+    };
+  }, [shopDomain]);
 
   useEffect(() => {
-    if (step >= 2) loadOpportunities();
-  }, [step, loadOpportunities]);
+    if (step < 2) return undefined;
+    const requestId = productsLoadRequestId.current + 1;
+    productsLoadRequestId.current = requestId;
+    let cancelled = false;
+    fetchCatalog(shopDomain).then(result => {
+      if (!cancelled) applyCatalog({ requestId, ...result });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [step, shopDomain, applyCatalog]);
 
   const buildBatch = useCallback(async () => {
     const ids =
@@ -664,10 +801,15 @@ export default function ClassicCreateWizard() {
       if (audienceRes?.audience) {
         const a = audienceRes.audience;
         setAudience(prev => {
-          const next = mergeAudienceAiIntoState(prev, stripClassicAudienceTargetingFields(a), {
-            source: audienceRes.source,
-            rationale: a.rationale || audienceRes.rationale,
-          });
+          const preservedFloor = resolveMinSampleSize(prev?.minSampleSize, minSampleSize);
+          const next = mergeAudienceAiIntoStatePreservingSample(
+            { ...prev, minSampleSize: String(preservedFloor) },
+            stripClassicAudienceTargetingFields(a),
+            {
+              source: audienceRes.source,
+              rationale: a.rationale || audienceRes.rationale,
+            }
+          );
           setGlobalAudience(segmentsFromClassicAudience(next, a.segments));
           return next;
         });
@@ -710,15 +852,25 @@ export default function ClassicCreateWizard() {
     priceOverrides,
     offerByArm,
     audience,
+    minSampleSize,
     experimentId,
     experimentType,
   ]);
 
   const enrichPlansForLaunch = useCallback(
     (sourcePlans = plans, { status = 'queued' } = {}) => {
-      const audienceState = audience || createDefaultAudienceState();
+      const rawAudienceState = audience || createDefaultAudienceState();
+      const audienceState = {
+        ...rawAudienceState,
+        guardrails: capRevenueGuardrailRows(
+          rawAudienceState.guardrails,
+          shopGuardrails.max_revenue_drop_percent
+        ),
+      };
       const countryLists = resolveCountryLists(audienceState);
       const mappedSegments = segmentsFromClassicAudience(audienceState, globalAudience);
+      const sampleSize = resolveMinSampleSize(audienceState.minSampleSize, minSampleSize);
+      const shopDesign = shopDesignFromGuardrails(shopGuardrails);
       const durationEstimate = estimateSignificanceDuration({
         plans: sourcePlans,
         opportunities,
@@ -727,7 +879,11 @@ export default function ClassicCreateWizard() {
         maxSelection,
         variations,
         trafficAllocation: audienceState.trafficAllocation,
-        minSampleSize: audienceState.minSampleSize || minSampleSize,
+        minSampleSize: sampleSize,
+        minConversionsPerVariation: shopDesign.minConversions,
+        mdePercent: shopDesign.mdePercent,
+        confidenceLevel: shopDesign.confidenceLevel,
+        power: shopDesign.power,
       });
       const goalPayload = buildClassicGoalPayload(audienceState);
       const stamped = stampClassicExperimentMetadata(sourcePlans, {
@@ -738,6 +894,10 @@ export default function ClassicCreateWizard() {
         experimentType,
       });
       return stamped.map(plan => {
+        const planEstimate = durationEstimate.perSkuEstimates?.find(
+          row => row.key === String(plan.variant_id || plan.id || '')
+        );
+        const stats = stampStatisticalFields(plan, shopGuardrails);
         const planGoal = goalByPlan[plan.id] || {};
         const planSecondary =
           Array.isArray(planGoal.secondary) && planGoal.secondary.length
@@ -753,9 +913,39 @@ export default function ClassicCreateWizard() {
           statistical_design: {
             ...(plan.statistical_design || {}),
             estimated_duration_days:
-              durationEstimate.days ?? plan.statistical_design?.estimated_duration_days ?? null,
+              planEstimate?.days ??
+              durationEstimate.days ??
+              plan.statistical_design?.estimated_duration_days ??
+              null,
             estimate_detail: durationEstimate.detail,
             traffic_allocation: durationEstimate.trafficAllocation,
+            duration_feasibility:
+              planEstimate?.durationFeasibility || durationEstimate.durationFeasibility || null,
+            practical_duration_range:
+              planEstimate?.practicalDurationRange ||
+              durationEstimate.practicalDurationRange ||
+              null,
+            traffic_evidence:
+              planEstimate?.trafficEvidence || durationEstimate.trafficEvidence || null,
+            traffic_source: plan.traffic_source || null,
+            traffic_confidence: plan.traffic_confidence || null,
+            practical_window_min_days: durationEstimate.practicalWindowMinDays || null,
+            practical_window_max_days: durationEstimate.practicalWindowMaxDays || null,
+            required_daily_visitors_for_practical_window:
+              durationEstimate.requiredDailyVisitorsForPracticalWindow || null,
+            visitors_per_variant_required:
+              planEstimate?.recommendedSampleSize ||
+              durationEstimate.recommendedSampleSize ||
+              plan.statistical_design?.visitors_per_variant_required ||
+              null,
+            mde_percent: stats.mde_percent,
+            confidence_level: stats.confidence_level,
+            statistical_power: stats.statistical_power,
+            analysis_method: stats.analysis_method,
+            power_rating:
+              planEstimate?.powerRating ||
+              durationEstimate.powerRating ||
+              plan.statistical_design?.power_rating,
           },
           audience: {
             inherit_from_shop_defaults: false,
@@ -774,19 +964,34 @@ export default function ClassicCreateWizard() {
             device_mode: audienceState.deviceMode || 'include',
             source_mode: audienceState.sourceMode || 'include',
             country_mode: countryLists.countryMode,
+            min_sample_size: sampleSize,
           },
           goal: {
             ...planGoal,
             primary_metric: planGoal.primary_metric || goalPayload.primary_metric,
             secondary_events: planSecondary.secondary_events,
             secondary: planSecondary.secondary,
+            min_sample_size: sampleSize,
+            analysis_method: stats.analysis_method,
+            mde_percent: stats.mde_percent,
+            statistical_power: stats.statistical_power,
+            significance_level: stats.significance_level,
+            visitors_per_variant_recommended:
+              planEstimate?.recommendedSampleSize ||
+              durationEstimate.recommendedSampleSize ||
+              null,
+            guardrails: revenueGuardrailGoalConfig(
+              audienceState.guardrails,
+              shopGuardrails.max_revenue_drop_percent
+            ),
           },
           launch_preferences: {
             auto_start: status !== 'draft',
             auto_round2: autoRound2,
-            max_learning_rounds: 3,
+            // Left unset so the shop's configured learning-round cap applies;
+            // stamping a value here overrode the Settings guardrail.
             manual_duration_cap_days: null,
-            min_sample_size: Number(audienceState.minSampleSize || minSampleSize) || null,
+            min_sample_size: sampleSize,
           },
           status,
         };
@@ -808,6 +1013,7 @@ export default function ClassicCreateWizard() {
       pickMode,
       maxSelection,
       variations,
+      shopGuardrails,
     ]
   );
 
@@ -842,9 +1048,6 @@ export default function ClassicCreateWizard() {
 
   const applyLocalAiBandFallback = useCallback(
     ({ unit = 'percent' } = {}) => {
-      const band = normalizeAiPriceBand(aiMinPct, aiMaxPct);
-      const min = band?.min ?? Math.abs(Number(aiMinPct) || (unit === 'amount' ? 1 : 10));
-      const max = band?.max ?? Math.abs(Number(aiMaxPct) || (unit === 'amount' ? 5 : 20));
       const testArms = variations.filter((row, i) => i > 0 && row.id !== 'control');
       const aiArms = testArms.filter(arm => (pricingByArm[arm.id]?.priceMode || '') === 'ai');
       const targetArms = aiArms.length ? aiArms : testArms;
@@ -865,14 +1068,35 @@ export default function ClassicCreateWizard() {
         }));
         return false;
       }
+      const rawBand = normalizeAiPriceBand(aiMinPct, aiMaxPct);
+      const bases = rows
+        .map(row => Number(row.current_price ?? row.price) || 0)
+        .filter(n => n > 0);
+      const avg = bases.length ? bases.reduce((sum, n) => sum + n, 0) / bases.length : 0;
+      const band =
+        capAiBandToShopMax(rawBand, shopGuardrails.max_price_change_percent, {
+          unit,
+          averagePrice: avg,
+        }) || rawBand;
+      const min = band?.min ?? Math.abs(Number(aiMinPct) || (unit === 'amount' ? 1 : 10));
+      const max = band?.max ?? Math.abs(Number(aiMaxPct) || (unit === 'amount' ? 5 : 20));
+      const armCount = targetArms.length;
+      const shopMaxChange = Number(shopGuardrails.max_price_change_percent);
+      const maxChangePct = Number.isFinite(shopMaxChange) && shopMaxChange > 0 ? shopMaxChange : 15;
       setPriceOverrides(prev => {
         const next = { ...prev };
-        rows.forEach((row, index) => {
+        rows.forEach(row => {
           const base = Number(row.current_price ?? row.price) || 0;
+          const ceiling = base * (1 + maxChangePct / 100);
           targetArms.forEach((arm, armIndex) => {
-            const t = (((index + armIndex) % 5) + 1) / 5;
-            const span = min + (max - min) * t;
-            const price = unit === 'amount' ? base + span : base * (1 + span / 100);
+            // Match the server: span the band so variations stay far enough
+            // apart to resolve a price response.
+            const position = armCount > 1 ? armIndex / (armCount - 1) : 0.5;
+            const span = min + (max - min) * position;
+            const raw = unit === 'amount' ? base + span : base * (1 + span / 100);
+            // The band was capped against the catalog average, so a flat dollar
+            // uplift can still breach max price change on a cheaper product.
+            const price = Math.min(raw, ceiling);
             next[`${row.variant_id}::${arm.id}`] = Math.max(0, price).toFixed(2);
           });
         });
@@ -880,10 +1104,14 @@ export default function ClassicCreateWizard() {
       });
       setAiPriceMeta({
         source: 'deterministic',
-        summary:
+        summary: [
+          describeAiBandCap(band, { unit }),
           unit === 'amount'
             ? `Local $${min}–$${max} band fallback (AI unavailable).`
-            : 'Local band fallback (AI unavailable).',
+            : `Local ${min}%–${max}% band fallback (AI unavailable).`,
+        ]
+          .filter(Boolean)
+          .join(' '),
         busy: false,
       });
       markArmsAiSuggested(targetArms.map(arm => arm.id));
@@ -898,6 +1126,7 @@ export default function ClassicCreateWizard() {
       selectedIds,
       pickMode,
       maxSelection,
+      shopGuardrails.max_price_change_percent,
       markArmsAiSuggested,
     ]
   );
@@ -923,12 +1152,20 @@ export default function ClassicCreateWizard() {
         });
         return;
       }
+      if (!shopGuardrailsReady) {
+        setAiPriceMeta({
+          source: null,
+          summary: 'Still loading shop experiment defaults. Try again in a moment.',
+          busy: false,
+        });
+        return;
+      }
       if (activeArmIndex === 0 && variations.length > 1) {
         setActiveArmIndex(1);
       }
 
-      const band = normalizeAiPriceBand(aiMinPct, aiMaxPct);
-      if (!band) {
+      const rawBand = normalizeAiPriceBand(aiMinPct, aiMaxPct);
+      if (!rawBand) {
         setAiPriceMeta({
           source: null,
           summary: 'Enter a min and max greater than 0, then click Suggest.',
@@ -936,21 +1173,22 @@ export default function ClassicCreateWizard() {
         });
         return;
       }
-      let minPct = band.min;
-      let maxPct = band.max;
-      if (unit === 'amount') {
-        // API bands are %-based; convert $ min/max using average base price.
-        const bases = rows
-          .map(row => Number(row.current_price ?? row.price) || 0)
-          .filter(n => n > 0);
-        const avg = bases.length ? bases.reduce((sum, n) => sum + n, 0) / bases.length : 100;
-        minPct = (band.min / avg) * 100;
-        maxPct = (band.max / avg) * 100;
-        if (maxPct <= 0) {
-          minPct = 5;
-          maxPct = 15;
-        }
-      }
+      const bases = rows
+        .map(row => Number(row.current_price ?? row.price) || 0)
+        .filter(n => n > 0);
+      const avg = bases.length ? bases.reduce((sum, n) => sum + n, 0) / bases.length : 0;
+      const band =
+        capAiBandToShopMax(rawBand, shopGuardrails.max_price_change_percent, {
+          unit,
+          averagePrice: avg,
+        }) || rawBand;
+      const bandNotice = describeAiBandCap(band, { unit });
+      const amountMode = unit === 'amount';
+      // Dollar bands are sent as dollars; the server applies the flat uplift to
+      // each product and clamps it per SKU. Converting to a catalog-average
+      // percent here would under-price cheap SKUs and over-price expensive ones.
+      const minPct = amountMode ? null : band.min;
+      const maxPct = amountMode ? null : band.max;
 
       const requestId = ++aiSuggestRequestId.current;
       setAiPriceMeta(prev => ({
@@ -978,7 +1216,10 @@ export default function ClassicCreateWizard() {
           })),
           min_pct: minPct,
           max_pct: maxPct,
-          objective: audience?.primaryMetric || shopGuardrails.objective || 'revenue_per_visitor',
+          unit,
+          min_amount: amountMode ? band.min : null,
+          max_amount: amountMode ? band.max : null,
+          objective: primaryMetric || shopGuardrails.objective || 'revenue_per_visitor',
           guardrails: shopGuardrails,
           use_ai: true,
         });
@@ -997,14 +1238,21 @@ export default function ClassicCreateWizard() {
           });
           return next;
         });
+        const baseSummary =
+          result?.summary ||
+          result?.data?.summary ||
+          (suggestions.length
+            ? 'AI price suggestions applied.'
+            : 'No AI prices returned — try Re-suggest or adjust the band.');
+        const limitedNotice = describeGuardrailLimitedSuggestions(
+          suggestions.filter(item => item?.guardrail_limited).length,
+          suggestions.length,
+          band,
+          { unit }
+        );
         setAiPriceMeta({
           source: result?.source || result?.data?.source || 'deterministic',
-          summary:
-            result?.summary ||
-            result?.data?.summary ||
-            (suggestions.length
-              ? 'AI price suggestions applied.'
-              : 'No AI prices returned — try Re-suggest or adjust the band.'),
+          summary: [bandNotice, baseSummary, limitedNotice].filter(Boolean).join(' '),
           busy: false,
         });
         if (suggestions.length) {
@@ -1036,12 +1284,125 @@ export default function ClassicCreateWizard() {
       shopDomain,
       aiMinPct,
       aiMaxPct,
-      audience?.primaryMetric,
+      primaryMetric,
       shopGuardrails,
+      shopGuardrailsReady,
       applyLocalAiBandFallback,
       pricingByArm,
       markArmsAiSuggested,
     ]
+  );
+
+  const raiseMaxPriceChange = useCallback(
+    async target => {
+      const next = Number(target);
+      if (!Number.isFinite(next) || next <= 0) return;
+      setRaisingMaxPriceChange(true);
+      try {
+        // Send the whole current object: the endpoint normalizes and persists a
+        // full guardrail record, so a partial body would reset the other limits.
+        await saveSmartPricingGuardrails(shopDomain, {
+          ...shopGuardrails,
+          max_price_change_percent: next,
+        });
+        await loadGuardrails();
+        // Put back what the merchant originally typed, now that it is allowed.
+        const restore = {};
+        const attemptedMin = Number(aiBandAttempt.min);
+        const attemptedMax = Number(aiBandAttempt.max);
+        if (Number.isFinite(attemptedMin) && attemptedMin > 0) {
+          restore.aiMinPct = String(attemptedMin);
+        }
+        if (Number.isFinite(attemptedMax) && attemptedMax > 0) {
+          restore.aiMaxPct = String(attemptedMax);
+        }
+        if (Object.keys(restore).length) {
+          patchAiBand({ ...restore, aiSuggested: false });
+        }
+        setAiBandAttempt({ min: null, max: null });
+        setAiPriceMeta(prev => ({
+          ...prev,
+          summary: `Max price change is now ${next}%. Click Suggest to use your full band.`,
+        }));
+      } catch {
+        setAiPriceMeta(prev => ({
+          ...prev,
+          summary: 'Could not update Max price change. Change it in Settings and try again.',
+        }));
+      } finally {
+        setRaisingMaxPriceChange(false);
+      }
+    },
+    [shopDomain, shopGuardrails, loadGuardrails, aiBandAttempt, patchAiBand]
+  );
+
+  const openGuardrailSettings = useCallback(() => {
+    const path = `${ROUTES.appSettings(shopDomain)}?tab=guardrails`;
+    if (typeof navigate === 'function') {
+      navigate(path);
+      return;
+    }
+    window.open(path, '_blank');
+  }, [navigate, shopDomain]);
+
+  /** Average selected-product price: the dollar equivalent of a percent cap. */
+  const aiBandAveragePrice = useCallback(() => {
+    const bases = resolvePricingRows({ opportunities, selectedIds, pickMode, maxSelection })
+      .map(row => Number(row.current_price ?? row.price) || 0)
+      .filter(n => n > 0);
+    return bases.length ? bases.reduce((sum, n) => sum + n, 0) / bases.length : 0;
+  }, [opportunities, selectedIds, pickMode, maxSelection]);
+
+  const applyBandField = useCallback(
+    (field, value) => {
+      // Until the shop's real cap has loaded, clamping would reduce the field
+      // against a placeholder the merchant never set.
+      const { value: next, attempted } = clampAiBandValue(
+        value,
+        shopGuardrailsReady ? shopGuardrails.max_price_change_percent : null,
+        { unit: aiUnit, averagePrice: aiBandAveragePrice() }
+      );
+      setAiBandAttempt(prev => ({ ...prev, [field]: attempted }));
+      patchAiBand({ [field === 'max' ? 'aiMaxPct' : 'aiMinPct']: next, aiSuggested: false });
+    },
+    [
+      shopGuardrailsReady,
+      shopGuardrails.max_price_change_percent,
+      aiUnit,
+      aiBandAveragePrice,
+      patchAiBand,
+    ]
+  );
+
+  const setAiMinPct = useCallback(value => applyBandField('min', value), [applyBandField]);
+  const setAiMaxPct = useCallback(value => applyBandField('max', value), [applyBandField]);
+
+  const setAiUnit = useCallback(
+    value => {
+      const nextUnit = value === 'amount' ? 'amount' : 'percent';
+      if (nextUnit === aiUnit) return;
+      const avg = aiBandAveragePrice();
+      // The remembered over-cap attempt was in the old unit, so it no longer
+      // describes anything once the unit changes.
+      setAiBandAttempt({ min: null, max: null });
+      // Carry the merchant's intent across units instead of reusing the raw
+      // number: on a $50 catalog, 10% means $5, not $10.
+      const convert = value2 => {
+        const n = Math.abs(Number(value2));
+        if (!Number.isFinite(n) || n <= 0 || avg <= 0) return null;
+        const converted = nextUnit === 'amount' ? (avg * n) / 100 : (n / avg) * 100;
+        return String(Math.round(converted * 100) / 100);
+      };
+      const nextMin = convert(aiMinPct);
+      const nextMax = convert(aiMaxPct);
+      patchAiBand({
+        aiUnit: nextUnit,
+        aiSuggested: false,
+        ...(nextMin ? { aiMinPct: nextMin } : {}),
+        ...(nextMax ? { aiMaxPct: nextMax } : {}),
+      });
+    },
+    [aiUnit, aiMinPct, aiMaxPct, aiBandAveragePrice, patchAiBand]
   );
 
   const generateHypothesisWithAi = useCallback(async () => {
@@ -1057,7 +1418,7 @@ export default function ClassicCreateWizard() {
         name,
         experiment_type: experimentType,
         hint: hypothesis,
-        objective: audience?.primaryMetric || shopGuardrails.objective || 'revenue_per_visitor',
+        objective: primaryMetric || shopGuardrails.objective || 'revenue_per_visitor',
         variants: rows.map(row => ({
           variant_id: row.variant_id,
           title: row.product_title || row.title,
@@ -1091,7 +1452,7 @@ export default function ClassicCreateWizard() {
     name,
     experimentType,
     hypothesis,
-    audience?.primaryMetric,
+    primaryMetric,
     shopGuardrails,
   ]);
 
@@ -1117,10 +1478,15 @@ export default function ClassicCreateWizard() {
       const result = await suggestSmartPricingAudience(shopDomain, sourcePlans, { useAi: true });
       const a = result?.audience || {};
       setAudience(prev => {
-        const next = mergeAudienceAiIntoState(prev, a, {
-          source: result?.source,
-          rationale: a.rationale,
-        });
+        const preservedFloor = resolveMinSampleSize(prev?.minSampleSize, minSampleSize);
+        const next = mergeAudienceAiIntoStatePreservingSample(
+          { ...prev, minSampleSize: String(preservedFloor) },
+          a,
+          {
+            source: result?.source,
+            rationale: a.rationale,
+          }
+        );
         setGlobalAudience(segmentsFromClassicAudience(next, a.segments));
         return next;
       });
@@ -1136,12 +1502,17 @@ export default function ClassicCreateWizard() {
     } finally {
       setAudienceAiBusy(false);
     }
-  }, [plans, shopDomain, buildBatch]);
+  }, [plans, shopDomain, buildBatch, minSampleSize]);
 
   const saveDraft = async () => {
     if (!String(name).trim()) {
       setMessageType('error');
       setMessage('Add an experiment name before saving a draft.');
+      return;
+    }
+    if (!shopGuardrailsReady) {
+      setMessageType('error');
+      setMessage('Still loading shop experiment defaults. Try again in a moment.');
       return;
     }
     setSavingDraft(true);
@@ -1190,6 +1561,17 @@ export default function ClassicCreateWizard() {
         setMessage('Smart Pricing currently supports Price test and Offer test experiments.');
         return;
       }
+      if (!shopGuardrailsReady) {
+        setMessageType('error');
+        setMessage('Still loading shop experiment defaults. Try again in a moment.');
+        return;
+      }
+      const sample = Number(minSampleSize);
+      if (!Number.isFinite(sample) || sample < 1) {
+        setMessageType('error');
+        setMessage('Enter a minimum sample size of at least 1 visitor per variation.');
+        return;
+      }
       setStep(1);
       return;
     }
@@ -1199,7 +1581,11 @@ export default function ClassicCreateWizard() {
         setMessage('Traffic must total 100%.');
         return;
       }
-      setLoadingProducts(true);
+      if (!hasPositiveVariationTraffic(variations)) {
+        setMessageType('error');
+        setMessage('Every variation must receive more than 0% traffic.');
+        return;
+      }
       setProductsLoadError('');
       setStep(2);
       return;
@@ -1243,6 +1629,17 @@ export default function ClassicCreateWizard() {
       return;
     }
     if (step === 3) {
+      if (!shopGuardrailsReady) {
+        setMessageType('error');
+        setMessage('Still loading shop experiment defaults. Try again in a moment.');
+        return;
+      }
+      const audienceCheck = validateClassicAudienceUi(audience || createDefaultAudienceState());
+      if (!audienceCheck.ok) {
+        setMessageType('error');
+        setMessage(audienceCheck.message);
+        return;
+      }
       setStep(4);
       const enriched = enrichPlansForLaunch();
       setPlans(enriched);
@@ -1251,6 +1648,24 @@ export default function ClassicCreateWizard() {
     }
     if (step === 4) {
       if (busy || launching) {
+        return;
+      }
+      if (!shopGuardrailsReady) {
+        setMessageType('error');
+        setMessage('Still loading shop experiment defaults. Try again in a moment.');
+        return;
+      }
+      if (trafficTotal(variations) !== 100 || !hasPositiveVariationTraffic(variations)) {
+        setMessageType('error');
+        setMessage('Every variation needs more than 0% traffic and the split must total 100%.');
+        return;
+      }
+      const launchAudienceCheck = validateClassicAudienceUi(
+        audience || createDefaultAudienceState()
+      );
+      if (!launchAudienceCheck.ok) {
+        setMessageType('error');
+        setMessage(launchAudienceCheck.message);
         return;
       }
       if (checkoutLoading) {
@@ -1337,6 +1752,7 @@ export default function ClassicCreateWizard() {
     ]
   );
 
+  const shopDesign = shopDesignFromGuardrails(shopGuardrails);
   const significanceEstimate = useMemo(
     () =>
       estimateSignificanceDuration({
@@ -1347,7 +1763,11 @@ export default function ClassicCreateWizard() {
         maxSelection,
         variations,
         trafficAllocation: audience?.trafficAllocation,
-        minSampleSize: audience?.minSampleSize || minSampleSize,
+        minSampleSize: resolveMinSampleSize(audience?.minSampleSize, minSampleSize),
+        minConversionsPerVariation: shopDesign.minConversions,
+        mdePercent: shopDesign.mdePercent,
+        confidenceLevel: shopDesign.confidenceLevel,
+        power: shopDesign.power,
       }),
     [
       plans,
@@ -1359,6 +1779,10 @@ export default function ClassicCreateWizard() {
       audience?.trafficAllocation,
       audience?.minSampleSize,
       minSampleSize,
+      shopDesign.minConversions,
+      shopDesign.mdePercent,
+      shopDesign.confidenceLevel,
+      shopDesign.power,
     ]
   );
   const estimatedDays = significanceEstimate.days;
@@ -1372,14 +1796,31 @@ export default function ClassicCreateWizard() {
         onBack={() => setStep(s => Math.max(0, s - 1))}
         onContinue={goNext}
         continueLabel={continueLabel}
-        continueDisabled={step === 2 && productsStepGate.disabled}
-        continueDisabledReason={step === 2 ? productsStepGate.hint : ''}
+        continueDisabled={
+          (step === 2 && productsStepGate.disabled) ||
+          ((step === 0 || step === 3 || step === 4) && !shopGuardrailsReady)
+        }
+        continueDisabledReason={
+          step === 2
+            ? productsStepGate.hint
+            : (step === 0 || step === 3 || step === 4) && !shopGuardrailsReady
+              ? 'Loading shop experiment defaults…'
+              : ''
+        }
         continueBusy={busy || launching}
         showCancel={step === 0}
         onCancel={backToList}
         onSaveDraft={saveDraft}
         saveDraftLabel="Save draft"
         saveDraftBusy={savingDraft}
+        saveDraftDisabled={!shopGuardrailsReady}
+        onGoToStep={index => {
+          if (busy || launching || savingDraft) return;
+          const next = Number(index);
+          if (!Number.isInteger(next) || next < 0 || next >= step) return;
+          setMessage('');
+          setStep(next);
+        }}
       >
         {message && messageType === 'success' && step !== 4 ? (
           <div className={styles.success}>{message}</div>
@@ -1423,6 +1864,7 @@ export default function ClassicCreateWizard() {
               );
             }}
             minSampleSize={minSampleSize}
+            significanceEstimate={significanceEstimate}
             onMinSampleSizeChange={value => {
               setMinSampleSize(String(value));
               setAudience(prev => ({ ...prev, minSampleSize: String(value) }));
@@ -1516,6 +1958,12 @@ export default function ClassicCreateWizard() {
             loadError={productsLoadError}
             onRetryLoad={loadOpportunities}
             continueHint={productsStepGate.hint}
+            shopDefaultsReady={shopGuardrailsReady}
+            shopMaxChangePercent={shopGuardrails.max_price_change_percent}
+        onRaiseMaxPriceChange={raiseMaxPriceChange}
+        raisingMaxPriceChange={raisingMaxPriceChange}
+        aiBandAttempt={aiBandAttempt}
+        onOpenGuardrailSettings={openGuardrailSettings}
             experimentType={experimentType}
             offerByArm={offerByArm}
             onOfferByArmChange={setOfferByArm}
@@ -1530,6 +1978,8 @@ export default function ClassicCreateWizard() {
             suggestBusy={audienceAiBusy}
             shopDomain={shopDomain}
             significanceEstimate={significanceEstimate}
+            shopMaxRevenueDropPercent={shopGuardrails.max_revenue_drop_percent}
+            disabled={!shopGuardrailsReady}
           />
         ) : null}
 
@@ -1550,6 +2000,7 @@ export default function ClassicCreateWizard() {
             audience={audience}
             estimatedDays={estimatedDays}
             estimatedTimeDetail={significanceEstimate.detail}
+            significanceEstimate={significanceEstimate}
             checkoutReady={launchCheckoutReady}
             checkoutLoading={checkoutLoading}
             checkoutReadiness={checkoutReadiness}

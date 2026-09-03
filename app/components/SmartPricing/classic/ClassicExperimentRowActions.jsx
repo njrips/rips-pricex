@@ -1,9 +1,11 @@
-import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import useIsomorphicLayoutEffect from '../../../hooks/useIsomorphicLayoutEffect';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router';
 import { Button, Modal } from '@shopify/polaris';
 import { ROUTES } from '../../../constants';
 import { apiPost } from '../../../services';
+import { getSmartPricingGuardrails } from '../../../services/smartPricingApi';
 import { useSmartPricingLaunch } from '../../../hooks/useSmartPricingLaunch';
 import { readInboxPlans, writeInboxPlans } from '../smartPricingConstants';
 import { persistInboxPlansNow } from '../smartPricingInboxPersistence';
@@ -91,7 +93,7 @@ export default function ClassicExperimentRowActions({
     setMenuBox(measureActionMenuBox(triggerRef.current));
   }, [open]);
 
-  useLayoutEffect(() => {
+  useIsomorphicLayoutEffect(() => {
     updateMenuBox();
   }, [open, updateMenuBox, actions.length]);
 
@@ -177,7 +179,8 @@ export default function ClassicExperimentRowActions({
       if (!toLaunch.length) {
         throw new Error('Nothing to launch for this experiment.');
       }
-      await launchMany(enrichInboxPlansForLaunch(toLaunch));
+      const guardrailsPayload = await getSmartPricingGuardrails(shopDomain).catch(() => ({}));
+      await launchMany(enrichInboxPlansForLaunch(toLaunch, guardrailsPayload));
       await persistInboxPlansNow(shopDomain, readInboxPlans(shopDomain)).catch(() => null);
       notify('success', 'Experiment launched.');
       await refreshList({ preferLocalIds: planIds, quiet: true });
@@ -371,6 +374,10 @@ export default function ClassicExperimentRowActions({
   return (
     <div
       className={`${styles.moreMenuWrap} ${styles.expRowActions}`}
+      // Layout wrapper with no semantics of its own: the click handler only
+      // keeps the menu from also triggering the row's navigation, and the real
+      // control inside is a Button that keyboard users reach directly.
+      role="presentation"
       onClick={event => event.stopPropagation()}
     >
       <span ref={triggerRef}>

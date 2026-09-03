@@ -2643,3 +2643,70 @@ html:has(.rpx-public) body {
     display: none;
   }
 }
+
+.px-docs-hero {
+  max-width: 760px;
+}
+
+.px-docs-title {
+  margin: 0 0 16px;
+  font-size: clamp(36px, 5vw, 56px);
+  font-weight: 700;
+  letter-spacing: -1.4px;
+  line-height: 1.1;
+}
+
+.px-docs-lead {
+  margin: 0 0 12px;
+  color: var(--px-ink-soft);
+  font-size: 18px;
+  line-height: 28px;
+}
+
+.px-docs-updated {
+  margin: 0;
+  color: var(--px-ink-muted);
+  font-size: 14px;
+}
+
+.px-docs-nav {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.px-docs-card {
+  color: inherit;
+  text-decoration: none;
+}
+
+.px-docs-card:hover {
+  border-color: var(--px-brand);
+}
+
+.px-docs-articles {
+  display: grid;
+  gap: 16px;
+}
+
+.px-landing .px-section[id],
+.px-docs-articles .px-card[id] {
+  scroll-margin-top: 96px;
+}
+
+.px-docs-articles .px-card h3 {
+  margin: 0 0 8px;
+}
+
+.px-docs-articles .px-card p {
+  margin: 0 0 12px;
+  color: var(--px-ink-soft);
+}
+
+.px-docs-articles .px-card p:last-child {
+  margin-bottom: 0;
+}
+
+@media (max-width: 900px) {
+  .px-docs-nav {
+    grid-template-columns: 1fr;
+  }
+}

@@ -23,6 +23,9 @@
     "graphql-codegen": "graphql-codegen",
     "vite": "vite",
     "typecheck": "react-router typegen && tsc --noEmit",
+    "test": "vitest run && npm run test:server",
+    "test:server": "node scripts/run-server-tests.js",
+    "test:watch": "vitest",
     "accept": "node scripts/acceptance-check.js",
     "tunnel:sync": "node scripts/sync-tunnel-env.js"
   },
@@ -56,8 +59,8 @@
     "@types/node": "^25.5.2",
     "@types/react": "^18.3.25",
     "@types/react-dom": "^18.3.7",
-    "@typescript-eslint/eslint-plugin": "^6.21.0",
-    "@typescript-eslint/parser": "^6.21.0",
+    "@typescript-eslint/eslint-plugin": "^8.69.0",
+    "@typescript-eslint/parser": "^8.69.0",
     "concurrently": "^9.0.0",
     "eslint": "^8.57.1",
     "eslint-import-resolver-typescript": "^4.4.4",
@@ -66,9 +69,12 @@
     "eslint-plugin-react": "^7.37.5",
     "eslint-plugin-react-hooks": "^7.0.1",
     "graphql-config": "^5.1.1",
+    "jest": "^30.5.1",
+    "jsdom": "^29.1.1",
     "prettier": "^3.6.2",
     "typescript": "^5.9.3",
-    "vite": "^7.3.1"
+    "vite": "^7.3.1",
+    "vitest": "^4.1.11"
   },
   "workspaces": {
     "packages": [
@@ -80,6 +86,9 @@
   ],
   "overrides": {
     "p-map": "^4.0.0",
-    "graphql": "16.11.0"
+    "graphql": "16.11.0",
+    "qs": "^6.16.0",
+    "deepmerge-ts": "^8.0.2",
+    "lodash": "^4.18.1"
   }
 }

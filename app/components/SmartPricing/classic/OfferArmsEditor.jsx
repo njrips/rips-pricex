@@ -1,11 +1,12 @@
-import React from 'react';
 import { Select, TextField } from '@shopify/polaris';
+import SettingsInfoLink from '../../Settings/SettingsInfoLink';
 import {
   EMPTY_OFFER_CONFIG,
   formatOfferRule,
   isActionableOfferConfig,
   normalizeOfferConfig,
 } from './offerSelection';
+import { IconControlBaseline } from './classicIcons';
 import styles from './SmartPricingClassic.module.css';
 
 const TYPE_OPTIONS = [
@@ -43,7 +44,10 @@ export default function OfferArmsEditor({
 
   return (
     <div className={styles.offerArmsStack}>
-      <div className={styles.sectionLabel}>Offers for each variation</div>
+      <div className={styles.labelRow}>
+        <div className={styles.sectionLabel}>Offers for each variation</div>
+        <SettingsInfoLink hash="offers" label="Offer tests" />
+      </div>
       <p className={styles.help}>
         Control stays at the catalog price with no discount. Each test variation applies one offer
         to every selected product. Assigned shoppers see the catalog price struck through, the
@@ -58,7 +62,18 @@ export default function OfferArmsEditor({
         return (
           <div key={arm.id} className={styles.offerArmCard}>
             <div className={styles.offerArmHead}>
-              <span className={styles.segmentLetter}>{arm.letter || String.fromCharCode(65 + index)}</span>
+              <span
+                className={`${styles.segmentLetter} ${
+                  isControl ? styles.controlVariationMarker : ''
+                }`}
+                aria-label={isControl ? 'Control — current catalog baseline' : `Variation ${arm.letter}`}
+              >
+                {isControl ? (
+                  <IconControlBaseline size={12} />
+                ) : (
+                  arm.letter || String.fromCharCode(64 + index)
+                )}
+              </span>
               <strong>{arm.name || (isControl ? 'Control' : `Variation ${index}`)}</strong>
               <span className={styles.offerArmMeta}>
                 {isControl

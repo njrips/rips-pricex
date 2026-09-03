@@ -6,14 +6,14 @@ export function createDefaultVariations() {
   return [
     {
       id: 'control',
-      letter: 'A',
+      letter: null,
       role: 'Control',
       name: 'Control',
       description: 'Current price',
       traffic: 50,
     },
     {
-      // First challenger is Variation A. Control keeps badge "A" as the control marker.
+      // Letters are reserved for challengers; Control uses a baseline symbol in the UI.
       id: 'var_a',
       letter: 'A',
       role: 'Variation A',
@@ -76,7 +76,7 @@ export function variationsFromPlanArms(arms = [], experimentType = 'price_test')
     const challengerLetter = String.fromCharCode(64 + Math.max(1, index));
     return {
       id: arm?.id || (isControl ? 'control' : `var_${challengerLetter.toLowerCase()}`),
-      letter: isControl ? 'A' : challengerLetter,
+      letter: isControl ? null : challengerLetter,
       role: isControl ? 'Control' : `Variation ${challengerLetter}`,
       name: arm?.label || (isControl ? 'Control' : `Variation ${challengerLetter}`),
       description: isControl ? (isOffer ? 'No offer (baseline)' : 'Current price') : '',

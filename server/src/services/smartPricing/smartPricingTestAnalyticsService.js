@@ -5,6 +5,7 @@
 const { getTestById } = require('../../models/test');
 const analyticsService = require('../analytics');
 const { findInboxPlanByTestId } = require('../../models/smartPricingInboxStore');
+const { isSmartPricingTest } = require('./smartPricingTestIdentity');
 
 function variantFixedPrice(variant = {}) {
   const cfg = variant.config && typeof variant.config === 'object' ? variant.config : {};
@@ -248,17 +249,44 @@ function buildSignificanceSummary(analytics) {
     winner: sig.winner ?? null,
     winnerVariantId: sig.winnerVariantId ?? null,
     bestVariantId: sig.bestVariantId ?? null,
+    minSampleSize: Number.isFinite(Number(sig.minSampleSize)) ? Number(sig.minSampleSize) : null,
+    // A merchant looking at a blocked result needs to see which floor is
+    // holding it, not just that something is missing.
+    minConversionsPerVariation: Number.isFinite(Number(sig.minConversionsPerVariation))
+      ? Number(sig.minConversionsPerVariation)
+      : null,
+    lowestArmConversions: Number.isFinite(Number(sig.lowestArmConversions))
+      ? Number(sig.lowestArmConversions)
+      : null,
+    recommendedSampleSize: Number.isFinite(Number(sig.recommendedSampleSize))
+      ? Number(sig.recommendedSampleSize)
+      : null,
+    sampleReady: sig.sampleReady === true ? true : sig.sampleReady === false ? false : null,
+    powered: sig.powered === true ? true : sig.powered === false ? false : null,
+    sequential: sig.sequential === true,
+    method: sig.method || null,
+    family: sig.family || null,
+    evidenceValidated: sig.evidenceValidated === true,
+    evidenceValidity: sig.evidenceValidity || null,
+    controlWin: sig.controlWin === true,
+    // A split that does not match the allocation invalidates the comparison, so
+    // it has to reach the merchant rather than sit in the analytics payload.
+    srm:
+      sig.srm && typeof sig.srm === 'object'
+        ? {
+            detected: sig.srm.detected === true,
+            pValue: Number.isFinite(Number(sig.srm.pValue)) ? Number(sig.srm.pValue) : null,
+            message: sig.srm.message || null,
+          }
+        : null,
+    outcomesMatured: sig.outcomesMatured === true ? true : sig.outcomesMatured === false ? false : null,
+    collectionDays: Number.isFinite(Number(sig.collectionDays))
+      ? Math.round(Number(sig.collectionDays))
+      : null,
+    outcomeMaturityDays: Number.isFinite(Number(sig.outcomeMaturityDays))
+      ? Number(sig.outcomeMaturityDays)
+      : null,
   };
-}
-
-function descriptionLooksLikeSmartPricing(test = {}) {
-  const description = String(test.description || '');
-  const name = String(test.name || '');
-  return (
-    /Created from Smart Pricing plan/i.test(description) ||
-    /^Smart Pricing\s*·/i.test(name) ||
-    /smart[_ ]pricing/i.test(description)
-  );
 }
 
 function synthesizeArmsFromTestVariants(testVariants = []) {
@@ -289,11 +317,7 @@ async function buildSmartPricingTestAnalytics(shopDomain, testId) {
   // tests table has no metadata column today — linkage usually lives on the inbox plan.
   const metadata = test.metadata && typeof test.metadata === 'object' ? test.metadata : {};
   const plan = (await findInboxPlanByTestId(shopDomain, testId)) || null;
-  const isSmartPricing =
-    metadata.smart_pricing_source === 'smart_pricing' ||
-    Boolean(metadata.smart_pricing_plan_id) ||
-    Boolean(plan?.id) ||
-    descriptionLooksLikeSmartPricing(test);
+  const isSmartPricing = isSmartPricingTest(test) || Boolean(plan?.id);
   if (!isSmartPricing) {
     throw new Error('Test is not linked to Smart Pricing');
   }
@@ -324,6 +348,33 @@ async function buildSmartPricingTestAnalytics(shopDomain, testId) {
     });
   } catch {
     revenueGuardrail = null;
+  }
+  // Read once and share: the auto-winner evaluation and the rollout decision
+  // both need these, and this function runs once per product on an experiment
+  // screen that may hold fifty of them.
+  const shopGuardrails = await require('./smartPricingGuardrailsService')
+    .getShopSmartPricingGuardrails(shopDomain)
+    .catch(() => null);
+  const shopReadiness = await require('./smartPricingRolloutReadinessStore')
+    .getShopRolloutReadiness(shopDomain)
+    .catch(() => ({}));
+  const testReadiness = shopReadiness?.[testId] || null;
+
+  let autoWinner = null;
+  if (!revenueGuardrail?.enforced) {
+    try {
+      const { evaluateSmartPricingAutoWinner } = require('./smartPricingAutoWinnerService');
+      autoWinner = await evaluateSmartPricingAutoWinner({
+        shopDomain,
+        test,
+        analytics,
+        plan,
+        guardrails: shopGuardrails,
+        readiness: testReadiness,
+      });
+    } catch {
+      autoWinner = null;
+    }
   }
   const analyticsVariants = Array.isArray(analytics?.variants) ? analytics.variants : [];
   const baselinePpv =
@@ -384,16 +435,43 @@ async function buildSmartPricingTestAnalytics(shopDomain, testId) {
   const significance = buildSignificanceSummary(analytics);
   const winner = resolveWinnerArm(armRows, significance);
 
+  // The rollout verdict ships with the analytics the experiment screen already
+  // fetches per product, so the readiness table and the apply button cannot
+  // disagree about whether this product is finished.
+  let productDecision = null;
+  try {
+    const { resolveProductRolloutDecision } = require('./smartPricingProductDecision');
+    productDecision = resolveProductRolloutDecision({
+      // The test row was read before the guardrail and auto-winner steps ran, so
+      // their fresh outcomes are handed over explicitly rather than re-read.
+      test: {
+        ...test,
+        status: autoWinner?.test_status || revenueGuardrail?.test_status || test.status,
+      },
+      // An auto-apply that just landed must read as applied, not ready again.
+      autoApplied:
+        autoWinner?.enforced === true && autoWinner?.action !== 'stop_winner_ready',
+      analytics: { significance, arms: armRows, revenue_guardrail: revenueGuardrail },
+      plan,
+      guardrails: shopGuardrails,
+      readiness: testReadiness,
+    });
+  } catch {
+    productDecision = null;
+  }
+
   return {
     test_id: testId,
     plan_id: plan?.id || metadata.smart_pricing_plan_id || null,
-    test_status: revenueGuardrail?.test_status || test.status,
+    test_status: autoWinner?.test_status || revenueGuardrail?.test_status || test.status,
     revenue_guardrail: revenueGuardrail,
+    auto_winner: autoWinner,
     baseline_ppv: baselinePpv,
     cogs: test.goal?.cogs || null,
     currency: plan?.currency || metadata.currency || 'USD',
     arms: armRows,
     significance,
+    product_decision: productDecision,
     winner_arm_id: winner.winner_arm_id,
     winner_variant_id: winner.winner_variant_id,
     summary: {

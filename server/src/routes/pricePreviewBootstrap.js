@@ -56,6 +56,14 @@ function persistPreviewCtx(targetWindow) {
     window.name = '__ripx_preview_ctx_v1__:' + JSON.stringify(ctx);
   } catch (_eTopName) {}
   try {
+    var encoded = encodeURIComponent(JSON.stringify(ctx));
+    if (encoded && encoded.length <= 3500) {
+      var secure = String(window.location.protocol || '') === 'https:' ? '; Secure' : '';
+      document.cookie =
+        '__ripx_preview_ctx_v1=' + encoded + '; Max-Age=7200; path=/; SameSite=Lax' + secure;
+    }
+  } catch (_eCookie) {}
+  try {
     if (targetWindow && targetWindow.sessionStorage) {
       targetWindow.sessionStorage.setItem('__ripx_preview_ctx_v1__', JSON.stringify(ctx));
     }
@@ -260,7 +268,7 @@ function buildPricePreviewHtml({
 
         function htmlLooksLikeProductPage(htmlText) {
           var html = String(htmlText || '');
-          return /product-form|product-info|\/cart\/add|name=["']id["']/i.test(html);
+          return /product-form|product-info|\\/cart\\/add|name=["']id["']/i.test(html);
         }
 
         function isPasswordGateResponse(result) {
@@ -271,7 +279,7 @@ function buildPricePreviewHtml({
               (result && result.finalUrl) || '',
               window.location.origin
             ).pathname.toLowerCase();
-            return path === '/password' || /\/password\/?$/.test(path);
+            return path === '/password' || /\\/password\\/?$/.test(path);
           } catch (_e) {
             return false;
           }

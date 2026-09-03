@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo } from 'react';
 import { Link, useNavigate, useOutletContext, useSearchParams } from 'react-router';
 import { withCurrentEmbeddedSearch } from '../utils/shopifyEmbeddedSearch';
 import { Badge, Banner, Button } from '@shopify/polaris';
-import type { AppOutletContext } from '../lib/api.client';
+import type { ApiTarget, AppOutletContext } from '../lib/api.client';
 import { rpxApi } from '../lib/api.client';
+import { useKeyedState } from '../hooks/useKeyedState';
 import { useThemeEmbedRedirect } from '../lib/useThemeEmbedRedirect';
 import useCartTransformStatus from '../hooks/useCartTransformStatus';
 import useCheckoutDiscountStatus from '../hooks/useCheckoutDiscountStatus';
@@ -29,55 +30,81 @@ function embedBadgeLabel(status: 'enabled' | 'disabled' | 'unknown', hasDeepLink
   return hasDeepLink ? 'Confirm in theme editor' : 'API key missing';
 }
 
-export default function SetupPage() {
-  const ctx = useOutletContext<AppOutletContext>();
-  const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
-  const [hints, setHints] = useState<string[]>([]);
-  const [surface, setSurface] = useState({ ready: false, configured: 0, message: '' });
-  const [embedStatus, setEmbedStatus] = useState<'enabled' | 'disabled' | 'unknown'>('unknown');
-  const [readinessBusy, setReadinessBusy] = useState(false);
-  const [launchSummary, setLaunchSummary] = useState(() =>
-    describeSmartPricingLaunchReadiness(null)
-  );
-  const { open: openEmbed, embedUrl, themeName } = useThemeEmbedRedirect(ctx);
-  const cart = useCartTransformStatus(ctx.shop);
-  const discount = useCheckoutDiscountStatus(ctx.shop);
+/** Readiness before the first answer arrives. */
+function idleReadiness(loading: boolean) {
+  return {
+    launchSummary: describeSmartPricingLaunchReadiness(null),
+    hints: [] as string[],
+    surface: { ready: false, configured: 0, message: '' },
+    embedStatus: 'unknown' as 'enabled' | 'disabled' | 'unknown',
+    busy: loading,
+  };
+}
 
-  const refreshReadiness = useCallback(async () => {
-    if (!ctx.shop) return;
-    setReadinessBusy(true);
-    try {
-      const data = await rpxApi.checkoutReadiness(ctx);
-      const readiness = unwrapCheckoutReadiness(data);
-      const summary = describeSmartPricingLaunchReadiness(readiness);
-      setLaunchSummary(summary);
-      const nextHints = checkoutReadinessHintLines(readiness);
-      if (summary.offerReady === false && readiness?.offer_message) {
-        nextHints.unshift(String(readiness.offer_message));
-      }
-      setHints(nextHints);
-      setSurface(priceSurfaceSummary(readiness));
-      setEmbedStatus(themeEmbedStatus(readiness));
-    } catch {
-      setLaunchSummary({
+async function loadReadiness(target: ApiTarget) {
+  try {
+    const data = await rpxApi.checkoutReadiness(target);
+    const readiness = unwrapCheckoutReadiness(data);
+    const summary = describeSmartPricingLaunchReadiness(readiness);
+    const hints = checkoutReadinessHintLines(readiness);
+    if (summary.offerReady === false && readiness?.offer_message) {
+      hints.unshift(String(readiness.offer_message));
+    }
+    return {
+      launchSummary: summary,
+      hints,
+      surface: priceSurfaceSummary(readiness),
+      embedStatus: themeEmbedStatus(readiness),
+      busy: false,
+    };
+  } catch {
+    return {
+      launchSummary: {
         priceReady: false,
         offerReady: false,
         anyReady: false,
         title: 'Checkout needs attention',
         detail: 'Could not load checkout readiness.',
-      });
-      setHints(['Could not load checkout readiness']);
-      setSurface({ ready: false, configured: 0, message: '' });
-      setEmbedStatus('unknown');
-    } finally {
-      setReadinessBusy(false);
-    }
-  }, [ctx.shop, ctx.apiBase]);
+      },
+      hints: ['Could not load checkout readiness'],
+      surface: { ready: false, configured: 0, message: '' },
+      embedStatus: 'unknown' as 'enabled' | 'disabled' | 'unknown',
+      busy: false,
+    };
+  }
+}
+
+export default function SetupPage() {
+  const ctx = useOutletContext<AppOutletContext>();
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const { shop, apiBase } = ctx;
+  const target = useMemo(() => ({ shop, apiBase }), [shop, apiBase]);
+  // One state for the whole readiness answer, keyed on the shop it describes.
+  // A new shop reads a fresh "checking" state rather than showing the previous
+  // shop's hints until the request lands.
+  const [readiness, setReadiness] = useKeyedState(target, () => idleReadiness(Boolean(shop)));
+  const { open: openEmbed, embedUrl, themeName } = useThemeEmbedRedirect(ctx);
+  const cart = useCartTransformStatus(shop);
+  const discount = useCheckoutDiscountStatus(shop);
+  const { hints, surface, embedStatus, launchSummary, busy: readinessBusy } = readiness;
 
   useEffect(() => {
-    void refreshReadiness();
-  }, [refreshReadiness]);
+    if (!shop) return undefined;
+    let cancelled = false;
+    loadReadiness(target).then(next => {
+      if (!cancelled) setReadiness(next);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [shop, target, setReadiness]);
+
+  const refreshReadiness = useCallback(async () => {
+    if (!shop) return;
+    setReadiness(prev => ({ ...prev, busy: true }));
+    setReadiness(await loadReadiness(target));
+  }, [shop, target, setReadiness]);
 
   const ensureAndRecheck = async () => {
     await cart.ensure();
@@ -168,7 +195,7 @@ export default function SetupPage() {
           </div>
           <p className={styles.adminRowBody}>
             Required for PDP price paint. Apps cannot turn the embed on for you — open the theme
-            editor, enable RipsPriceX, and Save. Status updates after we re-check (when reported).
+            editor, enable Pricify, and Save. Status updates after we re-check (when reported).
             {themeName ? (
               <>
                 {' '}

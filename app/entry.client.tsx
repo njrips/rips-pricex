@@ -49,31 +49,54 @@ function clearBrowserExtensionInjectionsBeforeHydration() {
   }
 }
 
-function pinPublicStylesheets() {
-  const pins = Array.from(document.querySelectorAll("link[data-ripx-css]")).map((node) => ({
-    key: node.getAttribute("data-ripx-css") || "",
-    href: node.getAttribute("href") || "",
-  })).filter((pin) => pin.key && pin.href);
+let reportedHydrationError = false;
 
-  const restore = () => {
-    for (const pin of pins) {
-      if (document.querySelector(`link[data-ripx-css="${pin.key}"]`)) continue;
-      const link = document.createElement("link");
-      link.rel = "stylesheet";
-      link.href = pin.href;
-      link.setAttribute("data-ripx-css", pin.key);
-      document.head.appendChild(link);
+async function reportHydrationHeadDifference() {
+  if (!import.meta.env.DEV) return;
+
+  try {
+    const response = await fetch(window.location.href, {
+      cache: "no-store",
+      credentials: "same-origin",
+      headers: { Accept: "text/html" },
+    });
+    if (!response.ok) return;
+
+    const serverDocument = new DOMParser().parseFromString(
+      await response.text(),
+      "text/html",
+    );
+    const signature = (node: Element) => {
+      const attributes = Array.from(node.attributes)
+        .map(({ name, value }) => `${name}=${value}`)
+        .sort()
+        .join(";");
+      return `${node.tagName.toLowerCase()}[${attributes}]${
+        node.tagName === "TITLE" ? node.textContent || "" : ""
+      }`;
+    };
+    const selectOwnedHead = (root: ParentNode) =>
+      Array.from(root.querySelectorAll("head > meta, head > link, head > title")).map(
+        signature,
+      );
+    const serverHead = selectOwnedHead(serverDocument);
+    const clientHead = selectOwnedHead(document);
+
+    if (JSON.stringify(serverHead) !== JSON.stringify(clientHead)) {
+      console.warn("[ripspricex] hydration head difference", {
+        serverOnly: serverHead.filter((item) => !clientHead.includes(item)),
+        clientOnly: clientHead.filter((item) => !serverHead.includes(item)),
+        serverOrder: serverHead,
+        clientOrder: clientHead,
+      });
     }
-  };
-
-  restore();
-  const observer = new MutationObserver(restore);
-  observer.observe(document.head, { childList: true });
+  } catch {
+    // Hydration reporting must never affect app startup.
+  }
 }
 
 startTransition(() => {
   clearBrowserExtensionInjectionsBeforeHydration();
-  pinPublicStylesheets();
   hydrateRoot(
     document,
     <StrictMode>
@@ -81,8 +104,10 @@ startTransition(() => {
     </StrictMode>,
     {
       onRecoverableError(error) {
-        if (typeof console !== "undefined" && console.warn) {
+        if (!reportedHydrationError && typeof console !== "undefined" && console.warn) {
+          reportedHydrationError = true;
           console.warn("[ripspricex] recoverable hydration issue", error);
+          void reportHydrationHeadDifference();
         }
       },
     },

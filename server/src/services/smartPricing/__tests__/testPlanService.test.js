@@ -23,6 +23,45 @@ describe('testPlanService', () => {
     expect(plan.guardrail_checks.every(c => c.passed)).toBe(true);
     expect(plan.learning_path).toHaveLength(3);
     expect(plan.arm_projections).toHaveLength(3);
+    expect(plan.statistical_design.mde_percent).toBe(10);
+    expect(plan.statistical_design.confidence_level).toBe(90);
+    expect(plan.statistical_design.analysis_method).toBe('sequential');
+    expect(plan.goal.analysis_method).toBe('sequential');
+    expect(plan.goal.significance_level).toBe(0.9);
+  });
+
+  it('honors shop confidence and target lift', () => {
+    const plan = buildSmartPricingTestPlan({
+      shopDomain: 'demo.myshopify.com',
+      productId: 'gid://shopify/Product/101',
+      variantId: 'gid://shopify/ProductVariant/1001',
+      title: 'Classic Hoodie M',
+      currentPrice: 59,
+      dailyVisitors: 140,
+      mdePercent: 8,
+      confidenceLevel: 95,
+    });
+    expect(plan.statistical_design.mde_percent).toBe(8);
+    expect(plan.statistical_design.confidence_level).toBe(95);
+    expect(plan.statistical_design.min_sample_size).toBeUndefined();
+  });
+
+  it('stamps shop min sample onto the created plan', () => {
+    const plan = buildSmartPricingTestPlan({
+      shopDomain: 'demo.myshopify.com',
+      productId: 'gid://shopify/Product/101',
+      variantId: 'gid://shopify/ProductVariant/1001',
+      title: 'Classic Hoodie M',
+      currentPrice: 59,
+      dailyVisitors: 140,
+      minSampleSize: 2500,
+      confidenceLevel: 95,
+      mdePercent: 8,
+    });
+    expect(plan.goal.min_sample_size).toBe(2500);
+    expect(plan.launch_preferences.min_sample_size).toBe(2500);
+    expect(plan.statistical_design.min_sample_size).toBe(2500);
+    expect(plan.goal.significance_level).toBe(0.95);
   });
 
   it('builds demo batch with distinct SKUs', () => {

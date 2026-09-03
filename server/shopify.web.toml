@@ -1,4 +1,4 @@
-name = "RipsPriceX API"
+name = "Pricify API"
 roles = ["background"]
 
 [commands]

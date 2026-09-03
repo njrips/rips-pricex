@@ -129,23 +129,23 @@ function WalkMock({ type }) {
     return (
       <MiniApp url={mock.url}>
         <p className="px-app-title">{mock.title}</p>
-        <label className="px-field">
+        <div className="px-field">
           <span>Experiment name</span>
           <strong>{mock.name}</strong>
-        </label>
-        <label className="px-field">
+        </div>
+        <div className="px-field">
           <span>Hypothesis</span>
           <p>{mock.hypothesis}</p>
-        </label>
+        </div>
         <div className="px-field-row">
-          <label className="px-field">
+          <div className="px-field">
             <span>Start date</span>
             <strong className="px-field-blank" />
-          </label>
-          <label className="px-field">
+          </div>
+          <div className="px-field">
             <span>Duration</span>
             <strong>{mock.duration}</strong>
-          </label>
+          </div>
         </div>
         <p className="px-mock-btn">{mock.next}</p>
       </MiniApp>
@@ -164,14 +164,14 @@ function WalkMock({ type }) {
           </div>
         </div>
         <div className="px-field-row">
-          <label className="px-field">
+          <div className="px-field">
             <span>Control price</span>
             <strong>{mock.control}</strong>
-          </label>
-          <label className="px-field px-field--on">
+          </div>
+          <div className="px-field px-field--on">
             <span>Variation price</span>
             <strong>{mock.variation}</strong>
-          </label>
+          </div>
         </div>
       </MiniApp>
     );

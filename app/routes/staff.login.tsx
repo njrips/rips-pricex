@@ -1,8 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from "react-router";
 import { Form, redirect, useActionData, useLoaderData, useNavigation } from "react-router";
 import PricifyIcon from "../components/public/pricify/PricifyIcon";
 import StaffOtpBoxes from "../components/public/pricify/StaffOtpBoxes";
+import { useHydrated } from "../hooks/useHydrated";
+import { useKeyedState } from "../hooks/useKeyedState";
 import {
   clearStaffOtpDraft,
   formatOtpCountdown,
@@ -156,56 +158,51 @@ export default function StaffLogin() {
   const actionData = useActionData<typeof action>();
   const navigation = useNavigation();
   const busy = navigation.state !== "idle";
-  const [draft, setDraft] = useState<null | { email: string; issued: string; message: string }>(
-    null,
+  const hydrated = useHydrated();
+  const actionResult = actionData && "step" in actionData ? actionData : null;
+  const actionStep = actionResult?.step || null;
+  // The saved draft lets a reload land back on the code step. It only matters
+  // before a form action has run — after that the action result says which step
+  // we are on — and it lives in browser storage, so it is read after hydration
+  // rather than mirrored into state. Reading it once per step keeps a verify
+  // that clears storage mid-flight from dropping the form back to the email
+  // step while the redirect is still in progress.
+  const draft = useMemo(
+    () => (!actionStep && hydrated ? readStaffOtpDraft() : null),
+    [actionStep, hydrated]
   );
-  const actionStep = actionData && "step" in actionData ? actionData.step : null;
   const step = actionStep === "code" || (!actionStep && draft) ? "code" : "email";
   const email = actionStep
-    ? String(("email" in actionData && actionData.email) || "")
+    ? String((actionResult && "email" in actionResult && actionResult.email) || "")
     : String(draft?.email || "");
   const issued = actionStep === "code"
-    ? String(("issued" in actionData && actionData.issued) || "")
+    ? String((actionResult && "issued" in actionResult && actionResult.issued) || "")
     : actionStep
       ? ""
       : String(draft?.issued || "");
   const message = actionStep === "code"
-    ? ("message" in actionData && actionData.message) || ""
+    ? (actionResult && "message" in actionResult && actionResult.message) || ""
     : actionStep
       ? ""
       : draft?.message || "";
   const otpResetKey = step === "code" ? `${email}:${issued || message}` : "idle";
   const otpLeft = useOtpCountdown(otpResetKey, issued);
-  const [codeDigits, setCodeDigits] = useState("");
+  // A newly issued code clears whatever was typed against the previous one.
+  const [codeDigits, setCodeDigits] = useKeyedState(otpResetKey, "");
   const intent = String(navigation.formData?.get("intent") || "");
   const sentTo = maskStaffEmail(email);
 
   useEffect(() => {
-    setDraft(readStaffOtpDraft());
-  }, []);
-
-  useEffect(() => {
     if (actionStep === "code") {
       writeStaffOtpDraft({ email, issued, message });
-      setDraft({ email, issued, message: String(message || "") });
       return;
     }
-    if (actionStep === "email") {
-      clearStaffOtpDraft();
-      setDraft(null);
-    }
+    if (actionStep === "email") clearStaffOtpDraft();
   }, [actionStep, email, issued, message]);
 
   useEffect(() => {
-    if (navigation.state === "loading" && intent === "verify") {
-      clearStaffOtpDraft();
-      setDraft(null);
-    }
+    if (navigation.state === "loading" && intent === "verify") clearStaffOtpDraft();
   }, [intent, navigation.state]);
-
-  useEffect(() => {
-    setCodeDigits("");
-  }, [otpResetKey]);
 
   return (
     <section className="staff-auth">
@@ -313,7 +310,6 @@ export default function StaffLogin() {
               type="email"
               autoComplete="email"
               spellCheck={false}
-              autoFocus
               required
               defaultValue={email}
               disabled={!data.configured || busy}

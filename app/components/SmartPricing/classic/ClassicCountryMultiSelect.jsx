@@ -1,6 +1,8 @@
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import useIsomorphicLayoutEffect from '../../../hooks/useIsomorphicLayoutEffect';
 import { createPortal } from 'react-dom';
 import { ISO_COUNTRIES, getCountryDisplayName, normalizeCountryCode } from '../../../utils/iso3166CountryDisplay';
+import { useKeyedState } from '../../../hooks/useKeyedState';
 import { IconCheck, IconSearch } from './classicIcons';
 import {
   ALL_COUNTRIES_LABEL,
@@ -11,6 +13,9 @@ import {
   isAllCountriesSelected,
 } from './countrySelection';
 import styles from './SmartPricingClassic.module.css';
+
+// The listbox renders through a portal, so the input can only point at it by id.
+const COUNTRY_LISTBOX_ID = 'country-listbox';
 
 function measureMenuBox(triggerEl) {
   if (!triggerEl || typeof window === 'undefined') return null;
@@ -58,9 +63,11 @@ export default function ClassicCountryMultiSelect({
   const selected = useMemo(() => collapseCountrySelection(value, mode), [value, mode]);
   const allSelected = isAllCountriesSelected(selected, mode);
   const noneExcluded = mode === 'exclude' && selected.length === 0;
-  const [query, setQuery] = useState('');
-  const [open, setOpen] = useState(false);
-  const [highlight, setHighlight] = useState(0);
+  // Switching between include and exclude starts the field over: the search box,
+  // the menu, and the highlighted row all belong to one mode.
+  const [query, setQuery] = useKeyedState(mode, '');
+  const [openRequested, setOpen] = useKeyedState(mode, false);
+  const open = openRequested && !disabled;
   const [menuBox, setMenuBox] = useState(null);
   const wrapRef = useRef(null);
   const menuRef = useRef(null);
@@ -77,6 +84,11 @@ export default function ClassicCountryMultiSelect({
     [blockedCodes]
   );
   const showAllOption = isAllCountriesOptionVisible(query, mode);
+  // Any change to the option list restarts the highlight at the top.
+  const [highlight, setHighlight] = useKeyedState(
+    `${mode}|${query}|${showAllOption ? 1 : 0}|${open ? 1 : 0}`,
+    0
+  );
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -102,7 +114,7 @@ export default function ClassicCountryMultiSelect({
     setMenuBox(measureMenuBox(wrapRef.current));
   }, [open]);
 
-  useLayoutEffect(() => {
+  useIsomorphicLayoutEffect(() => {
     updateMenuBox();
   }, [open, updateMenuBox, filtered.length, showAllOption]);
 
@@ -136,21 +148,7 @@ export default function ClassicCountryMultiSelect({
       document.removeEventListener('mousedown', onDoc);
       document.removeEventListener('keydown', onKey, true);
     };
-  }, [open]);
-
-  useEffect(() => {
-    if (disabled) setOpen(false);
-  }, [disabled]);
-
-  useEffect(() => {
-    setQuery('');
-    setOpen(false);
-    setHighlight(0);
-  }, [mode]);
-
-  useEffect(() => {
-    setHighlight(0);
-  }, [query, showAllOption, open]);
+  }, [open, setOpen]);
 
   useEffect(() => {
     if (!open || !menuRef.current) return;
@@ -171,7 +169,7 @@ export default function ClassicCountryMultiSelect({
     emit([]);
     setQuery('');
     setOpen(false);
-  }, [emit]);
+  }, [emit, setOpen, setQuery]);
 
   const toggle = useCallback(
     code => {
@@ -188,7 +186,7 @@ export default function ClassicCountryMultiSelect({
         emit([...selected, n]);
       }
     },
-    [allSelected, blockedSet, emit, selected, selectedSet]
+    [allSelected, blockedSet, emit, selected, selectedSet, setQuery]
   );
 
   const remove = useCallback(
@@ -240,7 +238,18 @@ export default function ClassicCountryMultiSelect({
         if (code) activateOption(code);
       }
     },
-    [activateOption, allSelected, highlight, open, optionCodes, query, remove, selected]
+    [
+      activateOption,
+      allSelected,
+      highlight,
+      open,
+      optionCodes,
+      query,
+      remove,
+      selected,
+      setHighlight,
+      setOpen,
+    ]
   );
 
   const headerHint = allSelected
@@ -281,12 +290,12 @@ export default function ClassicCountryMultiSelect({
       ? createPortal(
           <div
             ref={menuRef}
+            id={COUNTRY_LISTBOX_ID}
             className={styles.countryDropdown}
             style={menuStyle}
             role="listbox"
             aria-multiselectable="true"
             aria-label="Countries"
-            aria-activedescendant={activeId}
           >
             <div className={styles.countryDropdownHeader}>{headerHint}</div>
             {hasListRows ? (
@@ -371,6 +380,10 @@ export default function ClassicCountryMultiSelect({
         className={`${styles.countryField} ${open ? styles.countryFieldOpen : ''} ${
           disabled ? styles.countryFieldDisabled : ''
         }`}
+        // Clicking the chip area is a convenience that forwards focus to the
+        // search input below, which is the element that actually owns the
+        // combobox behaviour and is reachable by keyboard on its own.
+        role="presentation"
         onClick={() => {
           if (disabled) return;
           setOpen(true);
@@ -428,7 +441,10 @@ export default function ClassicCountryMultiSelect({
             placeholder={placeholder}
             autoComplete="off"
             disabled={disabled}
+            role="combobox"
             aria-expanded={open}
+            aria-controls={COUNTRY_LISTBOX_ID}
+            aria-activedescendant={activeId}
             aria-autocomplete="list"
             aria-label="Search countries"
           />

@@ -167,17 +167,109 @@ export async function previewSmartPricingWinner(domain, testId) {
 export async function applySmartPricingWinner(
   domain,
   testId,
-  { publishToShopify = true, dryRun = false, variantIndex } = {}
+  { publishToShopify = true, dryRun = false, variantIndex, stopIfRunning = false } = {}
 ) {
   const res = await apiPost(
     `/smart-pricing/tests/${encodeURIComponent(testId)}/apply-winner`,
     {
       publish_to_shopify: publishToShopify,
       dry_run: dryRun,
+      // Applying one product in a multi-product experiment stops that product
+      // only; the rest of the experiment keeps collecting.
+      stop_if_running: stopIfRunning,
       ...(variantIndex !== undefined && variantIndex !== null
         ? { variant_index: variantIndex }
         : {}),
     },
+    domain ? { params: { domain } } : {}
+  );
+  return unwrapData(res);
+}
+
+/** Ends one product with no catalog write: a control win or a winning offer. */
+export async function finishSmartPricingProduct(domain, testId) {
+  const res = await apiPost(
+    `/smart-pricing/tests/${encodeURIComponent(testId)}/finish-product`,
+    {},
+    domain ? { params: { domain } } : {}
+  );
+  return unwrapData(res);
+}
+
+/** Stop one product's test without pausing sibling products. */
+export async function stopSmartPricingProduct(domain, testId) {
+  const res = await apiPost(
+    `/smart-pricing/tests/${encodeURIComponent(testId)}/stop-product`,
+    {},
+    domain ? { params: { domain } } : {}
+  );
+  return unwrapData(res);
+}
+
+/** Resume one previously paused/stopped product test. */
+export async function resumeSmartPricingProduct(domain, testId) {
+  const res = await apiPost(
+    `/smart-pricing/tests/${encodeURIComponent(testId)}/resume-product`,
+    {},
+    domain ? { params: { domain } } : {}
+  );
+  return unwrapData(res);
+}
+
+/** Revert catalog prices to the snapshot taken at apply time. */
+export async function revertSmartPricingProductPrice(
+  domain,
+  testId,
+  { force = false, dryRun = false } = {}
+) {
+  const res = await apiPost(
+    `/smart-pricing/tests/${encodeURIComponent(testId)}/revert-price`,
+    { force, dry_run: dryRun },
+    domain ? { params: { domain } } : {}
+  );
+  return unwrapData(res);
+}
+
+/** Queue a follow-up learning round for winners or losers. */
+export async function rerunSmartPricingProduct(
+  domain,
+  testId,
+  { armPrices = null, useAiSuggestion = false, note = null } = {}
+) {
+  const res = await apiPost(
+    `/smart-pricing/tests/${encodeURIComponent(testId)}/rerun`,
+    {
+      ...(armPrices && typeof armPrices === 'object' ? { arm_prices: armPrices } : {}),
+      use_ai_suggestion: useAiSuggestion,
+      ...(note ? { note } : {}),
+    },
+    domain ? { params: { domain } } : {}
+  );
+  return unwrapData(res);
+}
+
+/** Full per-product report: lineage, analytics, events. */
+export async function getSmartPricingProductReport(domain, planId) {
+  const res = await apiGet(
+    `/smart-pricing/products/${encodeURIComponent(planId)}/report`,
+    domain ? { domain } : {}
+  );
+  return unwrapData(res);
+}
+
+export async function getSmartPricingProductEvents(domain, planId, { limit = 100 } = {}) {
+  const res = await apiGet(`/smart-pricing/products/${encodeURIComponent(planId)}/events`, {
+    ...(domain ? { domain } : {}),
+    limit: String(limit),
+  });
+  return unwrapData(res);
+}
+
+/** Applies every product that has reached a verdict, one at a time, server side. */
+export async function applyReadySmartPricingProducts(domain, testIds = []) {
+  const res = await apiPost(
+    '/smart-pricing/products/apply-ready',
+    { test_ids: testIds },
     domain ? { params: { domain } } : {}
   );
   return unwrapData(res);

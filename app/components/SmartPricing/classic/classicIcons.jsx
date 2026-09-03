@@ -1,4 +1,3 @@
-import React from 'react';
 import {
   ArrowLeftIcon,
   ArrowRightIcon,
@@ -108,6 +107,24 @@ export function IconScales({ size = 16 }) {
         strokeWidth="1.333"
       />
       <path d="M4.66667 14H11.3333" {...strokeProps} strokeWidth="1.333" />
+    </svg>
+  );
+}
+
+/** Control arm — current catalog/storefront baseline, distinct from A/B/C challengers. */
+export function IconControlBaseline({ size = 14 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden>
+      <path
+        d="M2.667 7.333 8 2.667l5.333 4.666"
+        {...strokeProps}
+        strokeWidth="1.333"
+      />
+      <path
+        d="M4 6.667v6h8v-6M6.667 12.667V9.333h2.666v3.334"
+        {...strokeProps}
+        strokeWidth="1.333"
+      />
     </svg>
   );
 }
@@ -597,6 +614,16 @@ export function IconGlobe({ size = 20 }) {
         strokeWidth="1.6"
         strokeLinecap="round"
       />
+    </svg>
+  );
+}
+
+export function IconInfo({ size = 16 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" aria-hidden>
+      <circle cx="8" cy="8" r="5.5" {...strokeProps} strokeWidth="1.333" />
+      <path d="M8 7.2v4" {...strokeProps} strokeWidth="1.333" />
+      <circle cx="8" cy="5.2" r="0.7" fill="currentColor" />
     </svg>
   );
 }

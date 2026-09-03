@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo } from 'react';
 import { TitleBar } from '@shopify/app-bridge-react';
 import { Link, useNavigate, useOutletContext } from 'react-router';
 import { Banner, Box } from '@shopify/polaris';
 import ClassicExperimentsList from '../components/SmartPricing/classic/ClassicExperimentsList';
+import { useKeyedState } from '../hooks/useKeyedState';
 import { useUpgradeRedirect } from '../lib/useUpgradeRedirect';
 import type { AppOutletContext } from '../lib/api.client';
 import { rpxApi } from '../lib/api.client';
@@ -16,18 +17,21 @@ export default function ExperimentsHome() {
   const ctx = useOutletContext<AppOutletContext>();
   const navigate = useNavigate();
   const upgrade = useUpgradeRedirect(ctx.upgradeUrl);
-  const [launchSummary, setLaunchSummary] = useState(() =>
-    describeSmartPricingLaunchReadiness(null)
+  const { shop, entitled, apiBase } = ctx;
+  const target = useMemo(() => ({ shop, apiBase }), [shop, apiBase]);
+  // Keyed on the shop being asked about. An unentitled or shopless render reads
+  // the unknown-readiness summary straight away, so the effect never has to
+  // push that state in by hand.
+  const [launchSummary, setLaunchSummary] = useKeyedState(
+    entitled && shop ? target : null,
+    () => describeSmartPricingLaunchReadiness(null)
   );
 
   useEffect(() => {
-    if (!ctx.entitled || !ctx.shop) {
-      setLaunchSummary(describeSmartPricingLaunchReadiness(null));
-      return;
-    }
+    if (!entitled || !shop) return undefined;
     let cancelled = false;
     rpxApi
-      .checkoutReadiness(ctx)
+      .checkoutReadiness(target)
       .then(data => {
         if (cancelled) return;
         setLaunchSummary(describeSmartPricingLaunchReadiness(unwrapCheckoutReadiness(data)));
@@ -38,13 +42,13 @@ export default function ExperimentsHome() {
     return () => {
       cancelled = true;
     };
-  }, [ctx.shop, ctx.entitled, ctx.apiBase]);
+  }, [entitled, shop, target, setLaunchSummary]);
 
   return (
     <>
       <TitleBar title="Experiments">
         {!ctx.entitled ? (
-          <button variant="primary" onClick={upgrade}>
+          <button variant="primary" onClick={() => upgrade()}>
             Upgrade to create
           </button>
         ) : null}

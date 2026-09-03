@@ -903,3 +903,23 @@ export function mergeAudienceAiIntoState(prev = {}, audiencePayload = {}, meta =
   };
   return next;
 }
+
+/**
+ * AI may optimize targeting and traffic, but the merchant's statistical floor
+ * is a safety setting and must not be overwritten by a model response.
+ */
+export function mergeAudienceAiIntoStatePreservingSample(
+  prev = {},
+  audiencePayload = {},
+  meta = {}
+) {
+  return mergeAudienceAiIntoState(
+    prev,
+    {
+      ...(audiencePayload && typeof audiencePayload === 'object' ? audiencePayload : {}),
+      minSampleSize: prev.minSampleSize ?? '5000',
+      min_sample_size: undefined,
+    },
+    meta
+  );
+}

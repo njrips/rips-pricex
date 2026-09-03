@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { Button, Select, TextField } from '@shopify/polaris';
 import {
   ALL_CLASSIC_METRIC_OPTIONS,
@@ -18,61 +18,22 @@ import {
   resolveCountryLists,
 } from './countrySelection';
 import ClassicGoalPickerModal from './ClassicGoalPickerModal';
+import SettingsInfoLink from '../../Settings/SettingsInfoLink';
 import { IconCheck, IconChevron, IconShield, IconWand } from './classicIcons';
-import { createRevenueGuardrailRow, ensureRevenueGuardrailRows } from './revenueGuardrail';
+import {
+  clampMaxRevenueDropPercent,
+  DEFAULT_MAX_REVENUE_DROP_PERCENT,
+  ensureRevenueGuardrailRows,
+  formatRevenueDropThreshold,
+  MAX_REVENUE_DROP_PERCENT,
+  MIN_REVENUE_DROP_PERCENT,
+  parseRevenueDropThreshold,
+} from './revenueGuardrail';
+import {
+  formatPracticalDurationRange,
+  formatVisitorCount,
+} from './estimateSignificanceDuration';
 import styles from './SmartPricingClassic.module.css';
-
-const DEFAULT_GUARDRAILS = [
-  createRevenueGuardrailRow(),
-  {
-    id: 'page_load',
-    label: 'Page load time',
-    hint: 'Speed of the page load',
-    rule: 'Must not increase',
-    threshold: '+5%',
-    on: true,
-  },
-  {
-    id: 'js_error',
-    label: 'JS error rate',
-    hint: 'Client-side errors per session',
-    rule: 'Must not increase',
-    threshold: '+10%',
-    on: true,
-  },
-  {
-    id: 'bounce',
-    label: 'Bounce rate',
-    hint: 'Single-page sessions',
-    rule: 'Must not increase',
-    threshold: '+3%',
-    on: false,
-  },
-  {
-    id: 'refund',
-    label: 'Refund rate',
-    hint: 'Refunds within 30 days',
-    rule: 'Must not increase',
-    threshold: '+2%',
-    on: true,
-  },
-  {
-    id: 'support',
-    label: 'Support tickets',
-    hint: 'New tickets per 1k sessions',
-    rule: 'Must not increase',
-    threshold: '+15%',
-    on: false,
-  },
-  {
-    id: 'retention',
-    label: '7-day retention',
-    hint: 'Returning users at day 7',
-    rule: 'Must not drop',
-    threshold: '-3%',
-    on: false,
-  },
-];
 
 export function createDefaultAudienceState() {
   return {
@@ -82,7 +43,7 @@ export function createDefaultAudienceState() {
     primaryCustomGoal: null,
     secondaryMetrics: [],
     customGoals: [],
-    guardrails: ensureRevenueGuardrailRows(DEFAULT_GUARDRAILS),
+    guardrails: ensureRevenueGuardrailRows([]),
     minSampleSize: '5000',
     ...normalizeClassicAudienceTargeting({}),
   };
@@ -148,6 +109,7 @@ export default function AudienceSuccessStepPanel({
   suggestBusy = false,
   shopDomain = '',
   significanceEstimate = null,
+  shopMaxRevenueDropPercent = DEFAULT_MAX_REVENUE_DROP_PERCENT,
   disabled = false,
 }) {
   const [advancedOpen, setAdvancedOpen] = useState(true);
@@ -159,13 +121,38 @@ export default function AudienceSuccessStepPanel({
   const primaryCustomGoal = state.primaryCustomGoal
     ? normalizeCustomGoals([state.primaryCustomGoal])[0] || null
     : null;
-  const guardrails = ensureRevenueGuardrailRows(state.guardrails || DEFAULT_GUARDRAILS);
+  const guardrails = ensureRevenueGuardrailRows(state.guardrails);
+  const revenueGuardrail = guardrails[0];
+  const effectiveRevenueDropMax = clampMaxRevenueDropPercent(
+    shopMaxRevenueDropPercent,
+    MAX_REVENUE_DROP_PERCENT
+  );
+  const storedRevenueDrop = parseRevenueDropThreshold(revenueGuardrail?.threshold);
+  const [revenueDropDraft, setRevenueDropDraft] = useState(null);
+  const displayedRevenueDrop =
+    revenueDropDraft ?? String(Math.min(storedRevenueDrop, effectiveRevenueDropMax));
+  const commitRevenueDrop = raw => {
+    const digits = String(raw ?? '').replace(/\D/g, '');
+    const normalized = Math.min(
+      effectiveRevenueDropMax,
+      parseRevenueDropThreshold(digits)
+    );
+    setRevenueDropDraft(null);
+    const threshold = formatRevenueDropThreshold(normalized);
+    patch({ guardrails: ensureRevenueGuardrailRows([{ ...revenueGuardrail, threshold }]) });
+  };
   const targeting = normalizeClassicAudienceTargeting(state);
   const { devices, sources, countryMode } = targeting;
   const countryLists = resolveCountryLists({ ...state, ...targeting });
   const countries = activeCountryList(countryLists);
   const otherTabCountries = blockedCountryCodes(countryLists);
   const trafficAllocation = Number(state.trafficAllocation) || 50;
+  const planningWindow = significanceEstimate?.practicalDurationRange || '';
+  const minimumSampleWindow = formatPracticalDurationRange(
+    significanceEstimate?.earliestDays,
+    significanceEstimate?.trafficEvidence
+  );
+  const durationNotFeasible = significanceEstimate?.durationFeasibility === 'not_feasible';
   const primaryMetric = primaryCustomGoal?.event_name
     ? String(primaryCustomGoal.event_name).trim().toLowerCase()
     : normalizePrimaryMetric(state.primaryMetric, 'revenue_per_visitor');
@@ -216,11 +203,11 @@ export default function AudienceSuccessStepPanel({
     <div>
       {typeof onSuggestAi === 'function' ? (
         <div className={styles.aiSuggestBanner}>
-          <div className={styles.labelRow}>
-            <div className={styles.aiSuggestTitle}>
+          <div className={styles.aiSuggestTitle}>
+            <span className={styles.aiSuggestTitleLead}>
               <IconWand size={16} />
               AI audience targeting
-            </div>
+            </span>
             <Button
               variant="plain"
               onClick={onSuggestAi}
@@ -230,7 +217,7 @@ export default function AudienceSuccessStepPanel({
               Suggest with AI
             </Button>
           </div>
-          <p className={styles.aiSuggestBody}>
+          <p className={styles.aiSuggestBody} aria-live="polite">
             {state.aiRationale
               ? state.aiRationale
               : 'Recommend segment, traffic split, success metric, and targeting from your catalog and guardrails.'}
@@ -254,9 +241,12 @@ export default function AudienceSuccessStepPanel({
       </div>
 
       <div className={styles.field}>
-        <label className={styles.label}>Traffic allocation</label>
+        <label className={styles.label} htmlFor="classic-audience-traffic">
+          Traffic allocation
+        </label>
         <input
           className={styles.slider}
+          id="classic-audience-traffic"
           type="range"
           min={5}
           max={100}
@@ -268,8 +258,18 @@ export default function AudienceSuccessStepPanel({
         />
         <p className={styles.help}>
           {trafficAllocation}% of matching visitors will enter the experiment.
-          {significanceEstimate?.days
-            ? ` Estimated time to significance: ~${significanceEstimate.days} days.`
+          {durationNotFeasible
+            ? ' Current traffic does not support a practical 2–8 week test; Review shows the traffic needed.'
+            : planningWindow
+              ? ` Estimated collection window ${planningWindow}.`
+              : significanceEstimate && !significanceEstimate.days
+                ? ' Timeline needs traffic data for every selected product and a positive allocation for every variation.'
+                : ''}
+          {significanceEstimate?.earliestDays &&
+          significanceEstimate.recommendedSampleSize &&
+          significanceEstimate.earliestDays !== significanceEstimate.days &&
+          minimumSampleWindow
+            ? ` Your minimum sample has an estimated ${minimumSampleWindow} collection window.`
             : ''}
         </p>
       </div>
@@ -399,65 +399,46 @@ export default function AudienceSuccessStepPanel({
         />
       ) : null}
 
-      <div className={styles.sectionLabel}>Guardrail metrics</div>
-      <table className={styles.guardTable}>
-        <thead>
-          <tr>
-            <th>
-              <span className={styles.guardMetricHead}>
-                <IconShield size={14} />
-                Metric
-              </span>
-            </th>
-            <th>Rule</th>
-            <th>Threshold</th>
-            <th>On</th>
-          </tr>
-        </thead>
-        <tbody>
-          {guardrails.map((row, index) => (
-            <tr key={row.id}>
-              <td>
-                <strong>{row.label}</strong>
-                <div className={styles.productSub}>{row.hint}</div>
-              </td>
-              <td>{row.rule}</td>
-              <td className={styles.guardThresholdCell}>
-                <input
-                  className={`${styles.thresholdInput} ${row.on ? '' : styles.thresholdInputDim}`}
-                  value={row.threshold}
-                  disabled={disabled}
-                  onChange={e => {
-                    const next = guardrails.map((g, i) =>
-                      i === index ? { ...g, threshold: e.target.value } : g
-                    );
-                    patch({ guardrails: next });
-                  }}
-                />
-              </td>
-              <td className={styles.guardOnCell}>
-                <button
-                  type="button"
-                  className={`${styles.toggle} ${row.on ? styles.toggleOn : ''}`}
-                  aria-pressed={row.on}
-                  disabled={disabled || row.locked || row.id === 'revenue'}
-                  onClick={() => {
-                    if (row.locked || row.id === 'revenue') return;
-                    const next = guardrails.map((g, i) => (i === index ? { ...g, on: !g.on } : g));
-                    patch({ guardrails: next });
-                  }}
-                >
-                  <span className={styles.toggleKnob} />
-                </button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <p className={styles.help}>
-        Revenue per visitor is always on and pauses the test if any variation drops past the
-        limit versus control. Other rows alert when those metrics are available.
-      </p>
+      <div className={styles.labelRow} id="classic-revenue-guardrail">
+        <div className={styles.sectionLabel}>Revenue guardrail</div>
+        <SettingsInfoLink hash="guardrail-metrics" label="Revenue guardrail" />
+      </div>
+      <div className={styles.guardrailCard}>
+        <div className={styles.guardrailCardHead}>
+          <span className={styles.guardrailCardTitle}>
+            <IconShield size={14} />
+            {revenueGuardrail.label}
+          </span>
+          <span className={`${styles.badge} ${styles.badgeAccent}`}>Always on</span>
+        </div>
+        <div className={styles.guardrailRule}>
+          <span>Pause the test if any variation drops more than</span>
+          <span className={styles.guardrailInputWrap}>
+            <input
+              className={styles.guardrailInput}
+              type="number"
+              min={MIN_REVENUE_DROP_PERCENT}
+              max={effectiveRevenueDropMax}
+              step={1}
+              value={displayedRevenueDrop}
+              disabled={disabled}
+              aria-label="Maximum revenue per visitor drop, percent"
+              aria-describedby="revenue-guardrail-help"
+              onChange={e => setRevenueDropDraft(String(e.target.value).replace(/\D/g, ''))}
+              onBlur={e => commitRevenueDrop(e.target.value)}
+            />
+            <span className={styles.guardrailInputSuffix} aria-hidden="true">
+              %
+            </span>
+          </span>
+          <span>versus control.</span>
+        </div>
+        <p className={styles.guardrailHint} id="revenue-guardrail-help">
+          Operational safety pause based on the observed revenue-per-visitor point estimate; it is
+          not winner evidence. Allowed range {MIN_REVENUE_DROP_PERCENT}–
+          {effectiveRevenueDropMax}% (your shop cap).
+        </p>
+      </div>
 
       <details
         className={`${styles.advanced} ${styles.audienceAdvanced}`}
@@ -470,15 +451,35 @@ export default function AudienceSuccessStepPanel({
         </summary>
         <div className={styles.advancedBody}>
           <div className={`${styles.field} ${styles.audienceMinSample}`}>
+            <div className={styles.labelRow}>
+              <span className={styles.label}>Minimum sample size per variation</span>
+              <SettingsInfoLink hash="min-sample" label="Minimum sample" />
+            </div>
             <TextField
               id="classic-aud-min-sample"
               label="Minimum sample size per variation"
+              labelHidden
+              type="number"
+              min={1}
               value={String(state.minSampleSize ?? '5000')}
               onChange={value => patch({ minSampleSize: value })}
               autoComplete="off"
               disabled={disabled}
-              helpText="We'll wait for at least this many visitors per variation before calling results."
             />
+            {significanceEstimate?.recommendedSampleSize &&
+            String(state.minSampleSize) !== String(significanceEstimate.recommendedSampleSize) ? (
+              <div className={styles.labelRow} style={{ marginTop: 6 }}>
+                <Button
+                  variant="plain"
+                  disabled={disabled}
+                  onClick={() =>
+                    patch({ minSampleSize: String(significanceEstimate.recommendedSampleSize) })
+                  }
+                >
+                  Use planning sample ({formatVisitorCount(significanceEstimate.recommendedSampleSize)})
+                </Button>
+              </div>
+            ) : null}
           </div>
 
           <div className={styles.modeRow}>

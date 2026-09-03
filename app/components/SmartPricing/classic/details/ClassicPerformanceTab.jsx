@@ -1,5 +1,6 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { Banner, Button, Select, TextField } from '@shopify/polaris';
+import { useKeyedState } from '../../../../hooks/useKeyedState';
 import { formatCurrency } from '../../smartPricingConstants';
 import { formatOfferRule } from '../offerSelection';
 import {
@@ -11,6 +12,7 @@ import {
   paginateVariationProducts,
 } from '../classicExperimentDetailsHelpers';
 import { IconTrophy } from '../classicIcons';
+import ClassicRolloutReadinessPanel from './ClassicRolloutReadinessPanel';
 import styles from '../SmartPricingClassic.module.css';
 
 function formatPpv(value, currency) {
@@ -70,8 +72,15 @@ export default function ClassicPerformanceTab({
   currency = 'USD',
   variationAverages = [],
   productPerformanceRows = [],
+  rolloutRows = [],
   variations = [],
   isOfferTest = false,
+  onApplyProduct,
+  onFinishProduct,
+  onApplyAllReady,
+  onOpenProduct,
+  rolloutBusyTestId = null,
+  rolloutApplyingAll = false,
 }) {
   const arms = Array.isArray(analytics?.arms) ? analytics.arms : [];
   const averages = Array.isArray(variationAverages) ? variationAverages : [];
@@ -85,17 +94,15 @@ export default function ClassicPerformanceTab({
           isControl: row.isControl,
         }));
 
-  const [query, setQuery] = useState('');
-  const [sort, setSort] = useState('title');
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(VARIATION_PRODUCTS_PAGE_SIZE);
-
-  useEffect(() => {
-    setQuery('');
-    setSort('title');
-    setPage(1);
-    setPageSize(VARIATION_PRODUCTS_PAGE_SIZE);
-  }, [productPerformanceRows.length, analytics?.test_id, analytics?.test_count]);
+  // A different result set (new analytics, or rows added/removed) starts the
+  // product table over rather than leaving a stale search on an empty page.
+  const productViewKey = `${productPerformanceRows.length}|${analytics?.test_id ?? ''}|${
+    analytics?.test_count ?? ''
+  }`;
+  const [query, setQuery] = useKeyedState(productViewKey, '');
+  const [sort, setSort] = useKeyedState(productViewKey, 'title');
+  const [page, setPage] = useKeyedState(productViewKey, 1);
+  const [pageSize, setPageSize] = useKeyedState(productViewKey, VARIATION_PRODUCTS_PAGE_SIZE);
 
   const filteredProducts = useMemo(
     () =>
@@ -106,14 +113,11 @@ export default function ClassicPerformanceTab({
     [productPerformanceRows, query, sort]
   );
 
+  // Clamped for us, so every reader below goes through pageData.page.
   const pageData = useMemo(
     () => paginateVariationProducts(filteredProducts, page, pageSize),
     [filteredProducts, page, pageSize]
   );
-
-  useEffect(() => {
-    if (page !== pageData.page) setPage(pageData.page);
-  }, [page, pageData.page]);
 
   if (analyticsLoading && !arms.length && !averages.length && !productPerformanceRows.length) {
     return (
@@ -140,9 +144,71 @@ export default function ClassicPerformanceTab({
   const sharedNote = productPerformanceRows.some(row => row.sharedTest);
 
   const revenueRail = analytics?.revenue_guardrail;
+  const significance = analytics?.significance;
+  const evidenceValidated = significance?.evidenceValidated === true;
+  // The split check rides on significance, but older payloads carried it at the
+  // top level of analytics, so both shapes are read.
+  const srm = significance?.srm || analytics?.srm || null;
+  const srmDetected = srm?.detected === true;
+  const srmPValue = srm?.pValue ?? null;
+  const isConversionFamily = String(significance?.family || '') === 'conversion';
+  const awaitingMaturity =
+    significance?.outcomesMatured === false &&
+    (significance?.significant === true || significance?.controlWin === true);
 
   return (
     <div className={styles.detailStack}>
+      {/* Assignment integrity comes before any reading of the result: if the
+          split is wrong, the arms are not comparable and the numbers below
+          cannot be acted on. */}
+      {srmDetected ? (
+        <Banner tone="critical" title="Traffic split does not match this test">
+          <p>
+            Visitors did not reach the variations in the proportions this test asked for
+            {Number.isFinite(Number(srmPValue)) ? ` (p = ${Number(srmPValue)})` : ''}. That usually
+            means bot traffic, a tracking problem, or a caching layer serving one variation more
+            often. Until it is resolved the variations are not comparable, so winner rollout is
+            blocked and no price will be written automatically.
+          </p>
+        </Banner>
+      ) : null}
+      {awaitingMaturity ? (
+        <Banner tone="info" title="Waiting for orders to settle">
+          <p>
+            The evidence has reached its threshold, but this test has been collecting for{' '}
+            {Math.max(0, Math.floor(Number(significance.collectionDays) || 0))} of{' '}
+            {Number(significance.outcomeMaturityDays) || 14} days. A price is not written
+            automatically until the test covers two full weekly cycles, so a single strong week
+            cannot decide a catalog price. You can still roll out the winner manually.
+          </p>
+        </Banner>
+      ) : null}
+      {analytics?.significance?.sampleReady === false &&
+      Number(analytics?.significance?.minSampleSize) > 0 ? (
+        <Banner tone="info" title="Waiting for minimum sample size">
+          <p>
+            {analytics.significance.message ||
+              `Results are not called until each variation reaches ${analytics.significance.minSampleSize} visitors.`}
+          </p>
+        </Banner>
+      ) : analytics?.significance?.sequential &&
+        analytics?.significance?.significant !== true &&
+        analytics?.significance?.controlWin !== true &&
+        analytics?.significance?.sampleReady !== false ? (
+        <Banner tone="info" title="Sequential test still collecting evidence">
+          <p>
+            {!evidenceValidated
+              ? isConversionFamily
+                ? 'Conversion results are confirmed against an exact boundary before any price is written automatically. Until that boundary is crossed the reading here is directional, so review it before rolling out a winner.'
+                : 'Revenue and profit per visitor are measured with an order-value variance approximation, so this metric always needs manual review before a price is rolled out.'
+              : analytics.significance.message ||
+                'Always-valid conversion testing decides each product on its own. A winning variation can be written to that product’s Shopify price; a control win leaves that catalog price unchanged.'}
+            {Number(analytics.significance.recommendedSampleSize) > 0
+              ? ` Fixed-horizon planning reference: ${Number(analytics.significance.recommendedSampleSize).toLocaleString('en-US')} visitors/variation.`
+              : ''}
+          </p>
+        </Banner>
+      ) : null}
       {revenueRail?.breached || revenueRail?.enforced ? (
         <Banner tone="warning" title="Paused by revenue guardrail">
           <p>
@@ -156,6 +222,18 @@ export default function ClassicPerformanceTab({
           {revenueRail.threshold_percent}%).
         </p>
       ) : null}
+      {/* Products finish at different times, so what to do next comes before the
+          experiment-wide averages. */}
+      <ClassicRolloutReadinessPanel
+        rows={rolloutRows}
+        currency={resolvedCurrency}
+        onApplyProduct={onApplyProduct}
+        onFinishProduct={onFinishProduct}
+        onApplyAllReady={onApplyAllReady}
+        onOpenProduct={onOpenProduct}
+        busyTestId={rolloutBusyTestId}
+        applyingAll={rolloutApplyingAll}
+      />
       <div className={styles.statCard}>
         <div className={styles.reviewHead}>
           <h3 className={styles.panelTitle}>Average performance by variation</h3>
@@ -371,6 +449,7 @@ export default function ClassicPerformanceTab({
             <thead>
               <tr>
                 <th scope="col">Product</th>
+                <th scope="col">Decision</th>
                 {armColumns.map(arm => (
                   <th key={arm.id} scope="col" className={styles.variationsPriceCol}>
                     {arm.label}
@@ -382,7 +461,7 @@ export default function ClassicPerformanceTab({
             <tbody>
               {!pageData.items.length ? (
                 <tr>
-                  <td colSpan={armColumns.length + 1}>
+                  <td colSpan={armColumns.length + 2}>
                     <p className={styles.help}>
                       {query.trim() ? 'No products match that search.' : 'No products to show.'}
                     </p>
@@ -393,13 +472,38 @@ export default function ClassicPerformanceTab({
                   <tr key={row.key} className={styles.productPriceRow}>
                     <td>
                       <div className={styles.productMeta}>
-                        <div className={styles.productName}>{row.productTitle || row.title}</div>
+                        <button
+                          type="button"
+                          className={styles.linkButton || undefined}
+                          style={{
+                            background: 'none',
+                            border: 0,
+                            padding: 0,
+                            color: 'inherit',
+                            textAlign: 'left',
+                            cursor: onOpenProduct && row.planId ? 'pointer' : 'default',
+                            font: 'inherit',
+                          }}
+                          onClick={() => {
+                            if (onOpenProduct && row.planId) onOpenProduct(row.planId);
+                          }}
+                        >
+                          <div className={styles.productName}>{row.productTitle || row.title}</div>
+                        </button>
                         <div className={styles.productSub}>
                           {row.variantTitle ? `${row.variantTitle} · ` : ''}
                           {row.handle ? `/${row.handle}` : row.productId || '—'}
                           {row.sharedTest ? ' · shared test' : ''}
                         </div>
                       </div>
+                    </td>
+                    <td>
+                      <div className={styles.productName}>{row.decisionLabel || '—'}</div>
+                      {row.sharedTest ? (
+                        <div className={styles.productSub}>
+                          Shared test — stop/re-run at experiment level
+                        </div>
+                      ) : null}
                     </td>
                     {armColumns.map(arm => {
                       const metrics = row.metricsByArmId?.[String(arm.id)] || null;
@@ -450,7 +554,7 @@ export default function ClassicPerformanceTab({
             <div className={styles.tablePager}>
               <Button
                 disabled={pageData.page <= 1}
-                onClick={() => setPage(p => Math.max(1, p - 1))}
+                onClick={() => setPage(Math.max(1, pageData.page - 1))}
               >
                 Previous
               </Button>
@@ -459,7 +563,7 @@ export default function ClassicPerformanceTab({
               </span>
               <Button
                 disabled={pageData.page >= pageData.totalPages}
-                onClick={() => setPage(p => Math.min(pageData.totalPages, p + 1))}
+                onClick={() => setPage(Math.min(pageData.totalPages, pageData.page + 1))}
               >
                 Next
               </Button>

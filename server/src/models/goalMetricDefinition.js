@@ -499,7 +499,7 @@ async function refreshGoalMetricEventRollups() {
   return { allTimeRows: 0, dailyRows: 0, shopDomain: null };
 }
 
-async function listGoalMetricDefinitions(shopDomain, options = {}) {
+async function listGoalMetricDefinitions(shopDomain) {
   const result = await query(
     `
       SELECT

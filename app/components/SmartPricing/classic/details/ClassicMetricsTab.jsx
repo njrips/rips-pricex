@@ -1,4 +1,3 @@
-import React from 'react';
 import { Button } from '@shopify/polaris';
 import { formatPrimaryMetricLabel } from '../classicExperimentDetailsHelpers';
 import styles from '../SmartPricingClassic.module.css';

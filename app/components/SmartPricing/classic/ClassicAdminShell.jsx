@@ -1,4 +1,3 @@
-import React from 'react';
 import { useNavigate } from 'react-router';
 import { Button } from '@shopify/polaris';
 import { TitleBar } from '@shopify/app-bridge-react';
@@ -10,6 +9,31 @@ import styles from './SmartPricingClassic.module.css';
 
 /**
  * Shared chrome for Setup / Settings — Classic layout, Admin / Polaris controls.
+ *
+ * @typedef {{ id: string, label: string }} AdminTab
+ * @typedef {{
+ *   label: string,
+ *   onClick?: (event?: import('react').MouseEvent) => void | Promise<void>,
+ *   href?: string,
+ *   target?: string,
+ *   disabled?: boolean,
+ *   busy?: boolean,
+ *   busyLabel?: string
+ * }} FooterAction
+ * @param {{
+ *   titleBar?: string,
+ *   title?: string,
+ *   subtitle?: string,
+ *   meta?: string | null,
+ *   backTo?: string | null,
+ *   backLabel?: string,
+ *   tabs?: AdminTab[] | null,
+ *   activeTab?: string | null,
+ *   onTabChange?: ((id: string) => void) | null,
+ *   footerPrimary?: FooterAction | null,
+ *   footerSecondary?: FooterAction | null,
+ *   children?: import('react').ReactNode
+ * }} props
  */
 export default function ClassicAdminShell({
   titleBar = 'Settings',

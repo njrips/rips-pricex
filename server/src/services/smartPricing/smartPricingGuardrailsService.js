@@ -4,6 +4,7 @@
  */
 
 const { query } = require('../../utils/database');
+const { ABSOLUTE_MIN_CONVERSIONS_PER_VARIATION } = require('../../utils/minSampleSize');
 
 const DEFAULT_AUDIENCE_TEMPLATE = Object.freeze({
   device: 'all',
@@ -31,7 +32,24 @@ const DEFAULT_GUARDRAILS = Object.freeze({
   default_audience_template: { ...DEFAULT_AUDIENCE_TEMPLATE },
   default_goal_template: { ...DEFAULT_GOAL_TEMPLATE },
   auto_round2_default: true,
+  // Writing a catalog price without being asked is not something a merchant
+  // should discover after the fact, so it stays off until they turn it on.
+  auto_apply_winner: false,
+  // Even with auto-apply on, a product that becomes ready waits this long so the
+  // merchant has a real chance to look at it or override it first.
+  auto_apply_delay_days: 3,
+  winner_ready_notify: true,
+  // Blank falls back to the store's Shopify contact address.
+  notification_email: '',
   max_learning_rounds: 3,
+  confidence_level: 90,
+  statistical_power: 80,
+  mde_percent: 10,
+  min_sample_size_per_variation: 5000,
+  // 5000 visitors at the 2% baseline this app plans against is 100 conversions,
+  // so the two default floors describe the same test rather than fighting.
+  min_conversions_per_variation: 100,
+  analysis_method: 'sequential',
 });
 
 function kvKey(shopDomain) {
@@ -106,6 +124,54 @@ function normalizeGoalTemplate(raw = {}) {
   };
 }
 
+function normalizeConfidenceLevel(raw, fallback = DEFAULT_GUARDRAILS.confidence_level) {
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return fallback;
+  const pct = n > 0 && n < 1 ? Math.round(n * 100) : Math.round(n);
+  return pct === 95 ? 95 : 90;
+}
+
+function normalizeMdePercent(raw, fallback = DEFAULT_GUARDRAILS.mde_percent) {
+  return clampNumber(raw, 5, 20, fallback);
+}
+
+function normalizeMinSampleSize(raw, fallback = DEFAULT_GUARDRAILS.min_sample_size_per_variation) {
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 1) return fallback;
+  return Math.min(1000000, Math.round(n));
+}
+
+function normalizeMinConversions(
+  raw,
+  fallback = DEFAULT_GUARDRAILS.min_conversions_per_variation
+) {
+  // The lower bound is the normal-approximation floor enforced at decision
+  // time, so Settings cannot offer a value the analysis would override anyway.
+  return clampNumber(raw, ABSOLUTE_MIN_CONVERSIONS_PER_VARIATION, 2000, fallback);
+}
+
+function resolveShopStatisticalDefaults(guardrails = {}) {
+  const g = normalizeGuardrails(guardrails);
+  return {
+    confidenceLevel: g.confidence_level,
+    statisticalPower: g.statistical_power,
+    mdePercent: g.mde_percent,
+    minSampleSize: g.min_sample_size_per_variation,
+    minConversions: g.min_conversions_per_variation,
+    analysisMethod: g.analysis_method,
+    significanceLevel: g.confidence_level / 100,
+  };
+}
+
+/** Accepts a single address; anything that is not one is stored as blank. */
+function normalizeNotificationEmail(value) {
+  const email = String(value ?? '')
+    .trim()
+    .toLowerCase();
+  if (!email) return '';
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) && email.length <= 254 ? email : '';
+}
+
 function normalizeGuardrails(raw = {}) {
   const source = raw && typeof raw === 'object' ? raw : {};
   const preset = String(
@@ -154,12 +220,39 @@ function normalizeGuardrails(raw = {}) {
       source.default_goal_template ?? source.defaultGoalTemplate ?? {}
     ),
     auto_round2_default: source.auto_round2_default !== false && source.autoRound2Default !== false,
+    // Opt-in rather than opt-out: absent or malformed input means off.
+    auto_apply_winner:
+      source.auto_apply_winner === true || source.autoApplyWinner === true,
+    auto_apply_delay_days: clampNumber(
+      source.auto_apply_delay_days ?? source.autoApplyDelayDays,
+      0,
+      30,
+      DEFAULT_GUARDRAILS.auto_apply_delay_days
+    ),
+    winner_ready_notify:
+      source.winner_ready_notify !== false && source.winnerReadyNotify !== false,
+    notification_email: normalizeNotificationEmail(
+      source.notification_email ?? source.notificationEmail
+    ),
     max_learning_rounds: clampNumber(
       source.max_learning_rounds ?? source.maxLearningRounds,
       1,
       3,
       DEFAULT_GUARDRAILS.max_learning_rounds
     ),
+    confidence_level: normalizeConfidenceLevel(
+      source.confidence_level ?? source.confidenceLevel,
+      DEFAULT_GUARDRAILS.confidence_level
+    ),
+    statistical_power: Number(source.statistical_power ?? source.statisticalPower) === 90 ? 90 : 80,
+    mde_percent: normalizeMdePercent(source.mde_percent ?? source.mdePercent),
+    min_sample_size_per_variation: normalizeMinSampleSize(
+      source.min_sample_size_per_variation ?? source.minSampleSizePerVariation
+    ),
+    min_conversions_per_variation: normalizeMinConversions(
+      source.min_conversions_per_variation ?? source.minConversionsPerVariation
+    ),
+    analysis_method: 'sequential',
     updated_at: source.updated_at || null,
   };
 }
@@ -209,6 +302,33 @@ async function saveShopSmartPricingGuardrails(shopDomain, patch = {}) {
   return next;
 }
 
+// Limits that exist to protect the merchant's catalog. A caller may supply
+// planning context to a preview, but never these.
+const PRICE_SAFETY_KEYS = Object.freeze([
+  'max_price_change_percent',
+  'maxPriceChangePercent',
+  'min_margin_percent',
+  'minMarginPercent',
+  'max_revenue_drop_percent',
+  'maxRevenueDropPercent',
+  'default_cogs_percent',
+  'defaultCogsPercent',
+]);
+
+/**
+ * Merge caller-supplied guardrail context for preview endpoints while keeping
+ * price-safety limits authoritative. Spreading raw request input over the shop
+ * guardrails let a caller widen their own limits and receive a plan whose arms
+ * exceeded them, which the UI then reported as passing its guardrail checks.
+ */
+function mergePreviewGuardrails(shopGuardrails = {}, clientInput = {}) {
+  const client = clientInput && typeof clientInput === 'object' ? { ...clientInput } : {};
+  PRICE_SAFETY_KEYS.forEach(key => {
+    delete client[key];
+  });
+  return { ...shopGuardrails, ...client };
+}
+
 function marginPercentFromDefaultCogs(price, defaultCogsPercent) {
   const salePrice = Number.parseFloat(String(price ?? '').trim());
   const cogsRate = Number(defaultCogsPercent) / 100;
@@ -220,6 +340,7 @@ function marginPercentFromDefaultCogs(price, defaultCogsPercent) {
 }
 
 module.exports = {
+  ABSOLUTE_MIN_CONVERSIONS_PER_VARIATION,
   DEFAULT_GUARDRAILS,
   DEFAULT_AUDIENCE_TEMPLATE,
   DEFAULT_GOAL_TEMPLATE,
@@ -228,5 +349,9 @@ module.exports = {
   normalizeGuardrails,
   normalizeAudienceTemplate,
   normalizeGoalTemplate,
+  normalizeConfidenceLevel,
+  resolveShopStatisticalDefaults,
   marginPercentFromDefaultCogs,
+  mergePreviewGuardrails,
+  PRICE_SAFETY_KEYS,
 };

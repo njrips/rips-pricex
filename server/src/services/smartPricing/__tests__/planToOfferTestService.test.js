@@ -42,6 +42,26 @@ describe('planToOfferTestService', () => {
     expect(payload.goal.guardrails.max_revenue_drop_percent).toBe(10);
   });
 
+  it('copies min_sample_size onto the offer test goal', () => {
+    const payload = buildOfferTestPayloadFromPlan({
+      ...plan,
+      goal: { min_sample_size: 1800 },
+    });
+    expect(payload.goal.min_sample_size).toBe(1800);
+  });
+
+  it('rejects a zero-traffic variation instead of silently rebalancing it', () => {
+    expect(() =>
+      buildOfferTestPayloadFromPlan({
+        ...plan,
+        price_arms: plan.price_arms.map((arm, index) => ({
+          ...arm,
+          allocation_percent: index === 0 ? 100 : 0,
+        })),
+      })
+    ).toThrow(/more than 0% traffic/i);
+  });
+
   it('formats fixed-amount arm names in the plan currency', () => {
     const payload = buildOfferTestPayloadFromPlan({
       ...plan,
@@ -60,6 +80,20 @@ describe('planToOfferTestService', () => {
     expect(payload.variants[1].name).toMatch(/5/);
     expect(payload.variants[1].name).toMatch(/Variation A/);
     expect(payload.variants[1].name).not.toMatch(/\$5\.00/);
+  });
+
+  it('uses shop sequential defaults when the offer plan has no stats', () => {
+    const payload = buildOfferTestPayloadFromPlan(plan, {
+      guardrails: {
+        confidence_level: 95,
+        mde_percent: 8,
+        min_sample_size_per_variation: 2200,
+      },
+    });
+    expect(payload.goal.analysis_method).toBe('sequential');
+    expect(payload.goal.significance_level).toBe(0.95);
+    expect(payload.goal.mde_percent).toBe(8);
+    expect(payload.goal.min_sample_size).toBe(2200);
   });
 
   it('detects offer plans from metadata', () => {

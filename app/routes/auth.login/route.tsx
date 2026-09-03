@@ -47,7 +47,6 @@ export default function Auth() {
         </p>
         <PublicShopOpenForm
           action="/auth/login"
-          autoFocus
           initialError={loaderShopError}
           title="Shop handle"
         />

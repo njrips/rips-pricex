@@ -2,6 +2,10 @@ const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('path');
 const { SUPPORT_INTERNAL_HEADER, supportInternalToken } = require('../supportInternalAuth');
+const {
+  INTERNAL_HEADER,
+  internalServiceToken,
+} = require('../../internalServiceAuth');
 
 require('dotenv').config({ path: path.resolve(__dirname, '../../../../../.env') });
 
@@ -173,11 +177,24 @@ describe('support ticket HTTP', { skip: !canRunHttp() }, () => {
       assert.equal(bodies.includes('Enable the theme app embed, then retry Setup.'), true);
       assert.equal(afterStaff.data?.ticket?.diagnostics, undefined);
 
+      // Uninstall is driven by our webhook handler, which proves itself with
+      // the internal shared secret rather than an App Bridge token.
+      const unauthenticatedUninstall = await json(`${base}/api/shops/uninstall`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Shopify-Shop-Domain': SHOP_A,
+        },
+        body: '{}',
+      });
+      assert.equal(unauthenticatedUninstall.status, 401);
+
       const uninstall = await json(`${base}/api/shops/uninstall`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'X-Shopify-Shop-Domain': SHOP_A,
+          [INTERNAL_HEADER]: internalServiceToken(SHOP_A),
         },
         body: '{}',
       });

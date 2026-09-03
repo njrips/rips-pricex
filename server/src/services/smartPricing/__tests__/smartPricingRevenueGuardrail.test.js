@@ -1,3 +1,5 @@
+const { describe, it } = require('node:test');
+const assert = require('node:assert/strict');
 const {
   clampMaxRevenueDropPercent,
   resolveEffectiveMaxRevenueDropPercent,
@@ -7,24 +9,26 @@ const {
 
 describe('smartPricingRevenueGuardrail', () => {
   it('clamps shop limits between 3 and 50', () => {
-    expect(clampMaxRevenueDropPercent(1)).toBe(3);
-    expect(clampMaxRevenueDropPercent(80)).toBe(50);
-    expect(clampMaxRevenueDropPercent('10')).toBe(10);
+    assert.equal(clampMaxRevenueDropPercent(1), 3);
+    assert.equal(clampMaxRevenueDropPercent(80), 50);
+    assert.equal(clampMaxRevenueDropPercent('10'), 10);
   });
 
   it('uses the tighter of shop and experiment thresholds', () => {
-    expect(
+    assert.equal(
       resolveEffectiveMaxRevenueDropPercent(
         { max_revenue_drop_percent: 10 },
         { metadata: { audience_ui: { guardrails: [{ id: 'revenue', threshold: '-15%' }] } } }
-      )
-    ).toBe(10);
-    expect(
+      ),
+      10
+    );
+    assert.equal(
       resolveEffectiveMaxRevenueDropPercent(
         { max_revenue_drop_percent: 15 },
         { metadata: { audience_ui: { guardrails: [{ id: 'revenue', threshold: '-8%' }] } } }
-      )
-    ).toBe(8);
+      ),
+      8
+    );
   });
 
   it('does not breach before min visitors', () => {
@@ -36,8 +40,22 @@ describe('smartPricingRevenueGuardrail', () => {
         { name: 'A', visitors: 40, revenuePerVisitor: 1 },
       ],
     });
-    expect(verdict.ready).toBe(false);
-    expect(verdict.breached).toBe(false);
+    assert.equal(verdict.ready, false);
+    assert.equal(verdict.breached, false);
+  });
+
+  it('does not compare the first unidentified arm against itself', () => {
+    const verdict = evaluateRevenueDrop({
+      thresholdPercent: 10,
+      minVisitors: 100,
+      variants: [
+        { name: 'A', visitors: 120, revenuePerVisitor: 2 },
+        { name: 'B', visitors: 40, revenuePerVisitor: 1 },
+      ],
+    });
+    assert.equal(verdict.ready, false);
+    assert.equal(verdict.breached, false);
+    assert.equal(verdict.reason, 'no_control');
   });
 
   it('breaches when a challenger drops past the limit', () => {
@@ -49,10 +67,10 @@ describe('smartPricingRevenueGuardrail', () => {
         { id: 'a', name: 'Variation A', visitors: 120, revenuePerVisitor: 1.6 },
       ],
     });
-    expect(verdict.ready).toBe(true);
-    expect(verdict.breached).toBe(true);
-    expect(verdict.observed_drop_percent).toBe(20);
-    expect(verdict.variant_id).toBe('a');
+    assert.equal(verdict.ready, true);
+    assert.equal(verdict.breached, true);
+    assert.equal(verdict.observed_drop_percent, 20);
+    assert.equal(verdict.variant_id, 'a');
   });
 
   it('stays within limit when the drop is smaller than the cap', () => {
@@ -64,15 +82,15 @@ describe('smartPricingRevenueGuardrail', () => {
         { name: 'A', visitors: 200, revenuePerVisitor: 1.9 },
       ],
     });
-    expect(verdict.breached).toBe(false);
-    expect(verdict.observed_drop_percent).toBe(5);
+    assert.equal(verdict.breached, false);
+    assert.equal(verdict.observed_drop_percent, 5);
   });
 
   it('builds an always-on launch config', () => {
     const config = buildRevenueDropGuardrailConfig({ max_revenue_drop_percent: 12 }, {});
-    expect(config.enabled).toBe(true);
-    expect(config.auto_stop).toBe(true);
-    expect(config.max_revenue_drop_percent).toBe(12);
-    expect(config.metric).toBe('revenue_per_visitor');
+    assert.equal(config.enabled, true);
+    assert.equal(config.auto_stop, true);
+    assert.equal(config.max_revenue_drop_percent, 12);
+    assert.equal(config.metric, 'revenue_per_visitor');
   });
 });

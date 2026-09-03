@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router';
 import { PUBLIC_HEADER_NAV } from '../../../constants/publicRoutes';
+import { useKeyedState } from '../../../hooks/useKeyedState';
 import { DEFAULT_APP_STORE_LISTING_URL } from '../../../utils/appStoreListingUrl';
 import { FOOTER_BLURB, FOOTER_COLUMNS, FOOTER_TAGLINE } from './landingContent';
 import PricifyLogo from './PricifyLogo';
@@ -35,14 +36,12 @@ export default function PricifyShell({
   fullBleed = false,
 }) {
   const { pathname, hash } = useLocation();
-  const [menuOpen, setMenuOpen] = useState(false);
+  // Navigating anywhere closes the mobile menu; tying it to the location means
+  // the closed state is simply what a new route reads, with no reopen flicker.
+  const [menuOpen, setMenuOpen] = useKeyedState(`${pathname}${hash}`, false);
   const [scrolled, setScrolled] = useState(false);
   const prevPathRef = useRef(pathname);
   const prevHashRef = useRef(hash);
-
-  useEffect(() => {
-    setMenuOpen(false);
-  }, [pathname, hash]);
 
   useEffect(() => {
     const prevPath = prevPathRef.current;
@@ -50,7 +49,7 @@ export default function PricifyShell({
     prevPathRef.current = pathname;
     prevHashRef.current = hash;
 
-    if (pathname !== '/') return;
+    if (pathname !== '/' && !pathname.startsWith('/docs')) return;
     if (hash) {
       scheduleScrollToPublicHash(hash);
       return;
@@ -83,7 +82,7 @@ export default function PricifyShell({
       html.style.overflow = previousHtml;
       window.removeEventListener('keydown', onKey);
     };
-  }, [menuOpen]);
+  }, [menuOpen, setMenuOpen]);
 
   return (
     <div className="rpx-public" data-palette="pricify">
@@ -106,16 +105,31 @@ export default function PricifyShell({
                 {menuOpen ? 'Close' : 'Menu'}
               </button>
               <nav id="px-site-nav" className="px-nav" aria-label="Product">
-                {PUBLIC_HEADER_NAV.map((item) => (
-                  <PublicSectionLink
-                    key={item.to}
-                    hash={item.to}
-                    className="px-nav-link"
-                    onNavigate={() => setMenuOpen(false)}
-                  >
-                    {item.label}
-                  </PublicSectionLink>
-                ))}
+                {PUBLIC_HEADER_NAV.map((item) =>
+                  item.href ? (
+                    <Link
+                      key={item.href}
+                      to={item.href}
+                      className={
+                        pathname.startsWith(item.href)
+                          ? 'px-nav-link is-active'
+                          : 'px-nav-link'
+                      }
+                      onClick={() => setMenuOpen(false)}
+                    >
+                      {item.label}
+                    </Link>
+                  ) : (
+                    <PublicSectionLink
+                      key={item.to}
+                      hash={item.to}
+                      className="px-nav-link"
+                      onNavigate={() => setMenuOpen(false)}
+                    >
+                      {item.label}
+                    </PublicSectionLink>
+                  )
+                )}
               </nav>
               <div className="px-header-actions">
                 <InstallLink storeUrl={storeUrl} className="px-btn px-btn--brand">

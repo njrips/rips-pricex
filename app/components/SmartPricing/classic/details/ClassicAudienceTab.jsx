@@ -1,4 +1,3 @@
-import React from 'react';
 import { Button } from '@shopify/polaris';
 import { formatSplitCountryAudienceLabel, resolveCountryLists } from '../countrySelection';
 import { formatAudienceFactValue } from '../classicExperimentDetailsHelpers';

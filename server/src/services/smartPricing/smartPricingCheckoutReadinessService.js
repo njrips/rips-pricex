@@ -277,7 +277,7 @@ async function resolveSmartPricingCheckoutReadiness(
         ? automaticDiscountAvailable
           ? 'Checkout discount function is attached for offer tests.'
           : 'Checkout discount function is deployed. Launch will attach the automatic discount.'
-        : 'Offer tests need the RipsPriceX checkout discount function. Deploy ripspricex-checkout-discount, then re-check Setup.',
+        : 'Offer tests need the Pricify checkout discount function. Deploy ripspricex-checkout-discount, then re-check Setup.',
     offer_ready:
       live.live_api_checked !== true ||
       discountFunctionAvailable === true ||

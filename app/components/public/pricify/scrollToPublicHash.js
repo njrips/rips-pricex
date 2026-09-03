@@ -15,7 +15,10 @@ function scheduleInstant(run) {
   cancelScheduledPublicScroll();
   run();
   scheduledScrollFrame = window.requestAnimationFrame(run);
-  scheduledScrollTimers.push(window.setTimeout(run, 50));
+  // Header/fonts can shift layout after the first paint — retry so /docs#id lands.
+  [50, 200, 600].forEach(ms => {
+    scheduledScrollTimers.push(window.setTimeout(run, ms));
+  });
 }
 
 function prefersReducedMotion() {

@@ -772,20 +772,6 @@
     }
   }
 
-  function isPreviewFocusProduct(productId) {
-    if (!productId) return false;
-    try {
-      if (typeof PREVIEW_MODE === 'undefined' || !PREVIEW_MODE) return true;
-    } catch (_e) {
-      return true;
-    }
-    if (!_ripxPreviewFocusProductId) return true;
-    try {
-      return gidMatches(_ripxPreviewFocusProductId, productId);
-    } catch (_eGid) {
-      return String(_ripxPreviewFocusProductId) === String(productId);
-    }
-  }
   function getShippingDebugStorageKey() {
     return '__ripx_shipping_debug_trail_v1__';
   }
@@ -1179,7 +1165,7 @@
   /** Fetch with one retry after delay (for transient failures). */
   function fetchWithRetry(url, options, timeoutMs, retryDelayMs) {
     var delay = typeof retryDelayMs === 'number' && retryDelayMs > 0 ? retryDelayMs : 800;
-    return fetchWithTimeout(url, options, timeoutMs).catch(function (err) {
+    return fetchWithTimeout(url, options, timeoutMs).catch(function (_err) {
       debugLog('fetch failed, retrying once', url.substring(0, 80) + '...');
       return new Promise(function (resolve, reject) {
         setTimeout(function () {
@@ -1201,6 +1187,7 @@
   const URL_PARAMS = new URLSearchParams(window.location.search);
   // Shopify navigation drops query params; keep preview context sticky across clicks (PDP/collections/cart).
   const PREVIEW_STORAGE_KEY = '__ripx_preview_ctx_v1__';
+  const PREVIEW_COOKIE_NAME = '__ripx_preview_ctx_v1';
   const PREVIEW_WINDOW_NAME_PREFIX = '__ripx_preview_ctx_v1__:';
   const PREVIEW_STORAGE_MAX_AGE_MS = 2 * 60 * 60 * 1000; // 2 hours
   const PREVIEW_VARIANT_CACHE_MAX_AGE_MS = 30 * 60 * 1000; // 30 minutes
@@ -1261,11 +1248,8 @@
       if (!returnRaw) return null;
       var returnUrl = new URL(returnRaw, window.location.origin);
       var extracted = extractPreviewParamsFromSearch(returnUrl.search);
-      if (!extracted || !window.sessionStorage) return null;
-      window.sessionStorage.setItem(
-        PREVIEW_STORAGE_KEY,
-        JSON.stringify(Object.assign({}, extracted, { persistedAtMs: Date.now() }))
-      );
+      if (!extracted) return null;
+      writePersistedPreviewCtx(extracted);
       return extracted;
     } catch (_ePasswordSeed) {
       return null;
@@ -1337,10 +1321,47 @@
   }
   const PREVIEW_RESET_SESSION = getPreviewParam('ab_preview_reset') === '1';
   const URL_PREVIEW_SESSION_ID = getPreviewParam('ab_preview_session') || null;
+  function expirePreviewCookie() {
+    try {
+      document.cookie =
+        PREVIEW_COOKIE_NAME +
+        '=; Max-Age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/; SameSite=Lax';
+    } catch (_eExpireCookie) {}
+  }
+  function writePreviewCookie(payload) {
+    try {
+      if (!payload || typeof payload !== 'object') return;
+      var encoded = encodeURIComponent(JSON.stringify(payload));
+      if (!encoded || encoded.length > 3500) return;
+      var secure = String(window.location.protocol || '') === 'https:' ? '; Secure' : '';
+      document.cookie =
+        PREVIEW_COOKIE_NAME +
+        '=' +
+        encoded +
+        '; Max-Age=7200; path=/; SameSite=Lax' +
+        secure;
+    } catch (_eWriteCookie) {}
+  }
+  function readPreviewCookie() {
+    try {
+      var prefix = PREVIEW_COOKIE_NAME + '=';
+      var parts = String(document.cookie || '').split(';');
+      for (var i = 0; i < parts.length; i += 1) {
+        var part = String(parts[i] || '').trim();
+        if (part.indexOf(prefix) !== 0) continue;
+        var raw = decodeURIComponent(part.slice(prefix.length) || '');
+        if (!raw) return null;
+        return normalizePreviewCtxObject(JSON.parse(raw));
+      }
+    } catch (_eReadCookie) {}
+    return null;
+  }
   function clearPreviewStorageForUrlContext() {
+    expirePreviewCookie();
     try {
       if (window.sessionStorage) {
         window.sessionStorage.removeItem(PREVIEW_STORAGE_KEY);
+        window.sessionStorage.removeItem(RIPX_PRICE_AF_HINT_STORAGE_KEY);
         var resetTestId = getPreviewParam('ab_preview_test');
         if (resetTestId) {
           window.sessionStorage.removeItem('ripx_preview_variant_cache_' + String(resetTestId));
@@ -1420,16 +1441,24 @@
   function readPersistedPreviewCtx() {
     try {
       const raw = window.sessionStorage && window.sessionStorage.getItem(PREVIEW_STORAGE_KEY);
-      if (!raw) return null;
-      const normalized = normalizePreviewCtxObject(JSON.parse(raw));
-      if (!normalized) {
+      if (raw) {
+        const normalized = normalizePreviewCtxObject(JSON.parse(raw));
+        if (normalized) return normalized;
         try {
           window.sessionStorage.removeItem(PREVIEW_STORAGE_KEY);
         } catch (eRemove) {}
-        return null;
       }
-      return normalized;
-    } catch (e) {
+    } catch (e) {}
+    try {
+      const fromCookie = readPreviewCookie();
+      if (!fromCookie) return null;
+      try {
+        if (window.sessionStorage) {
+          window.sessionStorage.setItem(PREVIEW_STORAGE_KEY, JSON.stringify(fromCookie));
+        }
+      } catch (_eHydrate) {}
+      return fromCookie;
+    } catch (_eCookie) {
       return null;
     }
   }
@@ -1451,24 +1480,19 @@
       return null;
     }
   }
-  function clearWindowNamePreviewCtx() {
-    try {
-      if (
-        typeof window.name === 'string' &&
-        window.name.indexOf(PREVIEW_WINDOW_NAME_PREFIX) === 0
-      ) {
-        window.name = '';
-      }
-    } catch (e) {}
-  }
   function writePersistedPreviewCtx(ctx) {
     try {
-      if (!window.sessionStorage) return;
-      const payload = {
-        ...(ctx || {}),
-        persistedAtMs: Date.now(),
-      };
-      window.sessionStorage.setItem(PREVIEW_STORAGE_KEY, JSON.stringify(payload));
+      const payload = Object.assign({}, ctx || {}, { persistedAtMs: Date.now() });
+      delete payload.launchTargetUrl;
+      try {
+        if (window.sessionStorage) {
+          window.sessionStorage.setItem(PREVIEW_STORAGE_KEY, JSON.stringify(payload));
+        }
+      } catch (_eSessionWrite) {}
+      writePreviewCookie(payload);
+      try {
+        window.name = PREVIEW_WINDOW_NAME_PREFIX + JSON.stringify(payload);
+      } catch (_eNameWrite) {}
     } catch (e) {}
   }
   const persistedPreview = readPersistedPreviewCtx();
@@ -1915,12 +1939,6 @@
       simple: PREVIEW_SIMPLE_MODE,
       sessionId: PREVIEW_SESSION_ID || null,
     });
-    if (
-      windowNamePreview &&
-      (HAS_URL_PREVIEW_CTX || (persistedPreview && persistedPreview.preview))
-    ) {
-      clearWindowNamePreviewCtx();
-    }
   }
 
   function cleanSimplePreviewUrlAfterSeed() {
@@ -2538,7 +2556,11 @@
   var _ripxInitStarted = false;
   var _ripxPreviewStabilityTimer = null;
   function getPreviewVariantScopeKey() {
-    return [String(PREVIEW_VARIANT_ID || ''), String(PREVIEW_VARIANT_NAME || '')].join('\u0001');
+    return [
+      String(PREVIEW_VARIANT_ID || ''),
+      String(PREVIEW_VARIANT_NAME || ''),
+      String(PREVIEW_SESSION_ID || ''),
+    ].join('\u0001');
   }
   function getPreviewVariantCacheStorageKey(testId) {
     return (
@@ -2555,7 +2577,6 @@
     var payload = { variant: variant, persistedAtMs: Date.now(), scope: getPreviewVariantScopeKey() };
     // Memory key must include arm scope — otherwise Variation A paints from a Control cache.
     _previewVariantCacheByTestId[key + '\u0001' + getPreviewVariantScopeKey()] = payload;
-    _previewVariantCacheByTestId[key] = payload;
     try {
       if (window.sessionStorage) {
         window.sessionStorage.setItem(
@@ -3293,7 +3314,9 @@
       '\u0000' +
       (PREVIEW_VARIANT_ID || '') +
       '\u0000' +
-      (PREVIEW_VARIANT_NAME || '');
+      (PREVIEW_VARIANT_NAME || '') +
+      '\u0000' +
+      (PREVIEW_SESSION_ID || '');
     if (_previewVariantInflight && _previewVariantInflightKey === key) {
       return _previewVariantInflight;
     }
@@ -6512,18 +6535,6 @@
     }
   }
 
-  function getRipxAssignedPriceForContext(productId, variantId) {
-    var vid = normalizeCartVariantId(variantId);
-    if (vid && _ripxAssignedPriceByVariantId[String(vid)]) {
-      return _ripxAssignedPriceByVariantId[String(vid)];
-    }
-    var pid = toNumericProductId(productId);
-    if (pid && _ripxAssignedPriceByProductId[String(pid)]) {
-      return _ripxAssignedPriceByProductId[String(pid)];
-    }
-    return null;
-  }
-
   function compareRipxPaintParity(targetUnit, displayedAmount, tolerance) {
     var target = Number(targetUnit);
     var shown = Number(displayedAmount);
@@ -7534,7 +7545,7 @@
     return pickMappedVariantId(baseCfg);
   }
 
-  function resolveStorefrontPriceApplicationMethod(configuredMethod, targetUnit, catalogUnit) {
+  function resolveStorefrontPriceApplicationMethod(configuredMethod, _targetUnit, _catalogUnit) {
     var normalized = normalizePriceApplicationMethod(configuredMethod);
     if (
       normalized === 'direct_price_override' ||
@@ -8541,13 +8552,6 @@
         appendConfiguredRegistrySelectors(targetList, surface, role, test);
       });
     });
-  }
-
-  function hasAnyConfiguredPriceSurfaceMappings(test) {
-    return (
-      getConfiguredTestPriceSurfaceMappings(test).length > 0 ||
-      getConfiguredShopPriceSurfaceMappings().length > 0
-    );
   }
 
   /**
@@ -10968,10 +10972,6 @@
   }
 
   /** @deprecated use formatShopPrice */
-  function formatPrice(price) {
-    return formatShopPrice(price);
-  }
-
   /**
    * Normalize a numeric or GID to full Shopify Product GID
    */
@@ -11087,7 +11087,7 @@
     }
     var el = document.querySelector('[data-product-id]');
     if (el) {
-      var id = el.getAttribute('data-product-id');
+      const id = el.getAttribute('data-product-id');
       if (id) return toProductGid(id);
     }
     // Late / alternate shapes: same script as getProductJson (product nested only).
@@ -11119,7 +11119,7 @@
     // Meta tag fallback (some themes set this)
     var meta = document.querySelector('meta[name="collection-id"], meta[property="collection:id"]');
     if (meta && meta.content) {
-      var id = meta.getAttribute('content');
+      const id = meta.getAttribute('content');
       if (id) return toCollectionGid(id);
     }
     // Theme fallback: many themes put collection JSON in a script tag (e.g. #CollectionJson, Dawn-style)
@@ -11129,7 +11129,7 @@
     if (script && script.textContent) {
       try {
         var data = JSON.parse(script.textContent);
-        var id = data.id || data.collection_id || (data.collection && data.collection.id);
+        const id = data.id || data.collection_id || (data.collection && data.collection.id);
         if (id) return toCollectionGid(id);
       } catch (e) {}
     }
@@ -11445,9 +11445,6 @@
     };
   }
 
-  function getOfferCodeNameForVariant(test, variant) {
-    return resolveOfferCodeForVariant(test, variant).codeName;
-  }
   function normalizeOfferDiscountType(config) {
     var cfgCandidates = getOfferConfigCandidates(config);
     var raw = '';
@@ -13182,8 +13179,6 @@
     if (!shouldCollectHeatmap()) return;
 
     getVariantCachePromise().then(function (cache) {
-      const pageUrl = window.location.href;
-
       document.addEventListener(
         'click',
         function (e) {

@@ -1,8 +1,8 @@
-# Alternate: EchoLogyx Ltd "rips-pricex"
+# Alternate: EchoLogyx Ltd production app (listing handle may remain rips-pricex)
 # Default local testing: shopify.app.ripspricex.toml
 # Learn more: https://shopify.dev/docs/apps/tools/cli/configuration
 
-name = "rips-pricex"
+name = "Pricify"
 client_id = "1427bfea71317ff9999f4ad85b59675b"
 application_url = "https://pricefy.echologyx.com"
 embedded = true

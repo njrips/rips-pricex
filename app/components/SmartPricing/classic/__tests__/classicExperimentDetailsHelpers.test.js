@@ -4,7 +4,9 @@ import {
   buildAudienceSummary,
   buildConversionRows,
   buildMetricsSummary,
+  buildDecisionCaption,
   buildOverviewKpis,
+  formatProductDecisionLabel,
   buildProductPerformanceGrid,
   buildSettingsSummary,
   buildPreviewBusyKey,
@@ -114,6 +116,107 @@ describe('classicExperimentDetailsHelpers', () => {
     expect(kpis.significant).toBe(true);
     expect(kpis.trafficAllocation).toBe(60);
     expect(kpis.winnerArmId).toBe('arm_a');
+    expect(kpis.decisionCaption).toBe('Winner called');
+  });
+
+  it('captions mixed per-product decisions while siblings still run', () => {
+    expect(
+      buildDecisionCaption({
+        significant: false,
+        experiment: {
+          plans: [
+            { status: 'applied' },
+            { status: 'running' },
+            { status: 'completed' },
+          ],
+        },
+      })
+    ).toBe('Deciding per product · 2 of 3 done');
+  });
+
+  it('labels product decisions without treating control retain as applied', () => {
+    expect(formatProductDecisionLabel({ status: 'applied' })).toBe('Applied');
+    expect(formatProductDecisionLabel({ status: 'completed' })).toBe('Kept catalog');
+    expect(formatProductDecisionLabel({ status: 'completed' }, { isOffer: true })).toBe(
+      'Completed'
+    );
+    expect(formatProductDecisionLabel({ status: 'running' })).toBe('Running');
+  });
+
+  it('does not mark overview KPIs significant while the sample floor is unmet', () => {
+    const kpis = buildOverviewKpis({
+      analytics: {
+        summary: { visitors: 400, lift: 18, confidence: 97, significant: false },
+        significance: { significant: false, sampleReady: false, minSampleSize: 5000, confidence: 97 },
+      },
+    });
+    expect(kpis.significant).toBe(false);
+    expect(kpis.confidence).toBe(97);
+  });
+
+  it('does not treat sequential confidence as a fixed-horizon call', () => {
+    const kpis = buildOverviewKpis({
+      analytics: {
+        summary: { visitors: 8000, lift: 12, confidence: 97, significant: true },
+        significance: {
+          sequential: true,
+          method: 'msprt',
+          significant: false,
+          sampleReady: true,
+          confidence: 97,
+        },
+      },
+    });
+    expect(kpis.significant).toBe(false);
+  });
+
+  it('reads min sample size from launch preferences when audience_ui is missing', () => {
+    expect(
+      buildAudienceSummary({
+        launch_preferences: { min_sample_size: 2200 },
+        audience: {},
+      }).minSampleSize
+    ).toBe(2200);
+    expect(
+      buildMetricsSummary({
+        launch_preferences: { min_sample_size: 2200 },
+        goal: {
+          visitors_per_variant_recommended: 18000,
+          analysis_method: 'sequential',
+          mde_percent: 10,
+        },
+      })
+    ).toMatchObject({
+      minSampleSize: 2200,
+      recommendedSampleSize: 18000,
+      analysisMethod: 'sequential',
+      mdePercent: 10,
+      confidenceLevel: 90,
+    });
+    expect(
+      buildMetricsSummary({
+        goal: { significance_level: 0.95, mde_percent: 8, analysis_method: 'sequential' },
+      })
+    ).toMatchObject({
+      confidenceLevel: 95,
+      mdePercent: 8,
+    });
+  });
+
+  it('reads the stamped practical duration plan for post-launch details', () => {
+    expect(
+      buildMetricsSummary({
+        statistical_design: {
+          duration_feasibility: 'not_feasible',
+          traffic_evidence: 'estimated',
+          required_daily_visitors_for_practical_window: 320,
+        },
+      })
+    ).toMatchObject({
+      durationFeasibility: 'not_feasible',
+      trafficEvidence: 'estimated',
+      requiredDailyVisitorsForPracticalWindow: 320,
+    });
   });
 
   it('builds conversion rows with relative widths and no synthetic fallback', () => {
@@ -143,7 +246,24 @@ describe('classicExperimentDetailsHelpers', () => {
       },
     });
     expect(rows.every(row => row.barWidth === 0)).toBe(true);
-    expect(rows.every(row => row.rate === null)).toBe(true);
+    // A measured 0% is real data and must stay 0 so the UI renders "0.00%";
+    // collapsing it to null showed a dash that reads as "no traffic yet".
+    expect(rows.every(row => row.rate === 0)).toBe(true);
+  });
+
+  it('distinguishes a missing conversion rate from a measured zero', () => {
+    const rows = buildConversionRows({
+      analytics: {
+        arms: [
+          { arm_id: 'a', role: 'control', label: 'Control', conversion_rate: 0 },
+          { arm_id: 'b', role: 'challenger', label: 'A' },
+          { arm_id: 'c', role: 'challenger', label: 'B', conversion_rate: null },
+        ],
+      },
+    });
+    expect(rows[0].rate).toBe(0);
+    expect(rows[1].rate).toBeNull();
+    expect(rows[2].rate).toBeNull();
   });
 
   it('summarizes variations, audience, and metrics from plan', () => {
@@ -240,6 +360,7 @@ describe('classicExperimentDetailsHelpers', () => {
     const plans = [
       {
         id: 'p1',
+        status: 'applied',
         product_title: 'Alpha Tee',
         product_id: 'prod_1',
         handle: 'alpha-tee',
@@ -251,6 +372,7 @@ describe('classicExperimentDetailsHelpers', () => {
       },
       {
         id: 'p2',
+        status: 'running',
         product_title: 'Beta Hoodie',
         product_id: 'prod_2',
         handle: 'beta-hoodie',
@@ -267,6 +389,7 @@ describe('classicExperimentDetailsHelpers', () => {
     expect(rows[0].products.map(p => p.price)).toEqual([40, 80]);
     expect(rows[1].products.map(p => p.price)).toEqual([36, 72]);
     expect(rows[0].products[0].handle).toBe('alpha-tee');
+    expect(rows[0].products.map(p => p.decisionLabel)).toEqual(['Applied', 'Running']);
 
     const matrix = buildVariationProductsMatrix(rows);
     expect(matrix).toHaveLength(2);
@@ -340,12 +463,17 @@ describe('classicExperimentDetailsHelpers', () => {
       variantId: 'var_a',
       variantName: 'A',
       productPath: '/products/alpha-tee',
+      previewSessionId: 'sess-price-1',
     });
-    // Price previews must use the Shopify price-preview bootstrap (PDP + ATC).
-    expect(preview).toContain('/apps/ripspricex/price-preview-bootstrap-v1');
-    expect(preview).toContain(encodeURIComponent('ab_preview=1'));
-    expect(preview).toContain(encodeURIComponent('ab_preview_test=test_1'));
-    expect(preview).toContain(encodeURIComponent('ab_preview_variant=var_a'));
+    expect(preview).toContain('https://ripx-plus.myshopify.com/products/alpha-tee');
+    expect(preview).not.toContain('price-preview-bootstrap');
+    expect(preview).toContain('ab_preview=1');
+    expect(preview).toContain('ab_preview_test=test_1');
+    expect(preview).toContain('ab_preview_variant=var_a');
+    expect(preview).toContain('ab_preview_reset=1');
+    expect(preview).toContain('ab_preview_simple=1');
+    expect(preview).toContain('ab_preview_test_type=price');
+    expect(preview).toContain('ab_preview_session=sess-price-1');
     expect(
       buildVariationPreviewUrl({
         shopDomain: 'ripx-plus.myshopify.com',
@@ -544,7 +672,21 @@ describe('classicExperimentDetailsHelpers', () => {
       test: { status: 'stopped', stopped_at: '2026-07-04T00:00:00.000Z', type: 'offer' },
     });
     expect(items.find(item => item.id === 'winner_applied')?.detail).toMatch(/catalog prices were not changed/);
-    expect(items.find(item => item.id === 'winner_ready')?.detail).toBe('Leading variation identified');
+    expect(items.find(item => item.id === 'winner_ready')).toBeUndefined();
+    expect(items.find(item => item.id === 'paused')).toBeUndefined();
+  });
+
+  it('records a per-product control retain without a catalog write', () => {
+    const items = buildActivityTimeline({
+      plan: {
+        status: 'completed',
+        control_retained_at: '2026-08-29T00:00:00.000Z',
+        updated_at: '2026-08-29T00:00:00.000Z',
+      },
+      test: { status: 'completed', stopped_at: '2026-08-29T00:00:00.000Z', type: 'price' },
+    });
+    expect(items.find(item => item.id === 'control_retained')?.title).toBe('Kept catalog price');
+    expect(items.find(item => item.id === 'winner_applied')).toBeUndefined();
     expect(items.find(item => item.id === 'paused')).toBeUndefined();
   });
 
@@ -741,7 +883,97 @@ describe('classicExperimentDetailsHelpers', () => {
       analyticsByTestId.t1
     );
     expect(mergedWithSummary.summary.visitors).toBe(600);
-    expect(mergedWithSummary.summary.confidence).toBe(95);
-    expect(mergedWithSummary.summary.significant).toBe(true);
+    expect(mergedWithSummary.summary.confidence).toBe(90);
+    expect(mergedWithSummary.summary.significant).toBe(false);
+  });
+
+  it('does not mark a multi-SKU experiment ready when only one test is significant', () => {
+    const merged = mergeExperimentAnalytics(
+      {
+        t1: {
+          summary: { visitors: 8000, lift: 12, confidence: 97, significant: true },
+          significance: { sequential: true, method: 'msprt', significant: true, sampleReady: true },
+        },
+        t2: {
+          summary: { visitors: 8000, lift: 4, confidence: 72, significant: false },
+          significance: { sequential: true, method: 'msprt', significant: false, sampleReady: true },
+        },
+      },
+      null
+    );
+    expect(merged.summary.significant).toBe(false);
+    expect(merged.significance.significant).toBe(false);
+    expect(merged.summary.confidence).toBe(72);
+  });
+
+  it('marks a multi-SKU experiment ready only when every test is sequentially significant', () => {
+    const merged = mergeExperimentAnalytics(
+      {
+        t1: {
+          summary: { visitors: 8000, lift: 12, confidence: 97, significant: true },
+          significance: { sequential: true, method: 'msprt', significant: true, sampleReady: true },
+        },
+        t2: {
+          summary: { visitors: 9000, lift: 11, confidence: 96, significant: true },
+          significance: { sequential: true, method: 'msprt', significant: true, sampleReady: true },
+        },
+      },
+      null
+    );
+    expect(merged.summary.significant).toBe(true);
+    expect(merged.significance.significant).toBe(true);
+    expect(merged.significance.sequential).toBe(true);
+    expect(merged.summary.confidence).toBe(96);
+  });
+
+  it('claims validated evidence only when every product has earned it', () => {
+    const validated = {
+      sequential: true,
+      method: 'beta_binomial_cs',
+      significant: true,
+      sampleReady: true,
+      evidenceValidated: true,
+      outcomesMatured: true,
+    };
+    const both = mergeExperimentAnalytics({ t1: { significance: validated }, t2: { significance: validated } }, null);
+    expect(both.significance.evidenceValidated).toBe(true);
+    expect(both.significance.method).toBe('beta_binomial_cs');
+
+    const mixed = mergeExperimentAnalytics(
+      {
+        t1: { significance: validated },
+        t2: { significance: { ...validated, method: 'msprt', evidenceValidated: false } },
+      },
+      null
+    );
+    expect(mixed.significance.evidenceValidated).toBe(false);
+    expect(mixed.significance.method).toBe('msprt');
+  });
+
+  it('surfaces one product’s split mismatch across the experiment', () => {
+    // A tracking fault on a single SKU is still a reason to distrust the run,
+    // so it must not be hidden by the products that look healthy.
+    const clean = { sequential: true, significant: true, sampleReady: true, srm: { detected: false } };
+    const merged = mergeExperimentAnalytics(
+      {
+        t1: { significance: clean },
+        t2: { significance: { ...clean, srm: { detected: true, pValue: 0.0001 } } },
+      },
+      null
+    );
+    expect(merged.significance.srm.detected).toBe(true);
+    expect(merged.significance.srm.pValue).toBe(0.0001);
+  });
+
+  it('reports an unsettled product as unsettled for the experiment', () => {
+    const base = { sequential: true, significant: true, sampleReady: true, evidenceValidated: true };
+    const merged = mergeExperimentAnalytics(
+      {
+        t1: { significance: { ...base, outcomesMatured: true } },
+        t2: { significance: { ...base, outcomesMatured: false } },
+      },
+      null
+    );
+    expect(merged.significance.outcomesMatured).toBe(false);
   });
 });

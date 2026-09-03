@@ -1,3 +1,5 @@
+import { mapServerEventToActivity } from './productActionAvailability';
+
 export const CLASSIC_ACTIVITY_LOG_MAX = 40;
 
 export const ACTIVITY_KIND_META = {
@@ -204,19 +206,35 @@ export function dedupeActivityItems(items = []) {
   return out;
 }
 
-export function mergeActivityTimeline(reconstructed = [], logged = []) {
+export function mergeActivityTimeline(reconstructed = [], logged = [], serverEvents = []) {
+  const serverItems = (Array.isArray(serverEvents) ? serverEvents : [])
+    .map(row => {
+      if (row?.source === 'server' && row?.kind) return row;
+      return mapServerEventToActivity(row);
+    })
+    .filter(Boolean);
+
+  // Server events win over reconstructed snapshots and legacy client logs for
+  // the same id / near-duplicate kind+title window.
   const logItems = (Array.isArray(logged) ? logged : [])
     .map(row => normalizeActivityEntry(row))
-    .filter(Boolean);
-  const logIds = new Set(logItems.map(item => item.id));
-  const logKinds = new Set(logItems.map(item => item.kind));
+    .filter(Boolean)
+    .map(row => ({ ...row, source: row.source || 'legacy' }));
+  const logIds = new Set([
+    ...serverItems.map(item => item.id),
+    ...logItems.map(item => item.id),
+  ]);
+  const logKinds = new Set([
+    ...serverItems.map(item => item.kind),
+    ...logItems.map(item => item.kind),
+  ]);
   const snapshots = (Array.isArray(reconstructed) ? reconstructed : []).filter(item => {
     if (!item?.id || logIds.has(item.id)) return false;
     if (SNAPSHOT_KINDS.has(item.kind) && logKinds.has(item.kind)) return false;
     return true;
   });
   return dedupeActivityItems(
-    [...logItems, ...snapshots]
+    [...serverItems, ...logItems, ...snapshots]
       .filter(item => item.at)
       .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())
   );

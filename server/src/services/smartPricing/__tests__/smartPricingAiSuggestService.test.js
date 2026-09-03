@@ -62,6 +62,76 @@ describe('smartPricingAiSuggestService', () => {
     });
   });
 
+  it('does not let the merchant band widen past shop max price change', () => {
+    const result = deterministicPriceSuggestions({
+      variants: [{ variant_id: 'v1', title: 'Tee', current_price: 40, margin_percent: 55 }],
+      arms: [{ id: 'var_b' }],
+      guardrails: { min_margin_percent: 35, max_price_change_percent: 15 },
+      minPct: 10,
+      maxPct: 25,
+    });
+    expect(result.suggestions).toHaveLength(1);
+    expect(result.suggestions[0].delta_percent).toBeLessThanOrEqual(15);
+    expect(result.suggestions[0].price).toBeLessThanOrEqual(46.01);
+    expect(result.summary).toMatch(/capped by your 15% max price change guardrail/i);
+  });
+
+  it('never exceeds the requested max for a high-opportunity product', () => {
+    const result = deterministicPriceSuggestions({
+      variants: [
+        {
+          variant_id: 'v1',
+          title: 'Tee',
+          current_price: 40,
+          margin_percent: 80,
+          opportunity_score: 0.95,
+        },
+      ],
+      arms: [{ id: 'var_b' }, { id: 'var_c' }, { id: 'var_d' }, { id: 'var_e' }, { id: 'var_f' }],
+      guardrails: { min_margin_percent: 35, max_price_change_percent: 30 },
+      minPct: 10,
+      maxPct: 20,
+    });
+    result.suggestions.forEach(row => {
+      expect(row.delta_percent).toBeLessThanOrEqual(20);
+      expect(row.delta_percent).toBeGreaterThanOrEqual(10);
+    });
+  });
+
+  it('spans the full requested band so variations are far enough apart', () => {
+    const result = deterministicPriceSuggestions({
+      variants: [{ variant_id: 'v1', title: 'Tee', current_price: 100, margin_percent: 80 }],
+      arms: [{ id: 'var_b' }, { id: 'var_c' }, { id: 'var_d' }],
+      guardrails: { min_margin_percent: 35, max_price_change_percent: 30 },
+      minPct: 10,
+      maxPct: 20,
+    });
+    expect(result.suggestions.map(row => row.delta_percent)).toEqual([10, 15, 20]);
+  });
+
+  it('places a single test arm in the middle of the band', () => {
+    const result = deterministicPriceSuggestions({
+      variants: [{ variant_id: 'v1', title: 'Tee', current_price: 100, margin_percent: 80 }],
+      arms: [{ id: 'var_b' }],
+      guardrails: { min_margin_percent: 35, max_price_change_percent: 30 },
+      minPct: 10,
+      maxPct: 20,
+    });
+    expect(result.suggestions[0].delta_percent).toBe(15);
+  });
+
+  it('marks suggestions the guardrail forced below the requested minimum', () => {
+    const result = deterministicPriceSuggestions({
+      variants: [{ variant_id: 'v1', title: 'Tee', current_price: 40, margin_percent: 80 }],
+      arms: [{ id: 'var_b' }],
+      guardrails: { min_margin_percent: 35, max_price_change_percent: 15 },
+      minPct: 20,
+      maxPct: 30,
+    });
+    expect(result.suggestions[0].delta_percent).toBeLessThanOrEqual(15);
+    expect(result.suggestions[0].guardrail_limited).toBe(true);
+  });
+
   it('uses OpenAI hypothesis when chatJson returns content', async () => {
     hasOpenAiKey.mockReturnValue(true);
     chatJson.mockResolvedValue({
@@ -150,6 +220,7 @@ describe('smartPricingAiSuggestService', () => {
     expect(result.source).toBe('openai');
     expect(result.audience.segment).toBe('new_visitors');
     expect(result.audience.trafficAllocation).toBe(40);
+    expect(result.audience.minSampleSize).toBe('5000');
     expect(result.audience.primaryMetric).toBe('conversion_rate');
     expect(result.audience.countries).toEqual(['US', 'CA']);
     expect(result.audience.deviceMode).toBe('include');
@@ -178,5 +249,25 @@ describe('smartPricingAiSuggestService', () => {
     expect(result.audience.segments.traffic_ramp_percent).toBe(60);
     expect(result.audience.segments.countries).toEqual(['GB']);
     expect(result.audience.segments.device).toBe('all');
+  });
+
+  it('uses a broad 80% allocation for sparse-store traffic without lowering sample safety', async () => {
+    hasOpenAiKey.mockReturnValue(false);
+    const result = await suggestAudienceAdvanced({
+      plans: [
+        {
+          title: 'New product',
+          daily_visitors: 8,
+          traffic_source: 'shop_prior_estimated',
+          traffic_confidence: 'estimated',
+        },
+      ],
+      guardrails: { min_sample_size_per_variation: 5000 },
+    });
+
+    expect(result.audience.segment).toBe('all_visitors');
+    expect(result.audience.trafficAllocation).toBe(80);
+    expect(result.audience.minSampleSize).toBe('5000');
+    expect(result.audience.rationale).toMatch(/traffic is low or still estimated/i);
   });
 });

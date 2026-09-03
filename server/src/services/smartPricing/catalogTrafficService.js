@@ -99,6 +99,7 @@ function buildMeasuredTrafficMetrics({
     visitors_30d: views30d,
     daily_visitors: dailyVisitors,
     baseline_conversion_rate: baselineConversionRate,
+    baseline_source: 'units_per_view_proxy',
     traffic_source: 'storefront_measured',
     traffic_confidence: resolveTrafficConfidence({
       units30d: units,
@@ -137,6 +138,7 @@ function resolveSkuTrafficMetrics({
       visitors_30d: visitors30d,
       daily_visitors: dailyVisitors,
       baseline_conversion_rate: Number(baselineConversionRate.toFixed(4)),
+      baseline_source: 'assumed_shop_cvr',
       traffic_source: 'orders_estimated',
       traffic_confidence: resolveTrafficConfidence({
         units30d: units,
@@ -161,6 +163,7 @@ function resolveSkuTrafficMetrics({
     visitors_30d: visitors30d,
     daily_visitors: priorDaily,
     baseline_conversion_rate: Number(cvr.toFixed(4)),
+    baseline_source: 'assumed_shop_cvr',
     traffic_source: 'shop_prior_estimated',
     traffic_confidence: 'estimated',
     measured_views_30d: 0,

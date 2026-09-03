@@ -25,6 +25,18 @@ const PREVIEW_VALUE = '1';
 const TEMP_PREVIEW_HOST_SUFFIXES = ['.trycloudflare.com', '.ngrok-free.app', '.ngrok.io'];
 const LEGACY_PREVIEW_BOOTSTRAP_PATHS = new Set(['/ripx-preview-test.html']);
 
+/** Fresh nonce so each Preview click replaces the previous storefront bucket. */
+export function createPreviewSessionId() {
+  try {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      return crypto.randomUUID();
+    }
+  } catch {
+    // ignore
+  }
+  return `ps_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
 function normalizePreviewHostname(input) {
   const raw = typeof input === 'string' ? input.trim() : '';
   if (!raw) return '';

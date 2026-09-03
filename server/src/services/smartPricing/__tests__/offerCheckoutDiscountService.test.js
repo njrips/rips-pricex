@@ -2,16 +2,25 @@ const {
   pickCheckoutDiscountFunction,
   matchDiscountsToFunction,
   findDiscountByTitle,
+  findKnownOfferDiscount,
   discountRecordId,
   normalizeShopifyIdentifier,
 } = require('../offerCheckoutDiscountService');
 
 describe('offerCheckoutDiscountService', () => {
-  it('prefers the RipsPriceX discount function over other discount functions', () => {
+  it('prefers the Pricify discount function over other discount functions', () => {
+    const chosen = pickCheckoutDiscountFunction([
+      { id: 'fn-other', title: 'Other app discount', apiType: 'discount' },
+      { id: 'fn-rpx', title: 'Pricify checkout discount', apiType: 'discount' },
+      { id: 'fn-cart', title: 'Pricify cart transform', apiType: 'cart_transform' },
+    ]);
+    expect(chosen.id).toBe('fn-rpx');
+  });
+
+  it('still prefers a legacy RipsPriceX discount title when no Pricify title exists', () => {
     const chosen = pickCheckoutDiscountFunction([
       { id: 'fn-other', title: 'Other app discount', apiType: 'discount' },
       { id: 'fn-rpx', title: 'RipsPriceX checkout discount', apiType: 'discount' },
-      { id: 'fn-cart', title: 'RipsPriceX cart transform', apiType: 'cart_transform' },
     ]);
     expect(chosen.id).toBe('fn-rpx');
   });
@@ -94,10 +103,19 @@ describe('offerCheckoutDiscountService', () => {
       findDiscountByTitle(
         [
           { discountId: 'd1', title: 'Other' },
-          { discountId: 'd2', title: 'RipsPriceX Offer Checkout Function' },
+          { discountId: 'd2', title: 'Pricify Offer Checkout Function' },
         ],
-        'RipsPriceX Offer Checkout Function'
+        'Pricify Offer Checkout Function'
       )?.discountId
+    ).toBe('d2');
+  });
+
+  it('reuses a legacy RipsPriceX automatic discount title', () => {
+    expect(
+      findKnownOfferDiscount([
+        { discountId: 'd1', title: 'Other' },
+        { discountId: 'd2', title: 'RipsPriceX Offer Checkout Function' },
+      ])?.discountId
     ).toBe('d2');
   });
 });

@@ -392,7 +392,12 @@ class ABTestEngine {
       }
 
       // Select variant based on traffic allocation
-      const variant = this.selectVariant(test.variants, userId, test.holdout_percent || 0);
+      const variant = this.selectVariant(
+        test.variants,
+        userId,
+        test.holdout_percent || 0,
+        test.id
+      );
       if (!variant) {
         return null;
       }
@@ -439,14 +444,19 @@ class ABTestEngine {
    * @param {string} userId - User identifier
    * @returns {Object} Selected variant
    */
-  selectVariant(variants, userId, holdoutPercent = 0) {
+  selectVariant(variants, userId, holdoutPercent = 0, testId = '') {
     if (!variants || variants.length === 0) {
       return null;
     }
-    // Create a hash from userId
+    // Salt by test so the same visitor is not systematically placed in the same
+    // arm across unrelated experiments. Existing assignments remain sticky.
     const hash = crypto
       .createHash('md5')
-      .update(String(userId || ''))
+      .update(
+        testId
+          ? `${String(testId)}:${String(userId || '')}`
+          : String(userId || '')
+      )
       .digest('hex');
     const hashInt = parseInt(hash.substring(0, 8), 16);
 
@@ -678,7 +688,12 @@ class ABTestEngine {
         continue;
       }
 
-      const variant = this.selectVariant(test.variants, userId, test.holdout_percent || 0);
+      const variant = this.selectVariant(
+        test.variants,
+        userId,
+        test.holdout_percent || 0,
+        test.id
+      );
       if (!variant) {
         continue;
       }

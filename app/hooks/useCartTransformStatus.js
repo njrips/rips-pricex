@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { apiGet, apiPost } from '../services/api';
+import { useKeyedState } from './useKeyedState';
 
 function unwrapBody(res) {
   const body = res?.data ?? res ?? {};
@@ -10,97 +11,130 @@ function unwrapBody(res) {
   return body;
 }
 
+const CHECKING = {
+  status: 'Checking cart transform…',
+  installed: false,
+  verified: false,
+  error: /** @type {string | null} */ (null),
+};
+
+const DEPLOY_FIRST = 'Deploy ripspricex-cart-transform, then Ensure';
+
+/** What the status payload means for the merchant, as a complete state. */
+function describeStatus(data) {
+  const flag = data.installedForRipxFunction;
+  const hasFunction = Boolean(data.function?.id);
+  if (flag === true) {
+    return {
+      status: 'Cart transform installed for this app',
+      installed: true,
+      verified: true,
+      error: null,
+    };
+  }
+  if (flag === false) {
+    return {
+      status: hasFunction ? 'Function found — click Ensure to install' : DEPLOY_FIRST,
+      installed: false,
+      verified: true,
+      error: null,
+    };
+  }
+  // Install check was inconclusive (null).
+  return {
+    status: hasFunction ? 'Function found — could not verify install; click Ensure' : DEPLOY_FIRST,
+    installed: false,
+    verified: false,
+    error: null,
+  };
+}
+
+async function loadStatus(shopDomain) {
+  try {
+    const res = await apiGet('/settings/cart-transform/status', {
+      shop: shopDomain || undefined,
+    });
+    const data = unwrapBody(res);
+    return { next: describeStatus(data), data };
+  } catch (e) {
+    return {
+      next: {
+        status: 'Could not load cart transform status',
+        installed: false,
+        verified: false,
+        error: e?.response?.data?.error || e?.message || 'Status failed',
+      },
+      data: null,
+    };
+  }
+}
+
 /**
  * Shared cart-transform status + ensure for Setup and Settings Installation.
  * @param {string} shopDomain
  * @param {{ enabled?: boolean }} [options]
  */
 export default function useCartTransformStatus(shopDomain, { enabled = true } = {}) {
-  const [status, setStatus] = useState('Checking cart transform…');
-  const [installed, setInstalled] = useState(false);
-  const [verified, setVerified] = useState(false);
+  // Keyed on what is being checked, so pointing at another shop reverts to
+  // "Checking…" rather than leaving the previous shop's verdict on screen.
+  const [state, setState] = useKeyedState(`${enabled ? 'on' : 'off'}:${shopDomain || ''}`, CHECKING);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState(/** @type {string | null} */ (null));
+
+  useEffect(() => {
+    if (!enabled) return undefined;
+    let cancelled = false;
+    loadStatus(shopDomain).then(({ next }) => {
+      if (!cancelled) setState(next);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [enabled, shopDomain, setState]);
 
   const refresh = useCallback(async () => {
     if (!enabled) return null;
-    setError(null);
-    try {
-      const res = await apiGet('/settings/cart-transform/status', {
-        shop: shopDomain || undefined,
-      });
-      const data = unwrapBody(res);
-      const flag = data.installedForRipxFunction;
-      if (flag === true) {
-        setInstalled(true);
-        setVerified(true);
-        setStatus('Cart transform installed for this app');
-      } else if (flag === false && data.function?.id) {
-        setInstalled(false);
-        setVerified(true);
-        setStatus('Function found — click Ensure to install');
-      } else if (flag === false) {
-        setInstalled(false);
-        setVerified(true);
-        setStatus('Deploy ripspricex-cart-transform, then Ensure');
-      } else if (data.function?.id) {
-        // install check inconclusive (null) but function exists
-        setInstalled(false);
-        setVerified(false);
-        setStatus('Function found — could not verify install; click Ensure');
-      } else {
-        setInstalled(false);
-        setVerified(false);
-        setStatus('Deploy ripspricex-cart-transform, then Ensure');
-      }
-      return data;
-    } catch (e) {
-      setInstalled(false);
-      setVerified(false);
-      setStatus('Could not load cart transform status');
-      setError(e?.response?.data?.error || e?.message || 'Status failed');
-      return null;
-    }
-  }, [enabled, shopDomain]);
+    setState(prev => ({ ...prev, error: null }));
+    const { next, data } = await loadStatus(shopDomain);
+    setState(next);
+    return data;
+  }, [enabled, shopDomain, setState]);
 
   const ensure = useCallback(async () => {
     if (!enabled) return null;
     setBusy(true);
-    setError(null);
+    setState(prev => ({ ...prev, error: null }));
     try {
       const res = await apiPost('/settings/cart-transform/ensure', {});
       const data = unwrapBody(res);
-      setStatus(
-        data.created
+      setState(prev => ({
+        ...prev,
+        status: data.created
           ? 'Cart transform installed'
           : data.assumedInstalled
             ? 'Cart transform already present'
-            : 'Cart transform already installed'
-      );
-      setInstalled(true);
-      setVerified(true);
+            : 'Cart transform already installed',
+        installed: true,
+        verified: true,
+      }));
       await refresh();
       return data;
     } catch (e) {
-      setError(e?.response?.data?.error || e?.message || 'Ensure failed');
+      setState(prev => ({
+        ...prev,
+        error: e?.response?.data?.error || e?.message || 'Ensure failed',
+      }));
       return null;
     } finally {
       setBusy(false);
     }
-  }, [enabled, refresh]);
-
-  useEffect(() => {
-    if (!enabled) return undefined;
-    refresh();
-    return undefined;
-  }, [enabled, refresh]);
+  }, [enabled, refresh, setState]);
 
   return {
-    status,
-    installed,
-    verified,
+    status: state.status,
+    installed: state.installed,
+    verified: state.verified,
     busy,
-    error,
+    error: state.error,
     refresh,
     ensure,
   };

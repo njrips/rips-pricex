@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Button, TextField } from '@shopify/polaris';
 import { IconCheck, IconGlobe } from './classicIcons';
@@ -52,7 +52,7 @@ export default function ClassicProductPickerModal({
     () => new Set((selectedIds || []).map(id => String(id))),
     [selectedIds]
   );
-  const isSelectedId = id => selectedSet.has(String(id || ''));
+  const isSelectedId = useCallback(id => selectedSet.has(String(id || '')), [selectedSet]);
 
   const collections = useMemo(() => {
     const q = sideSearch.trim().toLowerCase();
@@ -89,7 +89,7 @@ export default function ClassicProductPickerModal({
       });
     });
     return stats;
-  }, [collectionOptions, opportunities, selectedSet]);
+  }, [collectionOptions, opportunities, isSelectedId]);
 
   const collectionsTouched = useMemo(() => {
     let count = 0;
@@ -147,14 +147,17 @@ export default function ClassicProductPickerModal({
   if (typeof document === 'undefined') return null;
 
   return createPortal(
-    <div className={styles.modalBackdrop} role="presentation" onClick={onClose}>
-      <div
-        className={styles.modal}
-        role="dialog"
-        aria-modal="true"
-        aria-label="Product picker"
-        onClick={e => e.stopPropagation()}
-      >
+    <div
+      className={styles.modalBackdrop}
+      role="presentation"
+      onClick={e => {
+        // Close only on the backdrop itself. Letting the dialog swallow the
+        // click instead would put a mouse listener on a non-interactive
+        // element, which keyboard users can never reach.
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div className={styles.modal} role="dialog" aria-modal="true" aria-label="Product picker">
         <div className={styles.modalHeader}>
           <div>
             <h2 className={`${styles.modalTitle} ripx-classic-sans`}>Product picker</h2>

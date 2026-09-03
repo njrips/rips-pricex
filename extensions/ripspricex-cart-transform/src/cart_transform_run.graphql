@@ -1,4 +1,4 @@
-query Input {
+query CartTransformRun {
   cart {
     ripxCartTransformTestAmount: attribute(key: "_ripx_cart_transform_test_amount") {
       value

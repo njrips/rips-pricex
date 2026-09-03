@@ -18,8 +18,10 @@ const {
   ensureSmartPricingPlanPreviewTest,
 } = require('../services/smartPricing/smartPricingPlanPreviewService');
 const {
+  DEFAULT_GUARDRAILS,
   getShopSmartPricingGuardrails,
   saveShopSmartPricingGuardrails,
+  mergePreviewGuardrails,
 } = require('../services/smartPricing/smartPricingGuardrailsService');
 const {
   countRunningPriceTests,
@@ -28,7 +30,12 @@ const {
 const {
   applySmartPricingWinnerRollout,
   previewSmartPricingWinnerRollout,
+  finishSmartPricingProductWithoutPriceChange,
 } = require('../services/smartPricing/smartPricingWinnerRolloutService');
+const {
+  planApplyBatch,
+  batchBudgetExhausted,
+} = require('../services/smartPricing/applyReadyBatchPolicy');
 const {
   getSkuCogsOverrides,
   importSkuCogsFromCsv,
@@ -51,7 +58,7 @@ const {
   applyPriceArmOverrides,
 } = require('../services/smartPricing/testPlanService');
 const {
-  scheduleSmartPricingInboxSync,
+  syncSmartPricingInboxForTest,
 } = require('../services/smartPricing/smartPricingInboxStopSyncService');
 const {
   resolveSmartPricingCheckoutReadiness,
@@ -59,6 +66,16 @@ const {
 const {
   maybeAutoQueueRound2Plan,
 } = require('../services/smartPricing/smartPricingAutoRound2Service');
+const {
+  stopSmartPricingProduct,
+  resumeSmartPricingProduct,
+  revertSmartPricingProductPrice,
+  rerunSmartPricingProduct,
+  buildSmartPricingProductReport,
+} = require('../services/smartPricing/smartPricingProductLifecycleService');
+const {
+  listProductEvents,
+} = require('../models/smartPricingProductEventStore');
 const {
   buildSmartPricingTestAnalytics,
 } = require('../services/smartPricing/smartPricingTestAnalyticsService');
@@ -75,6 +92,7 @@ const {
 const { hasOpenAiKey } = require('../services/smartPricing/smartPricingAiProvider');
 
 const router = express.Router();
+
 
 router.use((req, res, next) => {
   if (req.method === 'GET' && req.path === '/status') {
@@ -328,7 +346,7 @@ router.post(
     const guardrailsInput =
       body.guardrails && typeof body.guardrails === 'object' ? body.guardrails : {};
     const shopGuardrails = await getShopSmartPricingGuardrails(req.shopDomain).catch(() => ({}));
-    const guardrails = { ...shopGuardrails, ...guardrailsInput };
+    const guardrails = mergePreviewGuardrails(shopGuardrails, guardrailsInput);
 
     let unitCost = body.unit_cost ?? body.unitCost ?? null;
     let marginSource = body.margin_source ?? body.marginSource ?? null;
@@ -431,11 +449,16 @@ router.post(
 
 router.post(
   '/scenario-preview',
-  asyncHandler((req, res) => {
+  asyncHandler(async (req, res) => {
     const body = req.body && typeof req.body === 'object' ? req.body : {};
     const currentPrice = Number(body.current_price);
     const presetId = body.scenario_preset || 'recommended';
-    const preview = applyScenarioPreset(currentPrice, presetId, body.guardrails || {});
+    const shopGuardrails = await getShopSmartPricingGuardrails(req.shopDomain).catch(() => ({}));
+    const preview = applyScenarioPreset(
+      currentPrice,
+      presetId,
+      mergePreviewGuardrails(shopGuardrails, body.guardrails)
+    );
     return sendSuccess(res, HTTP_STATUS.OK, { preview });
   })
 );
@@ -686,13 +709,20 @@ router.post(
     if (!arms.length) {
       return sendValidationError(res, ['arms is required']);
     }
-    const guardrails = await getShopSmartPricingGuardrails(req.shopDomain).catch(() => ({}));
+    const guardrails = await getShopSmartPricingGuardrails(req.shopDomain).catch(() => ({
+      ...DEFAULT_GUARDRAILS,
+    }));
     const result = await suggestPrices({
       variants,
       arms,
-      guardrails: { ...guardrails, ...(body.guardrails || {}) },
+      // Shop guardrails are price safety limits, so they must win over anything
+      // the client sends; body values only fill keys the shop does not define.
+      guardrails: { ...(body.guardrails || {}), ...guardrails },
       minPct: body.min_pct ?? body.minPct ?? 10,
       maxPct: body.max_pct ?? body.maxPct ?? 20,
+      unit: body.unit === 'amount' ? 'amount' : 'percent',
+      minAmount: body.min_amount ?? body.minAmount ?? null,
+      maxAmount: body.max_amount ?? body.maxAmount ?? null,
       objective: body.objective || guardrails.objective || 'profit_per_visitor',
     });
     return sendSuccess(res, HTTP_STATUS.OK, {
@@ -804,6 +834,21 @@ router.get(
   })
 );
 
+/** Inbox sync and round-2 queueing that has to follow any successful apply. */
+async function finishAppliedProduct(shopDomain, testId, result) {
+  await syncSmartPricingInboxForTest(shopDomain, testId, { reason: 'apply_winner' }).catch(
+    () => null
+  );
+  let planId = result?.test?.metadata?.smart_pricing_plan_id || null;
+  if (!planId) {
+    const { findInboxPlanByTestId } = require('../models/smartPricingInboxStore');
+    const inboxPlan = await findInboxPlanByTestId(shopDomain, testId).catch(() => null);
+    planId = inboxPlan?.id || null;
+  }
+  if (!planId) return null;
+  return maybeAutoQueueRound2Plan(shopDomain, planId).catch(() => null);
+}
+
 router.post(
   '/tests/:testId/apply-winner',
   asyncHandler(async (req, res) => {
@@ -814,6 +859,9 @@ router.post(
     }
     const dryRun = body.dry_run === true || body.dryRun === true;
     const publishToShopify = body.publish_to_shopify !== false && body.publishToShopify !== false;
+    // A multi-product experiment is a group of independent tests, so applying
+    // one product stops that product only and leaves its siblings running.
+    const stopIfRunning = body.stop_if_running === true || body.stopIfRunning === true;
     try {
       const result = await applySmartPricingWinnerRollout({
         testId: req.params.testId,
@@ -822,31 +870,299 @@ router.post(
         variantIndex: body.variant_index ?? body.variantIndex,
         publishToShopify,
         dryRun,
+        stopIfRunning,
       });
-      if (!dryRun) {
-        scheduleSmartPricingInboxSync(req.shopDomain, req.params.testId, {
-          reason: 'apply_winner',
-        });
-      }
       let autoRound2 = null;
-      if (!dryRun && result?.test?.metadata?.smart_pricing_plan_id) {
-        autoRound2 = await maybeAutoQueueRound2Plan(
-          req.shopDomain,
-          result.test.metadata.smart_pricing_plan_id
-        ).catch(() => null);
+      if (!dryRun) {
+        autoRound2 = await finishAppliedProduct(req.shopDomain, req.params.testId, result);
       }
       const updatedCount = result.publish?.summary?.updated_count ?? 0;
+      const errorCount = result.publish?.summary?.error_count ?? 0;
+      const publishMessage = () => {
+        if (updatedCount > 0) {
+          const updatedText = `Winner applied and ${updatedCount} Shopify price${updatedCount === 1 ? '' : 's'} updated`;
+          return errorCount > 0
+            ? `${updatedText}, but ${errorCount} could not be updated. Check the errors below and retry those variants.`
+            : updatedText;
+        }
+        // Reporting "already in sync" when every write failed sends the
+        // merchant away believing their catalog changed.
+        return errorCount > 0
+          ? `Winner applied to traffic, but no Shopify price could be updated (${errorCount} failed). Your catalog still shows the old prices.`
+          : 'Winner applied. Shopify prices were already in sync.';
+      };
       const message = dryRun
         ? 'Winner rollout preview ready'
         : publishToShopify
-          ? updatedCount > 0
-            ? `Winner applied and ${updatedCount} Shopify price${updatedCount === 1 ? '' : 's'} updated`
-            : 'Winner applied. Shopify prices were already in sync.'
+          ? publishMessage()
           : 'Winner applied to 100% of traffic';
       return sendSuccess(res, HTTP_STATUS.OK, { ...result, auto_round2: autoRound2 }, message);
     } catch (err) {
       return sendValidationError(res, [err.message]);
     }
+  })
+);
+
+router.post(
+  '/tests/:testId/finish-product',
+  asyncHandler(async (req, res) => {
+    try {
+      const result = await finishSmartPricingProductWithoutPriceChange({
+        testId: req.params.testId,
+        shopDomain: req.shopDomain,
+      });
+      await syncSmartPricingInboxForTest(req.shopDomain, req.params.testId, {
+        reason: result.control_retained ? 'merchant_control' : 'merchant_offer_complete',
+      }).catch(() => null);
+      return sendSuccess(
+        res,
+        HTTP_STATUS.OK,
+        result,
+        result.control_retained
+          ? 'Product finished on its current price. No catalog change was made.'
+          : 'Product finished on its winning offer. No catalog change was made.'
+      );
+    } catch (err) {
+      return sendValidationError(res, [err.message]);
+    }
+  })
+);
+
+/**
+ * Applies several finished products in one action.
+ *
+ * Each product is gated and written on its own, and one failure does not stop
+ * the rest — a merchant clearing a queue of ten wants the eight that worked,
+ * plus a straight answer about the two that did not.
+ */
+router.post(
+  '/products/apply-ready',
+  asyncHandler(async (req, res) => {
+    const body = req.body && typeof req.body === 'object' ? req.body : {};
+    // Overflow is reported rather than dropped silently, so the merchant knows
+    // there is a second click to make.
+    const { requested, testIds } = planApplyBatch(body.test_ids);
+    if (requested.length === 0) {
+      return sendValidationError(res, ['test_ids must contain at least one test id']);
+    }
+    const accessToken = await resolveShopifyAccessToken(req);
+    if (!accessToken) {
+      return sendValidationError(res, ['Missing Shopify access token']);
+    }
+
+    const results = [];
+    const startedAt = Date.now();
+    for (const testId of testIds) {
+      if (batchBudgetExhausted(results.length, Date.now() - startedAt)) {
+        break;
+      }
+      try {
+        // Each product's own verdict decides what "apply" means for it: a price
+        // test writes a catalog price, a control win or an offer just finishes.
+        const analytics = await buildSmartPricingTestAnalytics(req.shopDomain, testId);
+        const decision = analytics?.product_decision || null;
+        if (decision?.can_apply) {
+          const result = await applySmartPricingWinnerRollout({
+            testId,
+            shopDomain: req.shopDomain,
+            accessToken,
+            publishToShopify: true,
+            stopIfRunning: true,
+          });
+          await finishAppliedProduct(req.shopDomain, testId, result);
+          results.push({
+            test_id: testId,
+            applied: true,
+            action: 'apply_price',
+            updated_count: result.publish?.summary?.updated_count ?? 0,
+            winner_variant_id: result.publish?.winner_variant_id || null,
+          });
+        } else if (decision?.can_finish) {
+          const result = await finishSmartPricingProductWithoutPriceChange({
+            testId,
+            shopDomain: req.shopDomain,
+          });
+          await syncSmartPricingInboxForTest(req.shopDomain, testId, {
+            reason: result.control_retained ? 'merchant_control' : 'merchant_offer_complete',
+          }).catch(() => null);
+          results.push({
+            test_id: testId,
+            applied: true,
+            action: result.control_retained ? 'retain_control' : 'finish_offer',
+            updated_count: 0,
+          });
+        } else {
+          results.push({
+            test_id: testId,
+            applied: false,
+            error: decision?.detail || 'This product is not ready to apply yet',
+          });
+        }
+      } catch (err) {
+        results.push({ test_id: testId, applied: false, error: err.message });
+      }
+    }
+
+    const applied = results.filter(row => row.applied).length;
+    const failed = results.length - applied;
+    const deferred = requested.length - results.length;
+    const parts = [
+      failed
+        ? `Applied ${applied} of ${results.length} products. ${failed} could not be applied.`
+        : `Applied ${applied} product${applied === 1 ? '' : 's'}.`,
+    ];
+    if (deferred > 0) {
+      parts.push(`${deferred} more were left for the next batch — apply again to continue.`);
+    }
+    return sendSuccess(
+      res,
+      HTTP_STATUS.OK,
+      { results, applied, failed, deferred },
+      parts.join(' ')
+    );
+  })
+);
+
+/**
+ * A shared test is a conflict rather than bad input: the request is well formed,
+ * the test just spans several products.
+ */
+function sendProductActionError(res, err) {
+  if (err.code === 'SHARED_TEST') {
+    return sendError(res, HTTP_STATUS.CONFLICT, err.message, {
+      code: 'SHARED_TEST',
+      plan_count: err.planCount || null,
+    });
+  }
+  return sendValidationError(res, [err.message]);
+}
+
+router.post(
+  '/tests/:testId/stop-product',
+  asyncHandler(async (req, res) => {
+    try {
+      const result = await stopSmartPricingProduct({
+        testId: req.params.testId,
+        shopDomain: req.shopDomain,
+      });
+      return sendSuccess(res, HTTP_STATUS.OK, result, 'Product stopped. Sibling products keep running.');
+    } catch (err) {
+      return sendProductActionError(res, err);
+    }
+  })
+);
+
+router.post(
+  '/tests/:testId/resume-product',
+  asyncHandler(async (req, res) => {
+    try {
+      const result = await resumeSmartPricingProduct({
+        testId: req.params.testId,
+        shopDomain: req.shopDomain,
+      });
+      return sendSuccess(res, HTTP_STATUS.OK, result, 'Product resumed.');
+    } catch (err) {
+      return sendProductActionError(res, err);
+    }
+  })
+);
+
+router.post(
+  '/tests/:testId/revert-price',
+  asyncHandler(async (req, res) => {
+    const body = req.body && typeof req.body === 'object' ? req.body : {};
+    const accessToken = await resolveShopifyAccessToken(req);
+    if (!accessToken) {
+      return sendValidationError(res, ['Missing Shopify access token']);
+    }
+    try {
+      const result = await revertSmartPricingProductPrice({
+        testId: req.params.testId,
+        shopDomain: req.shopDomain,
+        accessToken,
+        force: body.force === true,
+        dryRun: body.dry_run === true || body.dryRun === true,
+      });
+      const message = result.already_reverted
+        ? 'Prices already match the pre-apply baseline.'
+        : result.dry_run
+          ? 'Revert preview ready'
+          : `Restored ${result.updated_count} Shopify price${result.updated_count === 1 ? '' : 's'}.`;
+      return sendSuccess(res, HTTP_STATUS.OK, result, message);
+    } catch (err) {
+      if (err.code === 'PRICE_DRIFT') {
+        return sendError(res, HTTP_STATUS.CONFLICT, err.message, {
+          code: 'PRICE_DRIFT',
+          drifted: err.drifted || [],
+        });
+      }
+      if (err.code === 'REVERT_UNVERIFIABLE') {
+        return sendError(res, HTTP_STATUS.CONFLICT, err.message, {
+          code: 'REVERT_UNVERIFIABLE',
+          unverified: err.unverified || [],
+        });
+      }
+      return sendValidationError(res, [err.message]);
+    }
+  })
+);
+
+router.post(
+  '/tests/:testId/rerun',
+  asyncHandler(async (req, res) => {
+    const body = req.body && typeof req.body === 'object' ? req.body : {};
+    const accessToken = await resolveShopifyAccessToken(req);
+    try {
+      const result = await rerunSmartPricingProduct({
+        testId: req.params.testId,
+        shopDomain: req.shopDomain,
+        accessToken,
+        armPrices: body.arm_prices || body.armPrices || null,
+        useAiSuggestion: body.use_ai_suggestion === true || body.useAiSuggestion === true,
+        note: body.note || null,
+      });
+      if (!result.queued && result.reason === 'round_exists') {
+        return sendSuccess(
+          res,
+          HTTP_STATUS.OK,
+          result,
+          'A follow-up round is already queued for this product.'
+        );
+      }
+      return sendSuccess(
+        res,
+        HTTP_STATUS.OK,
+        result,
+        result.queued
+          ? `Round ${result.learning_round} queued. Review and launch when ready.`
+          : result.reason || 'Follow-up not queued'
+      );
+    } catch (err) {
+      return sendProductActionError(res, err);
+    }
+  })
+);
+
+router.get(
+  '/products/:planId/report',
+  asyncHandler(async (req, res) => {
+    try {
+      const report = await buildSmartPricingProductReport(req.shopDomain, req.params.planId);
+      return sendSuccess(res, HTTP_STATUS.OK, report);
+    } catch (err) {
+      return sendValidationError(res, [err.message]);
+    }
+  })
+);
+
+router.get(
+  '/products/:planId/events',
+  asyncHandler(async (req, res) => {
+    const events = await listProductEvents(req.shopDomain, {
+      planId: req.params.planId,
+      limit: Number(req.query.limit) || 100,
+    });
+    return sendSuccess(res, HTTP_STATUS.OK, { events });
   })
 );
 

@@ -1,6 +1,10 @@
 import type { ActionFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
 import db from "../db.server";
+import {
+  expressApiBase,
+  internalServiceHeaders,
+} from "../utils/expressInternalApi.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
     const { payload, session, topic, shop } = await authenticate.webhook(request);
@@ -19,15 +23,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         });
     }
     try {
-      const apiBase = process.env.RIPSPRICEX_API_URL || "http://127.0.0.1:3456";
       const accessToken = session?.accessToken || undefined;
-      await fetch(`${apiBase}/api/shops/install`, {
+      await fetch(`${expressApiBase()}/api/shops/install`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Shopify-Shop-Domain": shop,
-          ...(accessToken ? { "X-Shopify-Access-Token": accessToken } : {}),
-        },
+        headers: internalServiceHeaders(
+          shop,
+          accessToken ? { "X-Shopify-Access-Token": accessToken } : {},
+        ),
         body: JSON.stringify({
           scope,
           access_token: accessToken,

@@ -1,7 +1,11 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { Button } from '@shopify/polaris';
+import { useKeyedState } from '../../../../hooks/useKeyedState';
+import useFocusTrap from '../../../../hooks/useFocusTrap';
 import AudienceSuccessStepPanel from '../AudienceSuccessStepPanel';
+import { estimateSignificanceDuration } from '../estimateSignificanceDuration';
+import { shopDesignFromGuardrails } from '../sampleSizePolicy';
 import styles from '../SmartPricingClassic.module.css';
 
 export default function ClassicAudienceMetricsEditModal({
@@ -13,22 +17,39 @@ export default function ClassicAudienceMetricsEditModal({
   readOnlyReason = '',
   liveWarning = '',
   saving = false,
+  shopDefaultsReady = true,
+  shopMaxRevenueDropPercent,
+  plans = [],
+  variations = [],
+  shopGuardrails = {},
   onClose,
   onSave,
 }) {
-  const [draft, setDraft] = useState(initialValue);
+  // Edits are kept per open/close cycle so a parent re-render cannot wipe them.
+  const [draft, setDraft] = useKeyedState(open, initialValue);
+  const focusTrapRef = useFocusTrap(open);
+  const significanceEstimate = useMemo(() => {
+    if (!draft) return null;
+    const design = shopDesignFromGuardrails(shopGuardrails);
+    return estimateSignificanceDuration({
+      plans,
+      variations,
+      trafficAllocation: draft.trafficAllocation,
+      minSampleSize: draft.minSampleSize,
+      minConversionsPerVariation: design.minConversions,
+      mdePercent: design.mdePercent,
+      confidenceLevel: design.confidenceLevel,
+      power: design.power,
+    });
+  }, [draft, plans, shopGuardrails, variations]);
 
   useEffect(() => {
-    if (open) setDraft(initialValue);
-    // Snapshot only when the editor opens so parent re-renders do not wipe edits.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
-
-  useEffect(() => {
-    if (!open || focus !== 'metrics') return undefined;
+    if (!open || (focus !== 'metrics' && focus !== 'guardrail')) return undefined;
     const timer = window.setTimeout(() => {
       const body = document.querySelector(`.${styles.audienceEditBody}`);
-      const target = document.getElementById('classic-metrics-editor');
+      const target = document.getElementById(
+        focus === 'guardrail' ? 'classic-revenue-guardrail' : 'classic-metrics-editor'
+      );
       if (!body || !target) return;
       const offset = target.getBoundingClientRect().top - body.getBoundingClientRect().top;
       body.scrollTop += offset - 8;
@@ -59,21 +80,28 @@ export default function ClassicAudienceMetricsEditModal({
     <div
       className={styles.modalBackdrop}
       role="presentation"
-      onClick={() => {
-        if (!saving) onClose();
+      onClick={event => {
+        // Close only on the backdrop itself. Letting the dialog swallow the
+        // click instead would put a mouse listener on a non-interactive
+        // element, which keyboard users can never reach.
+        if (event.target === event.currentTarget && !saving) onClose();
       }}
     >
       <div
+        ref={focusTrapRef}
         className={`${styles.modal} ${styles.audienceEditModal}`}
         role="dialog"
         aria-modal="true"
         aria-labelledby="classic-audience-edit-title"
-        onClick={event => event.stopPropagation()}
       >
         <div className={styles.modalHeader}>
           <div>
             <h2 id="classic-audience-edit-title" className={`${styles.modalTitle} ripx-classic-sans`}>
-              {focus === 'metrics' ? 'Edit metrics' : 'Edit audience'}
+              {focus === 'guardrail'
+                ? 'Edit revenue guardrail'
+                : focus === 'metrics'
+                  ? 'Edit metrics'
+                  : 'Edit audience'}
             </h2>
             {readOnlyReason ? <p className={styles.help}>{readOnlyReason}</p> : null}
             {liveWarning ? <p className={styles.help}>{liveWarning}</p> : null}
@@ -87,14 +115,21 @@ export default function ClassicAudienceMetricsEditModal({
             value={draft}
             onChange={setDraft}
             shopDomain={shopDomain}
-            disabled={readOnly || saving}
+            shopMaxRevenueDropPercent={shopMaxRevenueDropPercent}
+            significanceEstimate={significanceEstimate}
+            disabled={readOnly || saving || !shopDefaultsReady}
           />
         </div>
         {readOnly ? null : (
           <div className={styles.modalFooter}>
             <span />
-            <Button variant="primary" loading={saving} disabled={saving} onClick={() => onSave(draft)}>
-              Save changes
+            <Button
+              variant="primary"
+              loading={saving}
+              disabled={saving || !shopDefaultsReady}
+              onClick={() => onSave(draft)}
+            >
+              {shopDefaultsReady ? 'Save changes' : 'Loading shop defaults…'}
             </Button>
           </div>
         )}

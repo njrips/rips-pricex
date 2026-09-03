@@ -111,7 +111,7 @@ function getLineAttributeValue(line, aliasNames = [], keys = []) {
 }
 
 /**
- * @param {Input['cart']['lines'][number]} line
+ * @param {CartTransformRun['cart']['lines'][number]} line
  * @param {number | null} forcedTestAmount
  * @param {string} forcedTestVariantId
  * @returns {boolean}
@@ -169,7 +169,7 @@ function shouldApplyDirectOverride(line, forcedTestAmount, forcedTestVariantId) 
 }
 
 /**
- * @param {Input['cart']['lines'][number]} line
+ * @param {CartTransformRun['cart']['lines'][number]} line
  * @param {number | null} forcedTestAmount
  * @param {string} forcedTestVariantId
  * @returns {Operation['lineUpdate'] | null}
@@ -195,7 +195,7 @@ function buildLineUpdateOperation(line, forcedTestAmount, forcedTestVariantId) {
 }
 
 /**
- * @param {Input} input
+ * @param {CartTransformRun} input
  * @returns {CartTransformRunResult}
  */
 export function cartTransformRun(input) {

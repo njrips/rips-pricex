@@ -45,7 +45,7 @@ export function getOfferCheckoutBlockReason(readiness, { loading = false } = {})
     return String(readiness.offer_message);
   }
   if (readiness?.live_api_checked === true && readiness?.discount_function_available !== true) {
-    return 'Offer tests need the RipsPriceX checkout discount function. Deploy ripspricex-checkout-discount, then re-check Setup.';
+    return 'Offer tests need the Pricify checkout discount function. Deploy ripspricex-checkout-discount, then re-check Setup.';
   }
   return 'Could not confirm the checkout discount function. Open Setup and Ensure checkout discount.';
 }

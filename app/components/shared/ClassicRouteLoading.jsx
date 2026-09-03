@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { useNavigation } from 'react-router';
+import { useKeyedState } from '../../hooks/useKeyedState';
 
 /** Delay before show — avoids flash on instant transitions. */
 const SHOW_DELAY_MS = 120;
@@ -10,19 +11,19 @@ const SHOW_DELAY_MS = 120;
  */
 export default function ClassicRouteLoading() {
   const navigation = useNavigation();
-  const busy = navigation.state !== 'idle';
-  const [visible, setVisible] = useState(false);
+  // Scope "we have waited long enough to show a loader" to the navigation that
+  // earned it. Going idle drops the key, so the loader hides by reading a fresh
+  // value rather than by an effect racing to switch it off.
+  const navKey = navigation.state === 'idle' ? null : navigation.location?.key || 'busy';
+  const [visible, setVisible] = useKeyedState(navKey, false);
 
   useEffect(() => {
-    if (!busy) {
-      setVisible(false);
-      return undefined;
-    }
+    if (!navKey) return undefined;
     const timer = window.setTimeout(() => setVisible(true), SHOW_DELAY_MS);
     return () => window.clearTimeout(timer);
-  }, [busy]);
+  }, [navKey, setVisible]);
 
-  if (!visible) return null;
+  if (!navKey || !visible) return null;
 
   return (
     <div className="rpx-route-loading" aria-busy="true" aria-live="polite">

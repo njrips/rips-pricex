@@ -1,25 +1,69 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { Badge, Banner, Button } from '@shopify/polaris';
 import { rpxApi } from '../../../lib/api.client';
 import { useUpgradeRedirect } from '../../../lib/useUpgradeRedirect';
+import { useKeyedState } from '../../../hooks/useKeyedState';
 import {
   describeSmartPricingLaunchReadiness,
   unwrapCheckoutReadiness,
 } from '../../../utils/checkoutReadinessClient';
 import styles from '../../SmartPricing/classic/SmartPricingClassic.module.css';
 
+// Returns a patch rather than a whole state so a failed reload keeps whatever
+// plan details were already on screen.
+async function loadPlanState(request) {
+  try {
+    const [bill, readinessPayload] = await Promise.all([
+      rpxApi.billingStatus(request),
+      rpxApi.checkoutReadiness(request).catch(() => null),
+    ]);
+    return {
+      remote: {
+        entitled: Boolean(bill.entitled),
+        planHandle: bill.planHandle ?? null,
+        status: bill.status,
+        upgradeUrl: bill.upgradeUrl,
+      },
+      launchSummary: describeSmartPricingLaunchReadiness(
+        unwrapCheckoutReadiness(readinessPayload)
+      ),
+      loadError: null,
+      loading: false,
+    };
+  } catch (e) {
+    return {
+      loadError: e instanceof Error ? e.message : 'Could not load billing status',
+      loading: false,
+    };
+  }
+}
+
 /**
  * Plan entitlement + checkout readiness for Settings → Plan tab footers/body.
  * Pass enabled=false while another Settings tab is active to skip the network call.
  */
 export function usePlanBillingState(ctx, { enabled = true } = {}) {
-  const [remote, setRemote] = useState(null);
-  const [loadError, setLoadError] = useState(null);
-  const [loading, setLoading] = useState(Boolean(enabled));
-  const [launchSummary, setLaunchSummary] = useState(() =>
-    describeSmartPricingLaunchReadiness(null)
+  const request = useMemo(
+    () => ({
+      shop: ctx.shop,
+      apiBase: ctx.apiBase,
+      entitled: ctx.entitled,
+      enabled: Boolean(enabled),
+    }),
+    [ctx.shop, ctx.apiBase, ctx.entitled, enabled]
   );
+  const initialState = useMemo(
+    () => ({
+      remote: null,
+      loadError: null,
+      loading: Boolean(enabled),
+      launchSummary: describeSmartPricingLaunchReadiness(null),
+    }),
+    [enabled]
+  );
+  const [state, setState] = useKeyedState(request, initialState);
+  const { remote, loadError, loading, launchSummary } = state;
 
   const entitled = remote?.entitled ?? ctx.entitled;
   const planHandle = remote?.planHandle || ctx.planHandle || 'none';
@@ -33,36 +77,22 @@ export function usePlanBillingState(ctx, { enabled = true } = {}) {
   const canOpenPricing = Boolean(String(upgradeUrl || '').trim());
 
   const refresh = useCallback(async () => {
-    if (!enabled) return;
-    setLoading(true);
-    try {
-      const [bill, readinessPayload] = await Promise.all([
-        rpxApi.billingStatus(ctx),
-        rpxApi.checkoutReadiness(ctx).catch(() => null),
-      ]);
-      setRemote({
-        entitled: Boolean(bill.entitled),
-        planHandle: bill.planHandle ?? null,
-        status: bill.status,
-        upgradeUrl: bill.upgradeUrl,
-      });
-      const readiness = unwrapCheckoutReadiness(readinessPayload);
-      setLaunchSummary(describeSmartPricingLaunchReadiness(readiness));
-      setLoadError(null);
-    } catch (e) {
-      setLoadError(e instanceof Error ? e.message : 'Could not load billing status');
-    } finally {
-      setLoading(false);
-    }
-  }, [ctx.shop, ctx.apiBase, ctx.entitled, enabled]);
+    if (!request.enabled) return;
+    setState(prev => ({ ...prev, loading: true }));
+    const patch = await loadPlanState(request);
+    setState(prev => ({ ...prev, ...patch }));
+  }, [request, setState]);
 
   useEffect(() => {
-    if (!enabled) {
-      setLoading(false);
-      return;
-    }
-    void refresh();
-  }, [refresh, enabled]);
+    if (!request.enabled) return undefined;
+    let cancelled = false;
+    loadPlanState(request).then(patch => {
+      if (!cancelled) setState(prev => ({ ...prev, ...patch }));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [request, setState]);
 
   return {
     loading,

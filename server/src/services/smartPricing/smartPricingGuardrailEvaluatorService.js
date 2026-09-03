@@ -4,7 +4,7 @@
 
 const { updateTest } = require('../../models/test');
 const abTestEngine = require('../abTestEngine');
-const { scheduleSmartPricingInboxSync } = require('./smartPricingInboxStopSyncService');
+const { syncSmartPricingInboxForTest } = require('./smartPricingInboxStopSyncService');
 const {
   MIN_VISITORS_FOR_REVENUE_GUARDRAIL,
   evaluateRevenueDrop,
@@ -30,7 +30,7 @@ function isRunningStatus(status) {
   return key === 'running' || key === 'active';
 }
 
-function resolveThreshold(test = {}) {
+function resolveThreshold(test = {}, shopGuardrails = {}) {
   const config = parseGuardrailConfig(test.guardrail_config);
   const goalRails =
     test.goal && typeof test.goal === 'object' && test.goal.guardrails
@@ -40,7 +40,16 @@ function resolveThreshold(test = {}) {
     config.max_revenue_drop_percent ??
     goalRails.max_revenue_drop_percent ??
     test.metadata?.guardrails?.max_revenue_drop_percent;
-  return Number(raw);
+  const storedThreshold = Number(raw);
+  const shopThreshold = Number(
+    shopGuardrails.max_revenue_drop_percent ?? shopGuardrails.maxRevenueDropPercent
+  );
+  if (Number.isFinite(storedThreshold) && storedThreshold > 0) {
+    return Number.isFinite(shopThreshold) && shopThreshold > 0
+      ? Math.min(storedThreshold, shopThreshold)
+      : storedThreshold;
+  }
+  return shopThreshold;
 }
 
 async function enforceRevenueDropGuardrail({ shopDomain, test, analytics } = {}) {
@@ -61,16 +70,14 @@ async function enforceRevenueDropGuardrail({ shopDomain, test, analytics } = {})
     return { skipped: true, reason: 'not_running', test_status: test.status };
   }
 
-  let threshold = resolveThreshold(test);
-  if (!Number.isFinite(threshold) || threshold <= 0) {
-    try {
-      const { getShopSmartPricingGuardrails } = require('./smartPricingGuardrailsService');
-      const shop = await getShopSmartPricingGuardrails(shopDomain);
-      threshold = Number(shop?.max_revenue_drop_percent);
-    } catch {
-      threshold = NaN;
-    }
+  let shopGuardrails = {};
+  try {
+    const { getShopSmartPricingGuardrails } = require('./smartPricingGuardrailsService');
+    shopGuardrails = (await getShopSmartPricingGuardrails(shopDomain)) || {};
+  } catch {
+    shopGuardrails = {};
   }
+  let threshold = resolveThreshold(test, shopGuardrails);
   if (!Number.isFinite(threshold) || threshold <= 0) {
     threshold = 10;
   }
@@ -110,7 +117,22 @@ async function enforceRevenueDropGuardrail({ shopDomain, test, analytics } = {})
     guardrail_config: nextConfig,
   });
   const stopped = await abTestEngine.stopTest(test.id, shopDomain);
-  scheduleSmartPricingInboxSync(shopDomain, test.id, { reason: 'guardrail_breach' });
+  await syncSmartPricingInboxForTest(shopDomain, test.id, { reason: 'guardrail_breach' }).catch(
+    () => null
+  );
+
+  const { recordEventForTest } = require('../../models/smartPricingProductEventStore');
+  await recordEventForTest(shopDomain, test.id, 'guardrail_stopped', {
+    actor: 'guardrail',
+    test: stopped || test,
+    payload: {
+      observed_drop_percent: verdict.observed_drop_percent,
+      threshold_percent: verdict.threshold_percent,
+      variant_id: verdict.variant_id || null,
+      variant_name: verdict.variant_name || null,
+      breached_at: breachedAt,
+    },
+  }).catch(() => null);
 
   return {
     skipped: false,
@@ -124,4 +146,5 @@ async function enforceRevenueDropGuardrail({ shopDomain, test, analytics } = {})
 
 module.exports = {
   enforceRevenueDropGuardrail,
+  resolveThreshold,
 };

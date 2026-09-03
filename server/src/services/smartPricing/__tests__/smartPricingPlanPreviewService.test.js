@@ -18,7 +18,11 @@ jest.mock('../../shopifyService', () => ({
 jest.mock('../smartPricingLaunchService', () => ({
   launchSmartPricingPlanAsTest: jest.fn(),
 }));
+// Only the database-backed lookup is stubbed. The pure helpers in this module
+// are used by the payload builders under test, so replacing them with nothing
+// silently breaks those builders.
 jest.mock('../smartPricingGuardrailsService', () => ({
+  ...jest.requireActual('../smartPricingGuardrailsService'),
   getShopSmartPricingGuardrails: jest.fn().mockResolvedValue({}),
 }));
 jest.mock('../offerCheckoutDiscountService', () => ({
@@ -436,10 +440,18 @@ describe('smartPricingPlanPreviewService', () => {
         },
       ],
     };
+    // Model the row actually being absent and then created, rather than keying
+    // off call order: the service reads the plan more than once, so a
+    // `mockResolvedValueOnce(null)` was being consumed before the upsert check.
+    let stored = null;
     getInboxPlanById.mockReset();
-    getInboxPlanById.mockResolvedValueOnce(null).mockResolvedValue(incoming);
+    getInboxPlanById.mockImplementation(async () => stored);
     listInboxPlans.mockResolvedValue({ plans: [incoming] });
-    upsertInboxPlan.mockResolvedValue(incoming);
+    upsertInboxPlan.mockReset();
+    upsertInboxPlan.mockImplementation(async (_domain, plan) => {
+      stored = { ...incoming, ...(plan || {}) };
+      return stored;
+    });
     launchSmartPricingPlanAsTest.mockResolvedValue({
       test: {
         id: '88888888-8888-4888-8888-888888888888',

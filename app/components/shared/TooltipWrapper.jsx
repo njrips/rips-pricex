@@ -5,7 +5,6 @@
  * Use for buttons, icons, and other elements that need hover hints.
  */
 
-import React from 'react';
 import { Tooltip } from '@shopify/polaris';
 
 /**

@@ -454,6 +454,7 @@ module.exports = {
   supportNotifyRecipients,
   staffTicketUrl,
   firstEnv,
+  escapeHtml,
   formatFromAddress,
   isSupportMailerConfigured,
   staffLoginCodeEmail,

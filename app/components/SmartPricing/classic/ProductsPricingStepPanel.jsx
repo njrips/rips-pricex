@@ -1,9 +1,22 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Banner, Button, Select, TextField } from '@shopify/polaris';
+import { useKeyedState } from '../../../hooks/useKeyedState';
 import ClassicProductPickerModal from './ClassicProductPickerModal';
 import OfferArmsEditor from './OfferArmsEditor';
 import { isOfferExperimentType } from './offerSelection';
-import { armHasAiPrices, getAiSuggestCopy, normalizeAiPriceBand } from './productsStepReadiness';
+import SettingsInfoLink from '../../Settings/SettingsInfoLink';
+import {
+  aiSuggestBlockedReason,
+  armHasAiPrices,
+  capAiBandToShopMax,
+  describeAiBandCap,
+  describeAiBandClamp,
+  describeCollapsedAiBand,
+  getAiSuggestCopy,
+  normalizeAiPriceBand,
+  resolveMaxPriceChangeRaise,
+  resolveRaiseForAttempt,
+} from './productsStepReadiness';
 import {
   ButtonIconSearch,
   ButtonIconSelect,
@@ -11,6 +24,7 @@ import {
   IconCheckCircle,
   IconChevron,
   IconChevronRight,
+  IconControlBaseline,
   IconHandPick,
   IconPlusCircle,
   IconWand,
@@ -220,6 +234,11 @@ export default function ProductsPricingStepPanel({
   onAiBandDirty,
   aiUnit = 'percent',
   onAiUnitChange,
+  shopMaxChangePercent,
+  onRaiseMaxPriceChange,
+  raisingMaxPriceChange = false,
+  aiBandAttempt = null,
+  onOpenGuardrailSettings,
   aiMinPct = '10',
   aiMaxPct = '20',
   onAiMinPctChange,
@@ -228,6 +247,7 @@ export default function ProductsPricingStepPanel({
   loadError = '',
   onRetryLoad,
   continueHint = '',
+  shopDefaultsReady = true,
   currency = 'USD',
   bulkAppliedMessage = '',
   onDismissBulkMessage,
@@ -238,9 +258,7 @@ export default function ProductsPricingStepPanel({
   const [pickerOpen, setPickerOpen] = useState(false);
   const [tableFilter, setTableFilter] = useState('');
   const [tableCategory, setTableCategory] = useState('');
-  const [pricingPage, setPricingPage] = useState(0);
   const [pricingPageSize, setPricingPageSize] = useState(PRICING_TABLE_PAGE_SIZES[0]);
-  const [expanded, setExpanded] = useState(() => new Set());
   const [bulkUnit, setBulkUnit] = useState('percent');
   const [localBulkNotice, setLocalBulkNotice] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
@@ -251,7 +269,7 @@ export default function ProductsPricingStepPanel({
     [selectedIds]
   );
 
-  const isSelectedId = id => selectedSet.has(String(id || ''));
+  const isSelectedId = useCallback(id => selectedSet.has(String(id || '')), [selectedSet]);
 
   const catalogProductCount = useMemo(() => {
     const keys = new Set((opportunities || []).map(productKey));
@@ -264,7 +282,7 @@ export default function ProductsPricingStepPanel({
       if (isSelectedId(row.variant_id)) keys.add(productKey(row));
     });
     return keys.size;
-  }, [opportunities, selectedSet]);
+  }, [opportunities, isSelectedId]);
 
   const categoryOptions = useMemo(() => {
     const map = new Map();
@@ -289,7 +307,7 @@ export default function ProductsPricingStepPanel({
         };
       })
       .sort((a, b) => a.label.localeCompare(b.label));
-  }, [opportunities, selectedSet]);
+  }, [opportunities, isSelectedId]);
 
   const collectionStats = useMemo(() => {
     const stats = new Map();
@@ -309,7 +327,7 @@ export default function ProductsPricingStepPanel({
       });
     });
     return stats;
-  }, [collectionOptions, opportunities, selectedSet]);
+  }, [collectionOptions, opportunities, isSelectedId]);
 
   const filteredRows = useMemo(() => {
     const q = String(productSearch || '')
@@ -424,7 +442,7 @@ export default function ProductsPricingStepPanel({
     );
     if (!selectedProductKeys.size) return [];
     return allRows.filter(row => selectedProductKeys.has(productKey(row)));
-  }, [pickMode, opportunities, selectedIds, maxSelection, selectedSet]);
+  }, [pickMode, opportunities, maxSelection, isSelectedId]);
 
   const pricingGroups = useMemo(() => {
     const q = tableFilter.trim().toLowerCase();
@@ -445,7 +463,14 @@ export default function ProductsPricingStepPanel({
     return groupPricingRows(filtered);
   }, [pricingSource, tableFilter, tableCategory]);
 
+  // Filters, the pick mode, and the page size all change what "page 1" means, so
+  // each of them starts the pager over.
+  const [pricingPage, setPricingPage] = useKeyedState(
+    `${tableFilter}|${tableCategory}|${pickMode}|${pricingPageSize}`,
+    0
+  );
   const pricingPageCount = Math.max(1, Math.ceil(pricingGroups.length / pricingPageSize));
+  // Clamped so a shrinking result set cannot leave the pager past the last page.
   const safePricingPage = Math.min(pricingPage, pricingPageCount - 1);
   const pagedPricingGroups = useMemo(() => {
     const start = safePricingPage * pricingPageSize;
@@ -458,13 +483,6 @@ export default function ProductsPricingStepPanel({
     return `${start}–${end} of ${pricingGroups.length}`;
   }, [pricingGroups.length, safePricingPage, pricingPageSize]);
 
-  useEffect(() => {
-    setPricingPage(0);
-  }, [tableFilter, tableCategory, pickMode, pricingPageSize]);
-
-  useEffect(() => {
-    if (pricingPage !== safePricingPage) setPricingPage(safePricingPage);
-  }, [pricingPage, safePricingPage]);
 
   // Keep selection in sync with sibling variants so launch/batch includes the full product.
   useEffect(() => {
@@ -485,17 +503,20 @@ export default function ProductsPricingStepPanel({
       next.length === existing.length && next.every((id, index) => id === existing[index]);
     if (unchanged) return;
     onSelectedIdsChange(next);
-  }, [pickMode, opportunities, selectedIds, maxSelection, selectedSet, onSelectedIdsChange]);
+  }, [pickMode, opportunities, selectedIds, maxSelection, isSelectedId, onSelectedIdsChange]);
 
-  const didAutoExpand = useRef(false);
-  useEffect(() => {
-    if (didAutoExpand.current || !pricingGroups.length) return;
-    const firstMulti = pricingGroups.find(g => g.variants.length > 1);
-    if (firstMulti) {
-      setExpanded(new Set([firstMulti.key]));
-      didAutoExpand.current = true;
-    }
-  }, [pricingGroups]);
+  // The first product with several variants opens by default so the accordion is
+  // discoverable; the merchant's own expand/collapse wins until the list changes.
+  const firstMultiVariantKey = useMemo(
+    () => pricingGroups.find(g => g.variants.length > 1)?.key || '',
+    [pricingGroups]
+  );
+  const initialExpanded = useMemo(
+    () => new Set(firstMultiVariantKey ? [firstMultiVariantKey] : []),
+    [firstMultiVariantKey]
+  );
+  const [expanded, setExpanded] = useKeyedState(firstMultiVariantKey, initialExpanded);
+
 
   const expandAll = () => {
     setExpanded(prev => {
@@ -546,13 +567,53 @@ export default function ProductsPricingStepPanel({
     armId: activeArm?.id,
     priceOverrides,
   });
+  const aiBlockedReason = aiSuggestBlockedReason({
+    loadingProducts: loading,
+    shopDefaultsReady,
+    hasProducts: Boolean(pricingSource.length),
+    hasBand: Boolean(aiBand),
+  });
   const aiSuggestCopy = getAiSuggestCopy({
     hasProducts: Boolean(pricingSource.length),
     suggested: aiSuggested,
     hasArmPrices: activeArmHasAiPrices,
     summary: aiSuggestSummary,
     busy: aiSuggestBusy,
+    blockedReason: aiBlockedReason,
   });
+  // Warn while the band is being typed rather than after Suggest runs, so the
+  // shop guardrail never silently rewrites what the merchant asked for.
+  const aiBandAveragePrice = (() => {
+    const bases = pricingSource
+      .map(row => Number(row.current_price ?? row.price) || 0)
+      .filter(n => n > 0);
+    return bases.length ? bases.reduce((sum, n) => sum + n, 0) / bases.length : 0;
+  })();
+  const aiBandCap = capAiBandToShopMax(aiBand, shopMaxChangePercent, {
+    unit: aiUnit,
+    averagePrice: aiBandAveragePrice,
+  });
+  // The band fields are clamped to the shop cap as they are typed, so the usual
+  // case is an attempt we blocked. capAiBandToShopMax still covers a band that
+  // predates the current cap, such as a restored draft.
+  const attemptedBandValue = Math.max(
+    Number(aiBandAttempt?.min) || 0,
+    Number(aiBandAttempt?.max) || 0
+  );
+  const bandOptions = { unit: aiUnit, averagePrice: aiBandAveragePrice };
+  const aiBandClampNotice = describeAiBandClamp(
+    attemptedBandValue,
+    shopMaxChangePercent,
+    bandOptions
+  );
+  const aiBandCollapsedNotice = describeCollapsedAiBand(aiBandCap, { unit: aiUnit });
+  const aiBandCapNotice =
+    [aiBandClampNotice || describeAiBandCap(aiBandCap, { unit: aiUnit }), aiBandCollapsedNotice]
+      .filter(Boolean)
+      .join(' ') || '';
+  const aiBandRaise = aiBandClampNotice
+    ? resolveRaiseForAttempt(attemptedBandValue, shopMaxChangePercent, bandOptions)
+    : resolveMaxPriceChangeRaise(aiBandCap, bandOptions);
 
   const getTestPrice = (row, armId) => {
     const id = row.variant_id;
@@ -1204,25 +1265,42 @@ export default function ProductsPricingStepPanel({
         <>
       <div className={styles.sectionLabel}>Set prices for</div>
       <div className={styles.priceTabs} role="tablist" aria-label="Variation prices">
-        {variations.map((arm, index) => (
-          <button
-            key={arm.id}
-            type="button"
-            role="tab"
-            aria-selected={activeArmIndex === index}
-            className={`${styles.priceTab} ${activeArmIndex === index ? styles.priceTabActive : ''}`}
-            onClick={() => onActiveArmIndexChange(index)}
-          >
-            <span className={styles.segmentLetter}>{arm.letter}</span>
-            {arm.name || arm.role || `Variation ${arm.letter}`}
-          </button>
-        ))}
+        {variations.map((arm, index) => {
+          const isControl = index === 0 || arm.id === 'control';
+          return (
+            <button
+              key={arm.id}
+              type="button"
+              role="tab"
+              aria-selected={activeArmIndex === index}
+              className={`${styles.priceTab} ${
+                activeArmIndex === index ? styles.priceTabActive : ''
+              }`}
+              onClick={() => onActiveArmIndexChange(index)}
+            >
+              <span
+                className={`${styles.segmentLetter} ${
+                  isControl ? styles.controlVariationMarker : ''
+                }`}
+                aria-label={
+                  isControl ? 'Control — current catalog baseline' : `Variation ${arm.letter}`
+                }
+              >
+                {isControl ? <IconControlBaseline size={12} /> : arm.letter}
+              </span>
+              {arm.name || arm.role || `Variation ${arm.letter}`}
+            </button>
+          );
+        })}
       </div>
       <p className={styles.help} style={{ marginTop: 0, marginBottom: 18 }}>
         Pick which variation you&apos;re pricing. Each variation can have its own prices.
       </p>
 
-      <div className={styles.sectionLabel}>How would you like to price them?</div>
+      <div className={styles.labelRow}>
+        <div className={styles.sectionLabel}>How would you like to price them?</div>
+        <SettingsInfoLink hash="ai-price" label="AI price suggestions" />
+      </div>
       <div className={`${styles.modeRow} ${styles.modeRow3}`}>
         {[
           {
@@ -1234,7 +1312,7 @@ export default function ProductsPricingStepPanel({
           {
             id: 'ai',
             title: 'AI suggested',
-            desc: 'Optimal prices from AI.',
+            desc: 'Prices inside your min–max band.',
             icon: <IconWand size={16} />,
           },
           {
@@ -1279,8 +1357,11 @@ export default function ProductsPricingStepPanel({
       {priceMode === 'ai' ? (
         <div className={styles.aiSuggestBanner}>
           <div className={styles.aiSuggestTitle}>
-            <IconWand size={16} />
-            AI Price Suggestions
+            <span className={styles.aiSuggestTitleLead}>
+              <IconWand size={16} />
+              AI Price Suggestions
+            </span>
+            <SettingsInfoLink hash="ai-price" label="AI price suggestions" />
           </div>
           <p className={styles.aiSuggestBody}>{aiSuggestCopy.body}</p>
           <div className={styles.aiBar}>
@@ -1345,16 +1426,45 @@ export default function ProductsPricingStepPanel({
                   $
                 </button>
               </div>
-              <Button
-                variant="primary"
-                onClick={() => onAiSuggest?.({ unit: aiUnit })}
-                disabled={aiSuggestBusy || loading || !pricingSource.length || !aiBand}
-                loading={aiSuggestBusy}
-              >
-                {aiSuggestCopy.button}
-              </Button>
+              <span title={aiBlockedReason || undefined}>
+                <Button
+                  variant="primary"
+                  onClick={() => onAiSuggest?.({ unit: aiUnit })}
+                  disabled={aiSuggestBusy || Boolean(aiBlockedReason)}
+                  loading={aiSuggestBusy}
+                >
+                  {aiSuggestCopy.button}
+                </Button>
+              </span>
             </div>
           </div>
+          {aiBandCapNotice ? (
+            <p className={styles.aiSuggestBody}>
+              {aiBandCapNotice}
+              <SettingsInfoLink hash="max-price-change" label="Max price change" />
+              {aiBandRaise && onRaiseMaxPriceChange ? (
+                <Button
+                  variant="plain"
+                  onClick={() => onRaiseMaxPriceChange(aiBandRaise.target)}
+                  disabled={aiSuggestBusy || raisingMaxPriceChange}
+                  loading={raisingMaxPriceChange}
+                >
+                  {aiBandRaise.coversRequest
+                    ? `Raise max price change to ${aiBandRaise.target}%`
+                    : `Raise max price change to ${aiBandRaise.target}% (the highest allowed)`}
+                </Button>
+              ) : null}
+              {onOpenGuardrailSettings ? (
+                <Button
+                  variant="plain"
+                  onClick={onOpenGuardrailSettings}
+                  disabled={raisingMaxPriceChange}
+                >
+                  Change in Settings
+                </Button>
+              ) : null}
+            </p>
+          ) : null}
         </div>
       ) : null}
 
@@ -1528,7 +1638,7 @@ export default function ProductsPricingStepPanel({
               size="slim"
               accessibilityLabel="Previous page"
               disabled={safePricingPage <= 0 || !pricingGroups.length}
-              onClick={() => setPricingPage(page => Math.max(0, page - 1))}
+              onClick={() => setPricingPage(Math.max(0, safePricingPage - 1))}
             >
               <span className={styles.tablePagerChevronPrev} aria-hidden>
                 <IconChevronRight size={14} />
@@ -1538,7 +1648,7 @@ export default function ProductsPricingStepPanel({
               size="slim"
               accessibilityLabel="Next page"
               disabled={safePricingPage >= pricingPageCount - 1 || !pricingGroups.length}
-              onClick={() => setPricingPage(page => Math.min(pricingPageCount - 1, page + 1))}
+              onClick={() => setPricingPage(Math.min(pricingPageCount - 1, safePricingPage + 1))}
             >
               <IconChevronRight size={14} />
             </Button>

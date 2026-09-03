@@ -2,9 +2,9 @@
  * Deterministic audience / goal suggestions and Step 4 launch checklist for Smart Pricing.
  */
 
-const { resolveLaunchCapacity } = require('./smartPricingLaunchGuardService');
-const { resolveSmartPricingCheckoutReadiness } = require('./smartPricingCheckoutReadinessService');
-const { listInboxPlans } = require('../../models/smartPricingInboxStore');
+// Launch capacity, checkout readiness, and the inbox store reach the database
+// and Shopify client. They are required lazily inside buildBatchPreviewLaunch so
+// the pure audience/goal helpers in this module stay importable on their own.
 
 const DEFAULT_SEGMENTS = Object.freeze({
   device: 'all',
@@ -152,6 +152,12 @@ async function buildBatchPreviewLaunch({
   accessToken = '',
   guardrails = {},
 }) {
+  const { resolveLaunchCapacity } = require('./smartPricingLaunchGuardService');
+  const {
+    resolveSmartPricingCheckoutReadiness,
+  } = require('./smartPricingCheckoutReadinessService');
+  const { listInboxPlans } = require('../../models/smartPricingInboxStore');
+
   const list = Array.isArray(plans) ? plans : [];
   const capacity = await resolveLaunchCapacity(shopDomain, {
     requestedCount: list.length,
@@ -165,7 +171,13 @@ async function buildBatchPreviewLaunch({
 
   const perPlan = list.map(plan => {
     const guard = planGuardrailsPass(plan);
-    const power = String(plan?.statistical_design?.power_rating || '').toLowerCase();
+    const timeline = String(
+      plan?.statistical_design?.timeline_rating || plan?.statistical_design?.power_rating || ''
+    ).toLowerCase();
+    const durationFeasibility = String(
+      plan?.statistical_design?.duration_feasibility || ''
+    ).toLowerCase();
+    const timelineOk = timeline === 'adequate' && durationFeasibility === 'practical';
     const goal = plan.goal || suggestGoalForPlan(plan, guardrails);
     const cogsOk = goal?.cogs?.enabled !== false;
     const days = plan?.statistical_design?.estimated_duration_days ?? null;
@@ -174,8 +186,11 @@ async function buildBatchPreviewLaunch({
       title: plan.title,
       guardrails_ok: guard.ok,
       failed_guardrails: guard.failed.map(f => f.label || f.id),
-      power_rating: power || 'unknown',
-      power_ok: power !== 'underpowered',
+      timeline_rating: timeline || 'unknown',
+      timeline_ok: timelineOk,
+      duration_feasibility: durationFeasibility || 'unknown',
+      power_rating: timeline || 'unknown',
+      power_ok: timelineOk,
       estimated_duration_days: days,
       cogs_configured: cogsOk,
       learning_path_rounds: Array.isArray(plan.learning_path) ? plan.learning_path.length : 0,
@@ -213,7 +228,15 @@ async function buildBatchPreviewLaunch({
   overlaps.forEach(row => warnings.push(row.message));
   perPlan.forEach(row => {
     if (!row.power_ok) {
-      warnings.push(`${row.title || row.plan_id}: statistical power is underpowered`);
+      warnings.push(
+        `${row.title || row.plan_id}: ${
+          row.duration_feasibility === 'not_feasible'
+            ? 'traffic does not support a practical 2–8 week test'
+            : row.timeline_rating === 'underpowered'
+            ? 'traffic does not support the target planning window'
+            : 'timeline needs qualified conversion and traffic data'
+        }`
+      );
     }
     if (!row.cogs_configured) {
       warnings.push(`${row.title || row.plan_id}: COGS not configured on goal`);

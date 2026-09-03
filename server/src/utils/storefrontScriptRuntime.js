@@ -4,7 +4,7 @@
  */
 
 /** Bump when embedded runtime config or script contract changes. Keep ?v= in sync: extensions/ripspricex-theme/blocks/ripspricex-app-embed.liquid. */
-const SCRIPT_VERSION = '1.0.60';
+const SCRIPT_VERSION = '1.0.62';
 
 /**
  * DB/API may use "pricing"; storefront logic expects "price".
@@ -363,6 +363,7 @@ function buildEarlyStorefrontAntiFlickerBootstrap(activeTests, priceSurfaceRegis
     'if(/(?:^|[?&])ab_preview(?:=|&|$)/.test(q)||/(?:^|[?&])ab_preview_test=/.test(q))return true;' +
     'if(window.sessionStorage){var raw=window.sessionStorage.getItem("__ripx_preview_ctx_v1__");' +
     'if(raw){var parsed=JSON.parse(raw);if(parsed&&parsed.preview)return true;}}' +
+    'if(document.cookie&&document.cookie.indexOf("__ripx_preview_ctx_v1=")!==-1)return true;' +
     'var wn=String(window.name||"");if(wn.indexOf("__ripx_preview_ctx_v1__:")===0)return true;' +
     '}catch(_ePreviewCtx){}return false;}' +
     'if(ripxHasPreviewCtx())return;var h=document.documentElement;if(!h||h.getAttribute("data-ripx-af"))return;' +

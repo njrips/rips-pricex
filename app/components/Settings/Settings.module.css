@@ -4010,6 +4010,11 @@
 
 .sectionHeaderTitleTip {
   display: inline-flex;
+  /* A button so keyboard users can reach the tooltip; these three reset the
+     control back to the bare icon it looks like. */
+  border: 0;
+  background: none;
+  font: inherit;
   padding: 0.2rem;
   border-radius: 6px;
   color: var(--text-secondary);

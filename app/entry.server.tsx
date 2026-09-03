@@ -3,7 +3,6 @@ import { renderToPipeableStream } from "react-dom/server";
 import { ServerRouter } from "react-router";
 import { createReadableStreamFromReadable } from "@react-router/node";
 import { type EntryContext } from "react-router";
-import { isbot } from "isbot";
 import { addDocumentResponseHeaders } from "./shopify.server";
 
 export const streamTimeout = 5000;
@@ -15,11 +14,6 @@ export default async function handleRequest(
   reactRouterContext: EntryContext
 ) {
   addDocumentResponseHeaders(request, responseHeaders);
-  const userAgent = request.headers.get("user-agent");
-  const callbackName = isbot(userAgent ?? '')
-    ? "onAllReady"
-    : "onShellReady";
-
   return new Promise((resolve, reject) => {
     const { pipe, abort } = renderToPipeableStream(
       <ServerRouter
@@ -27,7 +21,11 @@ export default async function handleRequest(
         url={request.url}
       />,
       {
-        [callbackName]: () => {
+        // Route modules and their Meta output can suspend in development.
+        // Flushing onShellReady may put late <meta>/<link> nodes after </head>,
+        // while the client expects them in <head>, causing full-document
+        // hydration failure. Wait until the document (including head) is final.
+        onAllReady: () => {
           const body = new PassThrough();
           const stream = createReadableStreamFromReadable(body);
 

@@ -10,7 +10,14 @@ function expressApiBase() {
   return String(process.env.RIPSPRICEX_API_URL || 'http://127.0.0.1:3456').replace(/\/+$/, '');
 }
 
-export async function expressSupportFetch(path, { shop, staffToken, method = 'GET', body } = {}) {
+/**
+ * @param {string} path
+ * @param {{ shop?: string, staffToken?: string, method?: string, body?: unknown }} [options]
+ */
+export async function expressSupportFetch(
+  path,
+  { shop, staffToken, method = 'GET', body } = {}
+) {
   const headers = { Accept: 'application/json' };
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   if (shop) {

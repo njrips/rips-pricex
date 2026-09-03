@@ -79,10 +79,10 @@ function evaluateRevenueDrop({
   const threshold = clampMaxRevenueDropPercent(thresholdPercent);
   const floor = Math.max(1, Number(minVisitors) || MIN_VISITORS_FOR_REVENUE_GUARDRAIL);
   const controlIndex = rows.findIndex((row, index) => isControlVariant(row, index));
-  const control = controlIndex >= 0 ? rows[controlIndex] : rows[0];
-  if (!control) {
+  if (controlIndex < 0) {
     return { ready: false, breached: false, reason: 'no_control' };
   }
+  const control = rows[controlIndex];
   const controlRpv = variantRpv(control);
   const controlVisitors = Number(control.visitors) || 0;
   if (!(controlRpv > 0) || controlVisitors < floor) {

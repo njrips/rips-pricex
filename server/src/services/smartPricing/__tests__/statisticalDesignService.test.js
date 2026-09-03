@@ -1,7 +1,10 @@
+const { describe, it } = require('node:test');
+const assert = require('node:assert/strict');
 const {
   computeVisitorsPerVariant,
   buildVariantCountOptions,
   buildStatisticalDesign,
+  resolveSampleSizePolicy,
 } = require('../statisticalDesignService');
 
 describe('statisticalDesignService', () => {
@@ -12,7 +15,26 @@ describe('statisticalDesignService', () => {
       confidenceLevel: 90,
       power: 80,
     });
-    expect(n).toBeGreaterThan(0);
+    assert.equal(n, 63552);
+  });
+
+  it('Bonferroni-adjusts the planning reference for multiple challengers', () => {
+    const oneChallenger = computeVisitorsPerVariant({
+      baselineConversionRate: 0.02,
+      mdePercent: 10,
+      confidenceLevel: 90,
+      power: 80,
+      comparisonCount: 1,
+    });
+    const threeChallengers = computeVisitorsPerVariant({
+      baselineConversionRate: 0.02,
+      mdePercent: 10,
+      confidenceLevel: 90,
+      power: 80,
+      comparisonCount: 3,
+    });
+    assert.equal(threeChallengers, 90652);
+    assert.ok(threeChallengers > oneChallenger);
   });
 
   it('marks higher variant counts as underpowered at low traffic', () => {
@@ -22,10 +44,11 @@ describe('statisticalDesignService', () => {
       mdePercent: 8,
       targetDays: 14,
     });
-    expect(options).toHaveLength(3);
+    assert.equal(options.length, 3);
     const fourVariant = options.find(o => o.count === 4);
-    expect(fourVariant.power_rating).toBe('underpowered');
-    expect(options.some(o => o.recommended)).toBe(true);
+    assert.equal(fourVariant.power_rating, 'underpowered');
+    assert.equal(fourVariant.timeline_rating, 'underpowered');
+    assert.equal(options.some(o => o.recommended), true);
   });
 
   it('builds statistical design aligned with selected variant count', () => {
@@ -36,8 +59,34 @@ describe('statisticalDesignService', () => {
       baselinePpv: 1.84,
       mdePercent: 6.5,
     });
-    expect(design.primary_metric).toBe('profit_per_visitor');
-    expect(design.total_visitors_required).toBe(design.visitors_per_variant_required * 3);
-    expect(design.estimated_duration_days).toBeGreaterThan(0);
+    assert.equal(design.primary_metric, 'conversion_rate');
+    assert.equal(design.planning_method, 'fixed_horizon_two_proportion');
+    assert.equal(design.decision_metric, 'profit_per_visitor');
+    assert.equal(design.analysis_method, 'sequential');
+    assert.equal(design.total_visitors_required, design.visitors_per_variant_required * 3);
+    assert.ok(design.estimated_duration_days > 0);
+    assert.ok(['practical', 'not_feasible'].includes(design.duration_feasibility));
+    assert.equal(design.practical_window_max_days, 56);
+  });
+
+  it('keeps the merchant floor when no baseline exists and does not invent 2% CVR', () => {
+    const policy = resolveSampleSizePolicy({ merchantMin: 2000, baselineConversionRate: null });
+    assert.equal(policy.merchantMin, 2000);
+    assert.equal(policy.recommendedPerVariant, null);
+    assert.equal(policy.planningPerVariant, 2000);
+    assert.equal(policy.powerRating, 'adequate');
+  });
+
+  it('recommends power N from a real baseline and marks an undersized floor', () => {
+    const policy = resolveSampleSizePolicy({
+      merchantMin: 500,
+      baselineConversionRate: 0.05,
+      mdePercent: 10,
+      confidenceLevel: 90,
+      power: 80,
+    });
+    assert.ok(policy.recommendedPerVariant > 500);
+    assert.equal(policy.planningPerVariant, policy.recommendedPerVariant);
+    assert.equal(policy.powerRating, 'underpowered');
   });
 });

@@ -1,45 +1,20 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { Button, TextField } from '@shopify/polaris';
-import TooltipWrapper from '../../shared/TooltipWrapper';
+import SettingsInfoLink from '../../Settings/SettingsInfoLink';
 import { IconCheck, IconChevron } from './classicIcons';
+import { formatVisitorCount } from './estimateSignificanceDuration';
 import styles from './SmartPricingClassic.module.css';
 
 export const EXPERIMENT_TYPES = [
   {
-    id: 'ab',
-    title: 'A/B test',
-    description: 'Compare two versions of a single element.',
-    enabled: false,
-  },
-  {
-    id: 'mvt',
-    title: 'Multivariate',
-    description: 'Test multiple element combinations at once.',
-    enabled: false,
-  },
-  {
-    id: 'split_url',
-    title: 'Split URL',
-    description: 'Redirect traffic to different page URLs.',
-    enabled: false,
-  },
-  {
-    id: 'feature_flag',
-    title: 'Feature flag',
-    description: 'Roll out features gradually with targeting.',
-    enabled: false,
-  },
-  {
     id: 'price_test',
     title: 'Price test',
     description: 'Compare different price points for the same product.',
-    enabled: true,
   },
   {
     id: 'offer_test',
     title: 'Offer test',
     description: 'Test a percent or amount-off offer on selected products.',
-    enabled: true,
   },
 ];
 
@@ -54,6 +29,7 @@ export default function SetupStepPanel({
   onExperimentTypeChange,
   minSampleSize,
   onMinSampleSizeChange,
+  significanceEstimate = null,
 }) {
   const [advancedOpen, setAdvancedOpen] = useState(false);
 
@@ -72,7 +48,6 @@ export default function SetupStepPanel({
               : 'e.g. Growth plan — $39 price test'
           }
           autoComplete="off"
-          autoFocus
         />
       </div>
 
@@ -107,14 +82,12 @@ export default function SetupStepPanel({
       <div className={styles.typeGrid}>
         {EXPERIMENT_TYPES.map(type => {
           const selected = experimentType === type.id;
-          const card = (
+          return (
             <button
+              key={type.id}
               type="button"
-              disabled={!type.enabled}
-              className={`${styles.choiceCard} ${selected ? styles.choiceCardSelected : ''} ${
-                !type.enabled ? styles.choiceCardDisabled : ''
-              }`}
-              onClick={() => type.enabled && onExperimentTypeChange(type.id)}
+              className={`${styles.choiceCard} ${selected ? styles.choiceCardSelected : ''}`}
+              onClick={() => onExperimentTypeChange(type.id)}
               aria-pressed={selected}
             >
               <div className={styles.choiceTitle}>
@@ -127,16 +100,6 @@ export default function SetupStepPanel({
               </div>
               <p className={styles.choiceDesc}>{type.description}</p>
             </button>
-          );
-          if (type.enabled) {
-            return <React.Fragment key={type.id}>{card}</React.Fragment>;
-          }
-          return (
-            <span key={type.id} className={styles.choiceCardTooltipWrap}>
-              <TooltipWrapper content="Coming soon" preferredPosition="above">
-                <span className={styles.choiceCardTooltipTarget}>{card}</span>
-              </TooltipWrapper>
-            </span>
           );
         })}
       </div>
@@ -152,16 +115,33 @@ export default function SetupStepPanel({
         </summary>
         <div className={styles.advancedBody}>
           <div className={styles.field} style={{ marginBottom: 0, marginTop: 14 }}>
+            <div className={styles.labelRow}>
+              <span className={styles.label}>Minimum sample size per variation</span>
+              <SettingsInfoLink hash="min-sample" label="Minimum sample" />
+            </div>
             <TextField
               id="classic-min-sample"
               label="Minimum sample size per variation"
+              labelHidden
               type="number"
-              min={100}
+              min={1}
               value={String(minSampleSize ?? '')}
               onChange={onMinSampleSizeChange}
               autoComplete="off"
-              helpText="Used when estimating how long the test needs to run."
             />
+            {significanceEstimate?.recommendedSampleSize &&
+            String(minSampleSize) !== String(significanceEstimate.recommendedSampleSize) ? (
+              <div className={styles.labelRow}>
+                <Button
+                  variant="plain"
+                  onClick={() =>
+                    onMinSampleSizeChange(String(significanceEstimate.recommendedSampleSize))
+                  }
+                >
+                  Use planning sample ({formatVisitorCount(significanceEstimate.recommendedSampleSize)})
+                </Button>
+              </div>
+            ) : null}
           </div>
         </div>
       </details>

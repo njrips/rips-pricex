@@ -21,15 +21,47 @@ function resolveWinnerApplied(test = {}) {
   return mode === 'personalized' || mode === 'rollout';
 }
 
-function resolveInboxPlanStatus(test = {}) {
+function resolveAutoDecision(test = {}) {
+  const goal = test?.goal && typeof test.goal === 'object' ? test.goal : {};
+  return String(goal.auto_decision || '')
+    .trim()
+    .toLowerCase();
+}
+
+function resolveControlRetained(test = {}) {
+  const mode = String(test.personalization_mode || '')
+    .trim()
+    .toLowerCase();
+  if (mode === 'control' || mode === 'retained' || mode === 'control_retained') {
+    return true;
+  }
+  return resolveAutoDecision(test) === 'control';
+}
+
+function resolveAutoCompleted(test = {}) {
+  if (resolveWinnerApplied(test)) return false;
+  if (resolveControlRetained(test)) return true;
+  return resolveAutoDecision(test) === 'challenger';
+}
+
+function resolveInboxPlanStatus(test = {}, significance = {}) {
   if (resolveWinnerApplied(test)) {
     return 'applied';
   }
   const status = String(test.status || '')
     .trim()
     .toLowerCase();
+  if (resolveAutoCompleted(test) && WINNER_READY_STATUSES.has(status)) {
+    return 'completed';
+  }
   if (WINNER_READY_STATUSES.has(status)) {
-    return 'winner_ready';
+    if (significance.sampleReady === true && significance.controlWin === true) {
+      return 'completed';
+    }
+    if (significance.sampleReady === true && significance.significant === true) {
+      return 'winner_ready';
+    }
+    return 'stopped';
   }
   if (RUNNING_STATUSES.has(status)) {
     return 'running';
@@ -62,8 +94,22 @@ async function syncInboxPlanEntry(shopDomain, planRef = {}) {
     .trim()
     .toLowerCase();
   const winnerApplied = resolveWinnerApplied(test);
-  const winnerReady = WINNER_READY_STATUSES.has(testStatus) && !winnerApplied;
-  const inboxStatus = resolveInboxPlanStatus(test);
+  const autoCompleted = resolveAutoCompleted(test);
+  let significance = {};
+  if (WINNER_READY_STATUSES.has(testStatus) && !winnerApplied && !autoCompleted) {
+    try {
+      const { buildSmartPricingTestAnalytics } = require('./smartPricingTestAnalyticsService');
+      const analytics = await buildSmartPricingTestAnalytics(shopDomain, testId);
+      significance =
+        analytics?.significance && typeof analytics.significance === 'object'
+          ? analytics.significance
+          : {};
+    } catch {
+      significance = {};
+    }
+  }
+  const inboxStatus = resolveInboxPlanStatus(test, significance);
+  const winnerReady = inboxStatus === 'winner_ready';
 
   return {
     plan_id: planId,
@@ -76,6 +122,7 @@ async function syncInboxPlanEntry(shopDomain, planRef = {}) {
     winner_ready: winnerReady,
     winner_applied: winnerApplied,
     inbox_status: inboxStatus,
+    auto_decision: resolveAutoDecision(test) || null,
     stopped_at: test.stopped_at || null,
   };
 }
@@ -116,4 +163,6 @@ module.exports = {
   syncInboxPlanEntry,
   resolveInboxPlanStatus,
   resolveWinnerApplied,
+  resolveControlRetained,
+  resolveAutoCompleted,
 };

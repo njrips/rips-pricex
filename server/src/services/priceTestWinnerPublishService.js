@@ -257,6 +257,10 @@ function buildRolloutRows(test, winnerVariant) {
 
 const MAX_DIRECT_SHOPIFY_PUBLISH_PRODUCTS = 500;
 const SHOPIFY_PUBLISH_SAMPLE_LIMIT = 40;
+// Every applied variant is kept for the revert baseline, unlike the 40-row
+// display samples. Bounded so a large all-products apply cannot balloon the
+// stored plan.
+const APPLIED_BASELINE_LIMIT = 2000;
 
 function normalizeTargetType(targetType) {
   const raw = String(targetType || '')
@@ -657,6 +661,12 @@ async function publishWinnerPricesToShopify({
     skipped: [],
     errors: [],
   };
+  // samples.updated is display-only and capped, but revert needs every variant
+  // we actually wrote or it would restore some and silently leave the rest at
+  // the new price. Still bounded so an all-products apply cannot grow without
+  // limit; callers check applied_truncated before promising a full revert.
+  const appliedVariants = [];
+  let appliedTruncated = false;
 
   for (const product of products) {
     if (isExcludedProduct(product?.id, excludedProducts)) {
@@ -701,12 +711,18 @@ async function publishWinnerPricesToShopify({
           decision.targetPrice
         );
         summary.updated_count += 1;
-        pushLimited(samples.updated, {
+        const appliedRow = {
           product_id: product.id,
           variant_id: variant.id,
           previous_price: variant?.price ?? null,
           new_price: decision.targetPrice,
-        });
+        };
+        pushLimited(samples.updated, appliedRow);
+        if (appliedVariants.length < APPLIED_BASELINE_LIMIT) {
+          appliedVariants.push(appliedRow);
+        } else {
+          appliedTruncated = true;
+        }
       } catch (error) {
         summary.error_count += 1;
         pushLimited(samples.errors, {
@@ -725,6 +741,8 @@ async function publishWinnerPricesToShopify({
     winner_variant_name: winnerVariant?.name ? String(winnerVariant.name) : '',
     summary,
     samples,
+    applied_variants: appliedVariants,
+    applied_truncated: appliedTruncated,
   };
 }
 

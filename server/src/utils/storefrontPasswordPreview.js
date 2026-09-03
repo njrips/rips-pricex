@@ -10,8 +10,12 @@
  * then a verified follow-up fetch that is not still the password gate.
  */
 
+const { assertPublicHttpUrl, BlockedUrlError } = require('./outboundUrlGuard');
+
 /** @deprecated Kept for tests/docs only — never auto-injected (stores use different passwords). */
 const DEV_STOREFRONT_PASSWORD_FALLBACK = 'sp';
+
+const MAX_PREVIEW_REDIRECTS = 5;
 
 const BROWSER_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
@@ -444,7 +448,15 @@ async function fetchStorefrontPreviewHtml(
   signal,
   options = {}
 ) {
-  const parsedTarget = new URL(String(targetUrl || '').trim());
+  let parsedTarget;
+  try {
+    parsedTarget = await assertPublicHttpUrl(targetUrl);
+  } catch (error) {
+    if (error instanceof BlockedUrlError) {
+      return { ok: false, reason: 'blocked_target', detail: error.reason };
+    }
+    throw error;
+  }
   const headers = {
     Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
     'Accept-Language': 'en-US,en;q=0.9',
@@ -472,12 +484,34 @@ async function fetchStorefrontPreviewHtml(
       }
     }
   }
-  const fetchRes = await fetch(parsedTarget.toString(), {
-    method: 'GET',
-    redirect: 'follow',
-    signal,
-    headers,
-  });
+  // Redirects are followed by hand so each hop is re-checked; letting fetch
+  // follow them would allow an allowed host to bounce us into the private
+  // network the guard above just rejected.
+  let currentUrl = parsedTarget;
+  let fetchRes;
+  for (let hop = 0; hop <= MAX_PREVIEW_REDIRECTS; hop += 1) {
+    fetchRes = await fetch(currentUrl.toString(), {
+      method: 'GET',
+      redirect: 'manual',
+      signal,
+      headers,
+    });
+    const location = fetchRes.headers.get('location');
+    if (fetchRes.status < 300 || fetchRes.status >= 400 || !location) {
+      break;
+    }
+    if (hop === MAX_PREVIEW_REDIRECTS) {
+      return { ok: false, reason: 'too_many_redirects', status: fetchRes.status };
+    }
+    try {
+      currentUrl = await assertPublicHttpUrl(new URL(location, currentUrl));
+    } catch (error) {
+      if (error instanceof BlockedUrlError) {
+        return { ok: false, reason: 'blocked_target', detail: error.reason };
+      }
+      throw error;
+    }
+  }
   if (!fetchRes.ok) {
     return { ok: false, reason: 'fetch_failed', status: fetchRes.status };
   }
@@ -486,7 +520,7 @@ async function fetchStorefrontPreviewHtml(
     return { ok: false, reason: 'not_html', status: fetchRes.status };
   }
   const html = await fetchRes.text();
-  if (isLikelyShopifyPasswordPage(html, fetchRes.url || parsedTarget.toString())) {
+  if (isLikelyShopifyPasswordPage(html, fetchRes.url || currentUrl.toString())) {
     return { ok: false, reason: 'password_required', status: fetchRes.status };
   }
   return { ok: true, html };

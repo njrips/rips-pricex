@@ -36,7 +36,10 @@ export default function PublicLayout() {
   const { pathname } = useLocation();
 
   return (
-    <PricifyShell storeUrl={data.storeUrl} fullBleed={pathname === "/"}>
+    <PricifyShell
+      storeUrl={data.storeUrl}
+      fullBleed={pathname === "/" || pathname.startsWith("/docs")}
+    >
       <Outlet context={data} />
     </PricifyShell>
   );
@@ -67,12 +70,15 @@ function PublicErrorTitle({ notFound }: { notFound: boolean }) {
 
 export function ErrorBoundary() {
   const error = useRouteError();
+  // Read the store URL before the bounce check: skipping a hook on some renders
+  // changes the hook order and React would crash here with a hooks error that
+  // hides whatever error the boundary was rendered to report.
+  const storeUrl = usePublicStoreUrl();
   if (isShopifySessionBounce(error)) {
     // 401/410 or thrown App Bridge HTML must reach the iframe, not Pricify chrome.
     return boundary.error(error);
   }
   const notFound = isRouteErrorResponse(error) && error.status === 404;
-  const storeUrl = usePublicStoreUrl();
 
   return (
     <PricifyShell storeUrl={storeUrl}>

@@ -12,6 +12,33 @@ function html(prefetchError) {
   });
 }
 
+/** The inline script bodies of the generated page, ignoring external ones. */
+function inlineScripts(page) {
+  return [...page.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/gi)].map(m => m[1]);
+}
+
+describe('price preview bootstrap generated script', () => {
+  // The page is built by interpolating browser code into a template literal,
+  // where a `\/` collapses to a bare `/`. That silently turned a regex into a
+  // line comment and stopped the whole block parsing, which no amount of
+  // matching the output text would have noticed.
+  for (const prefetchError of [null, 'password_required', 'network_error']) {
+    it(`parses as JavaScript when prefetchError is ${prefetchError || 'absent'}`, () => {
+      const blocks = inlineScripts(html(prefetchError));
+      assert.ok(blocks.length > 0, 'expected at least one inline script');
+      for (const body of blocks) {
+        assert.doesNotThrow(() => new Function(body), SyntaxError);
+      }
+    });
+  }
+
+  it('keeps the slashes in the emitted regexes escaped', () => {
+    const page = html(null);
+    assert.match(page, /\|\\\/cart\\\/add\|/);
+    assert.match(page, /\/\\\/password\\\/\?\$\//);
+  });
+});
+
 describe('price preview bootstrap password gate', () => {
   it('navigates to the PDP when server prefetch hits the password wall', () => {
     const page = html('password_required');

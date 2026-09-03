@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Select, TextField } from '@shopify/polaris';
 import { ensureSmartPricingPlanPreviewTest } from '../../../../services/smartPricingApi';
+import { apiGet, unwrapData } from '../../../../services/api';
 import { formatCurrency } from '../../smartPricingConstants';
 import { formatOfferRule, resolveOfferPdpDisplayText } from '../offerSelection';
 import {
@@ -23,7 +24,9 @@ import {
   previewButtonState,
   resolvePlanProductPath,
 } from '../classicExperimentDetailsHelpers';
+import { createPreviewSessionId } from '../../../../utils/previewUrl';
 import useExclusivePreviewBusy from '../useExclusivePreviewBusy';
+import { useKeyedState } from '../../../../hooks/useKeyedState';
 import {
   ButtonIconExternalLink,
   ButtonIconQr,
@@ -36,6 +39,19 @@ import styles from '../SmartPricingClassic.module.css';
 function openPreview(url) {
   if (!url || typeof window === 'undefined') return;
   window.open(url, '_blank', 'noopener,noreferrer');
+}
+
+function withFreshPreviewSession(url) {
+  const raw = typeof url === 'string' ? url.trim() : '';
+  if (!raw) return '';
+  try {
+    const parsed = new URL(raw);
+    parsed.searchParams.set('ab_preview_reset', '1');
+    parsed.searchParams.set('ab_preview_session', createPreviewSessionId());
+    return parsed.toString();
+  } catch {
+    return raw;
+  }
 }
 
 /**
@@ -63,12 +79,13 @@ async function resolvePreviewProductPath(product) {
     return { path: null, error: 'Preview needs a product handle from the catalog.' };
   }
   try {
-    const res = await fetch(`/api/shopify/products/${encodeURIComponent(productId)}`, {
-      credentials: 'include',
-    });
-    const data = await res.json().catch(() => null);
+    // Goes through the shared client so the request carries the shop context
+    // and session token the admin API requires.
+    const data = unwrapData(
+      await apiGet(`/shopify/products/${encodeURIComponent(productId)}`)
+    );
     const handle = String(data?.product?.handle || '').trim();
-    if (!res.ok || !handle) {
+    if (!handle) {
       return {
         path: null,
         error: 'Could not load this product from Shopify. It may have been deleted.',
@@ -223,7 +240,7 @@ async function prepareArmPreviewUrl(
     },
     shopDomain,
     nextProduct.testId || fallbackTestId,
-    { isOfferTest, purpose }
+    { isOfferTest, purpose, previewSessionId: createPreviewSessionId() }
   );
   if (!url) {
     window.alert(
@@ -261,6 +278,9 @@ async function openArmPreview(
   }
 }
 
+const COPY_BLOCKED_MESSAGE =
+  'Your browser blocked the clipboard. Scan the QR code, or use Open link and copy the address from your browser.';
+
 const TEST_VARIANT_UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -277,7 +297,7 @@ function armPreviewUrl(
   product,
   shopDomain,
   fallbackTestId,
-  { isOfferTest = false, purpose = 'open' } = {}
+  { isOfferTest = false, purpose = 'open', previewSessionId } = {}
 ) {
   if (!shopDomain || !arm) return null;
   const productTestId =
@@ -318,6 +338,7 @@ function armPreviewUrl(
     }),
     productPath: resolvePlanProductPath(productForName),
     testType: isOfferTest ? 'offer' : 'price',
+    previewSessionId,
   });
 }
 
@@ -372,6 +393,7 @@ function VariationCard({
   const qrUrl = buildQrImageUrl(ensuredQrUrl || previewUrl, 168);
   const isQrOpen = qrOpenId === arm.id;
   const [copied, setCopied] = useState(false);
+  const [copyError, setCopyError] = useState('');
 
   useEffect(() => {
     if (!isQrOpen) return undefined;
@@ -413,7 +435,7 @@ function VariationCard({
       return;
     }
     if (previewUrl) {
-      setEnsuredQrUrl(previewUrl);
+      setEnsuredQrUrl(withFreshPreviewSession(previewUrl));
       setQrOpenId(arm.id);
       return;
     }
@@ -425,23 +447,30 @@ function VariationCard({
         inboxPlans,
       });
       if (!url) return;
-      setEnsuredQrUrl(url);
+      setEnsuredQrUrl(withFreshPreviewSession(url));
       setQrOpenId(arm.id);
     } finally {
       if (typeof endPreview === 'function') endPreview(qrKey);
     }
   };
 
+  const markCopied = () => {
+    setCopied(true);
+    if (copyTimerRef.current) window.clearTimeout(copyTimerRef.current);
+    copyTimerRef.current = window.setTimeout(() => setCopied(false), 1600);
+  };
+
   const copyLink = async () => {
-    const readyUrl = ensuredQrUrl || previewUrl;
+    // The embedded admin runs in an iframe where clipboard access is often
+    // denied. Swallowing that left the button doing nothing at all.
+    setCopyError('');
+    const readyUrl = withFreshPreviewSession(ensuredQrUrl || previewUrl);
     if (readyUrl) {
       try {
         await navigator.clipboard.writeText(readyUrl);
-        setCopied(true);
-        if (copyTimerRef.current) window.clearTimeout(copyTimerRef.current);
-        copyTimerRef.current = window.setTimeout(() => setCopied(false), 1600);
+        markCopied();
       } catch {
-        // ignore
+        setCopyError(COPY_BLOCKED_MESSAGE);
       }
       return;
     }
@@ -452,14 +481,16 @@ function VariationCard({
         purpose: 'share',
         inboxPlans,
       });
-      if (!url) return;
-      setEnsuredQrUrl(url);
-      await navigator.clipboard.writeText(url);
-      setCopied(true);
-      if (copyTimerRef.current) window.clearTimeout(copyTimerRef.current);
-      copyTimerRef.current = window.setTimeout(() => setCopied(false), 1600);
+      if (!url) {
+        setCopyError('Could not build a preview link for this variation.');
+        return;
+      }
+      const freshUrl = withFreshPreviewSession(url);
+      setEnsuredQrUrl(freshUrl);
+      await navigator.clipboard.writeText(freshUrl);
+      markCopied();
     } catch {
-      // ignore
+      setCopyError(COPY_BLOCKED_MESSAGE);
     } finally {
       if (typeof endPreview === 'function') endPreview(copyKey);
     }
@@ -591,6 +622,11 @@ function VariationCard({
                 {copied ? 'Copied' : 'Copy link'}
               </Button>
             </div>
+            {copyError ? (
+              <p className={styles.error} role="status">
+                {copyError}
+              </p>
+            ) : null}
           </div>
         ) : null}
       </div>
@@ -670,31 +706,25 @@ function VariationsProductsTable({
   endPreview,
   isOfferTest = false,
   inboxPlans = [],
+  onOpenProduct,
 }) {
-  const [query, setQuery] = useState('');
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(VARIATION_PRODUCTS_PAGE_SIZE);
-  const [previewArmId, setPreviewArmId] = useState('');
-  const [expanded, setExpanded] = useState(() => new Set());
-
-  const arms = variations || [];
+  const arms = useMemo(() => variations || [], [variations]);
   const controlArm = arms.find(arm => arm.isControl) || arms[0] || null;
   const matrix = useMemo(() => buildVariationProductsMatrix(arms), [arms]);
   const defaultArmId =
     controlArm?.id !== null && controlArm?.id !== undefined ? String(controlArm.id) : '';
 
-  useEffect(() => {
-    setQuery('');
-    setPage(1);
-    setPageSize(VARIATION_PRODUCTS_PAGE_SIZE);
-    setPreviewArmId(defaultArmId);
-    setExpanded(new Set());
-  }, [resetKey, defaultArmId]);
-
-  useEffect(() => {
-    const valid = arms.some(arm => String(arm.id) === String(previewArmId));
-    if (!valid && defaultArmId) setPreviewArmId(defaultArmId);
-  }, [arms, previewArmId, defaultArmId]);
+  // A different experiment or arm set is a different table: search, paging, and
+  // the previewed arm all start over.
+  const viewKey = `${resetKey}|${defaultArmId}`;
+  const [query, setQuery] = useKeyedState(viewKey, '');
+  const [page, setPage] = useKeyedState(viewKey, 1);
+  const [pageSize, setPageSize] = useKeyedState(viewKey, VARIATION_PRODUCTS_PAGE_SIZE);
+  const [previewArmChoice, setPreviewArmId] = useKeyedState(viewKey, defaultArmId);
+  // An arm that disappeared from the experiment falls back to the control arm.
+  const previewArmId = arms.some(arm => String(arm.id) === String(previewArmChoice))
+    ? previewArmChoice
+    : defaultArmId;
 
   const filteredMatrix = useMemo(
     () =>
@@ -707,24 +737,24 @@ function VariationsProductsTable({
 
   const groups = useMemo(() => groupVariationProductsByProduct(filteredMatrix), [filteredMatrix]);
 
+  // Clamped for us, so every reader below goes through pageData.page.
   const pageData = useMemo(
     () => paginateVariationProducts(groups, page, pageSize),
     [groups, page, pageSize]
   );
 
-  useEffect(() => {
-    if (page !== pageData.page) setPage(pageData.page);
-  }, [page, pageData.page]);
-
-  // Auto-expand the first multi-variant group on each result set.
-  useEffect(() => {
-    const firstMulti = pageData.items.find(g => (g.variants || []).length > 1);
-    if (!firstMulti) return;
-    setExpanded(prev => {
-      if (prev.size) return prev;
-      return new Set([firstMulti.key]);
-    });
-  }, [pageData.items]);
+  // The first product with several variants opens by default so the accordion is
+  // discoverable; expand/collapse then sticks until the result set changes.
+  const firstMultiVariantKey =
+    pageData.items.find(g => (g.variants || []).length > 1)?.key || '';
+  const initialExpanded = useMemo(
+    () => new Set(firstMultiVariantKey ? [firstMultiVariantKey] : []),
+    [firstMultiVariantKey]
+  );
+  const [expanded, setExpanded] = useKeyedState(
+    `${viewKey}|${firstMultiVariantKey}`,
+    initialExpanded
+  );
 
   if (!matrix.length) {
     return (
@@ -816,6 +846,7 @@ function VariationsProductsTable({
           <thead>
             <tr>
               <th scope="col">Product</th>
+              <th scope="col">Decision</th>
               {arms.map(arm => (
                 <th key={arm.id} scope="col" className={styles.variationsPriceCol}>
                   {arm.label}
@@ -829,7 +860,7 @@ function VariationsProductsTable({
           <tbody>
             {!pageData.items.length ? (
               <tr>
-                <td colSpan={arms.length + 2}>
+                <td colSpan={arms.length + 3}>
                   <p className={styles.help} style={{ margin: '8px 0' }}>
                     {query.trim() ? 'No products match that search.' : 'No products to show.'}
                   </p>
@@ -877,7 +908,25 @@ function VariationsProductsTable({
                             <span className={styles.tableThumb} aria-hidden />
                           )}
                           <div className={styles.productMeta}>
-                            <div className={styles.productName}>{group.title}</div>
+                            {onOpenProduct && group.planId ? (
+                              <button
+                                type="button"
+                                style={{
+                                  background: 'none',
+                                  border: 0,
+                                  padding: 0,
+                                  color: 'inherit',
+                                  textAlign: 'left',
+                                  cursor: 'pointer',
+                                  font: 'inherit',
+                                }}
+                                onClick={() => onOpenProduct(group.planId)}
+                              >
+                                <div className={styles.productName}>{group.title}</div>
+                              </button>
+                            ) : (
+                              <div className={styles.productName}>{group.title}</div>
+                            )}
                             <div className={styles.productSub}>
                               {group.handle ? `/${group.handle}` : 'Catalog'}
                               {multi ? (
@@ -893,6 +942,9 @@ function VariationsProductsTable({
                             </div>
                           </div>
                         </div>
+                      </td>
+                      <td>
+                        <div className={styles.productName}>{group.decisionLabel || '—'}</div>
                       </td>
                       {arms.map(arm => (
                         <td key={arm.id} className={styles.variationsPriceCol}>
@@ -951,6 +1003,11 @@ function VariationsProductsTable({
                                 <div className={styles.variantLabel}>
                                   <span className={styles.variantBullet} aria-hidden />
                                   {formatVariationVariantLabel(variant)}
+                                </div>
+                              </td>
+                              <td>
+                                <div className={styles.productSub}>
+                                  {variant.decisionLabel || '—'}
                                 </div>
                               </td>
                               {arms.map(arm => (
@@ -1029,7 +1086,7 @@ function VariationsProductsTable({
                 size="slim"
                 disabled={pageData.page <= 1}
                 accessibilityLabel="Previous page"
-                onClick={() => setPage(current => Math.max(1, current - 1))}
+                onClick={() => setPage(Math.max(1, pageData.page - 1))}
               >
                 <span className={styles.tablePagerChevronPrev} aria-hidden>
                   <IconChevronRight size={14} />
@@ -1042,7 +1099,7 @@ function VariationsProductsTable({
                 size="slim"
                 disabled={pageData.page >= pageData.totalPages}
                 accessibilityLabel="Next page"
-                onClick={() => setPage(current => Math.min(pageData.totalPages, current + 1))}
+                onClick={() => setPage(Math.min(pageData.totalPages, pageData.page + 1))}
               >
                 <IconChevronRight size={14} />
               </Button>
@@ -1061,15 +1118,14 @@ export default function ClassicVariationsTab({
   testId = null,
   isOfferTest = false,
   inboxPlans = [],
+  onOpenProduct,
 }) {
-  const [qrOpenId, setQrOpenId] = useState('');
   const { previewBusyKey, beginPreview, endPreview } = useExclusivePreviewBusy();
-
-  useEffect(() => {
-    if (previewBusyKey && !/:qr:/.test(previewBusyKey) && !/:copy:/.test(previewBusyKey)) {
-      setQrOpenId('');
-    }
-  }, [previewBusyKey]);
+  // Any other preview action takes over the row, so the QR panel closes and
+  // stays closed once that action finishes.
+  const otherPreviewBusy =
+    Boolean(previewBusyKey) && !/:qr:/.test(previewBusyKey) && !/:copy:/.test(previewBusyKey);
+  const [qrOpenId, setQrOpenId] = useKeyedState(otherPreviewBusy, '');
 
   const matrix = useMemo(() => buildVariationProductsMatrix(variations || []), [variations]);
   const productCount = matrix.length;
@@ -1122,6 +1178,7 @@ export default function ClassicVariationsTab({
         endPreview={endPreview}
         isOfferTest={isOfferTest}
         inboxPlans={inboxPlans}
+        onOpenProduct={onOpenProduct}
       />
     </div>
   );

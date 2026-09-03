@@ -1,15 +1,9 @@
 import { resolveCountryLists } from './countrySelection';
+import { ensureRevenueGuardrailRows } from './revenueGuardrail';
 import { collectActivityLogs, formatActivityRelative, mergeActivityTimeline } from './classicActivity';
-import { getPlanProductTitle } from './classicExperimentHelpers';
+import { getPlanProductTitle, normalizePlanStatus } from './classicExperimentHelpers';
 import { formatOfferRule, isOfferExperimentType } from './offerSelection';
-import {
-  buildPreviewUrl,
-  buildShopifyPricePreviewBootstrapUrl,
-  getDevStorefrontPasswordDefault,
-  isShopifyPreviewUrl,
-  loadPersistedStorefrontPassword,
-  resolvePreviewBaseUrl,
-} from '../../../utils/previewUrl';
+import { buildPreviewUrl, resolvePreviewBaseUrl } from '../../../utils/previewUrl';
 
 /**
  * Pure mappers for Classic experiment details (Overview + tabs).
@@ -178,10 +172,15 @@ export function buildOverviewKpis({ analytics = null, plan = null, experiment = 
       ? (Number(conversions) / Number(visitors)) * 100
       : null);
 
+  const sequential = significance.sequential === true || significance.method === 'msprt';
   const significant =
-    summary.significant === true ||
-    significance.significant === true ||
-    (confidence !== null && confidence !== undefined && Number(confidence) >= 95);
+    significance.sampleReady === false
+      ? false
+      : sequential
+        ? significance.significant === true
+        : summary.significant === true ||
+          significance.significant === true ||
+          (confidence !== null && confidence !== undefined && Number(confidence) >= 95);
 
   const primaryMetric =
     experiment?.primaryMetric || plan?.goal?.primary_metric || plan?.objective || 'conversion_rate';
@@ -220,7 +219,39 @@ export function buildOverviewKpis({ analytics = null, plan = null, experiment = 
       plan?.audience?.traffic_allocation ?? plan?.audience?.segments?.traffic_ramp_percent ?? null,
     winnerArmId: analytics?.winner_arm_id || null,
     winnerVariantId: analytics?.winner_variant_id || null,
+    decisionCaption: buildDecisionCaption({ experiment, significant }),
   };
+}
+
+export function buildDecisionCaption({ experiment = null, significant = false } = {}) {
+  const plans = Array.isArray(experiment?.plans) ? experiment.plans : [];
+  const statuses = plans.map(plan => normalizePlanStatus(plan));
+  const running = statuses.filter(status => status === 'running').length;
+  const decided = statuses.filter(
+    status => status === 'completed' || status === 'applied'
+  ).length;
+  if (plans.length > 1 && running > 0 && decided > 0) {
+    return `Deciding per product · ${decided} of ${plans.length} done`;
+  }
+  if (plans.length && decided === plans.length && running === 0) {
+    return significant ? 'Winner called' : 'Results in';
+  }
+  if (significant) return 'Winner called';
+  return 'Collecting data';
+}
+
+export function formatProductDecisionLabel(plan = {}, { isOffer = false } = {}) {
+  const status = String(plan?.status || '')
+    .trim()
+    .toLowerCase();
+  if (status === 'applied') return isOffer ? 'Completed' : 'Applied';
+  if (status === 'completed' || status === 'complete' || status === 'ended') {
+    return isOffer ? 'Completed' : 'Kept catalog';
+  }
+  if (status === 'winner_ready') return isOffer ? 'Result ready' : 'Winner ready';
+  if (status === 'running' || status === 'active') return 'Running';
+  if (status === 'paused' || status === 'stopped') return 'Paused';
+  return '';
 }
 
 export function buildConversionRows({ analytics = null, plan = null } = {}) {
@@ -230,7 +261,8 @@ export function buildConversionRows({ analytics = null, plan = null } = {}) {
 
   const rows = (analyticsArms.length ? analyticsArms : planArms).map((arm, index) => {
     const rate = Number(arm.conversion_rate ?? arm.rate);
-    const hasRate = Number.isFinite(rate) && rate > 0;
+    // A genuine 0% must render as "0.00%", not as the "no data yet" dash.
+    const hasRate = Number.isFinite(rate);
     const control = isControlArm(arm) || (!arm.role && index === 0);
     const id = arm.arm_id || arm.id || `arm_${index}`;
     return {
@@ -357,6 +389,12 @@ export function buildVariationsSummary(plan = null, analytics = null, options = 
         price: matched?.price ?? null,
         testId: row.test_id || null,
         currency: row.currency || null,
+        status: String(row.status || '').trim().toLowerCase() || null,
+        decisionLabel: formatProductDecisionLabel(row, {
+          isOffer: isOfferExperimentType(
+            row.experiment_type || row.metadata?.experiment_type || primary?.experiment_type
+          ),
+        }),
       };
     });
     const variant = resolveVariantForArm(test, arm, index);
@@ -509,6 +547,7 @@ export function buildVariationSharePreviewUrl({
   variantName,
   productPath = '/',
   testType = 'price',
+  previewSessionId,
 } = {}) {
   const tid =
     testId !== null && testId !== undefined && String(testId).trim() ? String(testId).trim() : '';
@@ -529,49 +568,19 @@ export function buildVariationSharePreviewUrl({
     testType: normalizeVariationPreviewTestType(testType),
     simplePreview: true,
     resetPreviewSession: true,
+    previewSessionId,
   });
 }
 
 /**
  * URL used when the merchant clicks Preview / Open.
- * Price tests wrap the PDP in price-preview-bootstrap so RipX injects before
- * theme scripts. Offer tests open the storefront PDP directly — the bootstrap
- * path looks like an API link and would seed a synthetic price test.
+ * Price and offer tests both open the storefront PDP with ab_preview* params.
+ * The theme embed + storefront script persist that bucket in sessionStorage,
+ * a session cookie, and window.name so Shopify navigations keep the arm.
+ * ab_preview_reset=1 (and a new session id on click) replaces any previous preview.
  */
-export function buildVariationPreviewUrl({
-  shopDomain,
-  testId,
-  variantId,
-  variantName,
-  productPath = '/',
-  storefrontPassword,
-  testType = 'price',
-} = {}) {
-  const directPreviewUrl = buildVariationSharePreviewUrl({
-    shopDomain,
-    testId,
-    variantId,
-    variantName,
-    productPath,
-    testType,
-  });
-  if (!directPreviewUrl) return null;
-  if (normalizeVariationPreviewTestType(testType) === 'offer') {
-    return directPreviewUrl;
-  }
-  if (isShopifyPreviewUrl(directPreviewUrl)) {
-    const password =
-      storefrontPassword !== null && storefrontPassword !== undefined
-        ? String(storefrontPassword).trim()
-        : loadPersistedStorefrontPassword(shopDomain) || getDevStorefrontPasswordDefault() || '';
-    return (
-      buildShopifyPricePreviewBootstrapUrl({
-        previewUrl: directPreviewUrl,
-        storefrontPassword: password || undefined,
-      }) || directPreviewUrl
-    );
-  }
-  return directPreviewUrl;
+export function buildVariationPreviewUrl(options = {}) {
+  return buildVariationSharePreviewUrl(options);
 }
 
 export function buildQrImageUrl(url, size = 180) {
@@ -665,6 +674,8 @@ export function buildVariationProductsMatrix(variations = []) {
           handle: product.handle || '',
           testId: product.testId || null,
           currency: product.currency || null,
+          status: product.status || null,
+          decisionLabel: product.decisionLabel || '',
           pricesByArmId: {},
         });
       }
@@ -673,6 +684,8 @@ export function buildVariationProductsMatrix(variations = []) {
       if (!row.imageUrl && product.imageUrl) row.imageUrl = product.imageUrl;
       if (!row.testId && product.testId) row.testId = product.testId;
       if (!row.currency && product.currency) row.currency = product.currency;
+      if (!row.status && product.status) row.status = product.status;
+      if (!row.decisionLabel && product.decisionLabel) row.decisionLabel = product.decisionLabel;
       if (!row.variantId && product.variantId) row.variantId = product.variantId;
       if (!row.variantTitle && product.variantTitle) row.variantTitle = product.variantTitle;
       if (!row.productTitle && product.productTitle) row.productTitle = product.productTitle;
@@ -702,6 +715,7 @@ export function groupVariationProductsByProduct(matrixRows = []) {
         imageUrl: row.imageUrl || null,
         handle: row.handle || '',
         currency: row.currency || null,
+        decisionLabel: row.decisionLabel || '',
         variants: [],
       });
     }
@@ -710,6 +724,9 @@ export function groupVariationProductsByProduct(matrixRows = []) {
     if (!group.handle && row.handle) group.handle = row.handle;
     if (!group.currency && row.currency) group.currency = row.currency;
     group.variants.push(row);
+    const labels = group.variants.map(item => item.decisionLabel).filter(Boolean);
+    group.decisionLabel =
+      labels.length && labels.every(label => label === labels[0]) ? labels[0] : labels.length ? 'Mixed' : '';
   });
   return Array.from(map.values()).sort((a, b) =>
     String(a.title || '').localeCompare(String(b.title || ''), undefined, { sensitivity: 'base' })
@@ -1052,6 +1069,12 @@ export function buildProductPerformanceGrid({
       testId: testId || null,
       currency: row.currency || null,
       sharedTest,
+      status: String(row?.status || '').trim().toLowerCase() || null,
+      decisionLabel: formatProductDecisionLabel(row, {
+        isOffer: isOfferExperimentType(
+          row?.experiment_type || row?.metadata?.experiment_type || primary?.experiment_type
+        ),
+      }),
       metricsByArmId,
       sort_visitors: controlMetrics?.visitors ?? null,
       sort_conversion_rate:
@@ -1059,6 +1082,111 @@ export function buildProductPerformanceGrid({
       sort_ppv: bestChallenger?.profit_per_visitor ?? controlMetrics?.profit_per_visitor ?? null,
     };
   });
+}
+
+/** States a product can be in, ordered the way the rollout queue reads. */
+export const ROLLOUT_STATE_ORDER = Object.freeze([
+  'ready_challenger',
+  'ready_control',
+  'blocked',
+  'collecting',
+  'applied',
+]);
+
+const ROLLOUT_STATE_TONE = Object.freeze({
+  ready_challenger: 'success',
+  ready_control: 'info',
+  blocked: 'critical',
+  collecting: 'subdued',
+  applied: 'subdued',
+});
+
+/**
+ * One row per product in the experiment, carrying the verdict the server
+ * computed for it.
+ *
+ * Products in an experiment finish at different times, so the queue is ordered
+ * by what needs the merchant rather than alphabetically: things they can act on
+ * first, then problems, then everything still running. Within the ready group
+ * the ones that have been waiting longest come first.
+ */
+export function buildProductRolloutRows({ plans = [], analyticsByTestId = {} } = {}) {
+  const planList = Array.isArray(plans) ? plans : [];
+  const map =
+    analyticsByTestId && typeof analyticsByTestId === 'object' ? analyticsByTestId : {};
+  const seenTestIds = new Set();
+
+  const rows = planList
+    .map((plan, index) => {
+      const testId =
+        plan?.test_id !== null && plan?.test_id !== undefined ? String(plan.test_id).trim() : '';
+      if (!testId || seenTestIds.has(testId)) return null;
+      seenTestIds.add(testId);
+      const payload = map[testId] || null;
+      const decision = payload?.product_decision || null;
+      const fullTitle = getPlanProductTitle(plan);
+      const split = splitProductVariantTitle(fullTitle);
+      const state = decision?.state || 'collecting';
+
+      return {
+        key: productRowKey(
+          { planId: plan.id, productId: plan.product_id, variantId: plan.variant_id, testId },
+          index
+        ),
+        testId,
+        planId: plan.id || null,
+        productId: plan.product_id || null,
+        title: fullTitle,
+        productTitle: split.productTitle,
+        variantTitle: split.variantTitle || '',
+        imageUrl: plan.image_url || null,
+        currency: payload?.currency || plan.currency || 'USD',
+        loading: !payload,
+        state,
+        tone: ROLLOUT_STATE_TONE[state] || 'subdued',
+        decision,
+        arms: Array.isArray(payload?.arms) ? payload.arms : [],
+        significance: payload?.significance || null,
+        summary: payload?.summary || null,
+        sortRank: Number.isFinite(Number(decision?.sort_rank))
+          ? Number(decision.sort_rank)
+          : ROLLOUT_STATE_ORDER.indexOf(state),
+        readySince: decision?.ready_since || null,
+      };
+    })
+    .filter(Boolean);
+
+  return rows.sort((a, b) => {
+    if (a.sortRank !== b.sortRank) return a.sortRank - b.sortRank;
+    if (a.readySince && b.readySince && a.readySince !== b.readySince) {
+      return a.readySince < b.readySince ? -1 : 1;
+    }
+    // Furthest along first among the ones still running, so the merchant can see
+    // what is about to land next.
+    const aPct = Number(a.decision?.progress?.percent);
+    const bPct = Number(b.decision?.progress?.percent);
+    if (Number.isFinite(aPct) && Number.isFinite(bPct) && aPct !== bPct) return bPct - aPct;
+    return String(a.title || '').localeCompare(String(b.title || ''));
+  });
+}
+
+/** Counts by state plus the ids a bulk apply would act on. */
+export function summarizeRolloutRows(rows = []) {
+  const list = Array.isArray(rows) ? rows : [];
+  const counts = ROLLOUT_STATE_ORDER.reduce((acc, state) => ({ ...acc, [state]: 0 }), {});
+  const actionableTestIds = [];
+  list.forEach(row => {
+    if (counts[row.state] !== undefined) counts[row.state] += 1;
+    if (row.decision?.can_apply || row.decision?.can_finish) actionableTestIds.push(row.testId);
+  });
+  return {
+    total: list.length,
+    counts,
+    actionableTestIds,
+    readyCount: counts.ready_challenger + counts.ready_control,
+    // Only price writes need the stronger confirmation copy.
+    priceWriteCount: list.filter(row => row.decision?.can_apply).length,
+  };
 }
 
 /**
@@ -1125,7 +1253,12 @@ export function mergeExperimentAnalytics(analyticsByTestId = {}, primary = null)
   let conversions = 0;
   const lifts = [];
   const confidences = [];
-  let significant = false;
+  let significantCount = 0;
+  let allSampleReady = true;
+  let anySequential = false;
+  let allEvidenceValidated = true;
+  let allOutcomesMatured = true;
+  let srm = null;
   let winnerArmId = primary?.winner_arm_id || null;
   let currency = primary?.currency || null;
 
@@ -1151,9 +1284,25 @@ export function mergeExperimentAnalytics(analyticsByTestId = {}, primary = null)
     if (Number.isFinite(lift)) lifts.push(lift);
     const confidence = Number(payload.summary?.confidence ?? payload.significance?.confidence);
     if (Number.isFinite(confidence)) confidences.push(confidence);
-    if (payload.summary?.significant === true || payload.significance?.significant === true) {
-      significant = true;
+    const sequential =
+      payload.significance?.sequential === true || payload.significance?.method === 'msprt';
+    if (sequential) anySequential = true;
+    if (payload.significance?.sampleReady === false) allSampleReady = false;
+    // These roll up conservatively: validation must hold for every product
+    // before the experiment claims it, and one product's broken split is worth
+    // surfacing across the experiment.
+    if (payload.significance?.evidenceValidated !== true) allEvidenceValidated = false;
+    if (payload.significance?.outcomesMatured === false) allOutcomesMatured = false;
+    if (!srm && (payload.significance?.srm?.detected === true || payload.srm?.detected === true)) {
+      srm = payload.significance?.srm || payload.srm;
     }
+    const thisSignificant =
+      payload.significance?.sampleReady === false
+        ? false
+        : sequential
+          ? payload.significance?.significant === true
+          : payload.summary?.significant === true || payload.significance?.significant === true;
+    if (thisSignificant) significantCount += 1;
     if (!winnerArmId && payload.winner_arm_id) winnerArmId = payload.winner_arm_id;
     (Array.isArray(payload.arms) ? payload.arms : []).forEach(arm => {
       const key = String(arm.arm_id || arm.label || arm.variant_name || '');
@@ -1192,6 +1341,8 @@ export function mergeExperimentAnalytics(analyticsByTestId = {}, primary = null)
       ? Math.round((conversions / visitors) * 10000) / 100
       : null;
 
+  const significant = allSampleReady && significantCount === entries.length;
+
   return {
     ...(primary || {}),
     currency,
@@ -1203,14 +1354,27 @@ export function mergeExperimentAnalytics(analyticsByTestId = {}, primary = null)
       conversions,
       overall_conversion_rate: overall,
       lift: meanFinite(lifts),
-      confidence: confidences.length ? Math.max(...confidences) : null,
+      confidence: confidences.length ? Math.min(...confidences) : null,
       significant,
     },
     significance: {
       ...(primary?.significance || {}),
       lift: meanFinite(lifts),
-      confidence: confidences.length ? Math.max(...confidences) : null,
+      confidence: confidences.length ? Math.min(...confidences) : null,
       significant,
+      sampleReady: allSampleReady,
+      sequential: anySequential || primary?.significance?.sequential === true,
+      evidenceValidated: allEvidenceValidated && entries.length > 0,
+      outcomesMatured: allOutcomesMatured,
+      srm,
+      // Only claim the exact method when every product earned it; otherwise the
+      // experiment is being read on directional evidence.
+      method:
+        allEvidenceValidated && entries.length > 0
+          ? 'beta_binomial_cs'
+          : anySequential
+            ? 'msprt'
+            : primary?.significance?.method,
     },
     multi_test: true,
     test_count: entries.length,
@@ -1292,7 +1456,13 @@ export function buildAudienceSummary(plan = null, test = null) {
       audienceUi.trafficAllocation ??
       segments.traffic_ramp_percent ??
       null,
-    minSampleSize: audienceUi.minSampleSize ?? audience.min_sample_size ?? null,
+    minSampleSize:
+      audienceUi.minSampleSize ??
+      audience.min_sample_size ??
+      plan?.launch_preferences?.min_sample_size ??
+      plan?.metadata?.launch_preferences?.min_sample_size ??
+      test?.goal?.min_sample_size ??
+      null,
     excludeBots: segments.exclude_bots !== false,
     excludeInternalIps: segments.exclude_internal_ips !== false,
     customer,
@@ -1303,9 +1473,23 @@ export function buildAudienceSummary(plan = null, test = null) {
   };
 }
 
+function resolveDisplayedConfidence(plan, test, planGoal, testGoal) {
+  const raw =
+    planGoal?.significance_level ??
+    testGoal?.significance_level ??
+    plan?.statistical_design?.confidence_level ??
+    test?.metadata?.statistical_design?.confidence_level;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return 90;
+  if (n > 1) return Math.round(n) === 95 ? 95 : 90;
+  return Math.round(n * 100) === 95 ? 95 : 90;
+}
+
 export function buildMetricsSummary(plan = null, test = null) {
   const planGoal = plan?.goal && typeof plan.goal === 'object' ? plan.goal : {};
   const testGoal = test?.goal && typeof test.goal === 'object' ? test.goal : {};
+  const statisticalDesign =
+    plan?.statistical_design || test?.metadata?.statistical_design || {};
   const primary =
     planGoal.primary_metric ||
     planGoal.metric ||
@@ -1342,16 +1526,39 @@ export function buildMetricsSummary(plan = null, test = null) {
     primaryMetricLabel: formatPrimaryMetricLabel(primary),
     secondary,
     secondaryEvents,
-    guardrails: Array.isArray(plan?.metadata?.audience_ui?.guardrails)
-      ? plan.metadata.audience_ui.guardrails
-      : Array.isArray(planGoal.guardrails)
-        ? planGoal.guardrails
+    guardrails: ensureRevenueGuardrailRows(
+      Array.isArray(plan?.metadata?.audience_ui?.guardrails)
+        ? plan.metadata.audience_ui.guardrails
         : [],
+      Number(planGoal.guardrails?.max_revenue_drop_percent)
+    ),
     minSampleSize:
       plan?.metadata?.audience_ui?.minSampleSize ??
       planGoal.min_sample_size ??
       testGoal.min_sample_size ??
+      plan?.audience?.min_sample_size ??
+      plan?.launch_preferences?.min_sample_size ??
+      plan?.metadata?.launch_preferences?.min_sample_size ??
       null,
+    recommendedSampleSize:
+      planGoal.visitors_per_variant_recommended ??
+      testGoal.visitors_per_variant_recommended ??
+      plan?.statistical_design?.visitors_per_variant_required ??
+      test?.metadata?.statistical_design?.visitors_per_variant_required ??
+      null,
+    analysisMethod:
+      planGoal.analysis_method ||
+      testGoal.analysis_method ||
+      plan?.statistical_design?.analysis_method ||
+      'sequential',
+    mdePercent: planGoal.mde_percent || testGoal.mde_percent || plan?.statistical_design?.mde_percent || 10,
+    confidenceLevel: resolveDisplayedConfidence(plan, test, planGoal, testGoal),
+    durationFeasibility: statisticalDesign.duration_feasibility || null,
+    practicalDurationRange: statisticalDesign.practical_duration_range || null,
+    trafficEvidence: statisticalDesign.traffic_evidence || null,
+    requiredDailyVisitorsForPracticalWindow:
+      statisticalDesign.required_daily_visitors_for_practical_window ?? null,
+    estimateDetail: statisticalDesign.estimate_detail || null,
     cogs: planGoal.cogs || testGoal.cogs || null,
     rationale: planGoal.rationale || null,
   };
@@ -1373,6 +1580,7 @@ export function buildActivityTimeline({
   analytics = null,
   qaRuns = [],
   plans = [],
+  serverEvents = [],
 } = {}) {
   const items = [];
   const actor =
@@ -1464,30 +1672,45 @@ export function buildActivityTimeline({
     });
   }
 
-  if (plan?.winner_applied_at || plan?.status === 'applied') {
+  const planStatus = String(plan?.status || '')
+    .trim()
+    .toLowerCase();
+  if (plan?.winner_applied_at || planStatus === 'applied') {
     items.push({
       id: 'winner_applied',
       at: plan.winner_applied_at || plan.updated_at,
-      title: isOffer ? 'Test completed' : 'Winner rolled out',
+      title: isOffer ? 'Test completed' : 'Winning price applied',
       kind: 'complete',
       actor,
       detail: isOffer
         ? 'Offer test finished — catalog prices were not changed'
-        : 'Winning price applied to Shopify',
+        : productCount > 1
+          ? 'This product’s winning variation was written to Shopify. Other products in the experiment keep running until they have a result.'
+          : 'This product’s winning variation was written to Shopify.',
     });
-  }
-
-  const planStatus = String(plan?.status || '')
-    .trim()
-    .toLowerCase();
-  if (planStatus === 'winner_ready') {
+  } else if (planStatus === 'completed') {
+    items.push({
+      id: 'control_retained',
+      at: plan?.control_retained_at || test?.stopped_at || plan?.updated_at,
+      title: isOffer ? 'Test completed' : 'Kept catalog price',
+      kind: 'complete',
+      actor,
+      detail: isOffer
+        ? 'This product’s test ended. Catalog prices were not changed.'
+        : productCount > 1
+          ? 'Control won for this product — the catalog price was left unchanged. Other products keep running until they have a result.'
+          : 'Control won for this product — the catalog price was left unchanged.',
+    });
+  } else if (planStatus === 'winner_ready') {
     items.push({
       id: 'winner_ready',
       at: test?.stopped_at || plan?.updated_at,
       title: isOffer ? 'Result ready' : 'Winner ready',
       kind: 'winner_ready',
       actor,
-      detail: isOffer ? 'Leading variation identified' : 'Waiting for winner rollout decision',
+      detail: isOffer
+        ? 'Leading variation identified'
+        : 'Automatic catalog write did not finish — use Roll out winner for this product',
     });
   } else if (test?.status === 'stopped' || test?.status === 'paused' || planStatus === 'paused') {
     const pausedAt = test?.stopped_at || test?.updated_at || plan?.updated_at || null;
@@ -1514,7 +1737,11 @@ export function buildActivityTimeline({
     });
   }
 
-  return mergeActivityTimeline(items, collectActivityLogs(catalog, actor));
+  return mergeActivityTimeline(
+    items,
+    collectActivityLogs(catalog, actor),
+    Array.isArray(serverEvents) ? serverEvents : []
+  );
 }
 
 export function buildSettingsSummary(plan = null, test = null, shopGuardrails = null) {

@@ -22,7 +22,7 @@ export default function CreateExperiment() {
         subtitle="Choose a Smart Pricing plan to unlock the experiment wizard. You can still browse Experiments and finish Setup."
         footerPrimary={{
           label: 'Upgrade',
-          onClick: upgrade,
+          onClick: () => upgrade(),
         }}
         footerSecondary={{
           label: 'Open Plan',

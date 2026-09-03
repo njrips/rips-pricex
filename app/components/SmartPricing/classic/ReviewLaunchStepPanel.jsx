@@ -1,4 +1,3 @@
-import React from 'react';
 import { Badge, Banner, Button } from '@shopify/polaris';
 import { formatSplitCountryAudienceLabel, resolveCountryLists } from './countrySelection';
 import {
@@ -12,6 +11,14 @@ import {
   primaryMetricLabel,
   secondaryMetricLabel,
 } from '../targeting/smartPricingAudienceHelpers';
+import { parseMinSampleSize } from './classicAudienceEdit';
+import {
+  formatApproxTestDuration,
+  formatVisitorCount,
+  PRACTICAL_TEST_MAX_DAYS,
+} from './estimateSignificanceDuration';
+import { IconControlBaseline } from './classicIcons';
+import SettingsInfoLink from '../../Settings/SettingsInfoLink';
 import styles from './SmartPricingClassic.module.css';
 
 function formatMoney(value) {
@@ -51,7 +58,6 @@ function segmentLabel(segment) {
 
 export default function ReviewLaunchStepPanel({
   name,
-  hypothesis: _hypothesis,
   experimentType = 'price_test',
   experimentTypeLabel = 'Price test',
   variations = [],
@@ -65,6 +71,7 @@ export default function ReviewLaunchStepPanel({
   audience,
   estimatedDays = null,
   estimatedTimeDetail = '',
+  significanceEstimate = null,
   checkoutReady = true,
   checkoutLoading = false,
   checkoutReadiness = null,
@@ -123,20 +130,29 @@ export default function ReviewLaunchStepPanel({
     }
     return formatPriceModeLabel(priceMode, { bulkPercent, bulkDirection });
   })();
+  const durationNotFeasible =
+    significanceEstimate?.durationFeasibility === 'not_feasible' ||
+    Number(estimatedDays) > PRACTICAL_TEST_MAX_DAYS;
+  const durationRange = significanceEstimate?.practicalDurationRange || '';
+  const durationTitle = durationNotFeasible
+    ? 'Traffic does not support a practical test'
+    : durationRange
+      ? `Estimated collection window: ${durationRange}`
+      : estimatedDays && estimatedDays <= PRACTICAL_TEST_MAX_DAYS
+        ? `Estimated collection window: ${formatApproxTestDuration(estimatedDays)}`
+        : estimatedDays
+          ? 'Traffic does not support a practical test'
+          : 'Timeline needs measured product traffic';
 
   return (
     <div className={styles.reviewStack}>
       <Banner
-        tone={estimatedDays && Number(estimatedDays) >= 42 ? 'warning' : 'info'}
-        title={
-          estimatedDays
-            ? `Estimated time to significance: ~${estimatedDays} days`
-            : 'Estimated time to significance'
-        }
+        tone={durationNotFeasible || !estimatedDays ? 'warning' : 'info'}
+        title={durationTitle}
       >
         <p>
           {estimatedTimeDetail ||
-            `Based on ${audience?.trafficAllocation ?? 50}% traffic, minimum sample size, variation count, and selected product traffic.`}
+            `Based on ${audience?.trafficAllocation ?? 50}% experiment traffic, the slowest variation allocation, selected product traffic, and a conversion-rate planning proxy. Live decisions use sequential evidence after the minimum sample.`}
         </p>
       </Banner>
 
@@ -303,13 +319,26 @@ export default function ReviewLaunchStepPanel({
                       const isControl = arm.role === 'control' || idx === 0;
                       const delta = isControl ? null : armDelta(controlPrice, arm.price);
                       const letter =
-                        arm.letter || variations[idx]?.letter || String.fromCharCode(65 + idx);
+                        arm.letter ||
+                        variations[idx]?.letter ||
+                        String.fromCharCode(64 + Math.max(1, idx));
                       return (
                         <span
                           key={arm.id || idx}
                           className={`${styles.armChip} ${!isControl ? styles.armChipAlt : ''}`}
                         >
-                          <span className={styles.armLetter}>{letter}</span>
+                          <span
+                            className={`${styles.armLetter} ${
+                              isControl ? styles.controlVariationMarker : ''
+                            }`}
+                            aria-label={
+                              isControl
+                                ? 'Control — current catalog baseline'
+                                : `Variation ${letter}`
+                            }
+                          >
+                            {isControl ? <IconControlBaseline size={10} /> : letter}
+                          </span>
                           {isOfferTest
                             ? isControl
                               ? 'No offer'
@@ -345,18 +374,34 @@ export default function ReviewLaunchStepPanel({
           </Button>
         </div>
         <div className={styles.reviewRows}>
-          {variations.map(arm => (
-            <div key={arm.id} className={styles.reviewRow}>
-              <div className={styles.kvLabel}>{arm.letter}</div>
-              <p className={styles.kvValue}>
-                {arm.name || arm.role} · {arm.traffic}% traffic
-                {isOfferTest && arm.id !== 'control'
-                  ? ` — ${formatOfferSummary(offerByArm[arm.id])}`
-                  : ''}
-                {arm.description ? ` — ${arm.description}` : ''}
-              </p>
-            </div>
-          ))}
+          {variations.map((arm, index) => {
+            const isControl = index === 0 || arm.id === 'control';
+            return (
+              <div key={arm.id} className={styles.reviewRow}>
+                <div className={styles.kvLabel}>
+                  <span
+                    className={`${styles.armLetter} ${
+                      isControl ? styles.controlVariationMarker : ''
+                    }`}
+                    aria-label={
+                      isControl
+                        ? 'Control — current catalog baseline'
+                        : `Variation ${arm.letter}`
+                    }
+                  >
+                    {isControl ? <IconControlBaseline size={10} /> : arm.letter}
+                  </span>
+                </div>
+                <p className={styles.kvValue}>
+                  {arm.name || arm.role} · {arm.traffic}% traffic
+                  {isOfferTest && arm.id !== 'control'
+                    ? ` — ${formatOfferSummary(offerByArm[arm.id])}`
+                    : ''}
+                  {arm.description ? ` — ${arm.description}` : ''}
+                </p>
+              </div>
+            );
+          })}
         </div>
       </section>
 
@@ -377,6 +422,41 @@ export default function ReviewLaunchStepPanel({
             <p className={styles.kvValue}>{audience?.trafficAllocation ?? 50}%</p>
           </div>
           <div className={styles.reviewRow}>
+            <div className={styles.kvLabel}>
+              Min sample / variation
+              <SettingsInfoLink hash="min-sample" label="Minimum sample" />
+            </div>
+            <p className={styles.kvValue}>
+              {parseMinSampleSize(audience?.minSampleSize)} visitors
+            </p>
+          </div>
+          {significanceEstimate?.recommendedSampleSize ? (
+            <div className={styles.reviewRow}>
+              <div className={styles.kvLabel}>
+                Planning reference / variation
+                <SettingsInfoLink hash="min-sample" label="Planning sample" />
+              </div>
+              <p className={styles.kvValue}>
+                {formatVisitorCount(significanceEstimate.recommendedSampleSize)} visitors
+                {significanceEstimate.powerRating === 'underpowered'
+                  ? ' · min sample is below this'
+                  : ''}
+              </p>
+            </div>
+          ) : null}
+          <div className={styles.reviewRow}>
+            <div className={styles.kvLabel}>
+              Analysis
+              <SettingsInfoLink hash="sequential" label="Sequential testing" />
+            </div>
+            <p className={styles.kvValue}>
+              Sequential directional evidence · fixed-horizon conversion traffic-sizing reference
+              ({significanceEstimate?.mdePercent || 10}% relative lift,{' '}
+              {significanceEstimate?.confidenceLevel || 90}% family-wise confidence) · manual
+              winner review required
+            </p>
+          </div>
+          <div className={styles.reviewRow}>
             <div className={styles.kvLabel}>Primary</div>
             <p className={styles.kvValue}>{primaryMetric}</p>
           </div>
@@ -385,12 +465,15 @@ export default function ReviewLaunchStepPanel({
             <p className={styles.kvValue}>{secondarySummary}</p>
           </div>
           <div className={styles.reviewRow}>
-            <div className={styles.kvLabel}>Guardrails</div>
+            <div className={styles.kvLabel}>
+              Revenue guardrail
+              <SettingsInfoLink hash="guardrail-metrics" label="Revenue guardrail" />
+            </div>
             <p className={styles.kvValue}>
               {(audience?.guardrails || [])
-                .filter(g => g.on || g.id === 'revenue')
+                .filter(g => g.id === 'revenue')
                 .map(g => `${g.label} (${g.threshold})`)
-                .join(', ') || 'None'}
+                .join(', ') || 'Revenue per visitor'}
             </p>
           </div>
           <div className={styles.reviewRow}>

@@ -1,3 +1,4 @@
+import { describe, expect, it } from 'vitest';
 import {
   enrichInboxPlansForLaunch,
   formatClassicStatusLabel,
@@ -68,6 +69,18 @@ describe('classicExperimentHelpers', () => {
         { id: 'p2', status: 'paused', test_id: 'test-2' },
       ])
     ).toBe('running');
+    expect(
+      rollupExperimentStatus([
+        { id: 'p1', status: 'applied', test_id: 'test-1' },
+        { id: 'p2', status: 'running', test_id: 'test-2' },
+      ])
+    ).toBe('running');
+    expect(
+      rollupExperimentStatus([
+        { id: 'p1', status: 'applied', test_id: 'test-1' },
+        { id: 'p2', status: 'completed', test_id: 'test-2' },
+      ])
+    ).toBe('applied');
   });
 
   it('falls back to title prefix grouping for legacy plans', () => {
@@ -95,6 +108,8 @@ describe('classicExperimentHelpers', () => {
   it('labels offer winner_ready as Result ready', () => {
     expect(formatClassicStatusLabel('winner_ready', 'offer_test')).toBe('Result ready');
     expect(formatClassicStatusLabel('winner_ready', 'price_test')).toBe('Winner ready');
+    expect(formatClassicStatusLabel('applied', 'price_test')).toBe('Applied');
+    expect(formatClassicStatusLabel('completed', 'price_test')).toBe('Completed');
   });
 
   it('enriches inbox drafts from audience_ui before list launch', () => {
@@ -108,7 +123,9 @@ describe('classicExperimentHelpers', () => {
             devices: ['Mobile'],
             deviceMode: 'include',
             countries: ['US'],
+            includeCountries: ['US'],
             countryMode: 'include',
+            minSampleSize: '3200',
           },
         },
       },
@@ -119,6 +136,29 @@ describe('classicExperimentHelpers', () => {
     expect(enriched.audience.include_countries).toEqual(['US']);
     expect(enriched.audience.segments.countries).toEqual(['US']);
     expect(enriched.launch_preferences.auto_start).toBe(true);
+    expect(enriched.audience.min_sample_size).toBe(3200);
+    expect(enriched.launch_preferences.min_sample_size).toBe(3200);
+    expect(enriched.goal.analysis_method).toBe('sequential');
+    expect(enriched.goal.significance_level).toBe(0.9);
+    expect(enriched.statistical_design.analysis_method).toBe('sequential');
+    expect(enriched.statistical_design.confidence_level).toBe(90);
+    expect(enriched.goal.guardrails).toEqual({
+      auto_stop: true,
+      max_revenue_drop_percent: 10,
+    });
+  });
+
+  it('uses shop statistical defaults when the inbox plan has none', () => {
+    const [enriched] = enrichInboxPlansForLaunch(
+      [{ id: 'p-shop', metadata: { audience_ui: { minSampleSize: '2000' } } }],
+      { confidence_level: 95, mde_percent: 8 }
+    );
+    expect(enriched.goal.significance_level).toBe(0.95);
+    expect(enriched.goal.mde_percent).toBe(8);
+    expect(enriched.goal.min_sample_size).toBe(2000);
+    expect(enriched.statistical_design.confidence_level).toBe(95);
+    expect(enriched.statistical_design.mde_percent).toBe(8);
+    expect(enriched.launch_preferences.min_sample_size).toBe(2000);
   });
 
   it('remaps include and exclude country lists onto launch segments', () => {

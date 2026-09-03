@@ -7,6 +7,8 @@ import {
   normalizeAudienceDevicePills,
   normalizeAudienceSegment,
   normalizeAudienceSourcePills,
+  parseMinSampleSize,
+  resolveMinSampleSize,
   validateClassicAudienceUi,
 } from '../classicAudienceEdit';
 
@@ -21,6 +23,7 @@ describe('canEditClassicAudienceMetrics', () => {
   it('blocks ended and archived experiments', () => {
     expect(canEditClassicAudienceMetrics('winner_ready')).toBe(false);
     expect(canEditClassicAudienceMetrics('applied')).toBe(false);
+    expect(canEditClassicAudienceMetrics('completed')).toBe(false);
     expect(canEditClassicAudienceMetrics('archived')).toBe(false);
   });
 });
@@ -100,7 +103,21 @@ describe('validateClassicAudienceUi', () => {
   it('rejects invalid traffic and sample size', () => {
     expect(validateClassicAudienceUi({ trafficAllocation: 2, minSampleSize: '5000', primaryMetric: 'revenue_per_visitor' }).ok).toBe(false);
     expect(validateClassicAudienceUi({ trafficAllocation: 50, minSampleSize: 'abc', primaryMetric: 'revenue_per_visitor' }).ok).toBe(false);
+    expect(validateClassicAudienceUi({ trafficAllocation: 50, minSampleSize: '0', primaryMetric: 'revenue_per_visitor' }).ok).toBe(false);
     expect(validateClassicAudienceUi({ trafficAllocation: 50, minSampleSize: '4000', primaryMetric: 'revenue_per_visitor' }).ok).toBe(true);
+  });
+});
+
+describe('parseMinSampleSize', () => {
+  it('uses a valid number and falls back to 5000', () => {
+    expect(parseMinSampleSize('2500')).toBe(2500);
+    expect(parseMinSampleSize('abc')).toBe(5000);
+    expect(parseMinSampleSize('', 1000)).toBe(1000);
+  });
+
+  it('keeps the highest valid floor when restored fields disagree', () => {
+    expect(resolveMinSampleSize('5000', '7500')).toBe(7500);
+    expect(resolveMinSampleSize('', '2500')).toBe(2500);
   });
 });
 
@@ -148,9 +165,76 @@ describe('applyAudienceUiToPlans', () => {
     expect(next[0].metadata.audience_ui.trafficAllocation).toBe(60);
     expect(next[0].goal.primary_metric).toBe('profit_per_visitor');
     expect(next[0].goal.min_sample_size).toBe(4000);
+    expect(next[0].goal.analysis_method).toBe('sequential');
+    expect(next[0].goal.significance_level).toBe(0.9);
+    expect(next[0].goal.guardrails).toEqual({
+      auto_stop: true,
+      max_revenue_drop_percent: 10,
+    });
+    expect(next[0].metadata.audience_ui.guardrails.map(row => row.id)).toEqual(['revenue']);
     expect(next[0].audience.include_countries).toEqual(['GB']);
     expect(next[0].audience.traffic_allocation).toBe(60);
     expect(next[0].audience.min_sample_size).toBe(4000);
+    expect(next[0].launch_preferences.min_sample_size).toBe(4000);
     expect(next[0].experiment_id).toBe('exp-1');
+  });
+
+  it('uses shop 95% confidence when the plan has no stamped stats', () => {
+    const next = applyAudienceUiToPlans(
+      [{ id: 'p1', audience: { segments: { device: 'all' } } }],
+      {
+        segment: 'all_visitors',
+        trafficAllocation: 50,
+        devices: [],
+        sources: [],
+        includeCountries: [],
+        excludeCountries: [],
+        countryMode: 'include',
+        primaryMetric: 'revenue_per_visitor',
+        secondaryMetrics: [],
+        customGoals: [],
+        primaryCustomGoal: null,
+        guardrails: [],
+        minSampleSize: '2500',
+      },
+      { shopGuardrails: { confidence_level: 95, mde_percent: 8 } }
+    );
+    expect(next[0].goal.significance_level).toBe(0.95);
+    expect(next[0].goal.mde_percent).toBe(8);
+  });
+
+  it('refreshes each SKU statistical design after audience edits', () => {
+    const audienceUi = {
+      segment: 'all_visitors',
+      trafficAllocation: 50,
+      devices: [],
+      sources: [],
+      includeCountries: [],
+      excludeCountries: [],
+      countryMode: 'include',
+      primaryMetric: 'conversion_rate',
+      secondaryMetrics: [],
+      customGoals: [],
+      primaryCustomGoal: null,
+      guardrails: [],
+      minSampleSize: '500',
+    };
+    const rows = [0.02, 0.08].map((baseline, index) => ({
+      id: `p${index + 1}`,
+      variant_id: `v${index + 1}`,
+      daily_visitors: 200,
+      baseline_conversion_rate: baseline,
+      price_arms: [
+        { id: 'control', allocation_percent: 50 },
+        { id: 'a', allocation_percent: 50 },
+      ],
+    }));
+    const next = applyAudienceUiToPlans(rows, audienceUi, {});
+    expect(next[0].statistical_design.visitors_per_variant_required).not.toBe(
+      next[1].statistical_design.visitors_per_variant_required
+    );
+    expect(next.every(row => row.statistical_design.estimated_duration_days > 0)).toBe(true);
+    expect(next.every(row => row.statistical_design.duration_feasibility)).toBe(true);
+    expect(next.every(row => row.statistical_design.traffic_evidence)).toBe(true);
   });
 });

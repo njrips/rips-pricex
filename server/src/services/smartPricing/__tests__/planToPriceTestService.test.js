@@ -54,6 +54,81 @@ describe('planToPriceTestService', () => {
     expect(control.name).toMatch(/\$59\.00|59/);
   });
 
+  it('rejects a zero-traffic variation instead of silently rebalancing it', () => {
+    const invalid = {
+      ...samplePlan,
+      price_arms: samplePlan.price_arms.map((arm, index) => ({
+        ...arm,
+        allocation_percent: index === 0 ? 100 : 0,
+      })),
+    };
+    expect(() => buildPriceTestPayloadFromPlan(invalid)).toThrow(/more than 0% traffic/i);
+  });
+
+  it('copies min_sample_size from launch preferences and audience_ui onto the test goal', () => {
+    const fromPrefs = buildPriceTestPayloadFromPlan({
+      ...samplePlan,
+      launch_preferences: { min_sample_size: 2500 },
+    });
+    expect(fromPrefs.goal.min_sample_size).toBe(2500);
+
+    const fromUi = buildPriceTestPayloadFromPlan({
+      ...samplePlan,
+      metadata: { audience_ui: { minSampleSize: '4000' } },
+    });
+    expect(fromUi.goal.min_sample_size).toBe(4000);
+  });
+
+  it('defaults Smart Pricing launches to sequential design with confidence 0.9', () => {
+    const payload = buildPriceTestPayloadFromPlan({
+      ...samplePlan,
+      goal: {
+        min_sample_size: 2500,
+        visitors_per_variant_recommended: 18000,
+        analysis_method: 'sequential',
+        mde_percent: 10,
+        significance_level: 0.9,
+      },
+    });
+    expect(payload.goal.analysis_method).toBe('sequential');
+    expect(payload.goal.significance_level).toBe(0.9);
+    expect(payload.goal.mde_percent).toBe(10);
+    expect(payload.goal.visitors_per_variant_recommended).toBe(18000);
+    expect(payload.goal.min_sample_size).toBe(2500);
+    expect(payload.metadata.statistical_design).toBeNull();
+  });
+
+  it('falls back to shop statistical defaults when the plan has none', () => {
+    const payload = buildPriceTestPayloadFromPlan(samplePlan, {
+      guardrails: {
+        confidence_level: 95,
+        mde_percent: 8,
+        min_sample_size_per_variation: 2500,
+      },
+    });
+    expect(payload.goal.significance_level).toBe(0.95);
+    expect(payload.goal.mde_percent).toBe(8);
+    expect(payload.goal.min_sample_size).toBe(2500);
+    expect(payload.goal.analysis_method).toBe('sequential');
+  });
+
+  it('copies plan statistical_design onto the launched test', () => {
+    const payload = buildPriceTestPayloadFromPlan({
+      ...samplePlan,
+      statistical_design: {
+        analysis_method: 'sequential',
+        confidence_level: 90,
+        mde_percent: 10,
+        visitors_per_variant_required: 18000,
+      },
+    });
+    expect(payload.metadata.statistical_design).toMatchObject({
+      analysis_method: 'sequential',
+      confidence_level: 90,
+      visitors_per_variant_required: 18000,
+    });
+  });
+
   it('maps audience segments and goal overrides onto the price test payload', () => {
     const payload = buildPriceTestPayloadFromPlan(
       {

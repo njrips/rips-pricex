@@ -1,19 +1,45 @@
 import { formatCurrency } from './smartPricingConstants';
 
+const PRACTICAL_TEST_MAX_DAYS = 56;
+
+function formatPlanningWindow(days) {
+  const total = Number(days);
+  if (!Number.isFinite(total) || total <= 0 || total > PRACTICAL_TEST_MAX_DAYS) return null;
+  return `${Math.max(2, Math.ceil(total / 7))} weeks`;
+}
+
 export function formatConfidenceBadge(plan) {
-  const days = plan?.statistical_design?.estimated_duration_days;
-  const rating = plan?.statistical_design?.power_rating;
-  if (rating === 'underpowered') {
+  const design = plan?.statistical_design || {};
+  const days = design.estimated_duration_days;
+  const rating = design.timeline_rating || design.power_rating;
+  const persistedRange = String(design.practical_duration_range || '').trim();
+  const window = persistedRange || formatPlanningWindow(days);
+  const ratingReady = rating === 'adequate' || rating === 'powered';
+  const feasibilityReady = design.duration_feasibility === 'practical';
+  if (!ratingReady || !window || !feasibilityReady) {
+    const infeasible =
+      design.duration_feasibility === 'not_feasible' || Boolean(days && !window);
     return {
       tone: 'warning',
-      label: days ? `Needs more time · ~${days} days` : 'Needs more time',
-      hint: 'Try 2 prices or launch later',
+      label: infeasible
+        ? 'Needs more traffic'
+        : rating === 'underpowered'
+          ? 'Needs more time'
+          : 'Needs planning data',
+      hint: infeasible
+          ? 'Not feasible inside the practical 2–8 week window'
+          : rating === 'underpowered'
+            ? 'Try 2 prices or launch later'
+            : 'Qualified traffic and conversion inputs are required',
     };
   }
   return {
     tone: 'success',
-    label: days ? `Ready · ~${days} days` : 'Ready',
-    hint: 'Good confidence this finishes on time',
+    label: persistedRange ? `Planning window · ${window}` : `Planning window · about ${window}`,
+    hint:
+      design.traffic_evidence === 'estimated'
+        ? 'Low-confidence traffic prior; verify after measured storefront traffic accrues'
+        : 'Current traffic supports the practical planning window',
   };
 }
 
@@ -57,8 +83,11 @@ export function planStatusLabel(plan) {
   if (plan?.status === 'applied') {
     return { tone: 'success', label: 'Applied' };
   }
+  if (plan?.status === 'completed') {
+    return { tone: 'success', label: 'Completed' };
+  }
   if (plan?.status === 'winner_ready') {
-    return { tone: 'attention', label: 'Apply price' };
+    return { tone: 'attention', label: 'Roll out winner' };
   }
   if (plan?.status === 'paused' || plan?.status === 'stopped') {
     return { tone: 'warning', label: 'Paused' };
@@ -78,7 +107,7 @@ export const SMART_PRICING_FLOW = [
   { id: 'pick', label: 'Pick products' },
   { id: 'review', label: 'Review plans' },
   { id: 'launch', label: 'Launch tests' },
-  { id: 'winner', label: 'Apply winner' },
+  { id: 'winner', label: 'Winner' },
 ];
 
 /**
@@ -106,8 +135,15 @@ export function resolveSmartPricingFlowIndex(screen, state = {}) {
 
 export function isSmartPricingTest(test) {
   const metadata = test?.metadata && typeof test.metadata === 'object' ? test.metadata : {};
+  if (metadata.smart_pricing_source === 'smart_pricing' || Boolean(metadata.smart_pricing_plan_id)) {
+    return true;
+  }
+  const description = String(test?.description || '');
+  const name = String(test?.name || '');
   return (
-    metadata.smart_pricing_source === 'smart_pricing' || Boolean(metadata.smart_pricing_plan_id)
+    /Created from Smart Pricing(?: offer)? plan/i.test(description) ||
+    /^Smart Pricing\s*·/i.test(name) ||
+    /smart[_ ]pricing/i.test(description)
   );
 }
 
@@ -117,10 +153,32 @@ export function isSmartPricingWinnerReady(test, linkedPlan = null) {
     .trim()
     .toLowerCase();
   const winnerApplied = personalizationMode === 'personalized' || personalizationMode === 'rollout';
-  if (linkedPlan?.status === 'applied') {
+  if (winnerApplied) {
     return false;
   }
-  return linkedPlan?.status === 'winner_ready' || (isStopped && !winnerApplied);
+  if (
+    personalizationMode === 'control' ||
+    personalizationMode === 'retained' ||
+    personalizationMode === 'control_retained'
+  ) {
+    return false;
+  }
+  const planStatus = String(linkedPlan?.status || '')
+    .trim()
+    .toLowerCase();
+  if (planStatus === 'winner_ready') {
+    return true;
+  }
+  if (planStatus === 'applied' || planStatus === 'completed') {
+    return false;
+  }
+  const decision = String(test?.goal?.auto_decision || '')
+    .trim()
+    .toLowerCase();
+  if (decision === 'control' || decision === 'challenger') {
+    return false;
+  }
+  return isStopped && !winnerApplied;
 }
 
 export function buildSmartPricingPlanFromTest(test, linkedPlan = null) {
@@ -138,7 +196,7 @@ export function buildSmartPricingPlanFromTest(test, linkedPlan = null) {
   };
 }
 
-export function resolveSmartPricingPlanContext(test, shopDomain) {
+export function resolveSmartPricingPlanContext(test) {
   if (!isSmartPricingTest(test)) {
     return null;
   }
@@ -185,7 +243,7 @@ export function groupInboxPlans(plans = []) {
       winnerReady.push(plan);
       return;
     }
-    if (plan.status === 'applied') {
+    if (plan.status === 'applied' || plan.status === 'completed') {
       applied.push(plan);
       return;
     }
@@ -305,10 +363,10 @@ export function resolveNextSmartPricingAction({
       kind: 'apply',
       title:
         winnerCount === 1
-          ? '1 test finished — apply the winning price'
-          : `${winnerCount} tests finished — apply winning prices`,
-      body: 'Publish the best price to Shopify when you are ready. Nothing changes until you confirm.',
-      cta: 'Apply winners',
+          ? '1 product needs a catalog write'
+          : `${winnerCount} products need a catalog write`,
+      body: 'Automatic Shopify write did not finish for these products. Confirm Roll out to apply that winning price.',
+      cta: 'Roll out winner',
       tab: 'draft',
     };
   }
@@ -367,7 +425,7 @@ export function getTabPlanSections(activeTabId, grouped, tabPlans = []) {
   }
   if (activeTabId === 'draft') {
     return [
-      { id: 'winner', title: 'Apply winning price', plans: pick(grouped.winnerReady) },
+      { id: 'winner', title: 'Roll out winner', plans: pick(grouped.winnerReady) },
       { id: 'ready', title: 'Ready to go live', plans: pick(grouped.queued) },
     ].filter(section => section.plans.length > 0);
   }

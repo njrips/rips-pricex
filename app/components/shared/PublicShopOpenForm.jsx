@@ -1,5 +1,6 @@
-import { useEffect, useId, useState } from 'react';
+import { useId } from 'react';
 import { Form, useActionData, useNavigation } from 'react-router';
+import { useKeyedState } from '../../hooks/useKeyedState';
 import { IconArrowRight } from '../SmartPricing/classic/classicIcons';
 import {
   coerceShopifyShopInput,
@@ -12,7 +13,6 @@ import styles from '../public/publicStyles';
 
 export default function PublicShopOpenForm({
   action = '/',
-  autoFocus = false,
   initialError = '',
   title = 'Open in Shopify Admin',
 }) {
@@ -20,13 +20,19 @@ export default function PublicShopOpenForm({
   const actionData = useActionData();
   const navigation = useNavigation();
   const submitting = navigation.state === 'submitting';
-  const [shop, setShop] = useState(() => toShopifyShopHandleField(actionData?.shop || ''));
-  const [error, setError] = useState(actionData?.errors?.shop || initialError || '');
+  // The field shows what the server echoed back until the visitor types over
+  // it. Keying the typed value to the echo means a new echo wins automatically,
+  // while an action that returns no shop leaves what they were typing alone.
+  const echoedShop = toShopifyShopHandleField(actionData?.shop || '');
+  const [typedShop, setTypedShop] = useKeyedState(echoedShop, null);
+  const shop = typedShop === null ? echoedShop : typedShop;
 
-  useEffect(() => {
-    if (actionData?.shop) setShop(toShopifyShopHandleField(actionData.shop));
-    if (actionData?.errors?.shop) setError(actionData.errors.shop);
-  }, [actionData]);
+  // Keyed on the result itself, so resubmitting and getting the same message
+  // shows it again instead of staying dismissed.
+  const [error, setError] = useKeyedState(
+    actionData,
+    () => actionData?.errors?.shop || initialError || ''
+  );
 
   const preview = shopOpenPreview(shop);
   const helpId = `${fieldId}-help`;
@@ -39,9 +45,9 @@ export default function PublicShopOpenForm({
       isShopifyStoreDomain(coerced) &&
       (next.includes('/') || /admin\.shopify\.com/i.test(next) || /\.myshopify\.com/i.test(next))
     ) {
-      setShop(toShopifyShopHandleField(coerced));
+      setTypedShop(toShopifyShopHandleField(coerced));
     } else {
-      setShop(next.replace(/^\s+/, ''));
+      setTypedShop(next.replace(/^\s+/, ''));
     }
     if (error) setError('');
   };
@@ -57,7 +63,7 @@ export default function PublicShopOpenForm({
       return;
     }
     field.value = normalized;
-    setShop(toShopifyShopHandleField(normalized));
+    setTypedShop(toShopifyShopHandleField(normalized));
     setError('');
   };
 
@@ -82,7 +88,6 @@ export default function PublicShopOpenForm({
               spellCheck={false}
               autoCapitalize="none"
               autoCorrect="off"
-              autoFocus={autoFocus}
               inputMode="text"
               placeholder="your-store"
               aria-invalid={Boolean(error)}

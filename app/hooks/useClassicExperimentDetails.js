@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useKeyedState } from './useKeyedState';
 import { apiGet, unwrapData } from '../services';
 import {
   getSmartPricingGuardrails,
   getSmartPricingInboxPlan,
   getSmartPricingOpportunities,
+  getSmartPricingProductEvents,
   getSmartPricingTestAnalytics,
 } from '../services/smartPricingApi';
 import {
@@ -18,6 +20,7 @@ import {
 } from '../components/SmartPricing/classic/classicExperimentHelpers';
 import { mergeInboxPlansById } from '../components/SmartPricing/classic/classicAudienceEdit';
 import { mergeQaRuns } from '../components/SmartPricing/classic/classicActivity';
+import { mapWithConcurrency } from '../utils/mapWithConcurrency';
 import {
   buildActivityTimeline,
   buildAudienceSummary,
@@ -25,6 +28,7 @@ import {
   buildMetricsSummary,
   buildOverviewKpis,
   buildProductPerformanceGrid,
+  buildProductRolloutRows,
   buildSettingsSummary,
   buildVariationAveragePerformance,
   buildVariationsSummary,
@@ -41,18 +45,14 @@ function unwrapTest(payload) {
 
 export function useClassicExperimentDetails(shopDomain, planId) {
   const [allPlans, setAllPlans] = useState([]);
-  const [analytics, setAnalytics] = useState(null);
-  const [analyticsByTestId, setAnalyticsByTestId] = useState({});
-  const [test, setTest] = useState(null);
-  const [qaRuns, setQaRuns] = useState([]);
   const [shopGuardrails, setShopGuardrails] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [analyticsLoading, setAnalyticsLoading] = useState(false);
   const [message, setMessage] = useState('');
   const [messageType, setMessageType] = useState('error');
   const [reloadKey, setReloadKey] = useState(0);
   const hydrateOptionsRef = useRef({});
   const handleBackfillKeyRef = useRef('');
+  const autoWinnerRefreshKeyRef = useRef('');
 
   const refresh = useCallback((hydrateOptions = {}) => {
     hydrateOptionsRef.current =
@@ -93,12 +93,14 @@ export function useClassicExperimentDetails(shopDomain, planId) {
           }
         }
 
-        const guardrails = await getSmartPricingGuardrails(shopDomain).catch(() => null);
-        if (guardrails && !cancelled) {
+        const guardrails = await getSmartPricingGuardrails(shopDomain).catch(() => ({}));
+        if (!cancelled) {
           setShopGuardrails(
-            guardrails.guardrails && typeof guardrails.guardrails === 'object'
+            guardrails?.guardrails && typeof guardrails.guardrails === 'object'
               ? guardrails.guardrails
-              : guardrails
+              : guardrails && typeof guardrails === 'object'
+                ? guardrails
+                : {}
           );
         }
       } catch (err) {
@@ -118,20 +120,45 @@ export function useClassicExperimentDetails(shopDomain, planId) {
   const experiment = useMemo(() => findExperimentByPlanId(allPlans, planId), [allPlans, planId]);
   const plan = experiment?.representative || findPlanInCatalog(allPlans, planId) || null;
   const testId = plan?.test_id || null;
+  // Read the plans off the experiment first so the memo depends on that list
+  // rather than on the whole experiment object.
+  const rawExperimentPlans = experiment?.plans;
   const experimentPlans = useMemo(
     () =>
-      Array.isArray(experiment?.plans) && experiment.plans.length
-        ? experiment.plans
+      Array.isArray(rawExperimentPlans) && rawExperimentPlans.length
+        ? rawExperimentPlans
         : plan
           ? [plan]
           : [],
-    [experiment?.plans, plan]
+    [rawExperimentPlans, plan]
   );
   const experimentTestIds = useMemo(
     () => collectExperimentTestIds(experimentPlans, testId),
     [experimentPlans, testId]
   );
   const experimentTestIdsKey = experimentTestIds.join('|');
+
+  // Analytics for the whole experiment, keyed on the shop and the exact set of
+  // product tests it covers. When that set changes the panel reads an empty,
+  // already-loading state instead of briefly showing the previous experiment's
+  // numbers against the new one.
+  const analyticsKey = `${shopDomain || ''}|${experimentTestIdsKey}`;
+  const [analyticsState, setAnalyticsState] = useKeyedState(analyticsKey, () => ({
+    analytics: null,
+    analyticsByTestId: {},
+    test: null,
+    qaRuns: [],
+    serverEvents: [],
+    loading: Boolean(shopDomain) && experimentTestIds.length > 0,
+  }));
+  const {
+    analytics,
+    analyticsByTestId,
+    test,
+    qaRuns,
+    serverEvents,
+    loading: analyticsLoading,
+  } = analyticsState;
 
   // Backfill storefront handles for older inbox plans that predate catalog handle persistence.
   useEffect(() => {
@@ -189,7 +216,7 @@ export function useClassicExperimentDetails(shopDomain, planId) {
           },
         });
       });
-      if (!patches.size) return;
+      if (!patches.size || cancelled) return;
 
       setAllPlans(prev =>
         prev.map(row => {
@@ -212,52 +239,61 @@ export function useClassicExperimentDetails(shopDomain, planId) {
   }, [shopDomain, experiment?.id, experiment?.plans]);
 
   useEffect(() => {
+    if (!shopDomain || !experimentTestIds.length) return undefined;
     let cancelled = false;
-    if (!shopDomain || !experimentTestIds.length) {
-      setAnalytics(null);
-      setAnalyticsByTestId({});
-      setTest(null);
-      setQaRuns([]);
-      setAnalyticsLoading(false);
-      return undefined;
-    }
 
     (async () => {
-      setAnalyticsLoading(true);
       let analyticsError = '';
       try {
-        const analyticsEntries = await Promise.all(
-          experimentTestIds.map(async id => {
-            try {
-              const data = await getSmartPricingTestAnalytics(shopDomain, id);
-              return [id, data];
-            } catch (err) {
-              if (!analyticsError) {
-                analyticsError = err?.message || 'Could not load Smart Pricing analytics.';
-              }
-              return [id, null];
+        // A few at a time: an experiment can be dozens of products, and each
+        // request costs the API several queries against a smaller pool.
+        const analyticsEntries = await mapWithConcurrency(experimentTestIds, async id => {
+          try {
+            const data = await getSmartPricingTestAnalytics(shopDomain, id);
+            return [id, data];
+          } catch (err) {
+            if (!analyticsError) {
+              analyticsError = err?.message || 'Could not load Smart Pricing analytics.';
             }
-          })
-        );
+            return [id, null];
+          }
+        });
         if (cancelled) return;
 
         const nextByTestId = {};
         analyticsEntries.forEach(([id, data]) => {
           if (data) nextByTestId[id] = data;
         });
-        setAnalyticsByTestId(nextByTestId);
 
         const primaryAnalytics =
           (testId && nextByTestId[String(testId)]) || Object.values(nextByTestId)[0] || null;
         const merged = mergeExperimentAnalytics(nextByTestId, primaryAnalytics);
-        setAnalytics(merged);
+        setAnalyticsState(prev => ({
+          ...prev,
+          analyticsByTestId: nextByTestId,
+          analytics: merged,
+        }));
 
-        const [testRes, ...qaLists] = await Promise.all([
+        const [testRes, productEventLists, ...qaLists] = await Promise.all([
           testId
             ? apiGet(`/tests/${encodeURIComponent(testId)}`)
                 .then(res => unwrapTest(unwrapData(res)))
                 .catch(() => null)
             : Promise.resolve(null),
+          mapWithConcurrency(
+            (Array.isArray(experimentPlans) ? experimentPlans : [])
+              .map(row => String(row?.id || '').trim())
+              .filter(Boolean)
+              .slice(0, 50),
+            async id => {
+              try {
+                const data = await getSmartPricingProductEvents(shopDomain, id, { limit: 40 });
+                return Array.isArray(data?.events) ? data.events : [];
+              } catch {
+                return [];
+              }
+            }
+          ).then(lists => lists.flat()),
           ...experimentTestIds.map(id =>
             apiGet(`/qa/tests/${encodeURIComponent(id)}/runs`)
               .then(res => {
@@ -269,8 +305,26 @@ export function useClassicExperimentDetails(shopDomain, planId) {
           ),
         ]);
         if (cancelled) return;
-        setTest(testRes);
-        setQaRuns(mergeQaRuns(qaLists, 16));
+        setAnalyticsState(prev => ({
+          ...prev,
+          test: testRes,
+          qaRuns: mergeQaRuns(qaLists, 16),
+          serverEvents: Array.isArray(productEventLists) ? productEventLists : [],
+        }));
+        const autoWinnerKey = Object.entries(nextByTestId)
+          .filter(
+            ([, row]) => row?.auto_winner?.enforced || row?.revenue_guardrail?.enforced
+          )
+          .map(
+            ([id, row]) =>
+              `${id}:${row.auto_winner?.action || ''}:${row.revenue_guardrail?.enforced ? 'rail' : ''}`
+          )
+          .sort()
+          .join('|');
+        if (autoWinnerKey && autoWinnerRefreshKeyRef.current !== autoWinnerKey) {
+          autoWinnerRefreshKeyRef.current = autoWinnerKey;
+          refresh({ quiet: true });
+        }
         // Surface hard failures, but avoid toast spam for transient/empty analytics.
         if (
           analyticsError &&
@@ -281,14 +335,23 @@ export function useClassicExperimentDetails(shopDomain, planId) {
           setMessage(analyticsError);
         }
       } finally {
-        if (!cancelled) setAnalyticsLoading(false);
+        if (!cancelled) setAnalyticsState(prev => ({ ...prev, loading: false }));
       }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [shopDomain, testId, experimentTestIds, experimentTestIdsKey, reloadKey]);
+  }, [
+    shopDomain,
+    testId,
+    experimentTestIds,
+    experimentTestIdsKey,
+    experimentPlans,
+    reloadKey,
+    refresh,
+    setAnalyticsState,
+  ]);
 
   const kpis = useMemo(
     () => buildOverviewKpis({ analytics, plan, experiment }),
@@ -315,6 +378,10 @@ export function useClassicExperimentDetails(shopDomain, planId) {
       }),
     [plan, experimentPlans, analyticsByTestId, analytics]
   );
+  const rolloutRows = useMemo(
+    () => buildProductRolloutRows({ plans: experimentPlans, analyticsByTestId }),
+    [experimentPlans, analyticsByTestId]
+  );
   const variations = useMemo(
     () =>
       buildVariationsSummary(plan, analytics, {
@@ -326,21 +393,32 @@ export function useClassicExperimentDetails(shopDomain, planId) {
   const audience = useMemo(() => buildAudienceSummary(plan, test), [plan, test]);
   const metrics = useMemo(() => buildMetricsSummary(plan, test), [plan, test]);
   const activity = useMemo(
-    () => buildActivityTimeline({ plan, test, analytics, qaRuns, plans: experimentPlans }),
-    [plan, test, analytics, qaRuns, experimentPlans]
+    () =>
+      buildActivityTimeline({
+        plan,
+        test,
+        analytics,
+        qaRuns,
+        plans: experimentPlans,
+        serverEvents,
+      }),
+    [plan, test, analytics, qaRuns, experimentPlans, serverEvents]
   );
   const settings = useMemo(
     () => buildSettingsSummary(plan, test, shopGuardrails),
     [plan, test, shopGuardrails]
   );
 
+  // Read the id out first: closing over `plan` itself would tie this callback
+  // to every field on the plan, not just the one it uses.
+  const currentPlanId = plan?.id || null;
   const patchPlanLocal = useCallback(
     patch => {
-      if (!plan?.id || !shopDomain) return;
-      updateInboxPlan(shopDomain, plan.id, patch);
-      setAllPlans(prev => prev.map(row => (row.id === plan.id ? { ...row, ...patch } : row)));
+      if (!currentPlanId || !shopDomain) return;
+      updateInboxPlan(shopDomain, currentPlanId, patch);
+      setAllPlans(prev => prev.map(row => (row.id === currentPlanId ? { ...row, ...patch } : row)));
     },
-    [plan?.id, shopDomain]
+    [currentPlanId, shopDomain]
   );
 
   const patchExperimentPlansLocal = useCallback(
@@ -399,6 +477,7 @@ export function useClassicExperimentDetails(shopDomain, planId) {
     conversionRows,
     variationAverages,
     productPerformanceRows,
+    rolloutRows,
     variations,
     audience,
     metrics,
@@ -408,6 +487,7 @@ export function useClassicExperimentDetails(shopDomain, planId) {
     messageType,
     setMessage,
     setMessageType,
+    shopGuardrails,
     experimentPlans,
     experimentTestIds,
     refresh,

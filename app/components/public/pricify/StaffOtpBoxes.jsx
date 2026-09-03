@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
+import { useHydrated } from '../../../hooks/useHydrated';
 import { OTP_LENGTH, normalizeOtpDigits, otpDigitList } from './staffOtp';
+
+const FIRST_OTP_BOX_ID = 'staff-otp-box-0';
 
 export default function StaffOtpBoxes({
   name = 'code',
@@ -8,13 +11,10 @@ export default function StaffOtpBoxes({
   onDigitsChange,
 }) {
   const [digits, setDigits] = useState(() => otpDigitList(''));
-  const [enhanced, setEnhanced] = useState(false);
+  // The split boxes need JavaScript, so they only take over after hydration.
+  const enhanced = useHydrated();
   const refs = useRef([]);
   const code = digits.join('');
-
-  useEffect(() => {
-    setEnhanced(true);
-  }, []);
 
   useEffect(() => {
     if (enhanced && autoFocus) refs.current[0]?.focus();
@@ -78,11 +78,11 @@ export default function StaffOtpBoxes({
 
   return (
     <div className={enhanced ? 'staff-otp is-enhanced' : 'staff-otp'}>
-      <label
-        className="staff-label"
-        htmlFor={enhanced ? undefined : 'staff-code'}
-        onClick={enhanced ? () => refs.current[0]?.focus() : undefined}
-      >
+      {/* Bind the label to whichever field is actually reachable: the first box
+          when the split boxes are live, the single fallback input otherwise. A
+          real association focuses on click for free, and unlike a click handler
+          it also announces the field to a screen reader. */}
+      <label className="staff-label" htmlFor={enhanced ? FIRST_OTP_BOX_ID : 'staff-code'}>
         6-digit code
         <input
           id="staff-code"
@@ -108,6 +108,7 @@ export default function StaffOtpBoxes({
         {digits.map((digit, index) => (
           <input
             key={index}
+            id={index === 0 ? FIRST_OTP_BOX_ID : undefined}
             ref={(node) => {
               refs.current[index] = node;
             }}

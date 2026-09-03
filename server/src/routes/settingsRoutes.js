@@ -52,7 +52,12 @@ function pickCartTransformFunction(functionsList = []) {
     const title = String(fn?.title || '')
       .trim()
       .toLowerCase();
-    return title.includes('ripspricex') || title.includes('ripx') || title.includes('rips price');
+    return (
+      title.includes('pricify') ||
+      title.includes('ripspricex') ||
+      title.includes('ripx') ||
+      title.includes('rips price')
+    );
   });
   if (preferred) return preferred;
   return cartTransforms.length > 0 ? cartTransforms[0] : null;
@@ -158,7 +163,7 @@ router.get(
 <link rel="dns-prefetch" href="${escapeHtmlAttr(scriptOrigin)}">
 `
       : '';
-    const snippetHtml = `<!-- RipsPriceX - Shopify. Prefer Theme App Embed. -->
+    const snippetHtml = `<!-- Pricify - Shopify. Prefer Theme App Embed. -->
 ${resourceHints}<script src="${scriptUrl}" defer crossorigin="anonymous" fetchpriority="high"></script>`;
 
     // Prefer live MAIN theme id for embed deep links (`/themes/current` can open a draft).
@@ -219,7 +224,7 @@ ${resourceHints}<script src="${scriptUrl}" defer crossorigin="anonymous" fetchpr
         method: 'App Proxy + App Embed (recommended)',
         steps: [
           'Configure App Proxy: subpath prefix "apps", subpath "ripspricex"',
-          'Enable RipsPriceX theme app embed in Online Store → Themes → Customize',
+          'Enable Pricify theme app embed in Online Store → Themes → Customize',
           'Deploy cart transform extension (ripspricex-cart-transform) for charged-price parity',
           'Deploy checkout discount (ripspricex-checkout-discount) and Ensure it for offer tests',
         ],
@@ -245,7 +250,7 @@ router.post(
       return sendError(
         res,
         400,
-        'Missing Shopify access token for this shop. Re-open RipsPriceX from Shopify Admin and try again.'
+        'Missing Shopify access token for this shop. Re-open Pricify from Shopify Admin and try again.'
       );
     }
 
@@ -494,7 +499,7 @@ router.get(
       return sendError(
         res,
         400,
-        'Missing Shopify access token for this shop. Re-open RipsPriceX from Shopify Admin and try again.'
+        'Missing Shopify access token for this shop. Re-open Pricify from Shopify Admin and try again.'
       );
     }
 
@@ -616,7 +621,7 @@ router.get(
       return sendError(
         res,
         400,
-        'Missing Shopify access token for this shop. Re-open RipsPriceX from Shopify Admin and try again.'
+        'Missing Shopify access token for this shop. Re-open Pricify from Shopify Admin and try again.'
       );
     }
 

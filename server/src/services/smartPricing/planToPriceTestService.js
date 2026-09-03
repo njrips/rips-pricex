@@ -3,6 +3,8 @@
  */
 
 const { buildRevenueDropGuardrailConfig } = require('./smartPricingRevenueGuardrail');
+const { resolveShopStatisticalDefaults } = require('./smartPricingGuardrailsService');
+const { firstPositiveInt } = require('../../utils/minSampleSize');
 
 function formatCurrencyLabel(amount, currency = 'USD') {
   const n = Number(amount);
@@ -187,8 +189,22 @@ function normalizeSecondaryGoalList(rawSecondary = [], rawEvents = []) {
   return out.slice(0, 12);
 }
 
+/** Confidence as a fraction (0.9). Never treat this as alpha — analytics does 1 - level. */
+function resolveGoalConfidence(planGoal = {}, design = {}, guardrails = {}) {
+  const raw = Number(planGoal.significance_level);
+  if (Number.isFinite(raw) && raw > 0) {
+    if (raw > 1 && raw <= 100) return raw / 100;
+    if (raw < 1) return raw;
+  }
+  const conf = Number(design?.confidence_level);
+  if (Number.isFinite(conf) && conf > 1 && conf <= 100) return conf / 100;
+  if (Number.isFinite(conf) && conf > 0 && conf < 1) return conf;
+  return resolveShopStatisticalDefaults(guardrails).significanceLevel;
+}
+
 function resolvePlanGoal(plan = {}, guardrails = {}) {
   const planGoal = plan.goal && typeof plan.goal === 'object' ? plan.goal : {};
+  const shopStats = resolveShopStatisticalDefaults(guardrails);
   const defaultGoal = guardrails.default_goal_template || guardrails.defaultGoalTemplate || {};
   const primary =
     planGoal.primary_metric ||
@@ -207,6 +223,37 @@ function resolvePlanGoal(plan = {}, guardrails = {}) {
       : defaultGoal.secondary_events
   );
   const revenueGuardrail = buildRevenueDropGuardrailConfig(guardrails, plan);
+  const launchPrefs =
+    plan.launch_preferences && typeof plan.launch_preferences === 'object'
+      ? plan.launch_preferences
+      : {};
+  const audienceUi =
+    plan.metadata?.audience_ui && typeof plan.metadata.audience_ui === 'object'
+      ? plan.metadata.audience_ui
+      : {};
+  const audience = plan.audience && typeof plan.audience === 'object' ? plan.audience : {};
+  const minSampleSize = firstPositiveInt(
+    planGoal.min_sample_size,
+    planGoal.minSampleSize,
+    audience.min_sample_size,
+    launchPrefs.min_sample_size,
+    audienceUi.minSampleSize,
+    audienceUi.min_sample_size,
+    shopStats.minSampleSize
+  );
+  const minConversionsPerVariation = firstPositiveInt(
+    planGoal.min_conversions_per_variation,
+    planGoal.minConversionsPerVariation,
+    audience.min_conversions_per_variation,
+    launchPrefs.min_conversions_per_variation,
+    audienceUi.minConversionsPerVariation,
+    plan.statistical_design?.min_conversions_per_variation,
+    shopStats.minConversions
+  );
+  const recommended = firstPositiveInt(
+    planGoal.visitors_per_variant_recommended,
+    plan.statistical_design?.visitors_per_variant_required
+  );
   return {
     // abTestEngine.validateTest requires goal.type (Test Wizard default).
     type: planGoal.type || defaultGoal.type || 'conversion',
@@ -217,6 +264,18 @@ function resolvePlanGoal(plan = {}, guardrails = {}) {
     secondary_events: secondary.map(item => item.event_name),
     cogs,
     auto_stop: true,
+    analysis_method: planGoal.analysis_method || shopStats.analysisMethod || 'sequential',
+    mde_percent:
+      Number(planGoal.mde_percent || plan.statistical_design?.mde_percent) || shopStats.mdePercent,
+    statistical_power:
+      Number(planGoal.statistical_power || plan.statistical_design?.statistical_power) ||
+      shopStats.statisticalPower,
+    significance_level: resolveGoalConfidence(planGoal, plan.statistical_design, guardrails),
+    ...(minSampleSize ? { min_sample_size: minSampleSize } : {}),
+    ...(minConversionsPerVariation
+      ? { min_conversions_per_variation: minConversionsPerVariation }
+      : {}),
+    ...(recommended ? { visitors_per_variant_recommended: recommended } : {}),
     guardrails: {
       auto_stop: true,
       max_revenue_drop_percent: revenueGuardrail.max_revenue_drop_percent,
@@ -240,17 +299,27 @@ function buildPriceTestPayloadFromPlan(plan = {}, options = {}) {
 
   const title = String(plan.title || 'Product').trim();
   const armProjections = Array.isArray(plan.arm_projections) ? plan.arm_projections : [];
-  const variants = arms.map((arm, index) => ({
-    name:
-      formatArmVariantName(arm, currency) ||
-      String(arm.label || `Variant ${String.fromCharCode(65 + index - 1)}`).trim(),
-    allocation: Number(arm.allocation_percent) || Math.floor(100 / arms.length),
-    config: buildVariantConfigForArm(plan, arm),
-  }));
+  const variants = arms.map((arm, index) => {
+    const rawAllocation = arm.allocation_percent;
+    const allocation =
+      rawAllocation === null || rawAllocation === undefined || rawAllocation === ''
+        ? Math.floor(100 / arms.length)
+        : Number(rawAllocation);
+    if (!Number.isFinite(allocation) || allocation <= 0) {
+      throw new Error('Every Smart Pricing variation must receive more than 0% traffic');
+    }
+    return {
+      name:
+        formatArmVariantName(arm, currency) ||
+        String(arm.label || `Variant ${String.fromCharCode(65 + index - 1)}`).trim(),
+      allocation,
+      config: buildVariantConfigForArm(plan, arm),
+    };
+  });
 
   const allocationTotal = variants.reduce((sum, v) => sum + (Number(v.allocation) || 0), 0);
-  if (allocationTotal !== 100 && variants.length > 0) {
-    variants[0].allocation += 100 - allocationTotal;
+  if (Math.abs(allocationTotal - 100) > 0.001) {
+    throw new Error('Smart Pricing variation traffic must total 100%');
   }
 
   const segments = resolvePlanSegments(plan, guardrails);
@@ -280,6 +349,10 @@ function buildPriceTestPayloadFromPlan(plan = {}, options = {}) {
       current_price: plan.current_price ?? null,
       currency,
       launch_preferences: launchPrefs,
+      statistical_design:
+        plan.statistical_design && typeof plan.statistical_design === 'object'
+          ? plan.statistical_design
+          : null,
       price_arms: arms.map(arm => ({
         id: arm.id,
         role: arm.role,

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Form, Link, useNavigation, useRevalidator, useSearchParams } from 'react-router';
 import { Badge, Banner, Button, Select, TextField } from '@shopify/polaris';
+import SettingsInfoLink from '../../Settings/SettingsInfoLink';
 import ClassicAdminShell from './ClassicAdminShell';
 import {
   HELP_FAQ_ITEMS,
@@ -22,6 +23,17 @@ function statusTone(status) {
   return undefined;
 }
 
+/**
+ * @param {{
+ *   tickets?: Array<Record<string, any>>,
+ *   selectedTicket?: Record<string, any> | null,
+ *   staffEmail?: string,
+ *   formError?: string | null,
+ *   listError?: string | null,
+ *   ticketError?: string | null,
+ *   formNotice?: string | null
+ * }} props
+ */
 export default function ClassicHelpPage({
   tickets = [],
   selectedTicket = null,
@@ -46,10 +58,13 @@ export default function ClassicHelpPage({
   const [replyEmail, setReplyEmail] = useState(staffEmail || '');
   const [replyBody, setReplyBody] = useState('');
 
+  // Scroll when a different ticket opens, not on every reply that re-renders it.
+  const selectedTicketId = selectedTicket?.public_id || '';
+
   useEffect(() => {
-    if (!selectedTicket) return;
+    if (!selectedTicketId) return;
     document.getElementById('help-ticket')?.scrollIntoView({ block: 'start', behavior: 'smooth' });
-  }, [selectedTicket?.public_id]);
+  }, [selectedTicketId]);
 
   useEffect(() => {
     if (typeof document === 'undefined') return undefined;
@@ -113,6 +128,15 @@ export default function ClassicHelpPage({
           </Banner>
         </div>
       ) : null}
+
+      <div className={styles.labelRow}>
+        <div className={styles.sectionLabel}>Experiment setting guides</div>
+        <SettingsInfoLink hash="how-settings-work" label="How Settings apply" />
+      </div>
+      <p className={styles.help} style={{ marginTop: 0, marginBottom: 20 }}>
+        Info icons in Create and Settings open the matching guide. Use the icon here for how shop
+        defaults apply to a new test.
+      </p>
 
       <div className={styles.sectionLabel}>Common questions</div>
       <div style={{ display: 'grid', gap: 8, marginBottom: 28 }}>

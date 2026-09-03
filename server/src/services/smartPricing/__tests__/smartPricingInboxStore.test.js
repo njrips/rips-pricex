@@ -104,6 +104,41 @@ describe('smartPricingInboxStore', () => {
     expect(savedJson.status).toBe('winner_ready');
   });
 
+  it('does not flip a paused plan to winner_ready', async () => {
+    query.mockResolvedValueOnce({
+      rows: [
+        {
+          plan_id: 'SP-1',
+          plan_json: { id: 'SP-1', title: 'Hoodie', status: 'paused', test_id: 't-1' },
+        },
+      ],
+    });
+
+    const client = {
+      query: jest.fn().mockResolvedValue({ rowCount: 0 }),
+      release: jest.fn(),
+    };
+    getClient.mockResolvedValueOnce(client);
+    query.mockResolvedValueOnce({ rows: [] });
+
+    await patchInboxPlansFromSync('demo.myshopify.com', [
+      {
+        plan_id: 'SP-1',
+        synced: true,
+        winner_ready: true,
+        inbox_status: 'winner_ready',
+        test_status: 'stopped',
+      },
+    ]);
+
+    const upsertCall = client.query.mock.calls.find(
+      call =>
+        typeof call[0] === 'string' && call[0].includes('INSERT INTO smart_pricing_inbox_plans')
+    );
+    const savedJson = JSON.parse(upsertCall[1][2]);
+    expect(savedJson.status).toBe('paused');
+  });
+
   it('throws revision conflict when expected revision is stale', async () => {
     query.mockResolvedValueOnce({
       rows: [

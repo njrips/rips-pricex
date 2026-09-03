@@ -26,6 +26,8 @@ export default function ClassicWizardShell({
   onSaveDraft,
   saveDraftLabel = 'Save draft',
   saveDraftBusy = false,
+  saveDraftDisabled = false,
+  onGoToStep,
   children,
   continueBusy = false,
 }) {
@@ -51,27 +53,47 @@ export default function ClassicWizardShell({
         </span>
       </div>
 
-      <div className={styles.stepper} role="list" aria-label="Experiment setup progress">
+      {/* A group rather than a list: completed steps are real buttons, and a
+          list may only contain listitems, so the list role forced a
+          non-interactive role onto them. Position is carried by
+          aria-current="step" on the active item. */}
+      <div className={styles.stepper} role="group" aria-label="Experiment setup progress">
         {steps.map((item, index) => {
           const done = index < stepIndex;
           const active = index === stepIndex;
           const connectorComplete = index < stepIndex;
+          const canJump =
+            done && typeof onGoToStep === 'function' && !continueBusy;
+          const itemClass = `${styles.stepItem} ${active ? styles.stepItemActive : ''} ${
+            done ? styles.stepItemDone : ''
+          } ${canJump ? styles.stepItemClickable : ''}`;
+          const itemBody = (
+            <>
+              <span className={styles.stepDot} aria-hidden>
+                {done ? <IconCheck size={14} /> : index + 1}
+              </span>
+              <span className={styles.stepText}>
+                <span className={styles.stepLabel}>{item.label}</span>
+                <span className={styles.stepSub}>{item.subtitle}</span>
+              </span>
+            </>
+          );
           return (
             <React.Fragment key={item.id}>
-              <div
-                role="listitem"
-                className={`${styles.stepItem} ${active ? styles.stepItemActive : ''} ${
-                  done ? styles.stepItemDone : ''
-                }`}
-              >
-                <span className={styles.stepDot} aria-hidden>
-                  {done ? <IconCheck size={14} /> : index + 1}
-                </span>
-                <span className={styles.stepText}>
-                  <span className={styles.stepLabel}>{item.label}</span>
-                  <span className={styles.stepSub}>{item.subtitle}</span>
-                </span>
-              </div>
+              {canJump ? (
+                <button
+                  type="button"
+                  className={itemClass}
+                  onClick={() => onGoToStep(index)}
+                  aria-label={`Go to ${item.label}`}
+                >
+                  {itemBody}
+                </button>
+              ) : (
+                <div className={itemClass} aria-current={active ? 'step' : undefined}>
+                  {itemBody}
+                </div>
+              )}
               {index < lastIndex ? (
                 <div
                   className={`${styles.stepConnector} ${
@@ -121,7 +143,7 @@ export default function ClassicWizardShell({
             <Button
               variant="tertiary"
               onClick={onSaveDraft}
-              disabled={saveDraftBusy || continueBusy}
+              disabled={saveDraftBusy || saveDraftDisabled || continueBusy}
               loading={saveDraftBusy}
             >
               {saveDraftLabel}

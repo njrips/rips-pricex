@@ -3,7 +3,7 @@ jest.mock('../../../models/test', () => ({
 }));
 
 jest.mock('../../../models/smartPricingInboxStore', () => ({
-  listInboxPlans: jest.fn(),
+  findInboxPlanByTestId: jest.fn(),
   patchInboxPlansFromSync: jest.fn(),
 }));
 
@@ -13,7 +13,7 @@ jest.mock('../smartPricingInboxSyncService', () => ({
 
 const { getTestById } = require('../../../models/test');
 const {
-  listInboxPlans,
+  findInboxPlanByTestId,
   patchInboxPlansFromSync,
 } = require('../../../models/smartPricingInboxStore');
 const { syncInboxPlanEntry } = require('../smartPricingInboxSyncService');
@@ -26,11 +26,14 @@ describe('smartPricingInboxStopSyncService', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     process.env.SMART_PRICING_ENABLED = 'true';
+    findInboxPlanByTestId.mockResolvedValue(null);
   });
 
-  it('detects smart pricing tests from metadata', () => {
+  it('detects smart pricing tests from metadata, name, or description', () => {
     expect(isSmartPricingTest({ metadata: { smart_pricing_plan_id: 'SP-1' } })).toBe(true);
     expect(isSmartPricingTest({ metadata: {} })).toBe(false);
+    expect(isSmartPricingTest({ name: 'Smart Pricing · Hoodie', metadata: {} })).toBe(true);
+    expect(isSmartPricingTest({ description: 'Created from Smart Pricing plan SP-1' })).toBe(true);
   });
 
   it('syncs inbox plan when test stops', async () => {
@@ -92,8 +95,10 @@ describe('smartPricingInboxStopSyncService', () => {
       status: 'stopped',
       metadata: { smart_pricing_source: 'smart_pricing' },
     });
-    listInboxPlans.mockResolvedValueOnce({
-      plans: [{ id: 'SP-9', test_id: 'test-2', status: 'running' }],
+    findInboxPlanByTestId.mockResolvedValueOnce({
+      id: 'SP-9',
+      test_id: 'test-2',
+      status: 'running',
     });
     syncInboxPlanEntry.mockResolvedValueOnce({
       plan_id: 'SP-9',
@@ -107,7 +112,67 @@ describe('smartPricingInboxStopSyncService', () => {
     expect(syncInboxPlanEntry).toHaveBeenCalledWith('demo.myshopify.com', {
       plan_id: 'SP-9',
       test_id: 'test-2',
+      status: 'running',
     });
     expect(result.synced).toBe(true);
+  });
+
+  it('does not un-pause a merchant pause during interval sync', async () => {
+    getTestById.mockResolvedValueOnce({
+      id: 'test-paused',
+      status: 'stopped',
+      name: 'Smart Pricing · Hoodie',
+    });
+    findInboxPlanByTestId.mockResolvedValueOnce({
+      id: 'SP-paused',
+      test_id: 'test-paused',
+      status: 'paused',
+    });
+    syncInboxPlanEntry.mockResolvedValueOnce({
+      plan_id: 'SP-paused',
+      test_id: 'test-paused',
+      synced: true,
+      inbox_status: 'winner_ready',
+      winner_ready: true,
+      winner_applied: false,
+      test_status: 'stopped',
+    });
+    patchInboxPlansFromSync.mockResolvedValueOnce({ plans: [] });
+
+    const result = await syncSmartPricingInboxForTest('demo.myshopify.com', 'test-paused', {
+      reason: 'interval',
+    });
+    expect(result.inbox_status).toBe('paused');
+    expect(result.winner_ready).toBe(false);
+    expect(patchInboxPlansFromSync).toHaveBeenCalledWith('demo.myshopify.com', [
+      expect.objectContaining({ plan_id: 'SP-paused', inbox_status: 'paused', winner_ready: false }),
+    ]);
+  });
+
+  it('syncs inbox-linked tests when tests.metadata is missing', async () => {
+    getTestById.mockResolvedValueOnce({
+      id: 'test-3',
+      status: 'completed',
+      name: 'Price test',
+      description: '',
+    });
+    findInboxPlanByTestId.mockResolvedValueOnce({
+      id: 'SP-3',
+      test_id: 'test-3',
+      status: 'running',
+    });
+    syncInboxPlanEntry.mockResolvedValueOnce({
+      plan_id: 'SP-3',
+      test_id: 'test-3',
+      synced: true,
+      inbox_status: 'completed',
+    });
+    patchInboxPlansFromSync.mockResolvedValueOnce({ plans: [] });
+
+    const result = await syncSmartPricingInboxForTest('demo.myshopify.com', 'test-3', {
+      reason: 'auto_control',
+    });
+    expect(result.synced).toBe(true);
+    expect(patchInboxPlansFromSync).toHaveBeenCalled();
   });
 });

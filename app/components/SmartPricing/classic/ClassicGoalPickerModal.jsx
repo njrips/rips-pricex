@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Banner, Button, Select, TextField } from '@shopify/polaris';
 import {
@@ -17,8 +17,29 @@ import {
   normalizeCustomGoals,
   validateCustomGoalDraft,
 } from '../targeting/smartPricingAudienceHelpers';
+import { useKeyedState } from '../../../hooks/useKeyedState';
+import useFocusTrap from '../../../hooks/useFocusTrap';
 import { ButtonIconPlus } from './classicIcons';
 import styles from './SmartPricingClassic.module.css';
+
+const NO_SHOP_CATALOG = {
+  definitions: [],
+  loading: false,
+  loadError: 'Shop domain is required to load Goals.',
+};
+
+async function loadGoalCatalog(domain) {
+  try {
+    const rows = await getGoalMetricDefinitions(domain);
+    return { definitions: Array.isArray(rows) ? rows : [], loading: false, loadError: '' };
+  } catch (err) {
+    return {
+      definitions: [],
+      loading: false,
+      loadError: err?.response?.data?.error || err?.message || 'Could not load Goals.',
+    };
+  }
+}
 
 function slugEventKey(raw) {
   return String(raw || '')
@@ -41,9 +62,17 @@ export default function ClassicGoalPickerModal({
   createMetricRole = 'secondary',
 }) {
   const [tab, setTab] = useState(initialTab === 'create' ? 'create' : 'browse');
-  const [definitions, setDefinitions] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState('');
+  // This modal is mounted only while it is open, so the trap is always on.
+  const focusTrapRef = useFocusTrap(true);
+  const initialCatalog = useMemo(
+    () =>
+      String(shopDomain || '').trim()
+        ? { definitions: [], loading: true, loadError: '' }
+        : NO_SHOP_CATALOG,
+    [shopDomain]
+  );
+  const [catalog, setCatalog] = useKeyedState(shopDomain, initialCatalog);
+  const { definitions, loading, loadError } = catalog;
   const [search, setSearch] = useState('');
   const [sourceFilter, setSourceFilter] = useState('all');
   const [draft, setDraft] = useState(createEmptyCustomGoalDraft);
@@ -55,31 +84,27 @@ export default function ClassicGoalPickerModal({
 
   const catalogRows = useMemo(() => filterPickerCatalogDefinitions(definitions), [definitions]);
 
-  const refreshCatalog = async () => {
+  const refreshCatalog = useCallback(async () => {
     const domain = String(shopDomain || '').trim();
     if (!domain) {
-      setDefinitions([]);
-      setLoading(false);
-      setLoadError('Shop domain is required to load Goals.');
+      setCatalog(NO_SHOP_CATALOG);
       return;
     }
-    setLoading(true);
-    setLoadError('');
-    try {
-      const rows = await getGoalMetricDefinitions(domain);
-      setDefinitions(Array.isArray(rows) ? rows : []);
-    } catch (err) {
-      setLoadError(err?.response?.data?.error || err?.message || 'Could not load Goals.');
-      setDefinitions([]);
-    } finally {
-      setLoading(false);
-    }
-  };
+    setCatalog(prev => ({ ...prev, loading: true, loadError: '' }));
+    setCatalog(await loadGoalCatalog(domain));
+  }, [shopDomain, setCatalog]);
 
   useEffect(() => {
-    refreshCatalog();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- load once on open
-  }, [shopDomain]);
+    const domain = String(shopDomain || '').trim();
+    if (!domain) return undefined;
+    let cancelled = false;
+    loadGoalCatalog(domain).then(next => {
+      if (!cancelled) setCatalog(next);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [shopDomain, setCatalog]);
 
   const availableRows = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -209,7 +234,7 @@ export default function ClassicGoalPickerModal({
         ? 'Fires automatically when the shopper URL matches your pattern.'
         : draft.trigger_type === 'custom_javascript'
           ? 'Return true, a number, or { value } when the event should count.'
-          : 'RipX watches the storefront and fires this event automatically.';
+          : 'Pricify watches the storefront and fires this event automatically.';
 
   const goalsPageHref = shopDomain ? ROUTES.appGoalsMetrics(shopDomain) : null;
 
@@ -219,14 +244,19 @@ export default function ClassicGoalPickerModal({
     <div
       className={`${styles.modalBackdrop} ${styles.goalPickerBackdrop}`}
       role="presentation"
-      onClick={onClose}
+      onClick={e => {
+        // Close only on the backdrop itself. Letting the dialog swallow the
+        // click instead would put a mouse listener on a non-interactive
+        // element, which keyboard users can never reach.
+        if (e.target === e.currentTarget) onClose();
+      }}
     >
       <div
+        ref={focusTrapRef}
         className={`${styles.modal} ${styles.goalPickerModal}`}
         role="dialog"
         aria-modal="true"
         aria-labelledby="classic-goal-picker-title"
-        onClick={e => e.stopPropagation()}
       >
         <div className={styles.modalHeader}>
           <div>
@@ -372,7 +402,7 @@ export default function ClassicGoalPickerModal({
           ) : (
             <div className={styles.goalPickerCreate}>
               <p className={styles.help}>
-                Define how RipX should fire this event on the storefront. It is saved to your Goals
+                Define how Pricify should fire this event on the storefront. It is saved to your Goals
                 library for reuse.
               </p>
 

@@ -3,6 +3,7 @@ const { createTest } = require('../../models/test');
 const { buildPriceTestPayloadFromPlan } = require('./planToPriceTestService');
 const { buildOfferTestPayloadFromPlan, isOfferPlan } = require('./planToOfferTestService');
 const { getShopSmartPricingGuardrails } = require('./smartPricingGuardrailsService');
+const { findPriceChangeViolations } = require('./priceBandService');
 const { assertCanLaunchPriceTests } = require('./smartPricingLaunchGuardService');
 const {
   resolveSmartPricingCheckoutReadiness,
@@ -19,6 +20,23 @@ async function launchSmartPricingPlanAsTest(
 ) {
   const guardrails = await getShopSmartPricingGuardrails(shopDomain).catch(() => ({}));
   const offerPlan = isOfferPlan(plan);
+
+  if (!offerPlan) {
+    const violations = findPriceChangeViolations(
+      plan?.current_price ?? plan?.currentPrice,
+      plan?.price_arms ?? plan?.priceArms,
+      guardrails
+    );
+    if (violations.length) {
+      const err = new Error(
+        `${violations.join(' ')} Adjust the prices, or raise the max price change in Settings.`
+      );
+      err.isValidation = true;
+      err.errors = violations;
+      throw err;
+    }
+  }
+
   const payload = offerPlan
     ? buildOfferTestPayloadFromPlan(plan, { guardrails })
     : buildPriceTestPayloadFromPlan(plan, { guardrails });
@@ -110,6 +128,18 @@ async function launchSmartPricingPlanAsTest(
   if (planId && test?.id) {
     inboxPlan = await linkInboxPlanToTest(shopDomain, planId, test.id, {
       status: started ? 'running' : 'draft',
+    }).catch(() => null);
+  }
+
+  if (started && test?.id) {
+    const { recordEventForTest } = require('../../models/smartPricingProductEventStore');
+    await recordEventForTest(shopDomain, test.id, 'launched', {
+      actor: 'merchant',
+      test: startedTest,
+      planId,
+      productId: plan?.product_id || null,
+      variantId: plan?.variant_id || null,
+      payload: { auto_start: true },
     }).catch(() => null);
   }
 

@@ -11,6 +11,19 @@ const {
 } = require('./smartPricingLaunchGuardService');
 const { resolveSmartPricingCheckoutReadiness } = require('./smartPricingCheckoutReadinessService');
 
+function statisticalInputsFromGuardrails(guardrails) {
+  const g = guardrails && typeof guardrails === 'object' ? guardrails : {};
+  const minSample = Number(g.min_sample_size_per_variation);
+  return {
+    mdePercent: Number(g.mde_percent) || 10,
+    confidenceLevel: Number(g.confidence_level) === 95 ? 95 : 90,
+    power: Number(g.statistical_power) || 80,
+    ...(Number.isFinite(minSample) && minSample >= 1
+      ? { minSampleSize: Math.round(minSample) }
+      : {}),
+  };
+}
+
 async function createBatchFromSelection({
   shopDomain = '',
   accessToken = '',
@@ -44,6 +57,12 @@ async function createBatchFromSelection({
       (scenarioPreset === 'recommended' ? opp.recommended_scenario_preset : scenarioPreset) ||
       scenarioPreset;
     const variantCount = variantCountBySku[variantId] || (opp.daily_visitors < 60 ? 2 : 3);
+    const baselineSource = String(opp.baseline_source || '').toLowerCase();
+    const qualifiedBaseline =
+      !baselineSource ||
+      ['experiment_conversion', 'converting_sessions', 'unique_purchasers_per_session'].includes(
+        baselineSource
+      );
     plans.push(
       buildSmartPricingTestPlan({
         shopDomain,
@@ -53,12 +72,14 @@ async function createBatchFromSelection({
         currentPrice: opp.current_price,
         currency: opp.currency,
         dailyVisitors: opp.daily_visitors,
-        baselineConversionRate: opp.baseline_conversion_rate,
+        baselineConversionRate: qualifiedBaseline ? opp.baseline_conversion_rate : null,
+        baselineSource: opp.baseline_source || null,
         baselinePpv: opp.baseline_ppv,
         trafficSource: opp.traffic_source,
         trafficConfidence: opp.traffic_confidence,
         scenarioPreset: resolvedScenario,
         variantCount,
+        ...statisticalInputsFromGuardrails(guardrails),
         guardrails: guardrails
           ? {
               minMarginPercent: guardrails.min_margin_percent,
@@ -75,7 +96,21 @@ async function createBatchFromSelection({
   }
 
   const underpowered = plans.filter(
-    plan => plan.statistical_design?.power_rating === 'underpowered'
+    plan =>
+      (plan.statistical_design?.timeline_rating || plan.statistical_design?.power_rating) ===
+      'underpowered'
+  ).length;
+  const notFeasible = plans.filter(
+    plan => plan.statistical_design?.duration_feasibility === 'not_feasible'
+  ).length;
+  const insufficientData = plans.filter(
+    plan => plan.statistical_design?.duration_feasibility === 'insufficient_data'
+  ).length;
+  const planningReady = plans.filter(
+    plan =>
+      plan.statistical_design?.duration_feasibility === 'practical' &&
+      (plan.statistical_design?.timeline_rating || plan.statistical_design?.power_rating) ===
+        'adequate'
   ).length;
   const estimatedTraffic = plans.filter(plan => plan.traffic_confidence === 'estimated').length;
 
@@ -90,10 +125,12 @@ async function createBatchFromSelection({
     checkout_readiness: checkoutReadiness,
     summary: {
       total: plans.length,
-      ready: plans.length - underpowered,
+      ready: planningReady,
       underpowered,
+      not_feasible: notFeasible,
+      insufficient_data: insufficientData,
       estimated_traffic: estimatedTraffic,
-      stagger_recommended: underpowered > 0 && plans.length > 1,
+      stagger_recommended: planningReady < plans.length && plans.length > 1,
     },
     missing_variant_ids: missing,
     guardrails,

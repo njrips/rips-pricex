@@ -20,7 +20,7 @@
 
   var config = readConfig();
   var shopHost = String(config.shopHost || window.location.hostname || '').trim();
-  var version = String(config.version || '').trim() || '1.0.60';
+  var version = String(config.version || '').trim() || '1.0.62';
   var directScriptBaseUrl = String(config.directScriptBaseUrl || '').trim();
 
   function hasRuntimeConfig() {
@@ -75,53 +75,102 @@
     } catch (_e) {}
   }
 
+  var COOKIE = '__ripx_preview_ctx_v1';
+  function cookieWrite(payload) {
+    try {
+      if (!payload) {
+        document.cookie = COOKIE + '=; Max-Age=0; path=/; SameSite=Lax';
+        return;
+      }
+      var encoded = encodeURIComponent(JSON.stringify(payload));
+      if (!encoded || encoded.length > 3500) return;
+      document.cookie =
+        COOKIE +
+        '=' +
+        encoded +
+        '; Max-Age=7200; path=/; SameSite=Lax' +
+        (location.protocol === 'https:' ? '; Secure' : '');
+    } catch (_eC) {}
+  }
+  function cookieRead() {
+    try {
+      var prefix = COOKIE + '=';
+      var parts = String(document.cookie || '').split(';');
+      for (var i = 0; i < parts.length; i += 1) {
+        var part = String(parts[i] || '').trim();
+        if (part.indexOf(prefix) !== 0) continue;
+        var parsed = JSON.parse(decodeURIComponent(part.slice(prefix.length) || ''));
+        return parsed && typeof parsed === 'object' ? parsed : null;
+      }
+    } catch (_eR) {}
+    return null;
+  }
+  function clearPreviewCaches() {
+    cookieWrite(null);
+    try {
+      if (window.sessionStorage) {
+        window.sessionStorage.removeItem(PREVIEW_STORAGE_KEY);
+        window.sessionStorage.removeItem('__ripx_price_af_hint_v1__');
+        for (var i = window.sessionStorage.length - 1; i >= 0; i -= 1) {
+          var key = window.sessionStorage.key(i);
+          if (key && key.indexOf('ripx_preview_variant_cache_') === 0) {
+            window.sessionStorage.removeItem(key);
+          }
+        }
+      }
+    } catch (_eReset) {}
+    try {
+      if (String(window.name || '').indexOf(PREVIEW_STORAGE_KEY + ':') === 0) window.name = '';
+    } catch (_eN) {}
+  }
   function readPreviewCtx() {
     try {
-      if (!window.sessionStorage) return null;
-      var raw = window.sessionStorage.getItem(PREVIEW_STORAGE_KEY);
-      if (!raw) return null;
-      var parsed = JSON.parse(raw);
-      if (!parsed || typeof parsed !== 'object') return null;
-      return parsed;
-    } catch (_e) {
-      return null;
-    }
+      var raw = window.sessionStorage && window.sessionStorage.getItem(PREVIEW_STORAGE_KEY);
+      if (raw) {
+        var parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object') return parsed;
+      }
+    } catch (_e) {}
+    return cookieRead();
   }
-
+  function writePreviewCtx(ctx) {
+    try {
+      if (!ctx) return;
+      var payload = Object.assign({}, ctx, { persistedAtMs: Date.now() });
+      delete payload.launchTargetUrl;
+      try {
+        if (window.sessionStorage) {
+          window.sessionStorage.setItem(PREVIEW_STORAGE_KEY, JSON.stringify(payload));
+        }
+      } catch (_eS) {}
+      cookieWrite(payload);
+      try {
+        window.name = PREVIEW_STORAGE_KEY + ':' + JSON.stringify(payload);
+      } catch (_eN) {}
+    } catch (_eW) {}
+  }
   function seedPreviewCtxFromUrl() {
     try {
-      if (!window.sessionStorage || !window.location || !window.location.search) return null;
+      if (!window.location || !window.location.search) return readPreviewCtx();
       var params = new URLSearchParams(window.location.search || '');
       var previewFlag = params.get('ab_preview') === '1';
       var testId = params.get('ab_preview_test') || null;
       var variantId = params.get('ab_preview_variant') || null;
       var variantName = params.get('ab_preview_variant_name') || null;
-      var tenantDomain = params.get('ab_preview_domain') || null;
-      if (!(previewFlag || testId || variantId || variantName)) return null;
-      if (params.get('ab_preview_reset') === '1') {
-        try {
-          window.sessionStorage.removeItem(PREVIEW_STORAGE_KEY);
-          if (testId)
-            window.sessionStorage.removeItem('ripx_preview_variant_cache_' + String(testId));
-          for (var i = window.sessionStorage.length - 1; i >= 0; i -= 1) {
-            var key = window.sessionStorage.key(i);
-            if (key && key.indexOf('ripx_preview_variant_cache_') === 0) {
-              window.sessionStorage.removeItem(key);
-            }
-          }
-        } catch (_eReset) {}
-      }
+      if (!(previewFlag || testId || variantId || variantName)) return readPreviewCtx();
+      if (params.get('ab_preview_reset') === '1') clearPreviewCaches();
       var ctx = {
-        preview: previewFlag,
+        preview: previewFlag || !!testId,
         testId: testId,
+        testType: params.get('ab_preview_test_type') || null,
         variantId: variantId,
         variantName: variantName,
-        tenantDomain: tenantDomain,
+        tenantDomain: params.get('ab_preview_domain') || null,
         simple: params.get('ab_preview_simple') === '1',
         sessionId: params.get('ab_preview_session') || null,
         persistedAtMs: Date.now(),
       };
-      window.sessionStorage.setItem(PREVIEW_STORAGE_KEY, JSON.stringify(ctx));
+      writePreviewCtx(ctx);
       return ctx;
     } catch (_e) {
       return null;
@@ -144,67 +193,65 @@
     }
   }
 
+  function scriptPath(value) {
+    return String(value || '').split('?')[0];
+  }
+  function forScripts(fn) {
+    Array.prototype.slice.call(document.scripts || []).forEach(fn);
+  }
   function hasScriptTagFor(src) {
     if (!src) return false;
-    var normalized = String(src).split('?')[0];
+    var n = scriptPath(src);
+    var found = false;
     try {
-      return Array.prototype.slice.call(document.scripts || []).some(function (script) {
-        var current = String((script && script.src) || '').split('?')[0];
-        return !!current && current === normalized;
+      forScripts(function (s) {
+        if (scriptPath(s && s.src) === n) found = true;
       });
-    } catch (_e) {
-      return false;
-    }
+    } catch (_e) {}
+    return found;
   }
-
   function removeScriptTagsFor(src) {
     if (!src) return;
-    var normalized = String(src).split('?')[0];
+    var n = scriptPath(src);
     try {
-      Array.prototype.slice.call(document.scripts || []).forEach(function (script) {
-        var current = String((script && script.src) || '').split('?')[0];
-        if (current && current === normalized && script.parentNode) {
-          script.parentNode.removeChild(script);
-        }
+      forScripts(function (s) {
+        if (scriptPath(s && s.src) === n && s.parentNode) s.parentNode.removeChild(s);
       });
     } catch (_e) {}
   }
-
+  function setStatus(obj) {
+    try {
+      window.__RIPX_APP_EMBED_LOADER_STATUS__ = obj;
+    } catch (_e) {}
+  }
   function appendScript(src, isFallback, forceReload) {
     if (!src) return;
-    if (forceReload) {
-      removeScriptTagsFor(src);
-    } else if (hasScriptTagFor(src)) {
-      return;
-    }
+    if (forceReload) removeScriptTagsFor(src);
+    else if (hasScriptTagFor(src)) return;
     var tag = document.createElement('script');
     tag.src = src;
     tag.async = false;
     tag.setAttribute('fetchpriority', 'high');
     tag.onload = function () {
       if (hasRipx()) {
-        try {
-          window.__RIPX_APP_EMBED_LOADER_STATUS__ = {
-            ok: true,
-            version: window.RipX.version,
-            source: isFallback ? 'direct' : 'app_proxy',
-            preview: hasPreviewCtx(),
-            at: Date.now(),
-          };
-        } catch (_eStatusOk) {}
+        setStatus({
+          ok: true,
+          version: window.RipX.version,
+          source: isFallback ? 'direct' : 'app_proxy',
+          preview: hasPreviewCtx(),
+          at: Date.now(),
+        });
         stopEnsure();
       }
     };
     tag.onerror = function () {
-      try {
-        window.__RIPX_APP_EMBED_LOADER_STATUS__ = {
-          ok: false,
-          failedSrc: src,
-          fallback: !!isFallback,
-          preview: hasPreviewCtx(),
-          at: Date.now(),
-        };
-      } catch (_eStatus) {}
+      setStatus({
+        ok: false,
+        failedSrc: src,
+        fallback: !!isFallback,
+        preview: hasPreviewCtx(),
+        at: Date.now(),
+      });
       if (!isFallback && directScriptBaseUrl)
         appendScript(withPreviewBust(buildDirectSrc()), true, forceReload === true);
     };
@@ -236,37 +283,27 @@
 
   function ensureLoaded() {
     if (hasRipx()) {
-      try {
-        window.__RIPX_APP_EMBED_LOADER_STATUS__ = {
-          ok: true,
-          version: window.RipX.version,
-          at: Date.now(),
-        };
-      } catch (_eStatus) {}
+      setStatus({ ok: true, version: window.RipX.version, at: Date.now() });
       stopEnsure();
       return;
     }
-
     var runtimePresentWithoutConfig = hasRipxVersion() && !hasRuntimeConfig();
     attemptCount += 1;
     appendScript(withPreviewBust(buildPrimarySrc()), false, runtimePresentWithoutConfig);
     if (directScriptBaseUrl)
       appendScript(withPreviewBust(buildDirectSrc()), true, runtimePresentWithoutConfig);
-
     if (attemptCount >= maxAttempts) {
       stopEnsure();
       reportInitFailure('runtime_missing_after_retries');
-      try {
-        window.__RIPX_APP_EMBED_LOADER_STATUS__ = {
-          ok: false,
-          reason: 'runtime_missing_after_retries',
-          preview: hasPreviewCtx(),
-          hasEmbedConfig: !!document.getElementById(CONFIG_ID),
-          primarySrc: buildPrimarySrc(),
-          fallbackConfigured: !!directScriptBaseUrl,
-          at: Date.now(),
-        };
-      } catch (_eStatus) {}
+      setStatus({
+        ok: false,
+        reason: 'runtime_missing_after_retries',
+        preview: hasPreviewCtx(),
+        hasEmbedConfig: !!document.getElementById(CONFIG_ID),
+        primarySrc: buildPrimarySrc(),
+        fallbackConfigured: !!directScriptBaseUrl,
+        at: Date.now(),
+      });
     }
   }
 

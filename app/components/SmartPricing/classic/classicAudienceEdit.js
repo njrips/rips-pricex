@@ -1,7 +1,13 @@
 import { resolveCountryLists } from './countrySelection';
 import { stampClassicExperimentMetadata } from './classicExperimentHelpers';
+import { shopDesignFromGuardrails, stampStatisticalFields } from './sampleSizePolicy';
+import { estimateSignificanceDuration } from './estimateSignificanceDuration';
 import { isClassicExperimentEnded } from './classicExperimentListActions';
-import { ensureRevenueGuardrailRows } from './revenueGuardrail';
+import {
+  capRevenueGuardrailRows,
+  ensureRevenueGuardrailRows,
+  revenueGuardrailGoalConfig,
+} from './revenueGuardrail';
 import {
   CLASSIC_DEVICE_OPTIONS,
   CLASSIC_SOURCE_OPTIONS,
@@ -66,6 +72,25 @@ export function normalizeAudienceSourcePills(list) {
   return mapPills(list, SOURCE_PILL_BY_KEY, CLASSIC_SOURCE_OPTIONS);
 }
 
+export const DEFAULT_MIN_SAMPLE_SIZE = 5000;
+export const MIN_SAMPLE_SIZE_FLOOR = 1;
+
+export function parseMinSampleSize(raw, fallback = DEFAULT_MIN_SAMPLE_SIZE) {
+  const n = Number(raw);
+  if (Number.isFinite(n) && n >= MIN_SAMPLE_SIZE_FLOOR) return Math.round(n);
+  const fb = Number(fallback);
+  if (Number.isFinite(fb) && fb >= MIN_SAMPLE_SIZE_FLOOR) return Math.round(fb);
+  return DEFAULT_MIN_SAMPLE_SIZE;
+}
+
+export function resolveMinSampleSize(...values) {
+  const valid = values
+    .map(Number)
+    .filter(value => Number.isFinite(value) && value >= MIN_SAMPLE_SIZE_FLOOR)
+    .map(Math.round);
+  return valid.length ? Math.max(...valid) : DEFAULT_MIN_SAMPLE_SIZE;
+}
+
 function baseAudienceUi() {
   return {
     segment: 'all_visitors',
@@ -75,7 +100,7 @@ function baseAudienceUi() {
     secondaryMetrics: [],
     customGoals: [],
     guardrails: ensureRevenueGuardrailRows([]),
-    minSampleSize: '5000',
+    minSampleSize: String(DEFAULT_MIN_SAMPLE_SIZE),
     ...normalizeClassicAudienceTargeting({}),
   };
 }
@@ -86,8 +111,11 @@ export function validateClassicAudienceUi(audienceUi = {}) {
     return { ok: false, message: 'Traffic allocation must be between 5% and 100%.' };
   }
   const sample = Number(audienceUi.minSampleSize);
-  if (!Number.isFinite(sample) || sample < 1) {
-    return { ok: false, message: 'Enter a minimum sample size of at least 1 visitor per variation.' };
+  if (!Number.isFinite(sample) || sample < MIN_SAMPLE_SIZE_FLOOR) {
+    return {
+      ok: false,
+      message: `Enter a minimum sample size of at least ${MIN_SAMPLE_SIZE_FLOOR} visitor per variation.`,
+    };
   }
   const primary = String(
     audienceUi.primaryCustomGoal?.event_name || audienceUi.primaryMetric || ''
@@ -182,25 +210,28 @@ export function audienceUiFromSummaries(summary = {}, metrics = {}, ui = {}) {
           .toLowerCase() !== primaryKey
     ),
     guardrails: ensureRevenueGuardrailRows(stored.guardrails || metrics.guardrails),
-    minSampleSize: String(summary.minSampleSize || stored.minSampleSize || '5000'),
+    minSampleSize: String(
+      parseMinSampleSize(summary.minSampleSize || stored.minSampleSize, DEFAULT_MIN_SAMPLE_SIZE)
+    ),
   };
 }
 
 export function applyAudienceUiToPlans(
   plans,
   audienceUi,
-  { experimentId, experimentTitle, hypothesis, experimentType } = {}
+  { experimentId, experimentTitle, hypothesis, experimentType, shopGuardrails } = {}
 ) {
+  const shopRevenueCap = shopGuardrails?.max_revenue_drop_percent;
   const normalizedUi = {
     ...audienceUi,
     segment: normalizeAudienceSegment(audienceUi.segment),
     devices: normalizeAudienceDevicePills(audienceUi.devices),
     sources: normalizeAudienceSourcePills(audienceUi.sources),
+    guardrails: capRevenueGuardrailRows(audienceUi.guardrails, shopRevenueCap),
   };
   const goal = buildClassicGoalPayload(normalizedUi);
   const countryLists = resolveCountryLists(normalizedUi);
-  const minSampleSize = Number(normalizedUi.minSampleSize);
-  const sampleSize = Number.isFinite(minSampleSize) && minSampleSize > 0 ? minSampleSize : null;
+  const sampleSize = parseMinSampleSize(normalizedUi.minSampleSize);
   const stamped = stampClassicExperimentMetadata(plans, {
     experimentId,
     experimentTitle,
@@ -208,27 +239,83 @@ export function applyAudienceUiToPlans(
     audienceUi: normalizedUi,
     experimentType,
   });
-  return stamped.map(plan => ({
-    ...plan,
-    goal: {
-      ...(plan.goal && typeof plan.goal === 'object' ? plan.goal : {}),
-      ...goal,
-      guardrails: ensureRevenueGuardrailRows(normalizedUi.guardrails),
-      ...(sampleSize ? { min_sample_size: sampleSize } : {}),
-    },
-    audience: {
-      inherit_from_shop_defaults: false,
-      ...(plan.audience && typeof plan.audience === 'object' ? plan.audience : {}),
-      traffic_allocation: Number(normalizedUi.trafficAllocation) || 50,
-      devices: normalizedUi.devices,
-      sources: normalizedUi.sources,
-      include_countries: countryLists.includeCountries,
-      exclude_countries: countryLists.excludeCountries,
-      country_mode: countryLists.countryMode,
-      device_mode: normalizedUi.deviceMode || 'include',
-      source_mode: normalizedUi.sourceMode || 'include',
-      ...(sampleSize ? { min_sample_size: sampleSize } : {}),
-      segments: classicAudienceToSegments(normalizedUi, plan.audience?.segments),
-    },
-  }));
+  const shopDesign = shopDesignFromGuardrails(shopGuardrails);
+  return stamped.map(plan => {
+    const stats = stampStatisticalFields(plan, shopGuardrails);
+    const variations = (Array.isArray(plan.price_arms) ? plan.price_arms : []).map(
+      (arm, index) => ({
+        id: arm.id || `arm-${index}`,
+        traffic: arm.allocation_percent ?? arm.traffic_percent,
+      })
+    );
+    const durationEstimate = estimateSignificanceDuration({
+      plans: [plan],
+      variations,
+      trafficAllocation: normalizedUi.trafficAllocation,
+      minSampleSize: sampleSize,
+      minConversionsPerVariation: shopDesign.minConversions,
+      mdePercent: stats.mde_percent,
+      confidenceLevel: stats.confidence_level,
+      power: stats.statistical_power,
+    });
+    return {
+      ...plan,
+      statistical_design: {
+        ...(plan.statistical_design || {}),
+        estimated_duration_days:
+          durationEstimate.days ?? plan.statistical_design?.estimated_duration_days ?? null,
+        estimate_detail: durationEstimate.detail,
+        traffic_allocation: durationEstimate.trafficAllocation,
+        duration_feasibility: durationEstimate.durationFeasibility || null,
+        practical_duration_range: durationEstimate.practicalDurationRange || null,
+        traffic_evidence: durationEstimate.trafficEvidence || null,
+        traffic_source: plan.traffic_source || null,
+        traffic_confidence: plan.traffic_confidence || null,
+        practical_window_min_days: durationEstimate.practicalWindowMinDays || null,
+        practical_window_max_days: durationEstimate.practicalWindowMaxDays || null,
+        required_daily_visitors_for_practical_window:
+          durationEstimate.requiredDailyVisitorsForPracticalWindow || null,
+        visitors_per_variant_required:
+          durationEstimate.recommendedSampleSize ||
+          plan.statistical_design?.visitors_per_variant_required ||
+          null,
+        mde_percent: stats.mde_percent,
+        confidence_level: stats.confidence_level,
+        statistical_power: stats.statistical_power,
+        analysis_method: stats.analysis_method,
+        power_rating: durationEstimate.powerRating || plan.statistical_design?.power_rating,
+      },
+      goal: {
+        ...(plan.goal && typeof plan.goal === 'object' ? plan.goal : {}),
+        ...goal,
+        guardrails: revenueGuardrailGoalConfig(normalizedUi.guardrails, shopRevenueCap),
+        min_sample_size: sampleSize,
+        analysis_method: stats.analysis_method,
+        mde_percent: stats.mde_percent,
+        statistical_power: stats.statistical_power,
+        significance_level: stats.significance_level,
+        visitors_per_variant_recommended: durationEstimate.recommendedSampleSize || null,
+      },
+      audience: {
+        inherit_from_shop_defaults: false,
+        ...(plan.audience && typeof plan.audience === 'object' ? plan.audience : {}),
+        traffic_allocation: Number(normalizedUi.trafficAllocation) || 50,
+        devices: normalizedUi.devices,
+        sources: normalizedUi.sources,
+        include_countries: countryLists.includeCountries,
+        exclude_countries: countryLists.excludeCountries,
+        country_mode: countryLists.countryMode,
+        device_mode: normalizedUi.deviceMode || 'include',
+        source_mode: normalizedUi.sourceMode || 'include',
+        min_sample_size: sampleSize,
+        segments: classicAudienceToSegments(normalizedUi, plan.audience?.segments),
+      },
+      launch_preferences: {
+        ...(plan.launch_preferences && typeof plan.launch_preferences === 'object'
+          ? plan.launch_preferences
+          : {}),
+        min_sample_size: sampleSize,
+      },
+    };
+  });
 }

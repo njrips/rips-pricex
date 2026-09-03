@@ -1,9 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
 import { Badge, Button, Spinner, TextField } from '@shopify/polaris';
 import PageShell from '../../shared/PageShell';
 import { ROUTES } from '../../../constants';
 import useClassicShopDomain from '../../../hooks/useClassicShopDomain';
+import { useKeyedState } from '../../../hooks/useKeyedState';
 import { readInboxPlans, setInboxPersistHandler, writeInboxPlans } from '../smartPricingConstants';
 import { filterPlansByQuery } from '../smartPricingUiHelpers';
 import { hydrateInboxFromServer, schedulePersistInboxPlans } from '../smartPricingInboxPersistence';
@@ -20,6 +21,7 @@ import {
   ButtonIconPlus,
   IconChevron,
   IconBolt,
+  IconControlBaseline,
   IconPerson,
   IconTrendUp,
 } from './classicIcons';
@@ -63,6 +65,25 @@ function emptyFilterCopy(filter) {
   return 'No experiments yet.';
 }
 
+async function loadExperimentPlans(shopDomain, hydrateOptions) {
+  const local = readInboxPlans(shopDomain) || [];
+  try {
+    const hydrated = await hydrateInboxFromServer(shopDomain, local, hydrateOptions).catch(
+      () => null
+    );
+    if (hydrated?.plans) {
+      writeInboxPlans(shopDomain, hydrated.plans, { persist: false });
+      return { plans: hydrated.plans, message: '' };
+    }
+    return { plans: local, message: '' };
+  } catch (err) {
+    return {
+      plans: readInboxPlans(shopDomain) || [],
+      message: err.message || 'Could not load experiments.',
+    };
+  }
+}
+
 function formatMetricLabel(metric) {
   const raw = String(metric || '').trim();
   if (!raw) return 'Profit per visitor';
@@ -82,7 +103,8 @@ export default function ClassicExperimentsList() {
   );
   const [plans, setPlans] = useState([]);
   const [search, setSearch] = useState('');
-  const [loading, setLoading] = useState(true);
+  // Starts busy for each shop; the first load below never has to flip it on.
+  const [loading, setLoading] = useKeyedState(shopDomain, true);
   const [gridBusy, setGridBusy] = useState('');
   const [message, setMessage] = useState('');
   const [messageType, setMessageType] = useState('error');
@@ -99,33 +121,44 @@ export default function ClassicExperimentsList() {
     return () => setInboxPersistHandler(null);
   }, []);
 
-  const load = useCallback(async (hydrateOptions = {}) => {
-    const quiet = Boolean(
-      hydrateOptions.quiet || hydrateOptions.preferLocalIds || hydrateOptions.omitIds
-    );
-    if (!quiet) setLoading(true);
-    try {
-      const local = readInboxPlans(shopDomain) || [];
-      const hydrated = await hydrateInboxFromServer(shopDomain, local, hydrateOptions).catch(
-        () => null
-      );
-      const next = Array.isArray(hydrated?.plans) ? hydrated.plans : local;
-      setPlans(next);
-      if (hydrated?.plans) {
-        writeInboxPlans(shopDomain, hydrated.plans, { persist: false });
-      }
-    } catch (err) {
-      setMessage(err.message || 'Could not load experiments.');
-      setPlans(readInboxPlans(shopDomain) || []);
-    } finally {
+  const loadRequestRef = useRef(0);
+
+  const applyLoad = useCallback(
+    result => {
+      setPlans(result.plans);
+      if (result.message) setMessage(result.message);
       setLoading(false);
       setGridBusy('');
-    }
-  }, [shopDomain]);
+    },
+    [setLoading]
+  );
+
+  // Refreshes triggered by row actions show the spinner again unless the caller
+  // asked for a quiet background hydrate.
+  const reload = useCallback(
+    async (hydrateOptions = {}) => {
+      const quiet = Boolean(
+        hydrateOptions.quiet || hydrateOptions.preferLocalIds || hydrateOptions.omitIds
+      );
+      if (!quiet) setLoading(true);
+      const requestId = loadRequestRef.current + 1;
+      loadRequestRef.current = requestId;
+      const result = await loadExperimentPlans(shopDomain, hydrateOptions);
+      // Drop a hydrate that lost the race to a newer load or a shop switch,
+      // otherwise the list can show a different shop's experiments.
+      if (requestId !== loadRequestRef.current) return;
+      applyLoad(result);
+    },
+    [shopDomain, applyLoad, setLoading]
+  );
 
   useEffect(() => {
-    load();
-  }, [load]);
+    const requestId = loadRequestRef.current + 1;
+    loadRequestRef.current = requestId;
+    loadExperimentPlans(shopDomain, {}).then(result => {
+      if (requestId === loadRequestRef.current) applyLoad(result);
+    });
+  }, [shopDomain, applyLoad]);
 
   const experiments = useMemo(() => {
     const queried = filterPlansByQuery(plans, search);
@@ -136,7 +169,7 @@ export default function ClassicExperimentsList() {
     const allExperiments = groupPlansIntoExperiments(plans.filter(p => !p.archived));
     const running = allExperiments.filter(e => e.status === 'running').length;
     const winning = allExperiments.filter(
-      e => e.status === 'winner_ready' || e.status === 'completed'
+      e => e.status === 'winner_ready' || e.status === 'applied' || e.status === 'completed'
     ).length;
     const visitors = allExperiments.reduce((sum, e) => sum + (Number(e.visitors) || 0), 0);
     return { running, visitors, winning };
@@ -177,7 +210,7 @@ export default function ClassicExperimentsList() {
   };
 
   const handleRowRefresh = async hydrateOptions => {
-    await load(hydrateOptions || {});
+    await reload(hydrateOptions || {});
   };
 
   const handleRowActionDone = (action, experiment) => {
@@ -460,29 +493,46 @@ export default function ClassicExperimentsList() {
                                       </div>
                                     </div>
                                     <div className={styles.expChildArms}>
-                                      {arms.slice(0, 3).map((arm, idx) => (
-                                        <span
-                                          key={arm.id || idx}
-                                          className={`${styles.armChip} ${
-                                            idx > 0 ? styles.armChipAlt : ''
-                                          }`}
-                                        >
-                                          <span className={styles.armLetter}>
-                                            {String.fromCharCode(65 + idx)}
+                                      {arms.slice(0, 3).map((arm, idx) => {
+                                        const isControl = idx === 0 || arm.role === 'control';
+                                        const letter = String.fromCharCode(64 + Math.max(1, idx));
+                                        return (
+                                          <span
+                                            key={arm.id || idx}
+                                            className={`${styles.armChip} ${
+                                              !isControl ? styles.armChipAlt : ''
+                                            }`}
+                                          >
+                                            <span
+                                              className={`${styles.armLetter} ${
+                                                isControl ? styles.controlVariationMarker : ''
+                                              }`}
+                                              aria-label={
+                                                isControl
+                                                  ? 'Control — current catalog baseline'
+                                                  : `Variation ${letter}`
+                                              }
+                                            >
+                                              {isControl ? (
+                                                <IconControlBaseline size={10} />
+                                              ) : (
+                                                letter
+                                              )}
+                                            </span>
+                                            {isOffer
+                                              ? isControl
+                                                ? 'No offer'
+                                                : formatOfferRule(arm.offer)
+                                              : arm.price !== null &&
+                                                  arm.price !== undefined &&
+                                                  Number.isFinite(Number(arm.price))
+                                                ? `$${Number(arm.price).toFixed(
+                                                    Number(arm.price) % 1 === 0 ? 0 : 2
+                                                  )}`
+                                                : '—'}
                                           </span>
-                                          {isOffer
-                                            ? idx === 0 || arm.role === 'control'
-                                              ? 'No offer'
-                                              : formatOfferRule(arm.offer)
-                                            : arm.price !== null &&
-                                                arm.price !== undefined &&
-                                                Number.isFinite(Number(arm.price))
-                                              ? `$${Number(arm.price).toFixed(
-                                                  Number(arm.price) % 1 === 0 ? 0 : 2
-                                                )}`
-                                              : '—'}
-                                        </span>
-                                      ))}
+                                        );
+                                      })}
                                     </div>
                                   </div>
                                 </td>

@@ -69,22 +69,44 @@ async function serveScript(req, res) {
     logger.warn('active tests load failed', { message: err.message });
   }
 
-  const config = buildStorefrontRuntimeConfig(
-    shop,
-    activeTests,
-    req,
-    goalMetricDefinitions,
-    { shopMappings: shopPriceSurfaceMappings },
-    {
-      runtimeSource: 'ripspricex-track',
-    }
-  );
+  let config;
+  try {
+    config = buildStorefrontRuntimeConfig(
+      shop,
+      activeTests,
+      req,
+      goalMetricDefinitions,
+      { shopMappings: shopPriceSurfaceMappings },
+      {
+        runtimeSource: 'ripspricex-track',
+      }
+    );
+  } catch (err) {
+    logger.error('storefront runtime config failed', { message: err.message });
+    config = {
+      apiUrl: '',
+      shopDomain: shop || null,
+      version: SCRIPT_VERSION,
+      runtimeSource: 'ripspricex-track-fallback',
+      activeTests: [],
+      goalMetricDefinitions: [],
+      priceSurfaceRegistry: { version: 1, shopMappings: [] },
+    };
+  }
   // apiUrl comes from resolvePublicAppUrl(req) inside buildStorefrontRuntimeConfig —
   // do not re-stamp RIPSPRICEX_PUBLIC_API_BASE here (stale after tunnel rotation).
 
-  const early = buildEarlyStorefrontAntiFlickerBootstrap
-    ? buildEarlyStorefrontAntiFlickerBootstrap(config)
-    : '';
+  let early = '';
+  try {
+    early = buildEarlyStorefrontAntiFlickerBootstrap
+      ? buildEarlyStorefrontAntiFlickerBootstrap(
+          config.activeTests,
+          config.priceSurfaceRegistry
+        )
+      : '';
+  } catch (err) {
+    logger.warn('early anti-flicker bootstrap failed', { message: err.message });
+  }
   const body = `${early}\nwindow.AB_TEST_RUNTIME_CONFIG=${JSON.stringify(config)};\n${loadScriptBody()}`;
   res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
   res.setHeader('Cache-Control', getStorefrontScriptCacheControl?.() || 'public, max-age=60');
@@ -329,9 +351,8 @@ router.get(
   ],
   async (req, res) => {
     try {
-      const { createPricePreviewBootstrapHandlers, PRICE_PREVIEW_BOOTSTRAP_CSP } = require(
-        './pricePreviewBootstrap'
-      );
+      // The bootstrap handler sets its own Content-Security-Policy.
+      const { createPricePreviewBootstrapHandlers } = require('./pricePreviewBootstrap');
       const validatePreviewBootstrapRequest = async (request, response) => {
         const shop = resolveShop(request);
         const targetUrl = String(request.query.url || request.query.target || '').trim();

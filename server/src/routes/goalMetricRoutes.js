@@ -126,7 +126,8 @@ router.get(
       return sendError(res, HTTP_STATUS.UNAUTHORIZED, 'Shop domain required');
     }
 
-    const definitions = await listGoalMetricDefinitions(shopDomain, { tenantId: req.tenantId });
+    // Scoped by shop; there is no tenant dimension in this schema.
+    const definitions = await listGoalMetricDefinitions(shopDomain);
     return sendSuccess(res, HTTP_STATUS.OK, { definitions });
   })
 );

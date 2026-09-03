@@ -150,7 +150,7 @@ describe('classicExperimentListActions', () => {
       { id: 'run', status: 'running', archived: false },
       { id: 'pause', status: 'paused', archived: false },
       { id: 'done', status: 'completed', archived: false },
-      { id: 'applied', status: 'completed', archived: false },
+      { id: 'applied', status: 'applied', archived: false },
       { id: 'draft', status: 'draft', archived: false },
       { id: 'old', status: 'paused', archived: true },
     ];

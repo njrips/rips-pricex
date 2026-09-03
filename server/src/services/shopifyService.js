@@ -403,6 +403,16 @@ class ShopifyService {
    * @returns {Promise<Object>} Updated product
    */
   async updateProductPrice(shopDomain, accessToken, productId, variantId, price) {
+    // Last line of defence before a merchant's live catalog: a NaN or a price
+    // that rounded to zero upstream would otherwise be written as "0" and make
+    // the product free.
+    const numericPrice = Number(price);
+    if (!Number.isFinite(numericPrice) || numericPrice <= 0) {
+      throw new Error(
+        `Refusing to set a non-positive price (${price}) on variant ${variantId}`
+      );
+    }
+
     const session = this.getSession(shopDomain, accessToken);
     const client = new this.api.clients.Graphql({ session });
 
@@ -424,7 +434,7 @@ class ShopifyService {
     const variables = {
       input: {
         id: variantId,
-        price: price.toString(),
+        price: numericPrice.toString(),
       },
     };
 

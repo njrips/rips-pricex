@@ -3,7 +3,7 @@ const { asyncHandler } = require('../middleware/asyncHandler');
 const { getTestById, updateTestStatus } = require('../models/test');
 const { requireEntitlement } = require('../services/billing/entitlementService');
 const {
-  scheduleSmartPricingInboxSync,
+  syncSmartPricingInboxForTest,
 } = require('../services/smartPricing/smartPricingInboxStopSyncService');
 
 const router = express.Router();
@@ -28,7 +28,9 @@ router.post(
       return res.status(404).json({ error: 'Test not found' });
     }
     await updateTestStatus(req.params.id, req.shopDomain, 'running');
-    scheduleSmartPricingInboxSync(req.shopDomain, req.params.id, { reason: 'manual_start' });
+    await syncSmartPricingInboxForTest(req.shopDomain, req.params.id, {
+      reason: 'manual_start',
+    }).catch(() => null);
     const updated = await getTestById(req.params.id, req.shopDomain);
     res.json({ test: updated });
   })
@@ -44,7 +46,9 @@ router.post(
     }
     await updateTestStatus(req.params.id, req.shopDomain, 'stopped');
     // Classic Pause maps to stop — keep inbox as paused, not winner_ready.
-    scheduleSmartPricingInboxSync(req.shopDomain, req.params.id, { reason: 'merchant_stop' });
+    await syncSmartPricingInboxForTest(req.shopDomain, req.params.id, {
+      reason: 'merchant_stop',
+    }).catch(() => null);
     const updated = await getTestById(req.params.id, req.shopDomain);
     res.json({ test: updated });
   })

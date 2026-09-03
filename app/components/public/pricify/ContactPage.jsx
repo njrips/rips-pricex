@@ -40,6 +40,10 @@ export default function ContactPage({ storeUrl, supportEmail = '' }) {
         </a>
       </p>
       <p className="docBody">
+        <Link to={PUBLIC_ROUTES.docs} className="textLink">
+          Guides
+        </Link>
+        {' · '}
         <PublicSectionLink hash="faq" className="textLink">
           FAQ
         </PublicSectionLink>

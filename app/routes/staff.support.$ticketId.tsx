@@ -2,6 +2,7 @@ import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from "react
 import { useEffect, useState } from "react";
 import { Form, Link, redirect, useActionData, useLoaderData, useNavigation } from "react-router";
 import { shopHandle, staffQueueBackHref } from "../components/public/pricify/staffQueue";
+import { useHydrated } from "../hooks/useHydrated";
 import { expressSupportFetch, supportErrorMessage } from "../utils/expressSupportApi.server";
 import { staffToken } from "../utils/staffSupportAuth.server";
 import {
@@ -93,11 +94,11 @@ export default function StaffTicketDetail() {
   const ticket = data.ticket;
   const closed = ticket?.status === "closed";
   const [reply, setReply] = useState("");
-  const [backTo, setBackTo] = useState("/staff/support");
-
-  useEffect(() => {
-    setBackTo(staffQueueBackHref());
-  }, []);
+  // The remembered queue filters live in browser storage, so the back link can
+  // only resolve to them after hydration; before that both sides render the
+  // plain queue href.
+  const hydrated = useHydrated();
+  const backTo = hydrated ? staffQueueBackHref() : "/staff/support";
 
   useEffect(() => {
     if (!data.notice || typeof window === "undefined") return;
@@ -146,9 +147,9 @@ export default function StaffTicketDetail() {
             {actionData.error}
           </p>
         ) : null}
-        {actionData?.notice || data.notice ? (
+        {data.notice ? (
           <p className="staff-success" aria-live="polite">
-            {actionData?.notice || data.notice}
+            {data.notice}
           </p>
         ) : null}
 

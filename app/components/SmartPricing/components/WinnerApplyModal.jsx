@@ -1,4 +1,3 @@
-import React from 'react';
 import { Banner, BlockStack, Modal, Text } from '@shopify/polaris';
 
 export default function WinnerApplyModal({
@@ -38,8 +37,9 @@ export default function WinnerApplyModal({
       <Modal.Section>
         <BlockStack gap="300">
           <Text as="p" tone="subdued">
-            Personalizes traffic to the winning price and updates Shopify variant prices where
-            needed.
+            Writes this product’s reviewed challenger to Shopify. Other products in the experiment
+            are not changed. Confirm only after checking the effect size, traffic quality, and
+            revenue guardrail.
           </Text>
 
           {loadingPreview && (
@@ -52,7 +52,7 @@ export default function WinnerApplyModal({
             <>
               <Banner tone="info">
                 <p>
-                  Winner variant: <strong>{winnerName}</strong>
+                  Reviewed challenger: <strong>{winnerName}</strong>
                 </p>
               </Banner>
 

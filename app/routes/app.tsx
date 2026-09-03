@@ -10,9 +10,8 @@ import "@shopify/polaris/build/esm/styles.css";
 
 import { authenticate } from "../shopify.server";
 import { setShopContext } from "../services/api";
+import { internalServiceHeaders } from "../utils/expressInternalApi.server";
 import ClassicRouteLoading from "../components/shared/ClassicRouteLoading";
-import ClientOnly from "../components/shared/ClientOnly";
-import ShopifyReady from "../components/shared/ShopifyReady";
 import { buildPricingPlansUrl } from "../utils/pricingPlansUrl";
 import "../styles/classic-theme.css";
 
@@ -36,62 +35,84 @@ function SupportLinkHandler() {
       navigate("/app/help");
     });
     return () => {
-      void shopify.support.registerHandler?.(null);
+      void shopify.support?.registerHandler?.(null);
     };
   }, [navigate, pathname]);
 
   return null;
 }
 
-function AppBootSplash() {
-  return (
-    <div
-      className="rpx-boot-splash"
-      style={{
-        minHeight: "100vh",
-        margin: 0,
-        background: "#f1f1f1",
-        color: "#303030",
-        fontFamily:
-          '"Inter", -apple-system, BlinkMacSystemFont, "San Francisco", "Segoe UI", Roboto, sans-serif',
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-      }}
-      aria-busy="true"
-      aria-live="polite"
-    >
-      <div style={{ textAlign: "center", padding: 24 }}>
-        <div
-          style={{
-            width: 28,
-            height: 28,
-            margin: "0 auto 12px",
-            borderRadius: "50%",
-            border: "2.5px solid rgba(48, 48, 48, 0.15)",
-            borderTopColor: "#303030",
-            animation: "rpx-boot-spin 0.7s linear infinite",
-          }}
-        />
-        <p style={{ margin: 0, fontSize: 14, fontWeight: 500 }}>Loading RipsPriceX…</p>
-        <style>{`@keyframes rpx-boot-spin { to { transform: rotate(360deg); } }`}</style>
-      </div>
-    </div>
+function syncShopIntoExpressApi({
+  apiBase,
+  shop,
+  accessToken,
+  scope,
+  entitled,
+  planHandle,
+}: {
+  apiBase: string;
+  shop: string;
+  accessToken: string;
+  scope: string;
+  entitled: boolean;
+  planHandle: string | null;
+}) {
+  const headers: Record<string, string> = internalServiceHeaders(
+    shop,
+    accessToken ? { "X-Shopify-Access-Token": accessToken } : {},
   );
+
+  void fetch(`${apiBase}/api/shops/install`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      access_token: accessToken || undefined,
+      scope: scope || undefined,
+      refresh_scopes: !scope.includes("write_discounts"),
+    }),
+    signal: AbortSignal.timeout(8000),
+  }).catch((err) => {
+    console.warn(
+      "[ripspricex] shops/install sync error",
+      err instanceof Error ? err.message : err,
+    );
+  });
+
+  if (!entitled) return;
+
+  void fetch(`${apiBase}/api/billing/sync-entitlement`, {
+    method: "POST",
+    headers: internalServiceHeaders(shop),
+    body: JSON.stringify({
+      entitled: true,
+      status: "ACTIVE",
+      planHandle: planHandle || "smart_pricing",
+    }),
+    signal: AbortSignal.timeout(8000),
+  }).catch((err) => {
+    console.warn(
+      "[ripspricex] sync-entitlement error",
+      err instanceof Error ? err.message : err,
+    );
+  });
 }
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { session, billing } = await authenticate.admin(request);
+  const started = Date.now();
+  // Do not call billing.check() here. A 401 invalidates the offline session and
+  // an App Pricing hang blocks the iframe on "Loading Pricify…".
+  const { session } = await authenticate.admin(request);
 
-  let entitled = process.env.RIPSPRICEX_DEV_ENTITLE_ALL === "true";
-  let planHandle: string | null = null;
   const shop = session.shop;
   const accessToken = session.accessToken || "";
   const appHandle = process.env.SHOPIFY_APP_HANDLE || "ripspricex";
   const upgradeUrl = buildPricingPlansUrl(shop, appHandle);
   const devEntitleAll = process.env.RIPSPRICEX_DEV_ENTITLE_ALL === "true";
+  const apiBase = process.env.RIPSPRICEX_API_URL || "http://127.0.0.1:3456";
+  const scope = String(
+    session.scope || process.env.SCOPES || process.env.SHOPIFY_SCOPES || "",
+  );
 
-  // Shopify App Pricing welcome / redirect appends plan_handle (charge_id retired after 2026-04-28).
   const requestUrl = new URL(request.url);
   const planHandleFromQuery = (
     requestUrl.searchParams.get("plan_handle") ||
@@ -99,97 +120,38 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     ""
   ).trim();
 
-  try {
-    if (billing && typeof billing.check === "function") {
-      const check = await billing.check({ isTest: true }).catch(() => null);
-      if (check && (check as { hasActivePayment?: boolean }).hasActivePayment) {
-        entitled = true;
-        const subscriptions = (
-          check as {
-            appSubscriptions?: Array<{ name?: string; status?: string }>;
-          }
-        ).appSubscriptions;
-        const active = Array.isArray(subscriptions)
-          ? subscriptions.find((sub) =>
-              ["ACTIVE", "active", "PENDING", "pending"].includes(
-                String(sub?.status || ""),
-              ),
-            ) || subscriptions[0]
-          : null;
-        if (active?.name) {
-          planHandle = String(active.name);
-        } else {
-          planHandle = "smart_pricing";
+  let entitled = devEntitleAll;
+  let planHandle: string | null = planHandleFromQuery || (devEntitleAll ? "dev_entitle_all" : null);
+
+  if (!entitled) {
+    try {
+      const statusRes = await fetch(`${apiBase}/api/billing/status`, {
+        headers: internalServiceHeaders(shop),
+        signal: AbortSignal.timeout(1500),
+      });
+      if (statusRes.ok) {
+        const status = (await statusRes.json()) as {
+          entitled?: boolean;
+          planHandle?: string | null;
+        };
+        entitled = Boolean(status.entitled);
+        if (!planHandle && status.planHandle) {
+          planHandle = String(status.planHandle);
         }
       }
+    } catch {
+      // First paint without entitlement is better than a hung Admin iframe.
     }
-  } catch {
-    // Partner App Pricing may not be linked yet
   }
 
-  if (planHandleFromQuery) {
-    planHandle = planHandleFromQuery;
-  }
-
-  if (devEntitleAll && !planHandle) {
-    planHandle = "dev_entitle_all";
-  }
-
-  const apiBase = process.env.RIPSPRICEX_API_URL || "http://127.0.0.1:3456";
-
-  // Sync install + offline access token into Express Postgres shop_sessions
-  // (required for catalog / cart-transform / Admin GraphQL from the API)
-  try {
-    const installRes = await fetch(`${apiBase}/api/shops/install`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Shopify-Shop-Domain": shop,
-        ...(accessToken ? { "X-Shopify-Access-Token": accessToken } : {}),
-      },
-      body: JSON.stringify({
-        access_token: accessToken || undefined,
-        scope: session.scope || process.env.SCOPES || process.env.SHOPIFY_SCOPES || undefined,
-        refresh_scopes: !String(session.scope || "").includes("write_discounts"),
-      }),
-      signal: AbortSignal.timeout(8000),
-    });
-    if (!installRes.ok) {
-      console.warn(
-        "[ripspricex] shops/install sync failed",
-        installRes.status,
-        await installRes.text().catch(() => ""),
-      );
-    } else if (!accessToken) {
-      console.warn(
-        "[ripspricex] shops/install: no offline access token on session — Admin API calls will fail until re-auth",
-      );
-    }
-
-    if (entitled) {
-      const entitleRes = await fetch(`${apiBase}/api/billing/sync-entitlement`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Shopify-Shop-Domain": shop,
-        },
-        body: JSON.stringify({
-          entitled: true,
-          status: "ACTIVE",
-          planHandle: planHandle || "smart_pricing",
-        }),
-        signal: AbortSignal.timeout(8000),
-      });
-      if (!entitleRes.ok) {
-        console.warn("[ripspricex] sync-entitlement failed", entitleRes.status);
-      }
-    }
-  } catch (err) {
-    console.warn(
-      "[ripspricex] API sync error (is Express running on RIPSPRICEX_API_URL?)",
-      err instanceof Error ? err.message : err,
-    );
-  }
+  syncShopIntoExpressApi({
+    apiBase,
+    shop,
+    accessToken,
+    scope,
+    entitled,
+    planHandle,
+  });
 
   const staffEmail = String(
     (session as { email?: string | null }).email ||
@@ -200,6 +162,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       ).onlineAccessInfo?.associated_user?.email ||
       "",
   ).trim();
+
+  console.info("[ripspricex] /app loader ready", {
+    shop,
+    ms: Date.now() - started,
+    entitled,
+  });
 
   return {
     apiKey: process.env.SHOPIFY_API_KEY || "",
@@ -222,34 +190,34 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 export default function App() {
   const data = useLoaderData<typeof loader>();
 
-  useEffect(() => {
+  // Set during render, not in an effect: React runs child effects before parent
+  // effects, so an effect here would land after the child routes have already
+  // fired their first API calls.
+  if (typeof window !== "undefined") {
     setShopContext(data.shop, "/api");
-  }, [data.shop]);
+  }
 
-  // AppProvider must stay outside ClientOnly so the App Bridge <script> is in the
-  // SSR HTML and window.shopify exists before TitleBar / NavMenu / redirects run.
+  // Render the real UI on the server. NavMenu / TitleBar are App Bridge custom
+  // elements that upgrade once app-bridge.js runs, so nothing here may block the
+  // first paint on `window.shopify` — that is what stranded the iframe on a splash.
   return (
     <AppProvider embedded apiKey={data.apiKey}>
-      <ClientOnly fallback={<AppBootSplash />}>
-        <ShopifyReady fallback={<AppBootSplash />}>
-          <PolarisAppProvider i18n={enTranslations}>
-            <NavMenu>
-              <Link to="/app" rel="home">
-                Experiments
-              </Link>
-              <Link to="/app/experiments/new">Create</Link>
-              <Link to="/app/setup">Setup</Link>
-              <Link to="/app/settings">Settings</Link>
-              <Link to="/app/help">Help</Link>
-            </NavMenu>
-            <SupportLinkHandler />
-            <div data-palette="admin">
-              <ClassicRouteLoading />
-              <Outlet context={data} />
-            </div>
-          </PolarisAppProvider>
-        </ShopifyReady>
-      </ClientOnly>
+      <PolarisAppProvider i18n={enTranslations}>
+        <NavMenu>
+          <Link to="/app" rel="home">
+            Experiments
+          </Link>
+          <Link to="/app/experiments/new">Create</Link>
+          <Link to="/app/setup">Setup</Link>
+          <Link to="/app/settings">Settings</Link>
+          <Link to="/app/help">Help</Link>
+        </NavMenu>
+        <SupportLinkHandler />
+        <div data-palette="admin">
+          <ClassicRouteLoading />
+          <Outlet context={data} />
+        </div>
+      </PolarisAppProvider>
     </AppProvider>
   );
 }

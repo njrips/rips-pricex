@@ -54,7 +54,7 @@ export default function PlanWelcomePage() {
             }
           : {
               label: 'Open Shopify plan selection',
-              onClick: upgrade,
+              onClick: () => upgrade(),
             }
       }
     >

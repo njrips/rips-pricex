@@ -168,12 +168,15 @@ function buildSmartPricingTestPlan(input = {}) {
     variantCount,
     dailyVisitors = 140,
     baselineConversionRate = 0.024,
+    baselineSource = null,
     baselinePpv = 1.84,
     trafficSource = 'orders_estimated',
     trafficConfidence = 'medium',
-    mdePercent = 6.5,
+    mdePercent = 10,
     confidenceLevel = 90,
     power = 80,
+    minSampleSize,
+    minConversionsPerVariation,
     guardrails = {},
     planId,
     planVersion = 1,
@@ -199,15 +202,33 @@ function buildSmartPricingTestPlan(input = {}) {
     confidenceLevel,
     power,
   });
-  const statisticalDesign = buildStatisticalDesign({
-    variantCount: resolvedCount,
-    dailyVisitors,
-    baselineConversionRate,
-    baselinePpv,
-    mdePercent,
-    confidenceLevel,
-    power,
-  });
+  const merchantMin = Number(minSampleSize ?? guardrails.min_sample_size_per_variation);
+  const sampleFloor = Number.isFinite(merchantMin) && merchantMin >= 1 ? Math.round(merchantMin) : null;
+  const merchantConversions = Number(
+    minConversionsPerVariation ?? guardrails.min_conversions_per_variation
+  );
+  const conversionFloor =
+    Number.isFinite(merchantConversions) && merchantConversions >= 1
+      ? Math.round(merchantConversions)
+      : null;
+  const statisticalDesign = {
+    ...buildStatisticalDesign({
+      variantCount: resolvedCount,
+      dailyVisitors,
+      baselineConversionRate,
+      baselineSource,
+      baselinePpv,
+      trafficSource,
+      trafficConfidence,
+      mdePercent,
+      confidenceLevel,
+      power,
+      decisionMetric: guardrails.objective || 'profit_per_visitor',
+    }),
+    analysis_method: 'sequential',
+    ...(sampleFloor ? { min_sample_size: sampleFloor } : {}),
+    ...(conversionFloor ? { min_conversions_per_variation: conversionFloor } : {}),
+  };
   const guardrailChecks = buildGuardrailChecks(currentPrice, priceArms, guardrails, {
     unitCost,
     marginSource,
@@ -240,9 +261,27 @@ function buildSmartPricingTestPlan(input = {}) {
     daily_visitors: dailyVisitors,
     traffic_source: trafficSource,
     traffic_confidence: trafficConfidence,
+    baseline_source: baselineSource,
     price_arms: priceArms,
     traffic_split_strategy: 'equal',
     statistical_design: statisticalDesign,
+    ...(sampleFloor
+      ? {
+          launch_preferences: { min_sample_size: sampleFloor },
+          goal: {
+            min_sample_size: sampleFloor,
+            analysis_method: 'sequential',
+            mde_percent: mdePercent,
+            significance_level: Number(confidenceLevel) === 95 ? 0.95 : 0.9,
+          },
+        }
+      : {
+          goal: {
+            analysis_method: 'sequential',
+            mde_percent: mdePercent,
+            significance_level: Number(confidenceLevel) === 95 ? 0.95 : 0.9,
+          },
+        }),
     variant_count_options: variantCountOptions,
     learning_path: buildLearningPath(currentPrice, scenarioPreset),
     arm_projections: armProjections,

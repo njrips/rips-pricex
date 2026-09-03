@@ -3,7 +3,9 @@
  */
 
 import { classicAudienceToSegments } from '../targeting/smartPricingAudienceHelpers';
+import { stampStatisticalFields } from './sampleSizePolicy';
 import { isOfferExperimentType } from './offerSelection';
+import { ensureRevenueGuardrailRows, revenueGuardrailGoalConfig } from './revenueGuardrail';
 
 export function classicWizardDraftKey(domain) {
   return `ripx_sp_classic_wizard_${String(domain || 'default')}`;
@@ -69,7 +71,8 @@ export function normalizePlanStatus(plan = {}) {
   if (status === 'running' || status === 'active') return 'running';
   if (status === 'paused' || status === 'stopped') return 'paused';
   if (status === 'winner_ready') return 'winner_ready';
-  if (status === 'applied' || status === 'completed' || status === 'complete' || status === 'ended') {
+  if (status === 'applied') return 'applied';
+  if (status === 'completed' || status === 'complete' || status === 'ended') {
     return 'completed';
   }
   if (status === 'queued' || status === 'draft') return status || 'draft';
@@ -81,6 +84,7 @@ function statusRank(plan) {
   if (status === 'archived') return 0;
   if (status === 'running') return 50;
   if (status === 'winner_ready') return 40;
+  if (status === 'applied') return 37;
   if (status === 'completed') return 35;
   if (status === 'paused') return 30;
   if (status === 'queued' || status === 'draft') return 20;
@@ -95,6 +99,7 @@ export function rollupExperimentStatus(plans = []) {
   if (statuses.some(status => status === 'running')) return 'running';
   if (statuses.some(status => status === 'paused')) return 'paused';
   if (statuses.some(status => status === 'winner_ready')) return 'winner_ready';
+  if (statuses.some(status => status === 'applied')) return 'applied';
   if (statuses.some(status => status === 'completed')) return 'completed';
   if (statuses.some(status => status === 'queued' || status === 'draft')) return 'draft';
   return statuses[0] || 'draft';
@@ -239,7 +244,7 @@ export function findPlanInCatalog(plans, planId) {
 }
 
 /** Map stored Classic audience_ui onto launch payload if plan.audience was never enriched. */
-export function enrichInboxPlansForLaunch(plans = []) {
+export function enrichInboxPlansForLaunch(plans = [], shopGuardrails = {}) {
   return (Array.isArray(plans) ? plans : []).map(plan => {
     const existingAudience = plan.audience && typeof plan.audience === 'object' ? plan.audience : {};
     const audienceUi =
@@ -254,6 +259,18 @@ export function enrichInboxPlansForLaunch(plans = []) {
       plan.experimentType ||
       plan.metadata?.experiment_type ||
       null;
+    const stats = stampStatisticalFields(plan, shopGuardrails);
+    const shopRaw =
+      shopGuardrails?.guardrails && typeof shopGuardrails.guardrails === 'object'
+        ? shopGuardrails.guardrails
+        : shopGuardrails;
+    const sampleFromUi = Number(audienceUi?.minSampleSize ?? audienceUi?.min_sample_size);
+    const sampleFromAudience = Number(existingAudience.min_sample_size);
+    const sampleFromShop = Number(shopRaw?.min_sample_size_per_variation);
+    const sampleSize = [sampleFromUi, sampleFromAudience, sampleFromShop].find(
+      n => Number.isFinite(n) && n >= 1
+    );
+    const roundedSample = Number.isFinite(sampleSize) ? Math.round(sampleSize) : null;
     return {
       ...plan,
       ...(experimentType ? { experiment_type: experimentType } : {}),
@@ -278,16 +295,46 @@ export function enrichInboxPlansForLaunch(plans = []) {
               device_mode: audienceUi.deviceMode || existingAudience.device_mode || 'include',
               source_mode: audienceUi.sourceMode || existingAudience.source_mode || 'include',
               country_mode: audienceUi.countryMode || existingAudience.country_mode || 'include',
+              min_sample_size: (() => {
+                const n = Number(
+                  audienceUi.minSampleSize ??
+                    audienceUi.min_sample_size ??
+                    existingAudience.min_sample_size
+                );
+                return Number.isFinite(n) && n >= 1 ? Math.round(n) : existingAudience.min_sample_size;
+              })(),
             }
           : {}),
         segments: segments || existingAudience.segments,
       },
       launch_preferences: {
-        auto_round2: true,
+        auto_round2: shopRaw?.auto_round2_default !== false,
         ...(plan.launch_preferences && typeof plan.launch_preferences === 'object'
           ? plan.launch_preferences
           : {}),
         auto_start: true,
+        ...(roundedSample ? { min_sample_size: roundedSample } : {}),
+      },
+      goal: {
+        ...(plan.goal && typeof plan.goal === 'object' ? plan.goal : {}),
+        analysis_method: stats.analysis_method,
+        mde_percent: stats.mde_percent,
+        statistical_power: stats.statistical_power,
+        significance_level: stats.significance_level,
+        guardrails: revenueGuardrailGoalConfig(
+          audienceUi?.guardrails,
+          Number(shopRaw?.max_revenue_drop_percent)
+        ),
+        ...(roundedSample ? { min_sample_size: roundedSample } : {}),
+      },
+      statistical_design: {
+        ...(plan.statistical_design && typeof plan.statistical_design === 'object'
+          ? plan.statistical_design
+          : {}),
+        analysis_method: stats.analysis_method,
+        mde_percent: stats.mde_percent,
+        statistical_power: stats.statistical_power,
+        confidence_level: stats.confidence_level,
       },
     };
   });
@@ -300,7 +347,10 @@ export function formatClassicStatusLabel(status, experimentType) {
   if (key === 'winner_ready') {
     return isOfferExperimentType(experimentType) ? 'Result ready' : 'Winner ready';
   }
-  if (key === 'applied' || key === 'completed' || key === 'complete' || key === 'ended') {
+  if (key === 'applied') {
+    return isOfferExperimentType(experimentType) ? 'Completed' : 'Applied';
+  }
+  if (key === 'completed' || key === 'complete' || key === 'ended') {
     return 'Completed';
   }
   if (key === 'running') return 'Running';
@@ -333,7 +383,9 @@ export function stampClassicExperimentMetadata(
       experiment_type: type || plan.metadata?.experiment_type || plan.experiment_type,
       product_title: getPlanProductTitle(plan),
       hypothesis: hypothesis ?? plan.metadata?.hypothesis,
-      audience_ui: audienceUi ?? plan.metadata?.audience_ui,
+      audience_ui: audienceUi
+        ? { ...audienceUi, guardrails: ensureRevenueGuardrailRows(audienceUi.guardrails) }
+        : plan.metadata?.audience_ui,
     },
   }));
 }

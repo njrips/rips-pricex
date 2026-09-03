@@ -15,9 +15,6 @@ export const links: LinksFunction = () => [
 
 export default function App() {
   return (
-    // Extensions mutate <html>/<body> before hydrate. RR hydrates the document;
-    // a remount wipes Vite-injected <style> tags. Pin real stylesheets in <head>
-    // (and again in links()) so they are React-owned and restorable.
     <html lang="en" suppressHydrationWarning>
       <head>
         <meta charSet="utf-8" />
@@ -28,26 +25,6 @@ export default function App() {
         <link
           rel="stylesheet"
           href="https://cdn.shopify.com/static/fonts/inter/v4/styles.css"
-        />
-        <link
-          rel="stylesheet"
-          href={adminTokensHref}
-          data-ripx-css="admin-tokens"
-        />
-        <link
-          rel="stylesheet"
-          href={classicThemeHref}
-          data-ripx-css="classic-theme"
-        />
-        <link
-          rel="stylesheet"
-          href={publicClassicHref}
-          data-ripx-css="public-classic"
-        />
-        <link
-          rel="stylesheet"
-          href={staffSupportHref}
-          data-ripx-css="staff-support"
         />
         <Meta />
         <Links />

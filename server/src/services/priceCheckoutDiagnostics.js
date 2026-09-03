@@ -405,11 +405,10 @@ function normalizeShopifyFunctionsSnapshot(functionsList) {
 function pickFunctionByApiType(functionsList, matcher) {
   const normalized = normalizeShopifyFunctionsSnapshot(functionsList);
   const matched = normalized.filter(fn => matcher(String(fn.apiType || '').toLowerCase()));
-  const ripxMatched = matched.find(fn =>
-    String(fn.title || '')
-      .toLowerCase()
-      .includes('ripx')
-  );
+  const ripxMatched = matched.find(fn => {
+    const title = String(fn.title || '').toLowerCase();
+    return title.includes('pricify') || title.includes('ripspricex') || title.includes('ripx');
+  });
   return ripxMatched || matched[0] || null;
 }
 

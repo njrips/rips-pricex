@@ -8,7 +8,6 @@
  * - Confidence intervals
  */
 
-const { query } = require('../utils/database');
 const {
   getTestAnalytics,
   getSecondaryEventMetrics,
@@ -19,6 +18,21 @@ const { getTestById } = require('../models/test');
 const { STATISTICAL_THRESHOLD, SETTINGS_BOUNDS } = require('../constants');
 const { getCheckoutPhaseFromTest } = require('../utils/checkoutPhases');
 const { parseGoalConfig } = require('../utils/goalConfig');
+const {
+  applyMinSampleSizeGate,
+  resolveConfiguredMinConversions,
+  resolveConfiguredMinSampleSize,
+} = require('../utils/minSampleSize');
+const {
+  applyValidatedConversionEvidence,
+  areOutcomesMatured,
+  resolveCollectionDays,
+} = require('../utils/betaBinomialConfidenceSequence');
+const {
+  applyAlwaysValidDecision,
+  resolveAnalysisConfidence,
+  shouldUseSequentialDecision,
+} = require('../utils/alwaysValidSignificance');
 
 const CHECKOUT_SECTION_EVENT_NAMES = Object.freeze([
   'checkout_section_impression',
@@ -958,24 +972,11 @@ class AnalyticsService {
     }
 
     // Calculate significance (frequentist) or Bayesian probability to beat control
-    const analysisMethod = goal.analysis_method || 'frequentist';
+    const sequential = shouldUseSequentialDecision(goal, test);
+    const analysisMethod = goal.analysis_method || (sequential ? 'sequential' : 'frequentist');
     let significanceThreshold = STATISTICAL_THRESHOLD.P_VALUE;
-    const configuredGoalConfidence = Number(goal.significance_level);
     try {
-      let conf =
-        Number.isFinite(configuredGoalConfidence) &&
-        configuredGoalConfidence > 0 &&
-        configuredGoalConfidence < 1
-          ? configuredGoalConfidence
-          : null;
-      if (!conf) {
-        const settingsRes = await query(
-          'SELECT confidence_level FROM shop_settings WHERE shop_domain = $1',
-          [shopDomain]
-        );
-        conf =
-          Number(settingsRes.rows[0]?.confidence_level) || SETTINGS_BOUNDS.DEFAULT_CONFIDENCE_LEVEL;
-      }
+      const conf = resolveAnalysisConfidence(goal, test, SETTINGS_BOUNDS.DEFAULT_CONFIDENCE_LEVEL);
       significanceThreshold = 1 - conf;
     } catch {
       // Use default
@@ -1022,23 +1023,9 @@ class AnalyticsService {
       };
     }
 
-    // Calculate revenue impact against the actual winner/best variant when available.
-    const controlVariant = variants[0];
-    const comparisonVariant =
-      variants.find(v => v.id === (significance.winnerVariantId || significance.bestVariantId)) ||
-      variants[1];
-    const revenueImpact =
-      controlVariant && comparisonVariant && controlVariant.id !== comparisonVariant.id
-        ? {
-            ...this.calculateRevenueImpact(controlVariant, comparisonVariant),
-            controlVariantId: controlVariant.id,
-            controlVariantName: controlVariant.name,
-            comparisonVariantId: comparisonVariant.id,
-            comparisonVariantName: comparisonVariant.name,
-          }
-        : null;
-
-    // Sample Ratio Mismatch (SRM) detection - data quality check
+    // Allocation-aware rows and the sample ratio check are built before the
+    // decision because both the SRM verdict and the exact conversion evidence
+    // depend on the designed split, not just the observed counts.
     const totalVisitors = variants.reduce((sum, v) => sum + v.visitors, 0);
     const holdoutPercent = test?.holdout_percent ?? 0;
     const variantsWithAllocation = variants.map(v => {
@@ -1054,6 +1041,71 @@ class AnalyticsService {
       return { ...v, allocation: testVariant?.allocation ?? 100 / variants.length };
     });
     const srm = this.detectSampleRatioMismatch(variantsWithAllocation, totalVisitors);
+
+    const sequentialAlpha =
+      Number.isFinite(significanceThreshold) && significanceThreshold > 0
+        ? significanceThreshold
+        : STATISTICAL_THRESHOLD.P_VALUE;
+    if (shouldUseSequentialDecision(goal, test)) {
+      // Tests planned before the design was stamped have no baseline on record.
+      // Passing the raw value through would hand the decision a NaN, so it is
+      // omitted instead and the observed pooled rate is used.
+      const designedBaseline = Number(
+        test?.metadata?.statistical_design?.baseline_conversion_rate
+      );
+      significance = applyAlwaysValidDecision(significance, variants, {
+        goal,
+        alpha: sequentialAlpha,
+        mdePercent: goal?.mde_percent,
+        baselineRate:
+          Number.isFinite(designedBaseline) && designedBaseline > 0 ? designedBaseline : undefined,
+      });
+    }
+    significance = applyMinSampleSizeGate(
+      significance,
+      variants,
+      resolveConfiguredMinSampleSize(test, goal),
+      resolveConfiguredMinConversions(test, goal)
+    );
+    // SRM belongs on the decision itself, not only alongside it: a mismatched
+    // split is a reason to distrust the result, so every consumer that reads
+    // significance has to see it.
+    significance.srm = srm;
+    significance = applyValidatedConversionEvidence(significance, variantsWithAllocation, {
+      alpha: sequentialAlpha,
+      mdePercent: goal?.mde_percent,
+      srm,
+      collectionDays: resolveCollectionDays(test),
+      outcomesMatured: areOutcomesMatured(test),
+    });
+    const recommended = Number(
+      goal?.visitors_per_variant_recommended ??
+        test?.metadata?.statistical_design?.visitors_per_variant_required
+    );
+    if (Number.isFinite(recommended) && recommended > 0) {
+      significance.recommendedSampleSize = Math.round(recommended);
+      const lowest = variants.reduce((min, row) => {
+        const n = Number(row?.visitors) || 0;
+        return min === null ? n : Math.min(min, n);
+      }, null);
+      significance.powered = lowest !== null && lowest >= recommended;
+    }
+
+    // Calculate revenue impact against the actual winner/best variant when available.
+    const controlVariant = variants[0];
+    const comparisonVariant =
+      variants.find(v => v.id === (significance.winnerVariantId || significance.bestVariantId)) ||
+      variants[1];
+    const revenueImpact =
+      controlVariant && comparisonVariant && controlVariant.id !== comparisonVariant.id
+        ? {
+            ...this.calculateRevenueImpact(controlVariant, comparisonVariant),
+            controlVariantId: controlVariant.id,
+            controlVariantName: controlVariant.name,
+            comparisonVariantId: comparisonVariant.id,
+            comparisonVariantName: comparisonVariant.name,
+          }
+        : null;
 
     return {
       testId,

@@ -1,5 +1,5 @@
 const express = require('express');
-const { requireShop } = require('../middleware/shopContext');
+const { requireShopSessionOrInternal } = require('../middleware/shopifySessionContext');
 const {
   getShopEntitlement,
   setEntitlement,
@@ -12,7 +12,7 @@ const logger = require('../utils/logger');
 
 const router = express.Router();
 
-router.get('/billing/status', requireShop, async (req, res) => {
+router.get('/billing/status', requireShopSessionOrInternal, async (req, res) => {
   const entitlement = await getShopEntitlement(req.shopDomain);
   res.json({
     shop: req.shopDomain,
@@ -25,7 +25,7 @@ router.get('/billing/status', requireShop, async (req, res) => {
  * Used by the embedded app loader after Shopify App Pricing / billing.check().
  * Unlike /billing/dev-entitle, this is allowed in production (shop-authenticated only).
  */
-router.post('/billing/sync-entitlement', requireShop, async (req, res) => {
+router.post('/billing/sync-entitlement', requireShopSessionOrInternal, async (req, res) => {
   const body = req.body || {};
   const entitled = body.entitled === true || ['ACTIVE', 'active', 'trial', 'TRIAL', 'paid', 'PAID'].includes(String(body.status || ''));
   const planHandle = body.planHandle || body.plan_handle || null;
@@ -37,7 +37,7 @@ router.post('/billing/sync-entitlement', requireShop, async (req, res) => {
   res.json({ shop: req.shopDomain, ...entitlement, synced: true });
 });
 
-router.post('/billing/dev-entitle', requireShop, async (req, res) => {
+router.post('/billing/dev-entitle', requireShopSessionOrInternal, async (req, res) => {
   if (process.env.NODE_ENV === 'production' && process.env.RIPSPRICEX_ALLOW_DEV_BILLING !== 'true') {
     return res.status(403).json({ error: 'Not allowed' });
   }
@@ -47,7 +47,7 @@ router.post('/billing/dev-entitle', requireShop, async (req, res) => {
   res.json(entitlement);
 });
 
-router.post('/shops/install', requireShop, async (req, res) => {
+router.post('/shops/install', requireShopSessionOrInternal, async (req, res) => {
   await upsertShopInstall(req.shopDomain);
   const accessToken = req.shopifyAccessToken || req.body?.access_token || req.body?.accessToken;
   let scope = req.body?.scope || process.env.SHOPIFY_SCOPES || process.env.SCOPES || null;
@@ -93,7 +93,7 @@ router.post('/shops/install', requireShop, async (req, res) => {
   });
 });
 
-router.post('/shops/uninstall', requireShop, async (req, res) => {
+router.post('/shops/uninstall', requireShopSessionOrInternal, async (req, res) => {
   await markShopUninstalled(req.shopDomain);
   await deleteShopSession(req.shopDomain).catch(() => {});
   res.json({ ok: true });

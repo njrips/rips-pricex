@@ -1,10 +1,10 @@
 {% comment %}
-  RipsPriceX App Embed — primary load via Shopify App Proxy (/apps/ripspricex/script.js).
+  Pricify App Embed — primary load via Shopify App Proxy (/apps/ripspricex/script.js).
   Fallback: if proxy fails, load the direct public script endpoint configured in theme settings.
   Important: do not hardcode temporary local tunnel URLs in schema defaults.
   Keep fallback empty by default and set it manually only for local/dev debugging sessions.
   target: head — the primary runtime is parser-blocking so the server bootstrap can run before body paint.
-  ?v= must stay in sync with backend storefrontScriptRuntime.js SCRIPT_VERSION (currently 1.0.60).
+  ?v= must stay in sync with backend storefrontScriptRuntime.js SCRIPT_VERSION (currently 1.0.62).
   Strict anti-flicker CSS contract: html[data-ripx-af="strict"] body{opacity:0 !important;}
 {% endcomment %}
 
@@ -12,7 +12,7 @@
   (function () {
     var storageKey = '__ripx_price_af_hint_v1__';
     var shopHost = '{{ request.host }}';
-    var version = '1.0.60';
+    var version = '1.0.62';
     var styleId = 'ripx-anti-flicker-style';
     var defaultPriceSelectors = [
       '.price',
@@ -24,6 +24,61 @@
       '.price-item__regular',
       '.product-price'
     ];
+    function seedPreviewCtxEarly() {
+      try {
+        var params = new URLSearchParams(window.location.search || '');
+        var testId = params.get('ab_preview_test') || null;
+        var variantId = params.get('ab_preview_variant') || null;
+        var variantName = params.get('ab_preview_variant_name') || null;
+        var previewFlag = params.get('ab_preview') === '1';
+        if (!(previewFlag || testId || variantId || variantName)) return;
+        if (params.get('ab_preview_reset') === '1') {
+          try {
+            document.cookie = '__ripx_preview_ctx_v1=; Max-Age=0; path=/; SameSite=Lax';
+            if (window.sessionStorage) {
+              window.sessionStorage.removeItem('__ripx_preview_ctx_v1__');
+              window.sessionStorage.removeItem('__ripx_price_af_hint_v1__');
+              for (var ri = window.sessionStorage.length - 1; ri >= 0; ri -= 1) {
+                var rk = window.sessionStorage.key(ri);
+                if (rk && rk.indexOf('ripx_preview_variant_cache_') === 0) {
+                  window.sessionStorage.removeItem(rk);
+                }
+              }
+            }
+            if (String(window.name || '').indexOf('__ripx_preview_ctx_v1__:') === 0) window.name = '';
+          } catch (_eResetEarly) {}
+        }
+        var ctx = {
+          preview: previewFlag || !!testId,
+          testId: testId,
+          testType: params.get('ab_preview_test_type') || null,
+          variantId: variantId,
+          variantName: variantName,
+          tenantDomain: params.get('ab_preview_domain') || null,
+          simple: params.get('ab_preview_simple') === '1',
+          sessionId: params.get('ab_preview_session') || null,
+          persistedAtMs: Date.now()
+        };
+        var raw = JSON.stringify(ctx);
+        try {
+          if (window.sessionStorage) window.sessionStorage.setItem('__ripx_preview_ctx_v1__', raw);
+        } catch (_eS) {}
+        try {
+          var enc = encodeURIComponent(raw);
+          if (enc && enc.length <= 3500) {
+            document.cookie =
+              '__ripx_preview_ctx_v1=' +
+              enc +
+              '; Max-Age=7200; path=/; SameSite=Lax' +
+              (location.protocol === 'https:' ? '; Secure' : '');
+          }
+        } catch (_eC) {}
+        try {
+          window.name = '__ripx_preview_ctx_v1__:' + raw;
+        } catch (_eN) {}
+      } catch (_eSeed) {}
+    }
+    seedPreviewCtxEarly();
     function applyPriceGuard(selectors, releasedBy, timeoutMs) {
       try {
         var safeSelectors = Array.isArray(selectors) ? selectors.filter(isSafeSelector).slice(0, 80) : [];
@@ -80,6 +135,18 @@
             }
           }
         }
+        try {
+          var cookiePrefix = '__ripx_preview_ctx_v1=';
+          var cookieParts = String(document.cookie || '').split(';');
+          for (var ci = 0; ci < cookieParts.length; ci += 1) {
+            var cookiePart = String(cookieParts[ci] || '').trim();
+            if (cookiePart.indexOf(cookiePrefix) !== 0) continue;
+            var cookieCtx = JSON.parse(decodeURIComponent(cookiePart.slice(cookiePrefix.length) || ''));
+            if (cookieCtx && cookieCtx.testType) {
+              return String(cookieCtx.testType).trim().toLowerCase();
+            }
+          }
+        } catch (_eCookieType) {}
         var wn = String(window.name || '');
         var prefix = '__ripx_preview_ctx_v1__:';
         if (wn.indexOf(prefix) === 0) {
@@ -150,8 +217,8 @@
 <script>
   (function () {
     var shopHost = '{{ request.host }}';
-    var version = '1.0.60';
-    var scriptUrl = 'https://' + shopHost + '/apps/ripspricex/script.js?v=1.0.60';
+    var version = '1.0.62';
+    var scriptUrl = 'https://' + shopHost + '/apps/ripspricex/script.js?v=1.0.62';
     try {
       var params = new URLSearchParams(window.location.search || '');
       var isPreview =
@@ -177,7 +244,7 @@
 <script id="ripx-app-embed-config" type="application/json">
   {
     "shopHost": {{ request.host | json }},
-    "version": "1.0.60",
+    "version": "1.0.62",
     "directScriptBaseUrl": {{ block.settings.direct_script_base_url | default: "__RIPX_UNSET__" | json }}
   }
 </script>
@@ -188,8 +255,8 @@
     window.__RIPX_APP_EMBED_LOADER__ = true;
 
     var shopHost = '{{ request.host }}';
-    var version = '1.0.60';
-    var primarySrc = 'https://' + shopHost + '/apps/ripspricex/script.js?v=1.0.60';
+    var version = '1.0.62';
+    var primarySrc = 'https://' + shopHost + '/apps/ripspricex/script.js?v=1.0.62';
     var directScriptBaseUrl = {{ block.settings.direct_script_base_url | default: "__RIPX_UNSET__" | json }};
     function normalizeDirectScriptBaseUrl(value) {
       var trimmed = String(value || '').trim();
@@ -233,26 +300,94 @@
       return hasRipxVersion() && hasRuntimeConfig();
     }
 
+    function expirePreviewCookie() {
+      try {
+        document.cookie =
+          '__ripx_preview_ctx_v1=; Max-Age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/; SameSite=Lax';
+      } catch (_eExpireCookie) {}
+    }
+
+    function writePreviewCookie(payload) {
+      try {
+        if (!payload || typeof payload !== 'object') return;
+        var encoded = encodeURIComponent(JSON.stringify(payload));
+        if (!encoded || encoded.length > 3500) return;
+        var secure = String(window.location.protocol || '') === 'https:' ? '; Secure' : '';
+        document.cookie =
+          '__ripx_preview_ctx_v1=' + encoded + '; Max-Age=7200; path=/; SameSite=Lax' + secure;
+      } catch (_eWriteCookie) {}
+    }
+
+    function readPreviewCookie() {
+      try {
+        var prefix = '__ripx_preview_ctx_v1=';
+        var parts = String(document.cookie || '').split(';');
+        for (var i = 0; i < parts.length; i += 1) {
+          var part = String(parts[i] || '').trim();
+          if (part.indexOf(prefix) !== 0) continue;
+          var raw = decodeURIComponent(part.slice(prefix.length) || '');
+          if (!raw) return null;
+          var parsed = JSON.parse(raw);
+          if (!parsed || typeof parsed !== 'object') return null;
+          return parsed;
+        }
+      } catch (_eReadCookie) {}
+      return null;
+    }
+
+    function clearPreviewCaches() {
+      expirePreviewCookie();
+      try {
+        if (window.sessionStorage) {
+          window.sessionStorage.removeItem('__ripx_preview_ctx_v1__');
+          window.sessionStorage.removeItem('__ripx_price_af_hint_v1__');
+          for (var i = window.sessionStorage.length - 1; i >= 0; i -= 1) {
+            var key = window.sessionStorage.key(i);
+            if (
+              key &&
+              (key.indexOf('ripx_preview_variant_cache_') === 0 ||
+                key.indexOf('ripx_preview_variant_cache_v2_') === 0)
+            ) {
+              window.sessionStorage.removeItem(key);
+            }
+          }
+        }
+      } catch (_eReset) {}
+      try {
+        var prefix = '__ripx_preview_ctx_v1__:';
+        if (typeof window.name === 'string' && window.name.indexOf(prefix) === 0) {
+          window.name = '';
+        }
+      } catch (_eResetName) {}
+    }
+
     function readPreviewCtx() {
       try {
-        if (!window.sessionStorage) return null;
-        var raw = window.sessionStorage.getItem('__ripx_preview_ctx_v1__');
-        if (!raw) return null;
-        var parsed = JSON.parse(raw);
-        if (!parsed || typeof parsed !== 'object') return null;
-        return parsed;
-      } catch (_e) {
-        return null;
-      }
+        if (window.sessionStorage) {
+          var raw = window.sessionStorage.getItem('__ripx_preview_ctx_v1__');
+          if (raw) {
+            var parsed = JSON.parse(raw);
+            if (parsed && typeof parsed === 'object') return parsed;
+          }
+        }
+      } catch (_e) {}
+      return readPreviewCookie();
     }
 
     function writePreviewCtx(ctx) {
       try {
-        if (!window.sessionStorage || !ctx) return;
-        window.sessionStorage.setItem(
-          '__ripx_preview_ctx_v1__',
-          JSON.stringify(Object.assign({}, ctx, { persistedAtMs: Date.now() }))
-        );
+        if (!ctx) return;
+        var payload = Object.assign({}, ctx, { persistedAtMs: Date.now() });
+        delete payload.launchTargetUrl;
+        try {
+          if (window.sessionStorage) {
+            window.sessionStorage.setItem('__ripx_preview_ctx_v1__', JSON.stringify(payload));
+          }
+        } catch (_eWriteSession) {}
+        writePreviewCookie(payload);
+        try {
+          window.name = '__ripx_preview_ctx_v1__:' + JSON.stringify(payload);
+        } catch (_eWriteName) {}
       } catch (_eWrite) {}
     }
 
@@ -296,7 +431,6 @@
 
     function seedPreviewCtxFromUrl() {
       try {
-        if (!window.sessionStorage || !window.location) return null;
         seedPreviewCtxFromPasswordReturnUrl();
         if (!window.location.search) return readPreviewCtx();
         var params = new URLSearchParams(window.location.search || '');
@@ -309,16 +443,7 @@
         var testType = params.get('ab_preview_test_type') || null;
         if (!(previewFlag || testId || variantId || variantName)) return readPreviewCtx();
         if (params.get('ab_preview_reset') === '1') {
-          try {
-            window.sessionStorage.removeItem('__ripx_preview_ctx_v1__');
-            if (testId) window.sessionStorage.removeItem('ripx_preview_variant_cache_' + String(testId));
-            for (var i = window.sessionStorage.length - 1; i >= 0; i -= 1) {
-              var key = window.sessionStorage.key(i);
-              if (key && key.indexOf('ripx_preview_variant_cache_') === 0) {
-                window.sessionStorage.removeItem(key);
-              }
-            }
-          } catch (_eReset) {}
+          clearPreviewCaches();
         }
         var ctx = {
           preview: previewFlag || !!testId,
@@ -570,7 +695,7 @@
 
 {% schema %}
 {
-  "name": "RipsPriceX App Embed",
+  "name": "Pricify App Embed",
   "target": "head",
   "javascript": "ripspricex-app-embed-loader.js",
   "settings": [

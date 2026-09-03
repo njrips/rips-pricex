@@ -1,3 +1,6 @@
+/**
+ * @param {{ name: string, size?: number, width?: number, height?: number, alt?: string }} props
+ */
 export default function PricifyIcon({ name, size = 20, width, height, alt = '' }) {
   const w = width ?? size;
   const h = height ?? size;

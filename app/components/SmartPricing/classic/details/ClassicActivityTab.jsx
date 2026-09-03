@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   ACTIVITY_FILTERS,
   activityFilterCounts,
@@ -14,24 +14,23 @@ import {
 import styles from '../SmartPricingClassic.module.css';
 
 export default function ClassicActivityTab({ activity }) {
-  const [filter, setFilter] = useState('all');
-  const items = Array.isArray(activity) ? activity : [];
+  const [requestedFilter, setFilter] = useState('all');
+  const items = useMemo(() => (Array.isArray(activity) ? activity : []), [activity]);
   const counts = useMemo(() => activityFilterCounts(items), [items]);
+  // New activity can empty out the selected bucket; fall back to All rather than
+  // showing a filter chip that no longer exists.
+  const filter = requestedFilter !== 'all' && !counts[requestedFilter] ? 'all' : requestedFilter;
   const visible = useMemo(() => filterActivityItems(items, filter), [items, filter]);
   const groups = useMemo(() => groupActivityByDay(visible), [visible]);
   const filters = ACTIVITY_FILTERS.filter(row => row.id === 'all' || counts[row.id] > 0);
-
-  useEffect(() => {
-    if (filter !== 'all' && !counts[filter]) setFilter('all');
-  }, [filter, counts]);
 
   if (!items.length) {
     return (
       <div className={styles.statCard}>
         <h3 className={styles.panelTitle}>Activity history</h3>
         <p className={styles.help}>
-          Launch, pause, resume, Self-QA, audience changes, guardrail stops, and winner rollout
-          will appear here as the experiment progresses.
+          Launch, pause, resume, Self-QA, audience changes, guardrail stops, and per-product
+          winner decisions will appear here as the experiment progresses.
         </p>
       </div>
     );

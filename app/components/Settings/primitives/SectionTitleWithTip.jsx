@@ -1,4 +1,3 @@
-import React from 'react';
 import { Icon, Text, Tooltip } from '@shopify/polaris';
 import { InfoIcon } from '@shopify/polaris-icons';
 import styles from '../Settings.module.css';
@@ -17,9 +16,9 @@ export function SectionTitleWithTip({
         {title}
       </Text>
       <Tooltip content={tip}>
-        <span className={styles.sectionHeaderTitleTip} tabIndex={0} aria-label={tip}>
+        <button type="button" className={styles.sectionHeaderTitleTip} aria-label={tip}>
           <Icon source={InfoIcon} />
-        </span>
+        </button>
       </Tooltip>
     </div>
   );

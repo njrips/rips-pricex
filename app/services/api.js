@@ -2,6 +2,7 @@
  * RipsPriceX API client — shop from Shopify session; talks to Express Smart Pricing API.
  */
 import axios from 'axios';
+import { getSessionToken } from '../lib/sessionToken';
 
 const DEFAULT_API = 'http://127.0.0.1:3456/api';
 
@@ -18,6 +19,10 @@ function resolveApiBase() {
   } catch {
     // ignore
   }
+  // In the Admin iframe the API is same-origin behind /api. Never fall back to
+  // the loopback dev URL there: it is unreachable over the tunnel, so a request
+  // made before setShopContext() lands would fail instead of merely being early.
+  if (typeof window !== 'undefined') return '/api';
   return DEFAULT_API;
 }
 
@@ -51,12 +56,18 @@ const apiClient = axios.create({
   timeout: 60000,
 });
 
-apiClient.interceptors.request.use((config) => {
+apiClient.interceptors.request.use(async (config) => {
   config.baseURL = resolveApiBase();
   const shop = getShopDomain();
   config.headers = config.headers || {};
   if (shop) {
     config.headers['X-Shopify-Shop-Domain'] = shop;
+  }
+  if (!config.headers.Authorization) {
+    const token = await getSessionToken();
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
   }
   if (!config.headers['X-Request-ID']) {
     config.headers['X-Request-ID'] =
@@ -95,7 +106,7 @@ apiClient.interceptors.response.use(
 export function unwrapData(response) {
   const body = response?.data ?? response;
   if (body && typeof body === 'object' && 'success' in body) {
-    const { success, message, ...rest } = body;
+    const { success: _success, message: _message, ...rest } = body;
     return rest;
   }
   return body;

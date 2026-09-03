@@ -55,6 +55,7 @@ function summarizeInboxPlans(plans = []) {
         plan.status !== 'queued' &&
         plan.status !== 'draft' &&
         plan.status !== 'applied' &&
+        plan.status !== 'completed' &&
         plan.status !== 'winner_ready')
   ).length;
   const draft = winnerReady + queued;
@@ -76,6 +77,8 @@ function mapRowToPlan(row) {
   return {
     ...json,
     id: row.plan_id,
+    status: json.status || row.status || undefined,
+    test_id: json.test_id || row.test_id || undefined,
     archived,
     archived_at: archived
       ? json.archived_at || (row.archived_at ? new Date(row.archived_at).toISOString() : null)
@@ -127,7 +130,7 @@ async function listInboxPlans(shopDomain, filters = {}) {
     .toLowerCase();
   if (status === 'running') {
     where.push(
-      "(status = 'running' OR status = 'applied' OR (test_id IS NOT NULL AND status NOT IN ('queued','draft','winner_ready')))"
+      "(status = 'running' OR status = 'applied' OR (test_id IS NOT NULL AND status NOT IN ('queued','draft','winner_ready','completed')))"
     );
   } else if (status === 'draft') {
     where.push("status IN ('queued','draft','winner_ready')");
@@ -454,10 +457,16 @@ async function patchInboxPlansFromSync(shopDomain, syncRows = []) {
     };
     if (sync.winner_applied || sync.inbox_status === 'applied') {
       patch.status = 'applied';
+      patch.winner_applied_at = sync.winner_applied_at || new Date().toISOString();
     } else if (sync.inbox_status === 'paused') {
       patch.status = 'paused';
+    } else if (sync.inbox_status === 'completed') {
+      patch.status = 'completed';
+      if (sync.auto_decision === 'control') {
+        patch.control_retained_at = sync.control_retained_at || new Date().toISOString();
+      }
     } else if (sync.winner_ready || sync.inbox_status === 'winner_ready') {
-      patch.status = 'winner_ready';
+      patch.status = plan.status === 'paused' ? 'paused' : 'winner_ready';
     } else if (sync.inbox_status === 'running') {
       patch.status = 'running';
     }
@@ -473,21 +482,35 @@ async function findInboxPlanByTestId(shopDomain, testId) {
   if (!domain || !id) {
     return null;
   }
+  const uuidPredicate = /^[0-9a-f-]{36}$/i.test(id)
+    ? 'test_id = $2::uuid'
+    : 'test_id::text = $2';
   const result = await query(
     `SELECT plan_id, plan_json, status, test_id, updated_at, created_at,
             COALESCE(archived, false) AS archived, archived_at
      FROM smart_pricing_inbox_plans
-     WHERE shop_domain = $1 AND test_id = $2::uuid
+     WHERE shop_domain = $1 AND ${uuidPredicate}
      LIMIT 1`,
     [domain, id]
   ).catch(err => {
-    if (!/archived/i.test(String(err?.message || ''))) {
+    const message = String(err?.message || '');
+    if (/invalid input syntax for type uuid/i.test(message)) {
+      return query(
+        `SELECT plan_id, plan_json, status, test_id, updated_at, created_at,
+                COALESCE(archived, false) AS archived, archived_at
+         FROM smart_pricing_inbox_plans
+         WHERE shop_domain = $1 AND test_id::text = $2
+         LIMIT 1`,
+        [domain, id]
+      );
+    }
+    if (!/archived/i.test(message)) {
       throw err;
     }
     return query(
       `SELECT plan_id, plan_json, status, test_id, updated_at, created_at
        FROM smart_pricing_inbox_plans
-       WHERE shop_domain = $1 AND test_id = $2::uuid
+       WHERE shop_domain = $1 AND ${uuidPredicate}
        LIMIT 1`,
       [domain, id]
     );
@@ -496,6 +519,38 @@ async function findInboxPlanByTestId(shopDomain, testId) {
     return null;
   }
   return mapRowToPlan(result.rows[0]);
+}
+
+/**
+ * How many plans (SKUs) are attached to one test.
+ * A count above 1 means per-product actions would hit sibling products too.
+ */
+async function countInboxPlansForTest(shopDomain, testId) {
+  const domain = normalizeShopDomain(shopDomain);
+  const id = String(testId || '').trim();
+  if (!domain || !id) {
+    return 0;
+  }
+  const uuidPredicate = /^[0-9a-f-]{36}$/i.test(id)
+    ? 'test_id = $2::uuid'
+    : 'test_id::text = $2';
+  const result = await query(
+    `SELECT COUNT(*)::int AS count
+     FROM smart_pricing_inbox_plans
+     WHERE shop_domain = $1 AND ${uuidPredicate}`,
+    [domain, id]
+  ).catch(err => {
+    if (/invalid input syntax for type uuid/i.test(String(err?.message || ''))) {
+      return query(
+        `SELECT COUNT(*)::int AS count
+         FROM smart_pricing_inbox_plans
+         WHERE shop_domain = $1 AND test_id::text = $2`,
+        [domain, id]
+      );
+    }
+    throw err;
+  });
+  return Number(result.rows[0]?.count) || 0;
 }
 
 async function getInboxPlanById(shopDomain, planIdOrTestId) {
@@ -572,6 +627,7 @@ module.exports = {
   patchInboxPlansFromSync,
   getInboxPlanById,
   findInboxPlanByTestId,
+  countInboxPlansForTest,
   upsertInboxPlan,
   linkInboxPlanToTest,
   summarizeInboxPlans,

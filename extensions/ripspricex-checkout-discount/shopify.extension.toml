@@ -1,7 +1,7 @@
 api_version = "2025-10"
 
 [[extensions]]
-name = "RipsPriceX checkout discount"
+name = "Pricify checkout discount"
 handle = "ripspricex-checkout-discount"
 uid = "77ed6e98-2193-af5b-3d32-ced22d8aba22293d93dd"
 type = "function"
