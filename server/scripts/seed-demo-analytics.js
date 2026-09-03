@@ -14,9 +14,11 @@
  *   --visitors=N   visitors per variation for a full-length test (default 3000)
  *   --tests=N      only seed the first N running tests
  *   --shop=DOMAIN  restrict to one shop
- *   --srm=N        give N tests a broken traffic split (default 2)
+ *   --srm=N        give N tests a broken traffic split (default 0)
  *   --stamp-floors write the sample/conversion floors onto seeded tests so the
  *                  readiness and winner gates engage (default off)
+ * Winning arms rotate: control, variation 1, then variation 2 when the test
+ * has three arms, so the experiment list shows mixed product outcomes.
  *   --clear        delete previously seeded rows and exit
  *   --dry-run      report what would be written, write nothing
  */
@@ -33,7 +35,7 @@ const SEED_TAG = 'demo-analytics';
 const SEED_FLOOR_MARKER = 'demo_seed_floors';
 
 function parseArgs(argv) {
-  const args = { visitors: 3000, tests: null, shop: null, srm: 2, clear: false, dryRun: false, stampFloors: false };
+  const args = { visitors: 3000, tests: null, shop: null, srm: 0, clear: false, dryRun: false, stampFloors: false };
   for (const raw of argv.slice(2)) {
     const [key, value] = raw.replace(/^--/, '').split('=');
     if (key === 'clear') args.clear = true;
@@ -66,24 +68,18 @@ function makeRandom(seedText) {
 }
 
 /**
- * Four stories, so the report screens show the range a merchant would really
- * meet rather than 121 identical winners.
+ * Rotate a clear winner so neighbouring products do not all tell the same
+ * story: control, variation 1, then variation 2 when the test has three arms.
  */
-const SCENARIOS = [
-  { key: 'challenger_wins', weight: 0.34 },
-  { key: 'control_wins', weight: 0.2 },
-  { key: 'inconclusive', weight: 0.31 },
-  { key: 'early', weight: 0.15 },
-];
-
-function pickScenario(random) {
-  const roll = random();
-  let cumulative = 0;
-  for (const scenario of SCENARIOS) {
-    cumulative += scenario.weight;
-    if (roll <= cumulative) return scenario.key;
-  }
-  return 'inconclusive';
+function pickWinner(index, armCount) {
+  const cycle = index % 3;
+  if (cycle === 0) return { key: 'control_wins', winnerArm: 0 };
+  if (cycle === 1) return { key: 'variant_1_wins', winnerArm: 1 };
+  const winnerArm = armCount > 2 ? 2 : 1;
+  return {
+    key: winnerArm === 2 ? 'variant_2_wins' : 'variant_1_wins',
+    winnerArm,
+  };
 }
 
 function firstNumber(...values) {
@@ -141,24 +137,15 @@ function resolveArmPrices(test, catalogPrice, random) {
  * numbers in tension the way a real price test does: a higher price converts
  * less often but can still win on revenue per visitor.
  */
-function resolveArmRates(armPrices, scenario, random) {
-  const controlPrice = armPrices[0];
-  const baseRate = 0.012 + random() * 0.028;
-  const elasticity = 1.4 + random() * 1.3;
-  return armPrices.map((price, index) => {
-    if (index === 0) return baseRate;
-    const ratio = price > 0 ? controlPrice / price : 1;
-    let rate = baseRate * Math.pow(ratio, elasticity);
-    if (scenario === 'challenger_wins') {
-      // Lift the strongest challenger clear of the noise floor.
-      rate *= index === 1 ? 1.28 + random() * 0.18 : 1.02 + random() * 0.08;
-    } else if (scenario === 'control_wins') {
-      rate *= 0.7 - random() * 0.12;
-    } else {
-      rate *= 0.99 + random() * 0.03;
+function resolveArmRates(armCount, winnerArm, random) {
+  const baseRate = 0.022 + random() * 0.006;
+  return Array.from({ length: armCount }, (_, index) => {
+    if (winnerArm === 0) {
+      return index === 0 ? baseRate * 2.1 : baseRate;
     }
-    return Math.min(0.35, Math.max(0.0008, rate));
-  });
+    if (index === winnerArm) return baseRate * 2.2;
+    return baseRate;
+  }).map(rate => Math.min(0.35, Math.max(0.008, rate)));
 }
 
 function multinomialSplit(total, weights, random) {
@@ -222,18 +209,17 @@ function buildTestData(test, args, index) {
   const variants = Array.isArray(test.variants) ? test.variants : [];
   if (variants.length < 2) return null;
 
-  const scenario = pickScenario(random);
+  const picked = pickWinner(index, variants.length);
+  const scenario = picked.key;
   const catalogPrice = firstNumber(test.catalog_price);
   const armPrices = resolveArmPrices(test, catalogPrice, random);
-  const armRates = resolveArmRates(armPrices, scenario, random);
+  const armRates = resolveArmRates(variants.length, picked.winnerArm, random);
 
   const startedAt = new Date(test.started_at || test.created_at || Date.now()).getTime();
   const now = Date.now();
   const windowMs = Math.max(3 * 86400000, now - startedAt);
 
-  // An "early" test simply has not had time to gather much, which is a state
-  // the report screens have to look right in too.
-  const perArm = scenario === 'early' ? Math.round(args.visitors * 0.12) : args.visitors;
+  const perArm = args.visitors;
   const total = perArm * variants.length;
 
   const forceSrm = index < args.srm;
