@@ -13,6 +13,10 @@
 require('@shopify/shopify-api/adapters/node');
 const { shopifyApi, ApiVersion } = require('@shopify/shopify-api');
 const logger = require('../utils/logger');
+const {
+  normalizeProductGid,
+  normalizeVariantGid,
+} = require('./smartPricing/smartPricingCatalogUtils');
 const ADMIN_GRAPHQL_UNAVAILABLE_CACHE = new Map();
 const ADMIN_REST_UNAVAILABLE_CACHE = new Map();
 
@@ -413,13 +417,22 @@ class ShopifyService {
       );
     }
 
+    // productVariantsBulkUpdate is scoped to a single product, so it needs the
+    // product id that the removed productVariantUpdate never asked for. Refuse
+    // here instead of sending a request Shopify can only reject.
+    const productGid = normalizeProductGid(productId);
+    const variantGid = normalizeVariantGid(variantId);
+    if (!productGid) {
+      throw new Error(`Refusing to update variant ${variantId} without a product id`);
+    }
+
     const session = this.getSession(shopDomain, accessToken);
     const client = new this.api.clients.Graphql({ session });
 
     const mutation = `
-      mutation productVariantUpdate($input: ProductVariantInput!) {
-        productVariantUpdate(input: $input) {
-          productVariant {
+      mutation productVariantsBulkUpdate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
+        productVariantsBulkUpdate(productId: $productId, variants: $variants) {
+          productVariants {
             id
             price
           }
@@ -432,20 +445,34 @@ class ShopifyService {
     `;
 
     const variables = {
-      input: {
-        id: variantId,
-        price: numericPrice.toString(),
-      },
+      productId: productGid,
+      variants: [
+        {
+          id: variantGid,
+          price: numericPrice.toString(),
+        },
+      ],
     };
 
     try {
       const response = await client.request(mutation, { variables });
+      const result = response?.data?.productVariantsBulkUpdate;
 
-      if (response.data.productVariantUpdate.userErrors.length > 0) {
-        throw new Error(response.data.productVariantUpdate.userErrors[0].message);
+      const userErrors = result?.userErrors || [];
+      if (userErrors.length > 0) {
+        throw new Error(userErrors[0].message);
       }
 
-      return response.data.productVariantUpdate.productVariant;
+      // A bulk mutation can answer without errors and still have written
+      // nothing — a variant that belongs to another product is the case that
+      // reaches here. Callers count a returned value as a price applied and
+      // store it as the revert baseline, so silence has to read as failure.
+      const updated = (result?.productVariants || [])[0];
+      if (!updated) {
+        throw new Error(`Shopify updated no variant for ${variantGid} on ${productGid}`);
+      }
+
+      return updated;
     } catch (error) {
       logger.error('Error updating product price', { error: error.message, productId });
       throw error;
