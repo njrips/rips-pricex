@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Button, Select, TextField } from '@shopify/polaris';
+import { Select } from '@shopify/polaris';
 import {
   ALL_CLASSIC_METRIC_OPTIONS,
   CLASSIC_DEVICE_OPTIONS,
@@ -19,20 +19,15 @@ import {
 } from './countrySelection';
 import ClassicGoalPickerModal from './ClassicGoalPickerModal';
 import SettingsInfoLink from '../../Settings/SettingsInfoLink';
-import { IconCheck, IconChevron, IconShield, IconWand } from './classicIcons';
+import { IconCheck, IconChevron, IconShield } from './classicIcons';
 import {
-  clampMaxRevenueDropPercent,
-  DEFAULT_MAX_REVENUE_DROP_PERCENT,
   ensureRevenueGuardrailRows,
   formatRevenueDropThreshold,
   MAX_REVENUE_DROP_PERCENT,
   MIN_REVENUE_DROP_PERCENT,
   parseRevenueDropThreshold,
 } from './revenueGuardrail';
-import {
-  formatPracticalDurationRange,
-  formatVisitorCount,
-} from './estimateSignificanceDuration';
+import { formatPracticalDurationRange } from './estimateSignificanceDuration';
 import styles from './SmartPricingClassic.module.css';
 
 export function createDefaultAudienceState() {
@@ -105,11 +100,8 @@ function SelectablePill({ label, active, disabled = false, onClick, className = 
 export default function AudienceSuccessStepPanel({
   value,
   onChange,
-  onSuggestAi,
-  suggestBusy = false,
   shopDomain = '',
   significanceEstimate = null,
-  shopMaxRevenueDropPercent = DEFAULT_MAX_REVENUE_DROP_PERCENT,
   disabled = false,
 }) {
   const [advancedOpen, setAdvancedOpen] = useState(true);
@@ -123,10 +115,7 @@ export default function AudienceSuccessStepPanel({
     : null;
   const guardrails = ensureRevenueGuardrailRows(state.guardrails);
   const revenueGuardrail = guardrails[0];
-  const effectiveRevenueDropMax = clampMaxRevenueDropPercent(
-    shopMaxRevenueDropPercent,
-    MAX_REVENUE_DROP_PERCENT
-  );
+  const effectiveRevenueDropMax = MAX_REVENUE_DROP_PERCENT;
   const storedRevenueDrop = parseRevenueDropThreshold(revenueGuardrail?.threshold);
   const [revenueDropDraft, setRevenueDropDraft] = useState(null);
   const displayedRevenueDrop =
@@ -201,30 +190,6 @@ export default function AudienceSuccessStepPanel({
 
   return (
     <div>
-      {typeof onSuggestAi === 'function' ? (
-        <div className={styles.aiSuggestBanner}>
-          <div className={styles.aiSuggestTitle}>
-            <span className={styles.aiSuggestTitleLead}>
-              <IconWand size={16} />
-              AI audience targeting
-            </span>
-            <Button
-              variant="plain"
-              onClick={onSuggestAi}
-              disabled={disabled || suggestBusy}
-              loading={suggestBusy}
-            >
-              Suggest with AI
-            </Button>
-          </div>
-          <p className={styles.aiSuggestBody} aria-live="polite">
-            {state.aiRationale
-              ? state.aiRationale
-              : 'Recommend segment, traffic split, success metric, and targeting from your catalog and guardrails.'}
-          </p>
-        </div>
-      ) : null}
-
       <div className={styles.field}>
         <Select
           id="classic-audience-segment"
@@ -317,8 +282,7 @@ export default function AudienceSuccessStepPanel({
           </button>
         </div>
         <p className={styles.help}>
-          Choose one metric to optimize, including profit or a custom goal. It cannot also be a
-          secondary.
+          Choose one metric to optimize, or add a custom goal. It cannot also be a secondary.
         </p>
       </div>
 
@@ -435,8 +399,8 @@ export default function AudienceSuccessStepPanel({
         </div>
         <p className={styles.guardrailHint} id="revenue-guardrail-help">
           Operational safety pause based on the observed revenue-per-visitor point estimate; it is
-          not winner evidence. Allowed range {MIN_REVENUE_DROP_PERCENT}–
-          {effectiveRevenueDropMax}% (your shop cap).
+          not winner evidence. Set it per experiment, between {MIN_REVENUE_DROP_PERCENT}% and{' '}
+          {effectiveRevenueDropMax}%.
         </p>
       </div>
 
@@ -450,38 +414,6 @@ export default function AudienceSuccessStepPanel({
           <IconChevron size={16} up={advancedOpen} />
         </summary>
         <div className={styles.advancedBody}>
-          <div className={`${styles.field} ${styles.audienceMinSample}`}>
-            <div className={styles.labelRow}>
-              <span className={styles.label}>Minimum sample size per variation</span>
-              <SettingsInfoLink hash="min-sample" label="Minimum sample" />
-            </div>
-            <TextField
-              id="classic-aud-min-sample"
-              label="Minimum sample size per variation"
-              labelHidden
-              type="number"
-              min={1}
-              value={String(state.minSampleSize ?? '5000')}
-              onChange={value => patch({ minSampleSize: value })}
-              autoComplete="off"
-              disabled={disabled}
-            />
-            {significanceEstimate?.recommendedSampleSize &&
-            String(state.minSampleSize) !== String(significanceEstimate.recommendedSampleSize) ? (
-              <div className={styles.labelRow} style={{ marginTop: 6 }}>
-                <Button
-                  variant="plain"
-                  disabled={disabled}
-                  onClick={() =>
-                    patch({ minSampleSize: String(significanceEstimate.recommendedSampleSize) })
-                  }
-                >
-                  Use planning sample ({formatVisitorCount(significanceEstimate.recommendedSampleSize)})
-                </Button>
-              </div>
-            ) : null}
-          </div>
-
           <div className={styles.modeRow}>
             <div className={styles.audiencePanel}>
               <div className={styles.sectionLabel}>Device type</div>

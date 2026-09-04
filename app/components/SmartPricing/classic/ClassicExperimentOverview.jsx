@@ -580,7 +580,10 @@ export default function ClassicExperimentOverview() {
       showError(null, 'No plans to update.');
       return;
     }
-    setEditFocus(focus === 'metrics' ? 'metrics' : 'audience');
+    // 'guardrail' scrolls the modal to the revenue guardrail and retitles it.
+    // Collapsing it to 'audience' dropped the caller on the segment fields with
+    // no sign of the setting they clicked Edit on.
+    setEditFocus(focus === 'metrics' || focus === 'guardrail' ? focus : 'audience');
     setEditSeed(audienceUiFromSummaries(audience, metrics, plan?.metadata?.audience_ui));
     setEditOpen(true);
   };
@@ -629,8 +632,8 @@ export default function ClassicExperimentOverview() {
         })
       );
       await replaceExperimentPlansLocal(nextPlans);
-      const draft = readClassicWizardDraft(shopDomain);
-      if (draft && String(draft.experiment_id || '') === String(resumeId || '')) {
+      const draft = readClassicWizardDraft(shopDomain, resumeId);
+      if (draft) {
         writeClassicWizardDraft(shopDomain, { ...draft, audience: audienceState });
       }
       setEditOpen(false);
@@ -931,7 +934,6 @@ export default function ClassicExperimentOverview() {
               settings={settings}
               audience={audience}
               metrics={metrics}
-              onEdit={() => openAudienceMetricsEditor('audience')}
               onEditMetrics={() => openAudienceMetricsEditor('guardrail')}
             />
           ) : null}
@@ -946,7 +948,6 @@ export default function ClassicExperimentOverview() {
         plans={experimentPlans}
         variations={variations}
         shopGuardrails={shopGuardrails || {}}
-        shopMaxRevenueDropPercent={shopGuardrails?.max_revenue_drop_percent}
         readOnly={!canEditClassicAudienceMetrics(status)}
         readOnlyReason={
           canEditClassicAudienceMetrics(status)

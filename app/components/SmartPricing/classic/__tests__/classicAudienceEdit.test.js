@@ -100,11 +100,19 @@ describe('audienceUiFromSummaries', () => {
 });
 
 describe('validateClassicAudienceUi', () => {
-  it('rejects invalid traffic and sample size', () => {
+  it('rejects traffic outside 5-100%', () => {
     expect(validateClassicAudienceUi({ trafficAllocation: 2, minSampleSize: '5000', primaryMetric: 'revenue_per_visitor' }).ok).toBe(false);
-    expect(validateClassicAudienceUi({ trafficAllocation: 50, minSampleSize: 'abc', primaryMetric: 'revenue_per_visitor' }).ok).toBe(false);
-    expect(validateClassicAudienceUi({ trafficAllocation: 50, minSampleSize: '0', primaryMetric: 'revenue_per_visitor' }).ok).toBe(false);
     expect(validateClassicAudienceUi({ trafficAllocation: 50, minSampleSize: '4000', primaryMetric: 'revenue_per_visitor' }).ok).toBe(true);
+  });
+
+  // The sample floor comes from Stat settings and there is no field for it in
+  // the wizard, so blocking the step on a missing or unreadable value would
+  // strand the merchant with nothing to correct. parseMinSampleSize normalizes
+  // it on the way to the plan instead.
+  it('does not block on a sample size the merchant can no longer enter', () => {
+    expect(validateClassicAudienceUi({ trafficAllocation: 50, minSampleSize: 'abc', primaryMetric: 'revenue_per_visitor' }).ok).toBe(true);
+    expect(validateClassicAudienceUi({ trafficAllocation: 50, minSampleSize: '0', primaryMetric: 'revenue_per_visitor' }).ok).toBe(true);
+    expect(validateClassicAudienceUi({ trafficAllocation: 50, primaryMetric: 'revenue_per_visitor' }).ok).toBe(true);
   });
 });
 

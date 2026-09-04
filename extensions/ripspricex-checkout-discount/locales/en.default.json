@@ -1,4 +1,4 @@
 {
-  "name": "Pricify checkout discount",
+  "name": "Priceify checkout discount",
   "description": "Applies percent and fixed offer-test discounts from cart line attributes."
 }

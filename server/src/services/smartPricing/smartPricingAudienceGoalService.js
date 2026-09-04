@@ -1,5 +1,9 @@
 /**
- * Deterministic audience / goal suggestions and Step 4 launch checklist for Smart Pricing.
+ * Deterministic goal suggestions and the Step 4 launch checklist for Smart Pricing.
+ *
+ * Audience suggestion used to live here too. It was removed with AI audience
+ * targeting: the merchant sets the audience, and the shop default template is
+ * applied directly from guardrails.
  */
 
 // Launch capacity, checkout readiness, and the inbox store reach the database
@@ -13,48 +17,6 @@ const DEFAULT_SEGMENTS = Object.freeze({
   exclude_bots: true,
   exclude_internal_ips: true,
 });
-
-function normalizeAudienceTemplate(raw = {}) {
-  const source = raw && typeof raw === 'object' ? raw : {};
-  const countries = Array.isArray(source.countries)
-    ? source.countries
-        .map(c =>
-          String(c || '')
-            .trim()
-            .toUpperCase()
-        )
-        .filter(Boolean)
-    : [];
-  return {
-    device: ['all', 'desktop', 'mobile'].includes(String(source.device || '').toLowerCase())
-      ? String(source.device).toLowerCase()
-      : 'all',
-    customer: ['all', 'new', 'returning'].includes(String(source.customer || '').toLowerCase())
-      ? String(source.customer).toLowerCase()
-      : 'all',
-    countries,
-    exclude_bots: source.exclude_bots !== false,
-    exclude_internal_ips: source.exclude_internal_ips !== false,
-  };
-}
-
-function suggestAudienceForPlans(plans = [], guardrails = {}) {
-  const template = normalizeAudienceTemplate(
-    guardrails.default_audience_template || guardrails.defaultAudienceTemplate || {}
-  );
-  const lowTraffic = (Array.isArray(plans) ? plans : []).some(
-    plan => Number(plan.daily_visitors || 0) > 0 && Number(plan.daily_visitors) < 40
-  );
-  if (lowTraffic && template.customer === 'all') {
-    // Prefer broader audience for low-traffic SKUs — keep all.
-  }
-  return {
-    inherit_from_shop_defaults: true,
-    segments: template,
-    rationale:
-      'Shop default audience template. Audience applies to the entire price test for each product variant.',
-  };
-}
 
 function suggestGoalForPlan(plan = {}, guardrails = {}) {
   const defaultGoal = guardrails.default_goal_template || guardrails.defaultGoalTemplate || {};
@@ -263,8 +225,6 @@ async function buildBatchPreviewLaunch({
 
 module.exports = {
   DEFAULT_SEGMENTS,
-  normalizeAudienceTemplate,
-  suggestAudienceForPlans,
   suggestGoalForPlan,
   suggestGoalsForPlans,
   buildBatchPreviewLaunch,

@@ -28,6 +28,11 @@ export function getClassicCreateSteps(experimentType = 'price_test') {
   });
 }
 
+export function classicCreateStepId(index) {
+  const step = CLASSIC_CREATE_STEPS[Number(index)];
+  return step ? step.id : null;
+}
+
 export function classicCreateStepIndex(stepId) {
   const key = String(stepId || '')
     .trim()

@@ -30,18 +30,18 @@ import {
   publicSectionHref,
 } from '../scrollToPublicHash.js';
 
-describe('Pricify FAQ copy', () => {
+describe('Priceify FAQ copy', () => {
   it('uses the seven Figma questions', () => {
     assert.deepEqual(
       FAQ_ITEMS.map((item) => item.q),
       [
-        'Is Pricify really free?',
+        'Is Priceify really free?',
         'Do I need coding experience?',
         'Can I choose which products to test?',
         'Can I control how much traffic sees each price?',
         'What metrics can I measure?',
         'Can I stop an experiment?',
-        'Does Pricify work with my Shopify store?',
+        'Does Priceify work with my Shopify store?',
       ]
     );
     assert.match(FAQ_ITEMS[0].a, /free to install/);
@@ -116,7 +116,7 @@ describe('Pricify FAQ copy', () => {
       '/staff/login'
     );
     assert.equal(PUBLIC_ROUTES.login, '/auth/login');
-    const shellSrc = fs.readFileSync(new URL('../PricifyShell.jsx', import.meta.url), 'utf8');
+    const shellSrc = fs.readFileSync(new URL('../PriceifyShell.jsx', import.meta.url), 'utf8');
     assert.match(shellSrc, /reloadDocument=\{staffPath/);
     assert.doesNotMatch(shellSrc, />\s*Log in\s*</);
     assert.deepEqual(LANDING_SECTION_ORDER, [
@@ -183,8 +183,8 @@ describe('publicSectionHref', () => {
 
 describe('publicErrorTitle', () => {
   it('titles public error chrome', () => {
-    assert.equal(publicErrorTitle(true), 'Page not found — Pricify');
-    assert.equal(publicErrorTitle(false), 'Something went wrong — Pricify');
+    assert.equal(publicErrorTitle(true), 'Page not found — Priceify');
+    assert.equal(publicErrorTitle(false), 'Something went wrong — Priceify');
   });
 });
 

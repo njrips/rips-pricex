@@ -112,6 +112,25 @@ describe('planToPriceTestService', () => {
     expect(payload.goal.analysis_method).toBe('sequential');
   });
 
+  it('judges a plan that names no metric on revenue per visitor', () => {
+    // Profit per visitor is revenue minus a flat shop-wide cost percentage, so
+    // it ranks variations exactly as revenue does while looking like a separate
+    // measurement. Nothing may land on it by default.
+    const { objective: _objective, ...planWithoutObjective } = samplePlan;
+    const payload = buildPriceTestPayloadFromPlan(planWithoutObjective, {
+      guardrails: { default_cogs_percent: 55 },
+    });
+    expect(payload.goal.primary_metric).toBe('revenue_per_visitor');
+    expect(payload.goal.metric).toBe('revenue_per_visitor');
+  });
+
+  it('still honours profit per visitor when a plan asks for it', () => {
+    const payload = buildPriceTestPayloadFromPlan(samplePlan, {
+      guardrails: { default_cogs_percent: 55 },
+    });
+    expect(payload.goal.primary_metric).toBe('profit_per_visitor');
+  });
+
   it('copies plan statistical_design onto the launched test', () => {
     const payload = buildPriceTestPayloadFromPlan({
       ...samplePlan,

@@ -14,9 +14,7 @@ import {
   getSmartPricingGuardrails,
   saveSmartPricingGuardrails,
   getSmartPricingOpportunities,
-  suggestSmartPricingAudience,
   suggestSmartPricingGoals,
-  suggestSmartPricingHypothesis,
   suggestSmartPricingPrices,
   batchPreviewSmartPricingLaunch,
 } from '../../../services/smartPricingApi';
@@ -26,31 +24,31 @@ import { readInboxPlans, writeInboxPlans } from '../smartPricingConstants';
 import { persistInboxPlansNow } from '../smartPricingInboxPersistence';
 /** Classic wizard: products per experiment (not parallel-test capacity). */
 const CLASSIC_MAX_PRODUCT_SELECTION = 100;
+/** Long enough that typing does not write on every keystroke. */
+const WIZARD_AUTOSAVE_DELAY_MS = 600;
 import {
   buildClassicGoalPayload,
   buildSecondaryGoalPayload,
   classicAudienceToSegments,
   createEmptyAudienceSegments,
-  mergeAudienceAiIntoStatePreservingSample,
   normalizeAudienceSegments,
   normalizeClassicAudienceTargeting,
   normalizeCustomGoals,
   normalizePrimaryMetric,
   normalizeSecondaryEvents,
-  stripClassicAudienceTargetingFields,
 } from '../targeting/smartPricingAudienceHelpers';
 import ClassicWizardShell from './ClassicWizardShell';
-import { classicCreateStepIndex } from './classicCreateSteps';
+import { CLASSIC_CREATE_STEPS, classicCreateStepIndex } from './classicCreateSteps';
+import {
+  buildWizardResumeSearch,
+  shouldAutosaveWizardSnapshot,
+} from './classicWizardAutosave';
 import SetupStepPanel, { EXPERIMENT_TYPES } from './SetupStepPanel';
 import VariationsStepPanel, { createDefaultVariations, trafficTotal } from './VariationsStepPanel';
 import { variationsFromPlanArms } from './variationsStepHelpers';
 import ProductsPricingStepPanel from './ProductsPricingStepPanel';
 import AudienceSuccessStepPanel, { createDefaultAudienceState } from './AudienceSuccessStepPanel';
-import {
-  capRevenueGuardrailRows,
-  ensureRevenueGuardrailRows,
-  revenueGuardrailGoalConfig,
-} from './revenueGuardrail';
+import { ensureRevenueGuardrailRows, revenueGuardrailGoalConfig } from './revenueGuardrail';
 import ReviewLaunchStepPanel from './ReviewLaunchStepPanel';
 import {
   clearClassicWizardDraft,
@@ -181,13 +179,15 @@ async function fetchCatalog(shopDomain) {
 
 export default function ClassicCreateWizard() {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const shopDomain = useClassicShopDomain();
   const resumeId = String(searchParams.get('resume') || '').trim();
   const stepParam = String(searchParams.get('step') || '').trim();
 
-  // A ?step= deep link decides where the wizard opens; navigation inside the
-  // wizard takes over from there without rewriting the URL.
+  // A ?step= deep link decides where the wizard opens. Moving between steps
+  // rewrites it (see syncResumeUrl) so a refresh comes back to the same place;
+  // because the rewrite always matches the step just set, the re-key below
+  // resolves to the value already on screen.
   const urlStep = classicCreateStepIndex(stepParam);
   const [step, setStep] = useKeyedState(stepParam, urlStep ?? 0);
   const [message, setMessage] = useState('');
@@ -208,7 +208,6 @@ export default function ClassicCreateWizard() {
   const [name, setName] = useState('');
   const [hypothesis, setHypothesis] = useState('');
   const [experimentType, setExperimentType] = useState('price_test');
-  const [minSampleSize, setMinSampleSize] = useState('');
   const [shopGuardrailsReady, setShopGuardrailsReady] = useState(false);
 
   const [variations, setVariations] = useState(createDefaultVariations);
@@ -332,8 +331,6 @@ export default function ClassicCreateWizard() {
     value => patchActivePricing({ bulkDirection: value }),
     [patchActivePricing]
   );
-  const [hypothesisBusy, setHypothesisBusy] = useState(false);
-  const [audienceAiBusy, setAudienceAiBusy] = useState(false);
   const [shopGuardrails, setShopGuardrails] = useState({});
   const [raisingMaxPriceChange, setRaisingMaxPriceChange] = useState(false);
   /** What the merchant typed when the shop cap forced a lower band value. */
@@ -387,7 +384,6 @@ export default function ClassicCreateWizard() {
       name,
       hypothesis,
       experimentType,
-      minSampleSize,
       variations,
       selectedIds,
       pickMode,
@@ -410,7 +406,6 @@ export default function ClassicCreateWizard() {
       name,
       hypothesis,
       experimentType,
-      minSampleSize,
       variations,
       selectedIds,
       pickMode,
@@ -429,6 +424,64 @@ export default function ClassicCreateWizard() {
     ]
   );
 
+  // Autosave keeps the wizard reloadable. It writes the browser draft only —
+  // an experiment reaches the Drafts list when the merchant saves or launches
+  // it, so a half-filled create never shows up there on its own.
+  const autosaveSuspended = useRef(false);
+
+  const syncResumeUrl = useCallback(
+    stepIndex => {
+      const search = buildWizardResumeSearch(searchParams, { experimentId, stepIndex });
+      if (search == null) return;
+      // Replace, so the browser Back button still leaves the wizard rather than
+      // walking back through every step the merchant visited.
+      setSearchParams(search, { replace: true, preventScrollReset: true });
+    },
+    [searchParams, setSearchParams, experimentId]
+  );
+
+  const persistWizardDraft = useCallback(
+    snapshot => {
+      if (autosaveSuspended.current) return false;
+      if (!shouldAutosaveWizardSnapshot(snapshot)) return false;
+      try {
+        writeClassicWizardDraft(shopDomain, snapshot);
+      } catch {
+        // Storage can be full or blocked. Losing the local copy is worth less
+        // than the wizard, so the merchant keeps working without it.
+        return false;
+      }
+      return true;
+    },
+    [shopDomain]
+  );
+
+  // `fresh` carries state produced in the same tick as the move. wizardSnapshot
+  // is memoised from the last render, so a step that builds plans and advances
+  // immediately would otherwise persist a draft holding the step it moved to
+  // and the plans from before it ran — resuming there fails to launch for want
+  // of products the merchant had in fact chosen.
+  const goToStep = useCallback(
+    (next, fresh = null) => {
+      const target = Math.max(0, Math.min(CLASSIC_CREATE_STEPS.length - 1, Number(next) || 0));
+      setStep(target);
+      persistWizardDraft({ ...wizardSnapshot, ...(fresh || {}), step: target });
+      syncResumeUrl(target);
+    },
+    [setStep, persistWizardDraft, wizardSnapshot, syncResumeUrl]
+  );
+
+  // Edits inside a step are saved on a short delay as well: a merchant who
+  // types a name and refreshes before pressing Continue should still find it.
+  useEffect(() => {
+    if (!draftHydrated) return undefined;
+    const timer = setTimeout(() => {
+      if (!persistWizardDraft(wizardSnapshot)) return;
+      syncResumeUrl(step);
+    }, WIZARD_AUTOSAVE_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [draftHydrated, wizardSnapshot, persistWizardDraft, syncResumeUrl, step]);
+
   const applyWizardSnapshot = useCallback(
     snapshot => {
       if (!snapshot || typeof snapshot !== 'object') return;
@@ -441,8 +494,6 @@ export default function ClassicCreateWizard() {
       if (snapshot.hypothesis !== null && snapshot.hypothesis !== undefined)
         setHypothesis(String(snapshot.hypothesis));
       if (snapshot.experimentType) setExperimentType(snapshot.experimentType);
-      if (snapshot.minSampleSize !== null && snapshot.minSampleSize !== undefined)
-        setMinSampleSize(String(snapshot.minSampleSize));
       if (Array.isArray(snapshot.variations) && snapshot.variations.length) {
         setVariations(snapshot.variations);
       }
@@ -513,9 +564,6 @@ export default function ClassicCreateWizard() {
         };
         setAudience(nextAudience);
         setGlobalAudience(segmentsFromClassicAudience(nextAudience, snapshot.globalAudience));
-        if (nextAudience.minSampleSize !== null && nextAudience.minSampleSize !== undefined) {
-          setMinSampleSize(String(nextAudience.minSampleSize));
-        }
       } else if (snapshot.globalAudience) {
         setGlobalAudience(normalizeAudienceSegments(snapshot.globalAudience));
       }
@@ -528,15 +576,22 @@ export default function ClassicCreateWizard() {
     [urlStep, setStep]
   );
 
+  // The draft this URL names, if this browser still holds it. Looked up by id
+  // because several unfinished experiments can be saved at once, and only the
+  // one named here belongs in this wizard.
+  const resumedLocalDraft = useMemo(
+    () => (hydrated && resumeId ? readClassicWizardDraft(shopDomain, resumeId) : null),
+    [hydrated, resumeId, shopDomain]
+  );
+
   // Saved drafts live in browser storage, so they can only be read once the
   // client has taken over. Seeding during that first post-hydration render (not
   // from an effect) lets the restored wizard reach the screen in one commit.
   if (hydrated && !draftHydrated) {
-    const localDraft = readClassicWizardDraft(shopDomain);
     setDraftHydrated(true);
     if (resumeId) {
-      if (localDraft && String(localDraft.experiment_id) === resumeId) {
-        applyWizardSnapshot(localDraft);
+      if (resumedLocalDraft) {
+        applyWizardSnapshot(resumedLocalDraft);
       } else {
         const inboxPlans = (readInboxPlans(shopDomain) || []).filter(
           plan => getPlanExperimentId(plan) === resumeId
@@ -585,16 +640,14 @@ export default function ClassicCreateWizard() {
                 first.audience?.segments || createEmptyAudienceSegments()
               )
             );
-            if (nextAudience.minSampleSize !== null && nextAudience.minSampleSize !== undefined) {
-              setMinSampleSize(String(nextAudience.minSampleSize));
-            }
           }
           if (urlStep == null) {
             setStep(inboxPlans.some(p => p.price_arms?.length) ? 4 : 2);
           }
-        } else if (localDraft) {
-          applyWizardSnapshot(localDraft);
         }
+        // Neither store knows this id — a link to an experiment that was
+        // launched, deleted, or aged out. Opening a blank wizard beats
+        // restoring a different experiment's answers under its name.
       }
     }
     // Without ?resume= an unfinished draft stays available but must not hijack a
@@ -605,22 +658,25 @@ export default function ClassicCreateWizard() {
     if (ok) {
       setShopGuardrails(g);
       const seedShopDefaults = !appliedSavedDraft;
+      // The sample floor is a Stat Setting now, with no field in this wizard,
+      // so it is taken from the shop every time — including when a draft is
+      // resumed. Honouring the draft's own copy would launch a test against a
+      // number the merchant can no longer see, let alone change.
       const shopSample = Number(g.min_sample_size_per_variation);
       const seededSample =
-        Number.isFinite(shopSample) && shopSample >= 1 ? String(Math.round(shopSample)) : null;
-      if (Number.isFinite(Number(g.max_revenue_drop_percent)) || (seededSample && seedShopDefaults)) {
-        setAudience(prev => ({
-          ...prev,
-          ...(seededSample && seedShopDefaults ? { minSampleSize: seededSample } : {}),
-          guardrails: Number.isFinite(Number(g.max_revenue_drop_percent))
-            ? ensureRevenueGuardrailRows(
-                seedShopDefaults ? [] : prev?.guardrails,
-                Number(g.max_revenue_drop_percent)
-              )
-            : prev?.guardrails,
-        }));
-      }
-      if (seededSample && seedShopDefaults) setMinSampleSize(seededSample);
+        Number.isFinite(shopSample) && shopSample >= 1
+          ? String(Math.round(shopSample))
+          : String(DEFAULT_MIN_SAMPLE_SIZE);
+      setAudience(prev => ({
+        ...prev,
+        minSampleSize: seededSample,
+        guardrails: Number.isFinite(Number(g.max_revenue_drop_percent))
+          ? ensureRevenueGuardrailRows(
+              seedShopDefaults ? [] : prev?.guardrails,
+              Number(g.max_revenue_drop_percent)
+            )
+          : prev?.guardrails,
+      }));
       if (g.default_scenario_preset && seedShopDefaults) {
         setScenarioPreset(g.default_scenario_preset);
       }
@@ -628,16 +684,15 @@ export default function ClassicCreateWizard() {
         setGlobalAudience(normalizeAudienceSegments(g.default_audience_template));
       }
       if (g.auto_round2_default === false && seedShopDefaults) setAutoRound2(false);
-      if (seedShopDefaults && !seededSample) {
-        setMinSampleSize(prev => prev || String(DEFAULT_MIN_SAMPLE_SIZE));
-        setAudience(current =>
-          current?.minSampleSize
-            ? current
-            : { ...current, minSampleSize: String(DEFAULT_MIN_SAMPLE_SIZE) }
-        );
-      }
-    } else if (!appliedSavedDraft) {
-      setMinSampleSize(prev => (prev ? prev : String(DEFAULT_MIN_SAMPLE_SIZE)));
+    } else {
+      // Settings never answered. Fall back to the documented default rather
+      // than leaving the floor blank, which would fail validation with no
+      // field on screen to correct.
+      setAudience(prev =>
+        prev?.minSampleSize
+          ? prev
+          : { ...prev, minSampleSize: String(DEFAULT_MIN_SAMPLE_SIZE) }
+      );
     }
     setShopGuardrailsReady(true);
   }, [appliedSavedDraft]);
@@ -795,25 +850,6 @@ export default function ClassicCreateWizard() {
       setPlans(nextPlans);
       setSelectedIds(ids);
 
-      const audienceRes = await suggestSmartPricingAudience(shopDomain, nextPlans, {
-        useAi: true,
-      }).catch(() => null);
-      if (audienceRes?.audience) {
-        const a = audienceRes.audience;
-        setAudience(prev => {
-          const preservedFloor = resolveMinSampleSize(prev?.minSampleSize, minSampleSize);
-          const next = mergeAudienceAiIntoStatePreservingSample(
-            { ...prev, minSampleSize: String(preservedFloor) },
-            stripClassicAudienceTargetingFields(a),
-            {
-              source: audienceRes.source,
-              rationale: a.rationale || audienceRes.rationale,
-            }
-          );
-          setGlobalAudience(segmentsFromClassicAudience(next, a.segments));
-          return next;
-        });
-      }
       const goalsRes = await suggestSmartPricingGoals(shopDomain, nextPlans).catch(() => null);
       const goalMap = {};
       (goalsRes?.suggestions || []).forEach(row => {
@@ -852,7 +888,6 @@ export default function ClassicCreateWizard() {
     priceOverrides,
     offerByArm,
     audience,
-    minSampleSize,
     experimentId,
     experimentType,
   ]);
@@ -862,14 +897,14 @@ export default function ClassicCreateWizard() {
       const rawAudienceState = audience || createDefaultAudienceState();
       const audienceState = {
         ...rawAudienceState,
-        guardrails: capRevenueGuardrailRows(
+        guardrails: ensureRevenueGuardrailRows(
           rawAudienceState.guardrails,
           shopGuardrails.max_revenue_drop_percent
         ),
       };
       const countryLists = resolveCountryLists(audienceState);
       const mappedSegments = segmentsFromClassicAudience(audienceState, globalAudience);
-      const sampleSize = resolveMinSampleSize(audienceState.minSampleSize, minSampleSize);
+      const sampleSize = resolveMinSampleSize(audienceState.minSampleSize);
       const shopDesign = shopDesignFromGuardrails(shopGuardrails);
       const durationEstimate = estimateSignificanceDuration({
         plans: sourcePlans,
@@ -1003,7 +1038,6 @@ export default function ClassicCreateWizard() {
       audience,
       goalByPlan,
       autoRound2,
-      minSampleSize,
       experimentId,
       name,
       hypothesis,
@@ -1327,7 +1361,7 @@ export default function ClassicCreateWizard() {
       } catch {
         setAiPriceMeta(prev => ({
           ...prev,
-          summary: 'Could not update Max price change. Change it in Settings and try again.',
+          summary: 'Could not raise the max price change. Try again, or narrow the band.',
         }));
       } finally {
         setRaisingMaxPriceChange(false);
@@ -1335,15 +1369,6 @@ export default function ClassicCreateWizard() {
     },
     [shopDomain, shopGuardrails, loadGuardrails, aiBandAttempt, patchAiBand]
   );
-
-  const openGuardrailSettings = useCallback(() => {
-    const path = `${ROUTES.appSettings(shopDomain)}?tab=guardrails`;
-    if (typeof navigate === 'function') {
-      navigate(path);
-      return;
-    }
-    window.open(path, '_blank');
-  }, [navigate, shopDomain]);
 
   /** Average selected-product price: the dollar equivalent of a percent cap. */
   const aiBandAveragePrice = useCallback(() => {
@@ -1405,104 +1430,14 @@ export default function ClassicCreateWizard() {
     [aiUnit, aiMinPct, aiMaxPct, aiBandAveragePrice, patchAiBand]
   );
 
-  const generateHypothesisWithAi = useCallback(async () => {
-    setHypothesisBusy(true);
-    try {
-      const rows = resolvePricingRows({
-        opportunities,
-        selectedIds,
-        pickMode,
-        maxSelection,
-      }).slice(0, 12);
-      const result = await suggestSmartPricingHypothesis(shopDomain, {
-        name,
-        experiment_type: experimentType,
-        hint: hypothesis,
-        objective: primaryMetric || shopGuardrails.objective || 'revenue_per_visitor',
-        variants: rows.map(row => ({
-          variant_id: row.variant_id,
-          title: row.product_title || row.title,
-          current_price: Number(row.current_price ?? row.price) || 0,
-          margin_percent: row.margin_percent,
-          units_sold_30d: row.units_sold_30d,
-          opportunity_score: row.opportunity_score,
-        })),
-      });
-      if (result?.hypothesis) {
-        setHypothesis(result.hypothesis);
-        setMessageType('success');
-        setMessage(
-          result.source === 'openai'
-            ? 'Hypothesis generated with AI.'
-            : 'Hypothesis drafted with a rule-based template (AI unavailable).'
-        );
-      }
-    } catch (err) {
-      setMessageType('error');
-      setMessage(err.message || 'Could not generate hypothesis.');
-    } finally {
-      setHypothesisBusy(false);
-    }
-  }, [
-    opportunities,
-    selectedIds,
-    pickMode,
-    maxSelection,
-    shopDomain,
-    name,
-    experimentType,
-    hypothesis,
-    primaryMetric,
-    shopGuardrails,
-  ]);
-
   const handleAudienceChange = useCallback(nextAudience => {
     const next = {
       ...(nextAudience || createDefaultAudienceState()),
       ...normalizeClassicAudienceTargeting(nextAudience),
     };
-    if (next.minSampleSize !== null && next.minSampleSize !== undefined) {
-      setMinSampleSize(String(next.minSampleSize));
-    }
     setAudience(next);
     setGlobalAudience(segmentsFromClassicAudience(next));
   }, []);
-
-  const suggestAudienceWithAi = useCallback(async () => {
-    setAudienceAiBusy(true);
-    try {
-      let sourcePlans = plans;
-      if (!sourcePlans.length) {
-        sourcePlans = await buildBatch();
-      }
-      const result = await suggestSmartPricingAudience(shopDomain, sourcePlans, { useAi: true });
-      const a = result?.audience || {};
-      setAudience(prev => {
-        const preservedFloor = resolveMinSampleSize(prev?.minSampleSize, minSampleSize);
-        const next = mergeAudienceAiIntoStatePreservingSample(
-          { ...prev, minSampleSize: String(preservedFloor) },
-          a,
-          {
-            source: result?.source,
-            rationale: a.rationale,
-          }
-        );
-        setGlobalAudience(segmentsFromClassicAudience(next, a.segments));
-        return next;
-      });
-      setMessageType('success');
-      setMessage(
-        result?.source === 'openai'
-          ? 'Audience targeting updated with AI.'
-          : 'Audience targeting drafted from shop defaults.'
-      );
-    } catch (err) {
-      setMessageType('error');
-      setMessage(err.message || 'Could not suggest audience.');
-    } finally {
-      setAudienceAiBusy(false);
-    }
-  }, [plans, shopDomain, buildBatch, minSampleSize]);
 
   const saveDraft = async () => {
     if (!String(name).trim()) {
@@ -1536,10 +1471,24 @@ export default function ClassicCreateWizard() {
         writeInboxPlans(shopDomain, merged);
         await persistInboxPlansNow(shopDomain, merged).catch(() => null);
         setPlans(enriched);
+        // Resuming prefers the browser draft over the inbox, so the draft has
+        // to learn about these plans now. Left to the debounced autosave, a
+        // refresh in the next moment would restore the copy saved above, which
+        // was taken before the plans were built.
+        persistWizardDraft({ ...wizardSnapshot, plans: enriched, step });
       }
+      // Saving keeps the merchant on the step they were editing. The URL now
+      // names the draft, so a refresh comes straight back here.
+      syncResumeUrl(step);
       setMessageType('success');
-      setMessage('Draft saved. You can finish this experiment later from Drafts.');
-      navigate(`${ROUTES.appSmartPricing(shopDomain)}?tab=draft`);
+      // Drafts on the experiments page lists plans, so an experiment only
+      // appears there once products have been chosen. Saying otherwise would
+      // send the merchant looking for a row that is not there yet.
+      setMessage(
+        inboxPlans.length
+          ? 'Draft saved. Keep editing here, or pick it up later from Drafts on the experiments page.'
+          : 'Draft saved in this browser. Keep editing here — choose products to also list it under Drafts.'
+      );
     } catch (err) {
       setMessageType('error');
       setMessage(err.message || 'Could not save draft.');
@@ -1566,13 +1515,7 @@ export default function ClassicCreateWizard() {
         setMessage('Still loading shop experiment defaults. Try again in a moment.');
         return;
       }
-      const sample = Number(minSampleSize);
-      if (!Number.isFinite(sample) || sample < 1) {
-        setMessageType('error');
-        setMessage('Enter a minimum sample size of at least 1 visitor per variation.');
-        return;
-      }
-      setStep(1);
+      goToStep(1);
       return;
     }
     if (step === 1) {
@@ -1587,7 +1530,7 @@ export default function ClassicCreateWizard() {
         return;
       }
       setProductsLoadError('');
-      setStep(2);
+      goToStep(2);
       return;
     }
     if (step === 2) {
@@ -1617,8 +1560,8 @@ export default function ClassicCreateWizard() {
         return;
       }
       try {
-        await buildBatch();
-        setStep(3);
+        const builtPlans = await buildBatch();
+        goToStep(3, Array.isArray(builtPlans) ? { plans: builtPlans } : null);
       } catch (err) {
         setMessageType('error');
         setMessage(
@@ -1640,9 +1583,9 @@ export default function ClassicCreateWizard() {
         setMessage(audienceCheck.message);
         return;
       }
-      setStep(4);
       const enriched = enrichPlansForLaunch();
       setPlans(enriched);
+      goToStep(4, { plans: enriched });
       batchPreviewSmartPricingLaunch(shopDomain, enriched).catch(() => {});
       return;
     }
@@ -1702,7 +1645,10 @@ export default function ClassicCreateWizard() {
       try {
         setBusy(true);
         const result = await launchMany(enriched);
-        clearClassicWizardDraft(shopDomain);
+        // Stop autosave before clearing, or a debounced write still in flight
+        // would put the draft straight back after the experiment went live.
+        autosaveSuspended.current = true;
+        clearClassicWizardDraft(shopDomain, experimentId);
         setMessageType('success');
         setMessage(`Launched ${result.launched} test${result.launched === 1 ? '' : 's'}.`);
         navigate(ROUTES.appSmartPricing(shopDomain));
@@ -1763,7 +1709,7 @@ export default function ClassicCreateWizard() {
         maxSelection,
         variations,
         trafficAllocation: audience?.trafficAllocation,
-        minSampleSize: resolveMinSampleSize(audience?.minSampleSize, minSampleSize),
+        minSampleSize: resolveMinSampleSize(audience?.minSampleSize),
         minConversionsPerVariation: shopDesign.minConversions,
         mdePercent: shopDesign.mdePercent,
         confidenceLevel: shopDesign.confidenceLevel,
@@ -1778,7 +1724,6 @@ export default function ClassicCreateWizard() {
       variations,
       audience?.trafficAllocation,
       audience?.minSampleSize,
-      minSampleSize,
       shopDesign.minConversions,
       shopDesign.mdePercent,
       shopDesign.confidenceLevel,
@@ -1793,7 +1738,7 @@ export default function ClassicCreateWizard() {
         stepIndex={step}
         experimentType={experimentType}
         onBackToList={backToList}
-        onBack={() => setStep(s => Math.max(0, s - 1))}
+        onBack={() => goToStep(step - 1)}
         onContinue={goNext}
         continueLabel={continueLabel}
         continueDisabled={
@@ -1819,7 +1764,7 @@ export default function ClassicCreateWizard() {
           const next = Number(index);
           if (!Number.isInteger(next) || next < 0 || next >= step) return;
           setMessage('');
-          setStep(next);
+          goToStep(next);
         }}
       >
         {message && messageType === 'success' && step !== 4 ? (
@@ -1833,8 +1778,6 @@ export default function ClassicCreateWizard() {
             onNameChange={setName}
             hypothesis={hypothesis}
             onHypothesisChange={setHypothesis}
-            onGenerateHypothesis={generateHypothesisWithAi}
-            hypothesisBusy={hypothesisBusy}
             experimentType={experimentType}
             onExperimentTypeChange={nextType => {
               const nextOffer = isOfferExperimentType(nextType);
@@ -1862,12 +1805,6 @@ export default function ClassicCreateWizard() {
                   return row;
                 })
               );
-            }}
-            minSampleSize={minSampleSize}
-            significanceEstimate={significanceEstimate}
-            onMinSampleSizeChange={value => {
-              setMinSampleSize(String(value));
-              setAudience(prev => ({ ...prev, minSampleSize: String(value) }));
             }}
           />
         ) : null}
@@ -1960,10 +1897,9 @@ export default function ClassicCreateWizard() {
             continueHint={productsStepGate.hint}
             shopDefaultsReady={shopGuardrailsReady}
             shopMaxChangePercent={shopGuardrails.max_price_change_percent}
-        onRaiseMaxPriceChange={raiseMaxPriceChange}
-        raisingMaxPriceChange={raisingMaxPriceChange}
-        aiBandAttempt={aiBandAttempt}
-        onOpenGuardrailSettings={openGuardrailSettings}
+            onRaiseMaxPriceChange={raiseMaxPriceChange}
+            raisingMaxPriceChange={raisingMaxPriceChange}
+            aiBandAttempt={aiBandAttempt}
             experimentType={experimentType}
             offerByArm={offerByArm}
             onOfferByArmChange={setOfferByArm}
@@ -1974,11 +1910,8 @@ export default function ClassicCreateWizard() {
           <AudienceSuccessStepPanel
             value={audience}
             onChange={handleAudienceChange}
-            onSuggestAi={suggestAudienceWithAi}
-            suggestBusy={audienceAiBusy}
             shopDomain={shopDomain}
             significanceEstimate={significanceEstimate}
-            shopMaxRevenueDropPercent={shopGuardrails.max_revenue_drop_percent}
             disabled={!shopGuardrailsReady}
           />
         ) : null}
@@ -2008,7 +1941,7 @@ export default function ClassicCreateWizard() {
             onFixSetup={openCheckoutSetup}
             onFixPriceSurfaces={openPriceSurfaceSettings}
             onRefreshCheckout={() => refreshCheckoutReadiness()}
-            onEditStep={setStep}
+            onEditStep={goToStep}
             plans={plans}
           />
         ) : null}

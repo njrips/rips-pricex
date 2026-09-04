@@ -7,7 +7,7 @@ export const meta: MetaFunction = () =>
   publicMeta({
     title: "Guides",
     description:
-      "How Pricify Settings apply to new experiments: confidence, sample size, and price safety.",
+      "How Priceify Settings apply to new experiments: confidence, sample size, and price safety.",
     path: "/docs/settings",
   });
 

@@ -238,7 +238,6 @@ export default function ProductsPricingStepPanel({
   onRaiseMaxPriceChange,
   raisingMaxPriceChange = false,
   aiBandAttempt = null,
-  onOpenGuardrailSettings,
   aiMinPct = '10',
   aiMaxPct = '20',
   onAiMinPctChange,
@@ -1452,15 +1451,6 @@ export default function ProductsPricingStepPanel({
                   {aiBandRaise.coversRequest
                     ? `Raise max price change to ${aiBandRaise.target}%`
                     : `Raise max price change to ${aiBandRaise.target}% (the highest allowed)`}
-                </Button>
-              ) : null}
-              {onOpenGuardrailSettings ? (
-                <Button
-                  variant="plain"
-                  onClick={onOpenGuardrailSettings}
-                  disabled={raisingMaxPriceChange}
-                >
-                  Change in Settings
                 </Button>
               ) : null}
             </p>

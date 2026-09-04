@@ -9,7 +9,6 @@ export const ROUTES = {
   appSmartPricingWelcome: (_domain) => '/app',
   appSmartPricingPlan: (_domain, planId) =>
     `/app/experiments/${encodeURIComponent(planId)}`,
-  appGoalsMetrics: (_domain) => '/app/settings',
   appTestDetail: (_domain, testId) => `/app/experiments/${encodeURIComponent(testId)}`,
   appSettings: (_domain) => '/app/settings',
   appSetup: (_domain) => '/app/setup',

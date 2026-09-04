@@ -28,7 +28,7 @@ describe('sampleSizePolicy', () => {
     expect(
       inferBaselineConversionRate({
         baseline_conversion_rate: 0.02,
-        baseline_source: 'units_per_view_proxy',
+        baseline_source: 'units_per_visitor_proxy',
       })
     ).toBeNull();
     expect(

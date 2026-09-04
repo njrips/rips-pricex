@@ -28,9 +28,9 @@ import {
   ticketHref,
   usingQueueFilters,
   writeStaffQueueFilters,
-} from "../components/public/pricify/staffQueue";
+} from "../components/public/priceify/staffQueue";
 
-export const meta: MetaFunction = () => [{ title: "Ticket queue · Staff · Pricify" }];
+export const meta: MetaFunction = () => [{ title: "Ticket queue · Staff · Priceify" }];
 
 const STATUS_CHIPS = [
   { value: DEFAULT_QUEUE_STATUS, label: "Needs attention" },

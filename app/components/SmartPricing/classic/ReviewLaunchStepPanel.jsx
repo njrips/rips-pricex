@@ -58,6 +58,7 @@ function segmentLabel(segment) {
 
 export default function ReviewLaunchStepPanel({
   name,
+  hypothesis = '',
   experimentType = 'price_test',
   experimentTypeLabel = 'Price test',
   variations = [],
@@ -259,6 +260,14 @@ export default function ReviewLaunchStepPanel({
             <div className={styles.kvLabel}>Type</div>
             <p className={styles.kvValue}>{experimentTypeLabel}</p>
           </div>
+          {/* Launched with the experiment, so leaving it off this page made a
+              hypothesis the merchant had written look like it had been lost. */}
+          {String(hypothesis || '').trim() ? (
+            <div className={styles.reviewRow}>
+              <div className={styles.kvLabel}>Hypothesis</div>
+              <p className={styles.kvValue}>{hypothesis}</p>
+            </div>
+          ) : null}
         </div>
       </section>
 
@@ -428,6 +437,7 @@ export default function ReviewLaunchStepPanel({
             </div>
             <p className={styles.kvValue}>
               {parseMinSampleSize(audience?.minSampleSize)} visitors
+              <span className={styles.help}> · from Stat settings</span>
             </p>
           </div>
           {significanceEstimate?.recommendedSampleSize ? (

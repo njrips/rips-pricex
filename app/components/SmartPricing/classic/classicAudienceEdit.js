@@ -3,11 +3,7 @@ import { stampClassicExperimentMetadata } from './classicExperimentHelpers';
 import { shopDesignFromGuardrails, stampStatisticalFields } from './sampleSizePolicy';
 import { estimateSignificanceDuration } from './estimateSignificanceDuration';
 import { isClassicExperimentEnded } from './classicExperimentListActions';
-import {
-  capRevenueGuardrailRows,
-  ensureRevenueGuardrailRows,
-  revenueGuardrailGoalConfig,
-} from './revenueGuardrail';
+import { ensureRevenueGuardrailRows, revenueGuardrailGoalConfig } from './revenueGuardrail';
 import {
   CLASSIC_DEVICE_OPTIONS,
   CLASSIC_SOURCE_OPTIONS,
@@ -110,13 +106,9 @@ export function validateClassicAudienceUi(audienceUi = {}) {
   if (!Number.isFinite(traffic) || traffic < 5 || traffic > 100) {
     return { ok: false, message: 'Traffic allocation must be between 5% and 100%.' };
   }
-  const sample = Number(audienceUi.minSampleSize);
-  if (!Number.isFinite(sample) || sample < MIN_SAMPLE_SIZE_FLOOR) {
-    return {
-      ok: false,
-      message: `Enter a minimum sample size of at least ${MIN_SAMPLE_SIZE_FLOOR} visitor per variation.`,
-    };
-  }
+  // The sample floor is no longer asked for here — it comes from Stat settings
+  // and is normalized by parseMinSampleSize on the way to the plan. Rejecting a
+  // missing value would block the step with nothing on screen to fix.
   const primary = String(
     audienceUi.primaryCustomGoal?.event_name || audienceUi.primaryMetric || ''
   ).trim();
@@ -227,7 +219,7 @@ export function applyAudienceUiToPlans(
     segment: normalizeAudienceSegment(audienceUi.segment),
     devices: normalizeAudienceDevicePills(audienceUi.devices),
     sources: normalizeAudienceSourcePills(audienceUi.sources),
-    guardrails: capRevenueGuardrailRows(audienceUi.guardrails, shopRevenueCap),
+    guardrails: ensureRevenueGuardrailRows(audienceUi.guardrails, shopRevenueCap),
   };
   const goal = buildClassicGoalPayload(normalizedUi);
   const countryLists = resolveCountryLists(normalizedUi);

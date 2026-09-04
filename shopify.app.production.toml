@@ -1,9 +1,9 @@
-# Pricify production — https://pricefy.echologyx.com
+# Priceify production — https://pricefy.echologyx.com
 # EchoLogyx Ltd Partner app (shopify.app.toml / client 1427bfea…).
 # Deploy: shopify app deploy --config shopify.app.production.toml --allow-updates
 # Do not enable automatically_update_urls_on_dev here (would clobber this host).
 
-name = "Pricify"
+name = "Priceify"
 client_id = "1427bfea71317ff9999f4ad85b59675b"
 application_url = "https://pricefy.echologyx.com"
 embedded = true

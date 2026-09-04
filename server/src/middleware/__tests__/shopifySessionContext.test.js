@@ -4,9 +4,14 @@ const crypto = require('node:crypto');
 
 const {
   requireShopifySession,
+  requireInternalService,
   BYPASS_ENV,
   RETRY_HEADER,
 } = require('../shopifySessionContext');
+const {
+  INTERNAL_HEADER,
+  internalServiceToken,
+} = require('../../services/internalServiceAuth');
 
 const SECRET = 'test-client-secret';
 const CLIENT_ID = 'test-client-id';
@@ -79,10 +84,10 @@ function makeRes() {
   };
 }
 
-function run(req) {
+function run(req, middleware = requireShopifySession) {
   const res = makeRes();
   let nextCalled = false;
-  requireShopifySession(req, res, () => {
+  middleware(req, res, () => {
     nextCalled = true;
   });
   return { res, nextCalled };
@@ -202,5 +207,66 @@ describe('requireShopifySession', () => {
 
     assert.equal(nextCalled, true);
     assert.equal(req.shopifyAccessToken, 'shpat_example');
+  });
+});
+
+describe('requireInternalService', () => {
+  it('accepts our own server, proving itself with the shared secret', () => {
+    const req = makeReq({
+      headers: {
+        'X-Shopify-Shop-Domain': SHOP,
+        [INTERNAL_HEADER]: internalServiceToken(SHOP),
+      },
+    });
+    const { res, nextCalled } = run(req, requireInternalService);
+
+    assert.equal(nextCalled, true);
+    assert.equal(res.statusCode, null);
+    assert.equal(req.shopDomain, SHOP);
+    assert.equal(req.internalServiceCall, true);
+  });
+
+  // The whole point of the guard: a merchant is signed in, so they hold a valid
+  // token, and could otherwise post themselves a paid entitlement.
+  it('rejects a merchant holding a valid session token', () => {
+    const req = makeReq({
+      token: makeToken(),
+      headers: { 'X-Shopify-Shop-Domain': SHOP },
+    });
+    const { res, nextCalled } = run(req, requireInternalService);
+
+    assert.equal(nextCalled, false);
+    assert.equal(res.statusCode, 401);
+  });
+
+  it('rejects a service token minted for a different shop', () => {
+    const req = makeReq({
+      headers: {
+        'X-Shopify-Shop-Domain': SHOP,
+        [INTERNAL_HEADER]: internalServiceToken('attacker.myshopify.com'),
+      },
+    });
+    const { res, nextCalled } = run(req, requireInternalService);
+
+    assert.equal(nextCalled, false);
+    assert.equal(res.statusCode, 401);
+  });
+
+  it('rejects a request with no proof at all', () => {
+    const req = makeReq({ headers: { 'X-Shopify-Shop-Domain': SHOP } });
+    const { res, nextCalled } = run(req, requireInternalService);
+
+    assert.equal(nextCalled, false);
+    assert.equal(res.statusCode, 401);
+  });
+
+  it('allows an unproven caller only when the bypass flag is set', () => {
+    process.env[BYPASS_ENV] = 'true';
+    const req = makeReq({ headers: { 'X-Shopify-Shop-Domain': SHOP } });
+    const { res, nextCalled } = run(req, requireInternalService);
+
+    assert.equal(nextCalled, true);
+    assert.equal(res.statusCode, null);
+    assert.equal(req.shopSessionVerified, false);
   });
 });

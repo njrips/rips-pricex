@@ -41,15 +41,16 @@ function resolveThreshold(test = {}, shopGuardrails = {}) {
     goalRails.max_revenue_drop_percent ??
     test.metadata?.guardrails?.max_revenue_drop_percent;
   const storedThreshold = Number(raw);
-  const shopThreshold = Number(
+  // The test's own threshold stands on its own. It used to be capped by the
+  // shop default, which is no longer a setting the merchant can see, so a test
+  // launched at 20% would have paused at 10% for reasons nothing on screen
+  // explained. The shop value is now only the fallback for a test without one.
+  if (Number.isFinite(storedThreshold) && storedThreshold > 0) {
+    return storedThreshold;
+  }
+  return Number(
     shopGuardrails.max_revenue_drop_percent ?? shopGuardrails.maxRevenueDropPercent
   );
-  if (Number.isFinite(storedThreshold) && storedThreshold > 0) {
-    return Number.isFinite(shopThreshold) && shopThreshold > 0
-      ? Math.min(storedThreshold, shopThreshold)
-      : storedThreshold;
-  }
-  return shopThreshold;
 }
 
 async function enforceRevenueDropGuardrail({ shopDomain, test, analytics } = {}) {

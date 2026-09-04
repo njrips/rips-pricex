@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { DEFAULT_APP_STORE_LISTING_URL } from '../../../utils/appStoreListingUrl';
-import PricifyIcon from './PricifyIcon';
-import PricifyLogo from './PricifyLogo';
+import PriceifyIcon from './PriceifyIcon';
+import PriceifyLogo from './PriceifyLogo';
 import PublicSectionLink from './PublicSectionLink';
 import {
   EXPERIMENT_INTRO,
@@ -90,7 +90,7 @@ function HeroSetupMock() {
 function HeroBadge() {
   return (
     <p className="px-badge">
-      <img className="px-badge-mark" src="/pricify/logo-mark.svg" alt="" width={22} height={22} />
+      <img className="px-badge-mark" src="/priceify/logo-mark.svg" alt="" width={22} height={22} />
       Free Shopify App
     </p>
   );
@@ -106,7 +106,7 @@ function MiniApp({ url, children, wide = false }) {
       </div>
       <div className="px-app">
         <aside className="px-app-side">
-          <PricifyLogo compact decorative />
+          <PriceifyLogo compact decorative />
           {HERO_SETUP_MOCK.nav.map((item, index) => (
             <p
               key={item}
@@ -369,7 +369,7 @@ export default function LandingPage({ storeUrl }) {
           <h2>Stop guessing what your products should cost.</h2>
           <p>
             Changing a product&apos;s price for every shopper is a decision based on assumptions.
-            Pricify lets you test different prices with real shoppers first, so you can make pricing
+            Priceify lets you test different prices with real shoppers first, so you can make pricing
             decisions based on actual results.
           </p>
         </div>
@@ -423,14 +423,14 @@ export default function LandingPage({ storeUrl }) {
 
       <section className="px-section" id="features">
         <div className="px-section-head">
-          <Eyebrow>WHY PRICIFY</Eyebrow>
+          <Eyebrow>WHY PRICEIFY</Eyebrow>
           <h2>Built to help you make smarter pricing decisions.</h2>
         </div>
         <div className="px-stack-cards">
           {FEATURE_CARDS.map((card) => (
             <article key={card.title} className="px-card px-card--row">
               <span className="px-icon-badge px-icon-badge--brand">
-                <PricifyIcon name={card.icon} />
+                <PriceifyIcon name={card.icon} />
               </span>
               <div>
                 <h3>{card.title}</h3>
@@ -467,7 +467,7 @@ export default function LandingPage({ storeUrl }) {
             <Eyebrow>RESULTS &amp; ANALYTICS</Eyebrow>
             <h2>Turn pricing experiments into actionable insights.</h2>
             <p>
-              Pricify helps you understand how each price variation performs so you can make your
+              Priceify helps you understand how each price variation performs so you can make your
               next pricing decision with more confidence.
             </p>
             <ul className="px-point-list">
@@ -484,7 +484,7 @@ export default function LandingPage({ storeUrl }) {
       <section className="px-section px-section--deep" id="use-cases">
         <div className="px-section-head">
           <Eyebrow>USE CASES</Eyebrow>
-          <h2>What could you test with Pricify?</h2>
+          <h2>What could you test with Priceify?</h2>
         </div>
         <div className="px-cards px-cards--2x2">
           {USE_CASES.map((card) => (
@@ -507,7 +507,7 @@ export default function LandingPage({ storeUrl }) {
       <section className="px-cta-wrap" id="cta">
         <div className="px-cta">
           <h2>Ready to test your prices?</h2>
-          <p>Install Pricify and start running pricing experiments on your Shopify store for free.</p>
+          <p>Install Priceify and start running pricing experiments on your Shopify store for free.</p>
           <InstallButton storeUrl={storeUrl} className="px-btn px-btn--brand px-btn--lg">
             Install free on Shopify
           </InstallButton>

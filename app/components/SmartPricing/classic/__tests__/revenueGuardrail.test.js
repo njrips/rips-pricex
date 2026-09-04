@@ -1,7 +1,6 @@
 import { describe, it } from 'vitest';
 import assert from 'node:assert/strict';
 import {
-  capRevenueGuardrailRows,
   createRevenueGuardrailRow,
   ensureRevenueGuardrailRows,
   formatRevenueDropThreshold,
@@ -44,16 +43,23 @@ describe('ensureRevenueGuardrailRows', () => {
     assert.deepEqual(config, { auto_stop: true, max_revenue_drop_percent: 8 });
   });
 
-  it('never stores an experiment threshold looser than the shop cap', () => {
-    const config = revenueGuardrailGoalConfig(
-      [{ id: 'revenue', threshold: '-20%' }],
-      10
-    );
-    assert.deepEqual(config, { auto_stop: true, max_revenue_drop_percent: 10 });
-    assert.equal(
-      capRevenueGuardrailRows([{ id: 'revenue', threshold: '-20%' }], 10)[0].threshold,
-      '-10%'
-    );
+  // The shop value used to cap this, and the tighter of the two won. It is no
+  // longer a setting a merchant can see, so capping by it would hold every test
+  // to a number they could not find, let alone change.
+  it('keeps an experiment threshold looser than the shop default', () => {
+    const config = revenueGuardrailGoalConfig([{ id: 'revenue', threshold: '-20%' }], 10);
+    assert.deepEqual(config, { auto_stop: true, max_revenue_drop_percent: 20 });
+  });
+
+  it('still holds the experiment threshold inside the allowed range', () => {
+    assert.deepEqual(revenueGuardrailGoalConfig([{ id: 'revenue', threshold: '-80%' }], 10), {
+      auto_stop: true,
+      max_revenue_drop_percent: MAX_REVENUE_DROP_PERCENT,
+    });
+    assert.deepEqual(revenueGuardrailGoalConfig([{ id: 'revenue', threshold: '-1%' }], 10), {
+      auto_stop: true,
+      max_revenue_drop_percent: MIN_REVENUE_DROP_PERCENT,
+    });
   });
 });
 

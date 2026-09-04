@@ -15,6 +15,7 @@ const {
   isStorefrontEmbeddedTestType,
   SCRIPT_VERSION,
 } = require('../utils/storefrontScriptRuntime');
+const { withAssignmentProof, signAssignedVariants } = require('../utils/assignmentProof');
 const { listGoalMetricDefinitions } = require('../models/goalMetricDefinition');
 const { getShopPriceSurfaceMappings } = require('../services/priceSurfaceRegistryService');
 const abTestEngine = require('../services/abTestEngine');
@@ -151,7 +152,11 @@ router.get('/variants', async (req, res) => {
       context,
       jsTargetingOverridesFromQuery(req.query)
     );
-    res.json({ success: true, variants: result, user_id: userId });
+    res.json({
+      success: true,
+      variants: signAssignedVariants(result, { userId, shopDomain: shop }),
+      user_id: userId,
+    });
   } catch (err) {
     logger.error('variants failed', { message: err.message });
     res.status(500).json({ error: err.message });
@@ -177,7 +182,13 @@ router.get('/variant', async (req, res) => {
       context,
       jsTargetingOverridesFromQuery(req.query)
     );
-    res.json({ success: true, variant: result?.[testId] || null, variants: result, user_id: userId });
+    const signed = signAssignedVariants(result, { userId, shopDomain: shop });
+    res.json({
+      success: true,
+      variant: signed?.[testId] || null,
+      variants: signed,
+      user_id: userId,
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -186,7 +197,6 @@ router.get('/variant', async (req, res) => {
 router.get(['/preview', '/preview-storefront-test'], async (req, res) => {
   try {
     const { findVariantForPreviewQuery } = require('../utils/previewVariantMatch');
-    const { signPriceAssignment } = require('../utils/priceAssignmentSignature');
     const shop = resolveShop(req);
     const testId = String(req.query.test_id || '').trim();
     if (!shop || !testId) {
@@ -224,28 +234,9 @@ router.get(['/preview', '/preview-storefront-test'], async (req, res) => {
       });
     }
 
-    let variantOut = forced;
-    if (forced) {
-      const forcedId =
-        forced.id !== undefined && forced.id !== null ? String(forced.id).trim() : '';
-      const issuedAtMs = Date.now();
-      const hmac = forcedId
-        ? signPriceAssignment({
-            testId,
-            variantId: forcedId,
-            userId,
-            shopDomain: shop,
-            issuedAtMs,
-          })
-        : null;
-      // Cart Transform only checks presence of proof attrs; HMAC is preferred when secret exists.
-      variantOut = {
-        ...forced,
-        assignment_sig: hmac || `preview:${testId}:${forcedId || 'arm'}`,
-        assignment_ts: String(issuedAtMs),
-        assignment_user: userId,
-      };
-    }
+    const variantOut = forced
+      ? withAssignmentProof(forced, { testId, userId, shopDomain: shop })
+      : forced;
 
     res.json({
       success: true,
@@ -293,19 +284,39 @@ router.post('/catalog-product-view', async (req, res) => {
     }
     const day = new Date().toISOString().slice(0, 10);
     const sessionKey = String(req.body?.session_key || req.body?.user_id || 'anon');
-    await query(
-      `INSERT INTO catalog_product_view_daily (shop_domain, product_id, day, views, sessions)
-       VALUES ($1, $2, $3::date, 1, 1)
-       ON CONFLICT (shop_domain, product_id, day)
-       DO UPDATE SET views = catalog_product_view_daily.views + 1`,
-      [shop, productId, day]
-    ).catch(() => {});
-    await query(
+    // The session row goes first so the day's rollup knows whether this view
+    // came from a visitor it has already counted. The rollup used to set
+    // sessions to 1 on insert and never touch it again, leaving a column that
+    // read "1 visitor" no matter how many people saw the product.
+    const session = await query(
       `INSERT INTO catalog_product_view_sessions (shop_domain, product_id, session_key, day)
        VALUES ($1, $2, $3, $4::date)
-       ON CONFLICT DO NOTHING`,
+       ON CONFLICT DO NOTHING
+       RETURNING session_key`,
       [shop, productId, sessionKey, day]
-    ).catch(() => {});
+    ).catch(err => {
+      // A dropped view costs an estimate a little accuracy, but silence here
+      // once hid the whole measured-traffic feature being switched off.
+      logger.warn('catalog product view session insert failed', {
+        shop,
+        message: err?.message,
+      });
+      return null;
+    });
+    const newVisitor = (session?.rows?.length || 0) > 0 ? 1 : 0;
+    await query(
+      `INSERT INTO catalog_product_view_daily (shop_domain, product_id, day, views, sessions)
+       VALUES ($1, $2, $3::date, 1, $4)
+       ON CONFLICT (shop_domain, product_id, day)
+       DO UPDATE SET views = catalog_product_view_daily.views + 1,
+                     sessions = catalog_product_view_daily.sessions + $4`,
+      [shop, productId, day, newVisitor]
+    ).catch(err => {
+      logger.warn('catalog product view rollup insert failed', {
+        shop,
+        message: err?.message,
+      });
+    });
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -323,9 +334,21 @@ router.post(['/', '/event', '/events'], async (req, res) => {
     if (!shop || !testId || !variantId) {
       return res.status(400).json({ error: 'shop, test_id, variant_id required' });
     }
+    const metadata = body.metadata && typeof body.metadata === 'object' ? body.metadata : {};
+    const orderId = String(metadata.order_id ?? '').trim();
+    // The storefront posts one conversion per painted price node on the order
+    // page, and again on every reload. Analytics sums event_value, so each
+    // repeat added the whole order total to revenue while conversions, counted
+    // per distinct visitor, stayed put — quietly inflating revenue per visitor.
+    // Idempotency is keyed on the order, which is the only thing that tells two
+    // posts apart from a genuine second purchase. The conflict target is left
+    // unnamed so this still runs on a database that has not taken migration 009
+    // yet, where naming the index would raise 42P10 and drop the event instead.
+    const dedupeConversion = String(eventType) === 'conversion' && orderId !== '';
     await query(
       `INSERT INTO events (test_id, variant_id, user_id, shop_domain, event_type, event_name, event_value, metadata)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
+       ${dedupeConversion ? 'ON CONFLICT DO NOTHING' : ''}`,
       [
         testId,
         String(variantId),
@@ -334,7 +357,7 @@ router.post(['/', '/event', '/events'], async (req, res) => {
         String(eventType),
         body.event_name || null,
         Number(body.event_value || body.value || 0) || 0,
-        JSON.stringify(body.metadata || {}),
+        JSON.stringify(metadata),
       ]
     );
     res.json({ ok: true });

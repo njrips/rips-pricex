@@ -1,23 +1,7 @@
-import { Button } from '@shopify/polaris';
 import { formatSplitCountryAudienceLabel, resolveCountryLists } from '../countrySelection';
 import { formatAudienceFactValue } from '../classicExperimentDetailsHelpers';
+import DetailFactCard from './DetailFactCard';
 import styles from '../SmartPricingClassic.module.css';
-
-function FactCard({ label, value, action, actionLabel, onAction }) {
-  return (
-    <div className={`${styles.statCard} ${styles.detailFactCard}`}>
-      <div className={styles.detailFactHead}>
-        <div className={styles.statLabel}>{label}</div>
-        {action ? (
-          <Button variant="plain" accessibilityLabel={actionLabel || action} onClick={onAction}>
-            {action}
-          </Button>
-        ) : null}
-      </div>
-      <div className={styles.statValue}>{value}</div>
-    </div>
-  );
-}
 
 export default function ClassicAudienceTab({ audience, onEdit }) {
   if (!audience) {
@@ -40,27 +24,27 @@ export default function ClassicAudienceTab({ audience, onEdit }) {
 
   return (
     <div className={styles.detailCardGrid}>
-      <FactCard
+      <DetailFactCard
         label="Segment"
         value={audience.segmentLabel || 'All visitors'}
         action={onEdit ? 'Edit targeting' : null}
         onAction={onEdit}
       />
-      <FactCard
+      <DetailFactCard
         label="Traffic allocation"
         value={Number.isFinite(traffic) ? `${traffic}%` : '—'}
         action={onEdit ? 'Adjust' : null}
         actionLabel="Adjust traffic allocation"
         onAction={onEdit}
       />
-      <FactCard
+      <DetailFactCard
         label="Devices"
         value={formatAudienceFactValue(audience.devices, deviceFallback)}
         action={onEdit ? 'Edit' : null}
         actionLabel="Edit devices"
         onAction={onEdit}
       />
-      <FactCard
+      <DetailFactCard
         label="Countries"
         value={(() => {
           const lists = resolveCountryLists(audience);

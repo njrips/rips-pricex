@@ -1,7 +1,8 @@
 import { apiDelete } from '../../../services';
 import { readInboxPlans, writeInboxPlans } from '../smartPricingConstants';
 import { deletePersistedInboxPlan, persistInboxPlansNow } from '../smartPricingInboxPersistence';
-import { collectExperimentTestIds } from './classicExperimentListActions';
+import { collectExperimentTestIds, getClassicExperimentResumeId } from './classicExperimentListActions';
+import { clearClassicWizardDraft } from './classicExperimentHelpers';
 
 export function getClassicExperimentDeleteTargets(experiment) {
   const plans = Array.isArray(experiment?.plans) ? experiment.plans : [];
@@ -20,7 +21,7 @@ export function buildClassicExperimentDeleteConfirmMessage(experiment) {
   }
   if (testIds.length) {
     parts.push(
-      `Also deletes ${testIds.length} linked Pricify test${testIds.length === 1 ? '' : 's'}.`
+      `Also deletes ${testIds.length} linked Priceify test${testIds.length === 1 ? '' : 's'}.`
     );
   }
   parts.push('This cannot be undone.');
@@ -54,6 +55,9 @@ export async function deleteClassicExperimentSynchronized(
   const current = readInboxPlans(shopDomain) || [];
   const remaining = current.filter(plan => !planIdSet.has(plan.id));
   writeInboxPlans(shopDomain, remaining, { persist: false });
+  // The wizard keeps its own copy in a separate store. Left behind, the
+  // experiment just deleted would come back as unfinished work on the list.
+  clearClassicWizardDraft(shopDomain, getClassicExperimentResumeId(experiment));
 
   try {
     await persistInboxPlansNow(shopDomain, remaining);

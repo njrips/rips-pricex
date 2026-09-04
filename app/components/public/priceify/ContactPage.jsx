@@ -7,7 +7,7 @@ export default function ContactPage({ storeUrl, supportEmail = '' }) {
   return (
     <article className="docCard">
       <Link to={PUBLIC_ROUTES.home} className="backLink">
-        Back to Pricify
+        Back to Priceify
       </Link>
       <p className="eyebrow">COMPANY</p>
       <h1 className="title">Contact</h1>

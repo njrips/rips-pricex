@@ -16,7 +16,7 @@ import {
   resolveAppStoreListingUrlFromEnv,
 } from "../utils/appStoreListingUrl";
 import { isShopifySessionBounce } from "../utils/shopifyEmbeddedSearch";
-import PricifyShell from "../components/public/pricify/PricifyShell";
+import PriceifyShell from "../components/public/priceify/PriceifyShell";
 import { publicErrorTitle } from "../components/public/publicMeta";
 
 export const loader = async () => {
@@ -36,12 +36,12 @@ export default function PublicLayout() {
   const { pathname } = useLocation();
 
   return (
-    <PricifyShell
+    <PriceifyShell
       storeUrl={data.storeUrl}
       fullBleed={pathname === "/" || pathname.startsWith("/docs")}
     >
       <Outlet context={data} />
-    </PricifyShell>
+    </PriceifyShell>
   );
 }
 
@@ -75,16 +75,16 @@ export function ErrorBoundary() {
   // hides whatever error the boundary was rendered to report.
   const storeUrl = usePublicStoreUrl();
   if (isShopifySessionBounce(error)) {
-    // 401/410 or thrown App Bridge HTML must reach the iframe, not Pricify chrome.
+    // 401/410 or thrown App Bridge HTML must reach the iframe, not Priceify chrome.
     return boundary.error(error);
   }
   const notFound = isRouteErrorResponse(error) && error.status === 404;
 
   return (
-    <PricifyShell storeUrl={storeUrl}>
+    <PriceifyShell storeUrl={storeUrl}>
       <PublicErrorTitle notFound={notFound} />
       <section className="hero">
-        <p className="eyebrow">PRICIFY</p>
+        <p className="eyebrow">PRICEIFY</p>
         <h1 className="title">{notFound ? "Page not found" : "Something went wrong"}</h1>
         <p className="subtitle">
           {notFound
@@ -92,9 +92,9 @@ export function ErrorBoundary() {
             : "The public site hit an error. Try the product page or install from the App Store."}
         </p>
         <Link to="/" className="px-btn px-btn--brand">
-          Back to Pricify
+          Back to Priceify
         </Link>
       </section>
-    </PricifyShell>
+    </PriceifyShell>
   );
 }

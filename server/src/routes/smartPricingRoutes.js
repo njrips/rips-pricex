@@ -80,14 +80,11 @@ const {
   buildSmartPricingTestAnalytics,
 } = require('../services/smartPricing/smartPricingTestAnalyticsService');
 const {
-  suggestAudienceForPlans,
   suggestGoalsForPlans,
   buildBatchPreviewLaunch,
 } = require('../services/smartPricing/smartPricingAudienceGoalService');
 const {
-  suggestHypothesis,
   suggestPrices,
-  suggestAudienceAdvanced,
 } = require('../services/smartPricing/smartPricingAiSuggestService');
 const { hasOpenAiKey } = require('../services/smartPricing/smartPricingAiProvider');
 
@@ -150,12 +147,15 @@ router.post(
 router.get(
   '/status',
   asyncHandler(async (req, res) => {
-    let entitled = process.env.RIPSPRICEX_DEV_ENTITLE_ALL === 'true';
+    const {
+      devEntitleAllEnabled,
+      getShopEntitlement,
+    } = require('../services/billing/entitlementService');
+    // Only the fallback for when the lookup below throws; production ignores
+    // the flag, so a failed lookup there reports unentitled rather than free.
+    let entitled = devEntitleAllEnabled();
     let upgradeUrl = null;
     try {
-      const {
-        getShopEntitlement,
-      } = require('../services/billing/entitlementService');
       const entitlement = await getShopEntitlement(req.shopDomain);
       entitled = Boolean(entitlement?.entitled);
       upgradeUrl = entitlement?.upgradeUrl || null;
@@ -680,24 +680,6 @@ router.post(
 );
 
 router.post(
-  '/plans/suggest-hypothesis',
-  asyncHandler(async (req, res) => {
-    const body = req.body && typeof req.body === 'object' ? req.body : {};
-    const result = await suggestHypothesis({
-      name: body.name,
-      experimentType: body.experiment_type || body.experimentType || 'price_test',
-      hypothesisHint: body.hint || body.hypothesis_hint || '',
-      objective: body.objective || 'profit_per_visitor',
-      variants: Array.isArray(body.variants) ? body.variants : [],
-    });
-    return sendSuccess(res, HTTP_STATUS.OK, {
-      ...result,
-      ai_available: hasOpenAiKey(),
-    });
-  })
-);
-
-router.post(
   '/plans/suggest-prices',
   asyncHandler(async (req, res) => {
     const body = req.body && typeof req.body === 'object' ? req.body : {};
@@ -723,48 +705,11 @@ router.post(
       unit: body.unit === 'amount' ? 'amount' : 'percent',
       minAmount: body.min_amount ?? body.minAmount ?? null,
       maxAmount: body.max_amount ?? body.maxAmount ?? null,
-      objective: body.objective || guardrails.objective || 'profit_per_visitor',
+      objective: body.objective || guardrails.objective || 'revenue_per_visitor',
     });
     return sendSuccess(res, HTTP_STATUS.OK, {
       ...result,
       ai_available: hasOpenAiKey(),
-    });
-  })
-);
-
-router.post(
-  '/plans/suggest-audience',
-  asyncHandler(async (req, res) => {
-    const body = req.body && typeof req.body === 'object' ? req.body : {};
-    const plans = Array.isArray(body.plans) ? body.plans : [];
-    const guardrails = await getShopSmartPricingGuardrails(req.shopDomain).catch(() => ({}));
-    const useAi = body.use_ai === true || body.useAi === true || body.mode === 'ai';
-
-    if (useAi) {
-      const advanced = await suggestAudienceAdvanced({
-        plans,
-        guardrails,
-        catalogHints: body.catalog_hints || body.catalogHints || {},
-      });
-      const legacy = suggestAudienceForPlans(plans, guardrails);
-      return sendSuccess(res, HTTP_STATUS.OK, {
-        audience: {
-          ...advanced.audience,
-          segments: advanced.audience.segments || legacy.segments,
-          inherit_from_shop_defaults: true,
-        },
-        source: advanced.source,
-        ai_available: hasOpenAiKey(),
-        guardrails_defaults: true,
-      });
-    }
-
-    const audience = suggestAudienceForPlans(plans, guardrails);
-    return sendSuccess(res, HTTP_STATUS.OK, {
-      audience,
-      source: 'deterministic',
-      ai_available: hasOpenAiKey(),
-      guardrails_defaults: true,
     });
   })
 );
@@ -970,11 +915,21 @@ router.post(
             stopIfRunning: true,
           });
           await finishAppliedProduct(req.shopDomain, testId, result);
+          // A batch row that says only "applied" hides a product whose catalog
+          // was written for some variants and refused for others — the same
+          // partial state the single-product apply already reports.
+          const errorCount = Number(result.publish?.summary?.error_count) || 0;
           results.push({
             test_id: testId,
             applied: true,
             action: 'apply_price',
             updated_count: result.publish?.summary?.updated_count ?? 0,
+            error_count: errorCount,
+            ...(errorCount > 0
+              ? {
+                  error: `${errorCount} Shopify price${errorCount === 1 ? '' : 's'} could not be updated and still show the old price.`,
+                }
+              : {}),
             winner_variant_id: result.publish?.winner_variant_id || null,
           });
         } else if (decision?.can_finish) {
@@ -1083,11 +1038,21 @@ router.post(
         force: body.force === true,
         dryRun: body.dry_run === true || body.dryRun === true,
       });
+      // A revert that only half-lands leaves the rest of the catalog at the
+      // winning price. Saying "restored 3 prices" and stopping there sends the
+      // merchant away believing the test was undone.
+      const revertErrors = Array.isArray(result.errors) ? result.errors.length : 0;
+      const restored = `Restored ${result.updated_count} Shopify price${result.updated_count === 1 ? '' : 's'}`;
+      const truncatedNote = result.baseline_truncated
+        ? ' The apply was larger than the snapshot could hold, so variants beyond it keep the applied price and need fixing in Shopify.'
+        : '';
       const message = result.already_reverted
         ? 'Prices already match the pre-apply baseline.'
         : result.dry_run
           ? 'Revert preview ready'
-          : `Restored ${result.updated_count} Shopify price${result.updated_count === 1 ? '' : 's'}.`;
+          : revertErrors > 0
+            ? `${restored}, but ${revertErrors} could not be restored and still show the applied price. Check the errors below and retry those variants.${truncatedNote}`
+            : `${restored}.${truncatedNote}`;
       return sendSuccess(res, HTTP_STATUS.OK, result, message);
     } catch (err) {
       if (err.code === 'PRICE_DRIFT') {

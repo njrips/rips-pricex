@@ -48,9 +48,7 @@ vi.mock('../../../../services/smartPricingApi', () => ({
   getSmartPricingGuardrails: vi.fn(async () => ({ guardrails: {} })),
   saveSmartPricingGuardrails: vi.fn(async () => ({})),
   getSmartPricingOpportunities: vi.fn(async () => ({ opportunities: [] })),
-  suggestSmartPricingAudience: vi.fn(async () => ({})),
   suggestSmartPricingGoals: vi.fn(async () => ({})),
-  suggestSmartPricingHypothesis: vi.fn(async () => ({})),
   suggestSmartPricingPrices: vi.fn(async () => ({})),
   batchPreviewSmartPricingLaunch: vi.fn(async () => ({})),
 }));

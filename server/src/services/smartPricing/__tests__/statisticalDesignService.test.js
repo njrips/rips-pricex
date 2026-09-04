@@ -61,7 +61,10 @@ describe('statisticalDesignService', () => {
     });
     assert.equal(design.primary_metric, 'conversion_rate');
     assert.equal(design.planning_method, 'fixed_horizon_two_proportion');
-    assert.equal(design.decision_metric, 'profit_per_visitor');
+    // No decisionMetric was passed, so this is the default. It is revenue per
+    // visitor: profit is only revenue scaled by an assumed cost percentage, so
+    // it cannot be the metric a design falls back to.
+    assert.equal(design.decision_metric, 'revenue_per_visitor');
     assert.equal(design.analysis_method, 'sequential');
     assert.equal(design.total_visitors_required, design.visitors_per_variant_required * 3);
     assert.ok(design.estimated_duration_days > 0);

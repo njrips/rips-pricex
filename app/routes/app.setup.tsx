@@ -195,7 +195,7 @@ export default function SetupPage() {
           </div>
           <p className={styles.adminRowBody}>
             Required for PDP price paint. Apps cannot turn the embed on for you — open the theme
-            editor, enable Pricify, and Save. Status updates after we re-check (when reported).
+            editor, enable Priceify, and Save. Status updates after we re-check (when reported).
             {themeName ? (
               <>
                 {' '}

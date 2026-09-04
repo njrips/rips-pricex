@@ -57,7 +57,7 @@ describe('staffLoginOtp', () => {
 
   it('builds a code email without extra copy', () => {
     const mail = staffLoginCodeEmail({ code: '123456', expiresMinutes: 1 });
-    assert.equal(mail.subject, 'Your Pricify staff sign-in code');
+    assert.equal(mail.subject, 'Your Priceify staff sign-in code');
     assert.match(mail.text, /123456/);
     assert.match(mail.text, /1 minute/);
     assert.match(mail.html, /123456/);

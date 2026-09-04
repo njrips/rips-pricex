@@ -1,5 +1,8 @@
 const express = require('express');
-const { requireShopSessionOrInternal } = require('../middleware/shopifySessionContext');
+const {
+  requireShopSessionOrInternal,
+  requireInternalService,
+} = require('../middleware/shopifySessionContext');
 const {
   getShopEntitlement,
   setEntitlement,
@@ -23,9 +26,12 @@ router.get('/billing/status', requireShopSessionOrInternal, async (req, res) => 
 /**
  * Sync Admin-session entitlement into Express shops table.
  * Used by the embedded app loader after Shopify App Pricing / billing.check().
- * Unlike /billing/dev-entitle, this is allowed in production (shop-authenticated only).
+ *
+ * Internal callers only. The body asserts the shop is paid, so it is trusted
+ * exactly as far as the caller is: our loader, which reads that state from
+ * Shopify. A merchant's own session token says nothing about their plan.
  */
-router.post('/billing/sync-entitlement', requireShopSessionOrInternal, async (req, res) => {
+router.post('/billing/sync-entitlement', requireInternalService, async (req, res) => {
   const body = req.body || {};
   const entitled = body.entitled === true || ['ACTIVE', 'active', 'trial', 'TRIAL', 'paid', 'PAID'].includes(String(body.status || ''));
   const planHandle = body.planHandle || body.plan_handle || null;

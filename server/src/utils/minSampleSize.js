@@ -105,6 +105,16 @@ function applyMinSampleSizeGate(significance, variants = [], minSampleSize, minC
     controlWin: false,
     winner: null,
     winnerVariantId: null,
+    // Withhold the reading itself, not just the verdict. Clearing `significant`
+    // alone still published a confidence figure computed from the same sample
+    // this floor exists to reject, so a test could show "97%" beside "waiting
+    // for 5,000 visitors per variation" — a number that reads as decisive while
+    // being, per the note at the top of this file, wrong rather than imprecise.
+    // Settings and the merchant guide both promise nothing is calculated until
+    // the floors are met; this is what makes that true.
+    confidence: null,
+    pValue: null,
+    evidenceWithheld: true,
     // Name the floor that is actually binding. "Waiting for more data" sends a
     // merchant looking for traffic when the real shortage is orders.
     message: visitorsReady

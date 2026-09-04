@@ -4226,6 +4226,29 @@ button.stepItem {
   line-height: 20px;
 }
 
+.calloutRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 8px;
+}
+
+.calloutRowText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.calloutRowActions {
+  display: inline-flex;
+  gap: 12px;
+  align-items: center;
+  flex-shrink: 0;
+}
+
 .priceTabs {
   display: flex;
   flex-wrap: wrap;
@@ -5819,6 +5842,87 @@ button.stepItem {
 
 .detailFactCard .detailChipRow {
   margin-top: 0;
+}
+
+/* Beats the `margin: 0` the rule above puts on every .help in a fact card, so a
+   caveat sits under its value instead of against it. */
+.detailFactCard .detailFactNote {
+  margin-top: 6px;
+}
+
+/* Experiment Settings tab.
+
+   Definition rows, not a full-width split. `selectionBar` pushes the value to
+   the far edge of the card, which left a wide empty gap between a short label
+   and a short value and made the eye travel to pair them — the complaint that
+   prompted this layout. Here the value sits in a column immediately beside its
+   label, so a stack of rows reads as one list. */
+.settingsRows {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.settingsRow {
+  display: grid;
+  grid-template-columns: minmax(0, 184px) minmax(0, 1fr);
+  gap: 2px 16px;
+  align-items: baseline;
+}
+
+.settingsRowLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--classic-fs-label);
+  font-weight: var(--classic-fw-regular);
+  line-height: 18px;
+  color: var(--classic-muted);
+}
+
+.settingsRowValue {
+  font-size: var(--classic-fs-label);
+  font-weight: var(--classic-fw-medium);
+  line-height: 18px;
+  color: var(--classic-ink);
+}
+
+/* Sits under the value, aligned to it, so a caveat reads as part of the answer
+   rather than as a new row. */
+.settingsRowNote {
+  grid-column: 2;
+  margin: 2px 0 0;
+}
+
+@media (max-width: 700px) {
+  .settingsRow {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .settingsRowNote {
+    grid-column: 1;
+  }
+}
+
+/* Points at the tab that owns a setting shown here read-only. */
+.settingsFootnote {
+  margin-top: 14px;
+}
+
+/* Secondary settings, folded away by default. Reuses the dashed `advanced`
+   disclosure from the create wizard so the two read as the same control. */
+.settingsDisclosure {
+  margin-top: 4px;
+}
+
+.settingsDisclosureGroup + .settingsDisclosureGroup {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--classic-line);
+}
+
+.settingsDisclosureGroup .settingsRows {
+  margin-top: 10px;
 }
 
 /* Rollout readiness queue: one row per product in a multi-product experiment. */

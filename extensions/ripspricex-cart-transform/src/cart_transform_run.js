@@ -4,6 +4,19 @@
 const NO_CHANGES = { operations: [] };
 const DIRECT_OVERRIDE_METHOD = 'direct_price_override';
 
+// Every input this function can see is a cart line attribute, and a shopper can
+// set those freely when adding to cart. A Shopify Function has no network and no
+// secret, so it cannot tell a real assignment from a forged one — the signature
+// attributes are checked for presence only, which proves nothing.
+//
+// So the target price is treated as untrusted and clamped to a band around the
+// price Shopify already charges for the line. A price test may not move a price
+// by more than 30% (the shop guardrail clamps to 3–30), so a legitimate target
+// never comes close to these limits, while a forged `_ripx_target_unit=0.01`
+// lands outside them and is ignored.
+const MIN_TARGET_RATIO = 0.5;
+const MAX_TARGET_RATIO = 2;
+
 function normalizePriceMethod(value) {
   return String(value || '')
     .trim()
@@ -47,31 +60,7 @@ function hasAssignmentProof(line) {
   );
 }
 
-function getForcedCartTransformTestAmount(input) {
-  return parseDecimal(input?.cart?.ripxCartTransformTestAmount?.value);
-}
-
-function getForcedCartTransformTestVariantId(input) {
-  const raw = String(input?.cart?.ripxCartTransformTestVariantId?.value || '').trim();
-  return raw || '';
-}
-
-function normalizeVariantId(value) {
-  const raw = String(value || '').trim();
-  if (!raw) {
-    return '';
-  }
-  const gidMatch = raw.match(/\/(\d+)$/);
-  if (gidMatch && gidMatch[1]) {
-    return gidMatch[1];
-  }
-  return raw.replace(/\D+/g, '') || raw;
-}
-
-function resolveLineTargetUnit(line, forcedTestAmount) {
-  if (forcedTestAmount !== null && forcedTestAmount >= 0) {
-    return forcedTestAmount;
-  }
+function resolveLineTargetUnit(line) {
   return parseDecimal(getLineAttributeValue(line, ['ripxTargetUnit'], ['_ripx_target_unit']));
 }
 
@@ -112,11 +101,9 @@ function getLineAttributeValue(line, aliasNames = [], keys = []) {
 
 /**
  * @param {CartTransformRun['cart']['lines'][number]} line
- * @param {number | null} forcedTestAmount
- * @param {string} forcedTestVariantId
  * @returns {boolean}
  */
-function shouldApplyDirectOverride(line, forcedTestAmount, forcedTestVariantId) {
+function shouldApplyDirectOverride(line) {
   if (!line || !line.id) {
     return false;
   }
@@ -127,39 +114,36 @@ function shouldApplyDirectOverride(line, forcedTestAmount, forcedTestVariantId) 
   if (line.merchandise?.__typename !== 'ProductVariant') {
     return false;
   }
-  const isForcedDocTestMode = forcedTestAmount !== null && forcedTestAmount >= 0;
-  if (isForcedDocTestMode) {
-    if (forcedTestVariantId) {
-      const lineVariantId = normalizeVariantId(line?.merchandise?.id);
-      if (!lineVariantId || lineVariantId !== normalizeVariantId(forcedTestVariantId)) {
-        return false;
-      }
-    }
-  } else {
-    // Normal production path: only RipX-marked lines using direct override and assignment proof are
-    // eligible. Cart Transform has no network resolver, so fail closed when the storefront did not
-    // stamp the signed assignment fields.
-    const ripxMarker = getLineAttributeValue(
-      line,
-      ['ripxTest', 'ripxVariant', 'ripxShop'],
-      ['_ripx_price_test', '_ripx_variant', '_ripx_shop']
-    );
-    if (!ripxMarker) {
-      return false;
-    }
-    if (!hasAssignmentProof(line)) {
-      return false;
-    }
-    if (!isDirectOverrideMethod(getConfiguredPriceMethod(line))) {
-      return false;
-    }
-  }
-  const targetUnit = resolveLineTargetUnit(line, forcedTestAmount);
-  const currentUnit = parseDecimal(line.cost?.amountPerQuantity?.amount);
-  if (targetUnit === null || targetUnit < 0) {
+  // Only RipX-marked lines using direct override and assignment proof are
+  // eligible. Cart Transform has no network resolver, so fail closed when the
+  // storefront did not stamp the assignment fields.
+  const ripxMarker = getLineAttributeValue(
+    line,
+    ['ripxTest', 'ripxVariant', 'ripxShop'],
+    ['_ripx_price_test', '_ripx_variant', '_ripx_shop']
+  );
+  if (!ripxMarker) {
     return false;
   }
-  if (currentUnit === null) {
+  if (!hasAssignmentProof(line)) {
+    return false;
+  }
+  if (!isDirectOverrideMethod(getConfiguredPriceMethod(line))) {
+    return false;
+  }
+  const targetUnit = resolveLineTargetUnit(line);
+  const currentUnit = parseDecimal(line.cost?.amountPerQuantity?.amount);
+  // A zero or negative target would hand the item over for nothing.
+  if (targetUnit === null || targetUnit <= 0) {
+    return false;
+  }
+  if (currentUnit === null || currentUnit <= 0) {
+    return false;
+  }
+  if (
+    targetUnit < currentUnit * MIN_TARGET_RATIO ||
+    targetUnit > currentUnit * MAX_TARGET_RATIO
+  ) {
     return false;
   }
   if (amountsMatch(targetUnit, currentUnit)) {
@@ -170,15 +154,13 @@ function shouldApplyDirectOverride(line, forcedTestAmount, forcedTestVariantId) 
 
 /**
  * @param {CartTransformRun['cart']['lines'][number]} line
- * @param {number | null} forcedTestAmount
- * @param {string} forcedTestVariantId
  * @returns {Operation['lineUpdate'] | null}
  */
-function buildLineUpdateOperation(line, forcedTestAmount, forcedTestVariantId) {
-  if (!shouldApplyDirectOverride(line, forcedTestAmount, forcedTestVariantId)) {
+function buildLineUpdateOperation(line) {
+  if (!shouldApplyDirectOverride(line)) {
     return null;
   }
-  const targetUnit = resolveLineTargetUnit(line, forcedTestAmount);
+  const targetUnit = resolveLineTargetUnit(line);
   if (targetUnit === null) {
     return null;
   }
@@ -201,11 +183,9 @@ function buildLineUpdateOperation(line, forcedTestAmount, forcedTestVariantId) {
 export function cartTransformRun(input) {
   // Shopify expects an empty operation list when no line needs direct override.
   const operations = [];
-  const forcedTestAmount = getForcedCartTransformTestAmount(input);
-  const forcedTestVariantId = getForcedCartTransformTestVariantId(input);
   const cartLines = input?.cart?.lines || [];
   for (const line of cartLines) {
-    const lineUpdate = buildLineUpdateOperation(line, forcedTestAmount, forcedTestVariantId);
+    const lineUpdate = buildLineUpdateOperation(line);
     if (lineUpdate) {
       operations.push({ lineUpdate });
     }

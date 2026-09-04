@@ -8,11 +8,11 @@ import {
   useLocation,
   useRouteError,
 } from "react-router";
-import StaffPricifyShell from "../components/public/pricify/StaffPricifyShell";
+import StaffPriceifyShell from "../components/public/priceify/StaffPriceifyShell";
 import { requireStaffSession, safeStaffNext } from "../utils/staffSupportAuth.server";
 
 export const meta: MetaFunction = () => [
-  { title: "Staff · Pricify" },
+  { title: "Staff · Priceify" },
   { name: "robots", content: "noindex, nofollow" },
 ];
 
@@ -41,13 +41,13 @@ export default function StaffLayout() {
   const isLogin = pathname === "/staff/login" || pathname === "/staff/login/";
 
   return (
-    <StaffPricifyShell
+    <StaffPriceifyShell
       showQueueNav={authed && !isLogin}
       wide={!isLogin}
       homeTo={authed && !isLogin ? '/staff/support' : '/'}
     >
       <Outlet />
-    </StaffPricifyShell>
+    </StaffPriceifyShell>
   );
 }
 
@@ -58,7 +58,7 @@ export function ErrorBoundary() {
     : "Staff support hit an error. Try signing in again.";
 
   return (
-    <StaffPricifyShell>
+    <StaffPriceifyShell>
       <section className="staff-auth">
         <div className="px-card staff-auth-card">
           <p className="px-eyebrow">Staff</p>
@@ -71,6 +71,6 @@ export function ErrorBoundary() {
           </Link>
         </div>
       </section>
-    </StaffPricifyShell>
+    </StaffPriceifyShell>
   );
 }

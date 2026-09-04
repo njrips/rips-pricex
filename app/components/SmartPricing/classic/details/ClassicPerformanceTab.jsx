@@ -7,23 +7,70 @@ import {
   VARIATION_PRODUCTS_PAGE_SIZE,
   VARIATION_PRODUCTS_PAGE_SIZES,
   filterSortProductPerformance,
+  formatMetricMoney,
   formatNumber,
   formatRate,
   paginateVariationProducts,
 } from '../classicExperimentDetailsHelpers';
 import { IconTrophy } from '../classicIcons';
+import { TooltipWrapper } from '../../../shared';
 import ClassicRolloutReadinessPanel from './ClassicRolloutReadinessPanel';
 import styles from '../SmartPricingClassic.module.css';
 
-function formatPpv(value, currency) {
-  const n = Number(value);
-  if (!Number.isFinite(n)) return '—';
-  return formatCurrency(n, currency);
+/**
+ * Revenue per visitor is the money metric of record here.
+ *
+ * Profit per visitor used to sit beside it in every chart, total and column.
+ * It looked like a second, independent measurement and it was not: a launch
+ * stamps one shop-wide cost-of-goods percentage onto the goal, and live profit
+ * is computed as revenue minus that percentage of revenue. Profit per visitor
+ * was therefore revenue per visitor times a constant — at the default 55% cost
+ * assumption, exactly 45% of it, in every row, with an identical ranking. It
+ * added a column and a decision to read, and no information.
+ *
+ * Real per-variant cost does exist for the price-band and margin guardrails,
+ * which read Shopify's unit cost. Live analytics never used it. Until it does,
+ * this tab reports what the store actually took.
+ */
+const MONEY_HELP = {
+  rpvByVariation:
+    'Revenue per visitor for this variation: sales divided by visitors. Each product counts once, however much traffic it got.',
+  rpvAllTraffic:
+    'Revenue per visitor across the whole experiment, control and variations together, weighted by visitors. Higher or lower than the per-variation averages because busier products pull it further.',
+  armRpv: 'Measured revenue per visitor for this variation, averaged across the products in it.',
+};
+
+/** Table heading that explains itself on hover. */
+function MetricHeading({ label, help }) {
+  return (
+    <th>
+      <TooltipWrapper content={help}>
+        <span>{label}</span>
+      </TooltipWrapper>
+    </th>
+  );
+}
+
+/** Totals row: label with an explanation, value on the right. */
+function TotalsRow({ label, help, value }) {
+  return (
+    <div className={styles.selectionBar}>
+      {help ? (
+        <TooltipWrapper content={help}>
+          <span>{label}</span>
+        </TooltipWrapper>
+      ) : (
+        <span>{label}</span>
+      )}
+      <strong>{value}</strong>
+    </div>
+  );
 }
 
 function AverageMetricChart({
   title,
   subtitle,
+  help,
   rows,
   valueKey,
   barWidthKey,
@@ -33,7 +80,11 @@ function AverageMetricChart({
   return (
     <div className={styles.statCard}>
       <div className={styles.reviewHead}>
-        <h3 className={styles.panelTitle}>{title}</h3>
+        <h3 className={styles.panelTitle}>
+          <TooltipWrapper content={help}>
+            <span>{title}</span>
+          </TooltipWrapper>
+        </h3>
         {subtitle ? <span className={styles.productSub}>{subtitle}</span> : null}
       </div>
       {rows.length ? (
@@ -200,7 +251,7 @@ export default function ClassicPerformanceTab({
             {!evidenceValidated
               ? isConversionFamily
                 ? 'Conversion results are confirmed against an exact boundary before any price is written automatically. Until that boundary is crossed the reading here is directional, so review it before rolling out a winner.'
-                : 'Revenue and profit per visitor are measured with an order-value variance approximation, so this metric always needs manual review before a price is rolled out.'
+                : 'Revenue per visitor is measured with an order-value variance approximation, so this metric always needs manual review before a price is rolled out.'
               : analytics.significance.message ||
                 'Always-valid conversion testing decides each product on its own. A winning variation can be written to that product’s Shopify price; a control win leaves that catalog price unchanged.'}
             {Number(analytics.significance.recommendedSampleSize) > 0
@@ -272,41 +323,29 @@ export default function ClassicPerformanceTab({
         />
       </div>
 
-      <div className={styles.overviewSplit}>
-        <AverageMetricChart
-          title="Avg profit / visitor"
-          subtitle={resolvedCurrency}
-          rows={averages}
-          valueKey="avg_profit_per_visitor"
-          barWidthKey="ppvBarWidth"
-          formatValue={value => formatPpv(value, resolvedCurrency)}
-          leadingLabel={isOfferTest ? 'Leading' : 'Winner'}
-        />
-        <div className={styles.statCard}>
-          <div className={styles.reviewHead}>
-            <h3 className={styles.panelTitle}>Totals</h3>
-          </div>
-          <div className={styles.selectionBar}>
-            <span>Products</span>
-            <strong>{formatNumber(productCount)}</strong>
-          </div>
-          <div className={styles.selectionBar}>
-            <span>Visitors</span>
-            <strong>{formatNumber(analytics?.summary?.visitors)}</strong>
-          </div>
-          <div className={styles.selectionBar}>
-            <span>Conversions</span>
-            <strong>{formatNumber(analytics?.summary?.conversions)}</strong>
-          </div>
-          <div className={styles.selectionBar}>
-            <span>Live weighted PPV</span>
-            <strong>{formatPpv(analytics?.summary?.live_weighted_ppv, resolvedCurrency)}</strong>
-          </div>
-          <div className={styles.selectionBar}>
-            <span>Projected best PPV</span>
-            <strong>{formatPpv(analytics?.summary?.projected_best_ppv, resolvedCurrency)}</strong>
-          </div>
+      <AverageMetricChart
+        title="Avg revenue / visitor"
+        subtitle={`By variation · ${resolvedCurrency}`}
+        help={MONEY_HELP.rpvByVariation}
+        rows={averages}
+        valueKey="avg_revenue_per_visitor"
+        barWidthKey="rpvBarWidth"
+        formatValue={value => formatMetricMoney(value, resolvedCurrency)}
+        leadingLabel={isOfferTest ? 'Leading' : 'Winner'}
+      />
+
+      <div className={styles.statCard}>
+        <div className={styles.reviewHead}>
+          <h3 className={styles.panelTitle}>Totals</h3>
         </div>
+        <TotalsRow label="Products" value={formatNumber(productCount)} />
+        <TotalsRow label="Visitors" value={formatNumber(analytics?.summary?.visitors)} />
+        <TotalsRow label="Conversions" value={formatNumber(analytics?.summary?.conversions)} />
+        <TotalsRow
+          label="Revenue per visitor, all traffic"
+          help={MONEY_HELP.rpvAllTraffic}
+          value={formatMetricMoney(analytics?.summary?.live_weighted_rpv, resolvedCurrency)}
+        />
       </div>
 
       {arms.length ? (
@@ -325,9 +364,12 @@ export default function ClassicPerformanceTab({
                   <th>{isOfferTest ? 'Offer' : 'Price'}</th>
                   <th>Visitors</th>
                   <th>Conversion</th>
-                  <th>PPV</th>
-                  <th>Projected</th>
-                  <th>vs proj</th>
+                  <MetricHeading label="Revenue / visitor" help={MONEY_HELP.armRpv} />
+                  {/* Forecast and "vs forecast" are gone with the profit
+                      columns. Both were profit figures, and the comparison was
+                      not sound: the forecast used each product's real margin
+                      where Shopify had a unit cost, while the measured side
+                      used the flat shop-wide cost assumption. */}
                   <th>Status</th>
                 </tr>
               </thead>
@@ -358,17 +400,7 @@ export default function ClassicPerformanceTab({
                       </td>
                       <td>{formatNumber(arm.visitors)}</td>
                       <td>{formatRate(arm.conversion_rate)}</td>
-                      <td>{formatPpv(arm.profit_per_visitor, resolvedCurrency)}</td>
-                      <td>{formatPpv(arm.projected_ppv, resolvedCurrency)}</td>
-                      <td>
-                        {arm.ppv_vs_projection_delta === null ||
-                        arm.ppv_vs_projection_delta === undefined
-                          ? '—'
-                          : `${arm.ppv_vs_projection_delta >= 0 ? '+' : ''}${formatPpv(
-                              arm.ppv_vs_projection_delta,
-                              resolvedCurrency
-                            )}`}
-                      </td>
+                      <td>{formatMetricMoney(arm.revenue_per_visitor, resolvedCurrency)}</td>
                       <td>
                         <span className={trap ? styles.trapBadge : styles.okBadge}>
                           {trap ? 'Revenue trap' : 'OK'}
@@ -423,7 +455,7 @@ export default function ClassicPerformanceTab({
                 { label: 'Name A–Z', value: 'title' },
                 { label: 'Visitors (high → low)', value: 'visitors_desc' },
                 { label: 'Conversion (high → low)', value: 'conversion_desc' },
-                { label: 'PPV (high → low)', value: 'ppv_desc' },
+                { label: 'Revenue per visitor (high → low)', value: 'rpv_desc' },
               ]}
             />
           </div>
@@ -514,11 +546,11 @@ export default function ClassicPerformanceTab({
                           </div>
                           <div className={styles.productSub}>
                             {formatNumber(metrics?.visitors)} vis ·{' '}
-                            {formatPpv(
-                              metrics?.profit_per_visitor,
+                            {formatMetricMoney(
+                              metrics?.revenue_per_visitor,
                               row.currency || resolvedCurrency
                             )}{' '}
-                            PPV
+                            rev/visitor
                           </div>
                           <div className={styles.productSub}>
                             {isOfferTest

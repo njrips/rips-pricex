@@ -15,7 +15,7 @@ export default defineConfig({
   test: {
     environment: 'node',
     globals: true,
-    include: ['app/**/*.test.js'],
+    include: ['app/**/*.test.js', 'storefront/**/*.test.js'],
     restoreMocks: true,
   },
 });

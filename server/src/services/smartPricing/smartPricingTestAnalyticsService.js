@@ -7,6 +7,19 @@ const analyticsService = require('../analytics');
 const { findInboxPlanByTestId } = require('../../models/smartPricingInboxStore');
 const { isSmartPricingTest } = require('./smartPricingTestIdentity');
 
+/**
+ * A measured number, or null when there is nothing to measure.
+ *
+ * `Number(null)` is 0, so `Number.isFinite(Number(x))` accepts an unmeasured
+ * metric as a real zero and reports "$0.00 per visitor" for an arm that has
+ * simply not been seen yet.
+ */
+function finiteOrNull(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
 function variantFixedPrice(variant = {}) {
   const cfg = variant.config && typeof variant.config === 'object' ? variant.config : {};
   if (cfg.price !== undefined && cfg.price !== null && String(cfg.price).trim() !== '') {
@@ -120,18 +133,19 @@ function matchVariantToArm(arm, testVariants = [], analyticsVariants = [], optio
 function buildArmAnalyticsRow(arm, projection, matches, baselinePpv) {
   const live = matches.analyticsVariant || {};
   const visitors = Number(live.visitors) || 0;
-  const livePpv = Number(live.profitPerVisitor ?? live.profit_per_visitor);
-  const liveRpv = Number(live.revenuePerVisitor ?? live.revenue_per_visitor);
-  const projectedPpv = Number(projection?.projected_ppv);
-  const baseline = Number(baselinePpv);
+  const livePpv = finiteOrNull(live.profitPerVisitor ?? live.profit_per_visitor);
+  const liveRpv = finiteOrNull(live.revenuePerVisitor ?? live.revenue_per_visitor);
+  const liveRate = finiteOrNull(live.conversionRate ?? live.conversion_rate);
+  const projectedPpv = finiteOrNull(projection?.projected_ppv);
+  const baseline = finiteOrNull(baselinePpv);
   const ppvDelta =
-    Number.isFinite(livePpv) && Number.isFinite(projectedPpv)
+    livePpv !== null && projectedPpv !== null
       ? Math.round((livePpv - projectedPpv) * 1000) / 1000
       : null;
 
   const revenueTrapLive =
-    Number.isFinite(liveRpv) &&
-    Number.isFinite(livePpv) &&
+    liveRpv !== null &&
+    livePpv !== null &&
     liveRpv > (baseline || 0) &&
     livePpv < (baseline || liveRpv);
 
@@ -144,10 +158,13 @@ function buildArmAnalyticsRow(arm, projection, matches, baselinePpv) {
     variant_name: live.name || matches.testVariant?.name || null,
     visitors,
     conversions: Number(live.conversions) || 0,
-    conversion_rate: Number(live.conversionRate ?? live.conversion_rate) || 0,
-    revenue_per_visitor: Number.isFinite(liveRpv) ? liveRpv : null,
-    profit_per_visitor: Number.isFinite(livePpv) ? livePpv : null,
-    projected_ppv: Number.isFinite(projectedPpv) ? projectedPpv : null,
+    // Null, not 0, when this arm could not be matched to live analytics: the
+    // arm has reported nothing, and a confident "0.00%" reads as a variation
+    // that nobody bought rather than one nobody has seen yet.
+    conversion_rate: liveRate,
+    revenue_per_visitor: liveRpv,
+    profit_per_visitor: livePpv,
+    projected_ppv: projectedPpv,
     projected_conversion_delta_percent: projection?.projected_conversion_delta_percent ?? null,
     ppv_vs_projection_delta: ppvDelta,
     revenue_trap_projected: projection?.revenue_trap_risk === true,
@@ -243,24 +260,18 @@ function buildSignificanceSummary(analytics) {
   }
   return {
     significant: sig.significant === true,
-    lift: Number.isFinite(Number(sig.lift)) ? Number(sig.lift) : null,
-    confidence: Number.isFinite(Number(sig.confidence)) ? Number(sig.confidence) : null,
+    lift: finiteOrNull(sig.lift),
+    confidence: finiteOrNull(sig.confidence),
     message: sig.message || null,
     winner: sig.winner ?? null,
     winnerVariantId: sig.winnerVariantId ?? null,
     bestVariantId: sig.bestVariantId ?? null,
-    minSampleSize: Number.isFinite(Number(sig.minSampleSize)) ? Number(sig.minSampleSize) : null,
+    minSampleSize: finiteOrNull(sig.minSampleSize),
     // A merchant looking at a blocked result needs to see which floor is
     // holding it, not just that something is missing.
-    minConversionsPerVariation: Number.isFinite(Number(sig.minConversionsPerVariation))
-      ? Number(sig.minConversionsPerVariation)
-      : null,
-    lowestArmConversions: Number.isFinite(Number(sig.lowestArmConversions))
-      ? Number(sig.lowestArmConversions)
-      : null,
-    recommendedSampleSize: Number.isFinite(Number(sig.recommendedSampleSize))
-      ? Number(sig.recommendedSampleSize)
-      : null,
+    minConversionsPerVariation: finiteOrNull(sig.minConversionsPerVariation),
+    lowestArmConversions: finiteOrNull(sig.lowestArmConversions),
+    recommendedSampleSize: finiteOrNull(sig.recommendedSampleSize),
     sampleReady: sig.sampleReady === true ? true : sig.sampleReady === false ? false : null,
     powered: sig.powered === true ? true : sig.powered === false ? false : null,
     sequential: sig.sequential === true,
@@ -275,17 +286,14 @@ function buildSignificanceSummary(analytics) {
       sig.srm && typeof sig.srm === 'object'
         ? {
             detected: sig.srm.detected === true,
-            pValue: Number.isFinite(Number(sig.srm.pValue)) ? Number(sig.srm.pValue) : null,
+            pValue: finiteOrNull(sig.srm.pValue),
             message: sig.srm.message || null,
           }
         : null,
     outcomesMatured: sig.outcomesMatured === true ? true : sig.outcomesMatured === false ? false : null,
-    collectionDays: Number.isFinite(Number(sig.collectionDays))
-      ? Math.round(Number(sig.collectionDays))
-      : null,
-    outcomeMaturityDays: Number.isFinite(Number(sig.outcomeMaturityDays))
-      ? Number(sig.outcomeMaturityDays)
-      : null,
+    collectionDays:
+      finiteOrNull(sig.collectionDays) === null ? null : Math.round(Number(sig.collectionDays)),
+    outcomeMaturityDays: finiteOrNull(sig.outcomeMaturityDays),
   };
 }
 
@@ -421,16 +429,26 @@ async function buildSmartPricingTestAnalytics(shopDomain, testId) {
   const overallConversionRate =
     totalVisitors > 0 ? Math.round((totalConversions / totalVisitors) * 10000) / 100 : null;
 
-  const weightedLivePpv =
-    totalVisitorsFromArms > 0
-      ? armRows.reduce(
-          (sum, row) =>
-            sum +
-            (Number.isFinite(row.profit_per_visitor) ? row.profit_per_visitor : 0) *
-              (Number(row.visitors) || 0),
-          0
-        ) / totalVisitorsFromArms
-      : null;
+  // Per-visitor money for the test as a whole. Weighted by visitors rather
+  // than averaged across arms, so an arm on a 10% traffic slice cannot move the
+  // total as much as one carrying the rest of the traffic.
+  // Only arms that reported the metric count, on both sides of the division.
+  // An arm with no figure has not earned nothing, it has not been measured, so
+  // dividing by its traffic too would drag the total toward zero — and a test
+  // where nothing reported would come out as a confident 0 rather than blank.
+  const weightedLive = key => {
+    let weighted = 0;
+    let weight = 0;
+    armRows.forEach(row => {
+      if (!Number.isFinite(row[key])) return;
+      const visitors = Number(row.visitors) || 0;
+      weighted += row[key] * visitors;
+      weight += visitors;
+    });
+    return weight > 0 ? weighted / weight : null;
+  };
+  const weightedLivePpv = weightedLive('profit_per_visitor');
+  const weightedLiveRpv = weightedLive('revenue_per_visitor');
 
   const significance = buildSignificanceSummary(analytics);
   const winner = resolveWinnerArm(armRows, significance);
@@ -479,9 +497,10 @@ async function buildSmartPricingTestAnalytics(shopDomain, testId) {
       conversions: totalConversions,
       overall_conversion_rate: overallConversionRate,
       live_weighted_ppv: weightedLivePpv,
+      live_weighted_rpv: weightedLiveRpv,
       projected_best_ppv: armRows.reduce((best, row) => {
-        const ppv = Number(row.projected_ppv);
-        if (!Number.isFinite(ppv)) {
+        const ppv = finiteOrNull(row.projected_ppv);
+        if (ppv === null) {
           return best;
         }
         return best === null || ppv > best ? ppv : best;

@@ -125,7 +125,7 @@ export function describeSmartPricingLaunchReadiness(readiness) {
           'Offer tests can launch. Price tests still need theme price selectors (Settings → Price surfaces).';
       } else {
         detail =
-          'Offer tests can launch. Price tests still need the Pricify cart transform (Setup step 2).';
+          'Offer tests can launch. Price tests still need the Priceify cart transform (Setup step 2).';
       }
     }
     return {

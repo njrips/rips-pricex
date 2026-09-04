@@ -112,12 +112,12 @@ export default function DocsPage({ storeUrl }) {
       <section className="px-cta-wrap" id="cta">
         <div className="px-cta">
           <h2>Ready to test your prices?</h2>
-          <p>Install Pricify and start running pricing experiments on your Shopify store for free.</p>
+          <p>Install Priceify and start running pricing experiments on your Shopify store for free.</p>
           <InstallButton storeUrl={storeUrl} className="px-btn px-btn--brand px-btn--lg">
             Install free on Shopify
           </InstallButton>
           <p className="px-cta-fine">
-            <Link to={PUBLIC_ROUTES.home}>Back to Pricify</Link>
+            <Link to={PUBLIC_ROUTES.home}>Back to Priceify</Link>
             {' · '}
             <Link to={PUBLIC_ROUTES.contact}>Contact</Link>
           </p>

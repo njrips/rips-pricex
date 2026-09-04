@@ -1,7 +1,10 @@
 /**
- * Advanced Smart Pricing AI suggestions for Classic wizard:
- * hypothesis, per-variant prices, and audience targeting.
- * Uses OpenAI when available; otherwise deterministic heuristics.
+ * Advanced Smart Pricing AI suggestions for the Classic wizard: per-variant
+ * test prices, on the Products step. Uses OpenAI when available; otherwise
+ * deterministic heuristics.
+ *
+ * Audience targeting was also suggested here until it was removed — merchants
+ * set the audience themselves, so there is no model in that path any more.
  */
 
 const { chatJson, hasOpenAiKey } = require('./smartPricingAiProvider');
@@ -10,14 +13,6 @@ const {
   resolveAiPriceLiftBand,
   resolveSuggestionMarginPercent,
 } = require('./aiPriceLiftBand');
-const {
-  classicAudienceToSegments,
-  normalizePrimaryMetric,
-  clampTrafficPercent,
-  normalizeMode,
-  normalizeCountryList,
-} = require('./classicAudienceSegmentMapper');
-
 function round2(n) {
   return Math.round(Number(n) * 100) / 100;
 }
@@ -53,89 +48,6 @@ function normalizeVariantRows(variants = []) {
       recommended_scenario_preset: row.recommended_scenario_preset || 'recommended',
     }))
     .filter(row => row.variant_id && row.current_price > 0);
-}
-
-function isOfferExperimentType(raw) {
-  const key = String(raw || '')
-    .trim()
-    .toLowerCase();
-  return key === 'offer_test' || key === 'offer';
-}
-
-function deterministicHypothesis({ name, experimentType, variants = [], objective }) {
-  const titles = variants
-    .slice(0, 3)
-    .map(v => v.title)
-    .filter(Boolean);
-  const productBit = titles.length
-    ? titles.join(', ') + (variants.length > 3 ? ` (+${variants.length - 3} more)` : '')
-    : 'selected products';
-  const metric = String(objective || 'paid conversion rate').replace(/_/g, ' ');
-  const offer = isOfferExperimentType(experimentType);
-  const typeLabel = offer
-    ? 'checkout offers'
-    : String(experimentType || 'price_test') === 'price_test'
-      ? 'price points'
-      : 'variations';
-  const because = offer
-    ? 'shoppers respond differently to a checkout discount versus paying the catalog price'
-    : 'shoppers respond differently to value framing within a safe margin band';
-  const label = String(name || '').trim() || 'this experiment';
-  return `If we test alternate ${typeLabel} on ${productBit} for “${label}”, then ${metric} will improve because ${because}.`;
-}
-
-async function suggestHypothesis({
-  name,
-  experimentType = 'price_test',
-  hypothesisHint = '',
-  objective = 'profit_per_visitor',
-  variants = [],
-} = {}) {
-  const rows = normalizeVariantRows(variants);
-  const fallback = deterministicHypothesis({ name, experimentType, variants: rows, objective });
-
-  if (!hasOpenAiKey()) {
-    return { hypothesis: fallback, source: 'deterministic', rationale: 'Rule-based template' };
-  }
-
-  const payload = await chatJson({
-    systemPrompt: `You are a senior Shopify experiment designer for Classic Smart Pricing.
-Return strict JSON only:
-{ "hypothesis": "one clear If/then/because sentence, max 220 chars", "rationale": "max 100 chars why this hypothesis" }
-Rules:
-- Use merchant-friendly plain language.
-- Focus on conversion/profit tradeoffs, not hype.
-- Do not invent products not in the list.
-- If experiment_type is offer_test or offer, write about a checkout percent or amount-off discount, not catalog price changes.`,
-    userPrompt: JSON.stringify({
-      experiment_name: name || null,
-      experiment_type: experimentType,
-      objective,
-      hint: hypothesisHint || null,
-      products: rows.slice(0, 12).map(r => ({
-        title: r.title,
-        current_price: r.current_price,
-        margin_percent: r.margin_percent,
-        units_sold_30d: r.units_sold_30d,
-        opportunity_score: r.opportunity_score,
-      })),
-    }),
-    temperature: 0.45,
-    maxTokens: 350,
-  });
-
-  const hypothesis = String(payload?.hypothesis || '').trim();
-  if (!hypothesis) {
-    return { hypothesis: fallback, source: 'deterministic', rationale: 'Fallback after AI miss' };
-  }
-  return {
-    hypothesis: hypothesis.slice(0, 280),
-    source: 'openai',
-    rationale:
-      String(payload?.rationale || '')
-        .trim()
-        .slice(0, 140) || null,
-  };
 }
 
 function deterministicPriceSuggestions({
@@ -260,7 +172,7 @@ async function suggestPrices({
   unit = 'percent',
   minAmount = null,
   maxAmount = null,
-  objective = 'profit_per_visitor',
+  objective = 'revenue_per_visitor',
 } = {}) {
   const rows = normalizeVariantRows(variants);
   const testArms = (Array.isArray(arms) ? arms : []).filter(
@@ -294,7 +206,7 @@ async function suggestPrices({
   const { min, max, shopMax, requestedMin } = resolveAiPriceLiftBand(minPct, maxPct, guardrails);
   const armCatalog = testArms.map(a => ({ id: a.id, label: a.label || a.name || a.id }));
   const payload = await chatJson({
-    systemPrompt: `You are a pricing scientist for Shopify A/B price tests in Pricify.
+    systemPrompt: `You are a pricing scientist for Shopify A/B price tests in Priceify.
 Return strict JSON only:
 {
   "summary": "one sentence",
@@ -403,185 +315,6 @@ Rules:
       String(payload?.summary || '')
         .trim()
         .slice(0, 220) || `AI suggested ${suggestions.length} test prices within ${min}–${max}%.`,
-  };
-}
-
-function hasSparseTraffic(plans = []) {
-  return (Array.isArray(plans) ? plans : []).some(plan => {
-    const source = String(plan?.traffic_source || '').toLowerCase();
-    const confidence = String(plan?.traffic_confidence || '').toLowerCase();
-    const daily = Number(plan?.daily_visitors);
-    return (
-      source.includes('shop_prior') ||
-      confidence === 'estimated' ||
-      (Number.isFinite(daily) && daily > 0 && daily < 40)
-    );
-  });
-}
-
-function deterministicAudienceAdvanced(plans = [], guardrails = {}, catalogHints = {}) {
-  // Required lazily: this module's price path must not pull in the launch
-  // guard's database and Shopify client just to compute a price band.
-  const {
-    suggestAudienceForPlans,
-    suggestGoalsForPlans,
-  } = require('./smartPricingAudienceGoalService');
-  const base = suggestAudienceForPlans(plans, guardrails);
-  const goals = suggestGoalsForPlans(plans, guardrails);
-  const primary = normalizePrimaryMetric(goals?.[0]?.goal?.primary_metric || 'revenue_per_visitor');
-  const sparseTraffic = hasSparseTraffic(plans);
-  const trafficHint = Number(catalogHints?.typical_traffic_share);
-  const trafficAllocation = sparseTraffic
-    ? 80
-    : Number.isFinite(trafficHint)
-      ? clampTrafficPercent(trafficHint)
-      : 50;
-  const audienceUi = {
-    segment: 'all_visitors',
-    trafficAllocation,
-    primaryMetric: primary,
-    secondaryMetrics: Array.isArray(goals?.[0]?.goal?.secondary_events)
-      ? goals[0].goal.secondary_events
-      : [],
-    devices: ['Desktop', 'Mobile', 'Tablet'],
-    sources: ['Direct', 'Search', 'Social', 'Email', 'Paid ads', 'Referral'],
-    countries: normalizeCountryList(catalogHints.top_countries),
-    deviceMode: 'include',
-    sourceMode: 'include',
-    countryMode: 'include',
-    minSampleSize: String(
-      Number.isFinite(Number(guardrails.min_sample_size_per_variation)) &&
-        Number(guardrails.min_sample_size_per_variation) >= 1
-        ? Math.round(Number(guardrails.min_sample_size_per_variation))
-        : 5000
-    ),
-  };
-  return {
-    source: 'deterministic',
-    audience: {
-      ...audienceUi,
-      rationale:
-        sparseTraffic
-          ? 'Broad audience and 80% allocation because product traffic is low or still estimated.'
-          : base?.rationale ||
-            'Shop defaults with traffic-aware primary metric and include-only targeting',
-      segments: classicAudienceToSegments(audienceUi, base?.segments || null),
-    },
-  };
-}
-
-async function suggestAudienceAdvanced({ plans = [], guardrails = {}, catalogHints = {} } = {}) {
-  const fallback = deterministicAudienceAdvanced(plans, guardrails, catalogHints);
-  const sparseTraffic = hasSparseTraffic(plans);
-  if (!hasOpenAiKey()) {
-    return fallback;
-  }
-
-  const compactPlans = (Array.isArray(plans) ? plans : []).slice(0, 12).map(p => ({
-    title: p.title || p.product_title,
-    current_price: p.current_price ?? p.price_arms?.[0]?.price,
-    margin_percent: p.margin_percent,
-    daily_visitors: p.daily_visitors,
-    traffic_source: p.traffic_source,
-    traffic_confidence: p.traffic_confidence,
-    countries_hint: catalogHints.top_countries || null,
-  }));
-
-  const payload = await chatJson({
-    systemPrompt: `You design Shopify experiment audiences for Pricify price tests.
-Return strict JSON only:
-{
-  "segment": "all_visitors|new_visitors|returning",
-  "traffic_allocation": 50,
-  "primary_metric": "profit_per_visitor|revenue_per_visitor|conversion_rate",
-  "devices": ["Desktop","Mobile"],
-  "sources": ["Direct","Search"],
-  "countries": ["US","GB"],
-  "device_mode": "include|exclude",
-  "source_mode": "include|exclude",
-  "country_mode": "include|exclude",
-  "min_sample_size": ${Number(guardrails.min_sample_size_per_variation) || 5000},
-  "rationale": "max 140 chars"
-}
-Rules:
-- Prefer all_visitors unless data clearly skews.
-- Prefer include modes for first price tests.
-- traffic_allocation between 20 and 80.
-- For low or estimated product traffic, use all_visitors, worldwide targeting, and 80% traffic.
-- min_sample_size is a fixed merchant safety setting; return it unchanged.
-- countries empty means worldwide.
-- Keep targeting simple for a first price test.
-- primary_metric must be one of profit_per_visitor, revenue_per_visitor, conversion_rate.`,
-    userPrompt: JSON.stringify({
-      guardrails: {
-        objective: guardrails.objective,
-        min_sample_size_per_variation: guardrails.min_sample_size_per_variation,
-      },
-      plans: compactPlans,
-    }),
-    temperature: 0.3,
-    maxTokens: 500,
-  });
-
-  if (!payload || typeof payload !== 'object') {
-    return fallback;
-  }
-
-  const traffic = sparseTraffic
-    ? 80
-    : clampTrafficPercent(
-        Math.min(
-          80,
-          Math.max(
-            20,
-            Number(payload.traffic_allocation) || Number(fallback.audience.trafficAllocation) || 50
-          )
-        )
-      );
-  const segment = ['all_visitors', 'new_visitors', 'returning'].includes(payload.segment)
-    ? payload.segment
-    : 'all_visitors';
-  const primaryMetric = normalizePrimaryMetric(
-    payload.primary_metric,
-    fallback.audience.primaryMetric
-  );
-  const devices =
-    Array.isArray(payload.devices) && payload.devices.length
-      ? payload.devices.map(String)
-      : fallback.audience.devices;
-  const sources =
-    Array.isArray(payload.sources) && payload.sources.length
-      ? payload.sources.map(String)
-      : fallback.audience.sources;
-  const countries = Array.isArray(payload.countries)
-    ? payload.countries.map(c => String(c).toUpperCase()).filter(Boolean)
-    : [];
-  const audienceUi = {
-    segment,
-    trafficAllocation: traffic,
-    primaryMetric,
-    secondaryMetrics: fallback.audience.secondaryMetrics,
-    devices,
-    sources,
-    countries,
-    deviceMode: normalizeMode(payload.device_mode || 'include'),
-    sourceMode: normalizeMode(payload.source_mode || 'include'),
-    countryMode: normalizeMode(payload.country_mode || 'include'),
-    minSampleSize: String(
-      fallback.audience.minSampleSize || guardrails.min_sample_size_per_variation || 5000
-    ),
-  };
-
-  return {
-    source: 'openai',
-    audience: {
-      ...audienceUi,
-      rationale:
-        String(payload.rationale || '')
-          .trim()
-          .slice(0, 160) || null,
-      segments: classicAudienceToSegments(audienceUi, fallback.audience.segments || null),
-    },
   };
 }
 
@@ -709,10 +442,7 @@ async function suggestPricesForRerun({ shopDomain, plan = {}, test = null } = {}
 }
 
 module.exports = {
-  suggestHypothesis,
   suggestPrices,
-  suggestAudienceAdvanced,
   suggestPricesForRerun,
-  deterministicHypothesis,
   deterministicPriceSuggestions,
 };

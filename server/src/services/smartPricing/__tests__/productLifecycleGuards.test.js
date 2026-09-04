@@ -152,6 +152,57 @@ describe('revertSmartPricingProductPrice drift guard', () => {
       { productId: 'gid://P1', variantId: 'gid://V1', price: 40 },
     ]);
     assert.ok(recordedEvents.some(event => event.eventType === 'reverted'));
+    assert.equal(result.baseline_truncated, false);
+  });
+
+  // The publisher stops recording old prices past a cap, so a very large apply
+  // leaves variants it can never restore. A revert that reports only what it
+  // did restore sends the merchant away believing the test was fully undone.
+  it('says so when the apply snapshot could not hold every variant', async () => {
+    applyEvent = { payload: { ...applyEvent.payload, baseline_truncated: true } };
+    const service = loadService({ plan: PLAN, test: TEST });
+    const result = await service.revertSmartPricingProductPrice({
+      testId: 'test-1',
+      shopDomain: 'shop.myshopify.com',
+      accessToken: 'token',
+    });
+
+    assert.equal(result.reverted, true);
+    assert.equal(result.baseline_truncated, true);
+  });
+
+  it('reports the variants it could not restore instead of only the ones it did', async () => {
+    applyEvent = {
+      payload: {
+        variants: [
+          { product_id: 'gid://P1', variant_id: 'gid://V1', previous_price: 40, new_price: 46 },
+          { product_id: 'gid://P1', variant_id: 'gid://V2', previous_price: 20, new_price: 24 },
+        ],
+      },
+    };
+    productVariants = {
+      'gid://P1': [
+        { id: 'gid://V1', price: '46.00' },
+        { id: 'gid://V2', price: '24.00' },
+      ],
+    };
+    const service = loadService({ plan: PLAN, test: TEST });
+    const shopify = require(require.resolve(path.join(SMART_PRICING_DIR, '../shopifyService')));
+    shopify.updateProductPrice = async (_shop, _token, productId, variantId, price) => {
+      if (variantId === 'gid://V2') throw new Error('variant not found');
+      shopifyCalls.updates.push({ productId, variantId, price });
+      return { success: true };
+    };
+
+    const result = await service.revertSmartPricingProductPrice({
+      testId: 'test-1',
+      shopDomain: 'shop.myshopify.com',
+      accessToken: 'token',
+    });
+
+    assert.equal(result.updated_count, 1);
+    assert.equal(result.errors.length, 1);
+    assert.equal(result.errors[0].variant_id, 'gid://V2');
   });
 
   it('blocks the write with PRICE_DRIFT when someone changed the price after apply', async () => {

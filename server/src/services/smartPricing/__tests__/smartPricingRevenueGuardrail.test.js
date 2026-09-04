@@ -14,13 +14,15 @@ describe('smartPricingRevenueGuardrail', () => {
     assert.equal(clampMaxRevenueDropPercent('10'), 10);
   });
 
-  it('uses the tighter of shop and experiment thresholds', () => {
+  // The shop value used to cap this. It is no longer a setting the merchant can
+  // see, so it is now only the starting point for an experiment without one.
+  it('uses the experiment threshold, looser or tighter than the shop default', () => {
     assert.equal(
       resolveEffectiveMaxRevenueDropPercent(
         { max_revenue_drop_percent: 10 },
         { metadata: { audience_ui: { guardrails: [{ id: 'revenue', threshold: '-15%' }] } } }
       ),
-      10
+      15
     );
     assert.equal(
       resolveEffectiveMaxRevenueDropPercent(
@@ -28,6 +30,13 @@ describe('smartPricingRevenueGuardrail', () => {
         { metadata: { audience_ui: { guardrails: [{ id: 'revenue', threshold: '-8%' }] } } }
       ),
       8
+    );
+  });
+
+  it('falls back to the shop default when the experiment has no threshold', () => {
+    assert.equal(
+      resolveEffectiveMaxRevenueDropPercent({ max_revenue_drop_percent: 12 }, {}),
+      12
     );
   });
 

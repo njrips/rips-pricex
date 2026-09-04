@@ -21,7 +21,11 @@ export const CUSTOMER_OPTIONS = [
 export const GOAL_METRIC_OPTIONS = [
   { label: 'Revenue per visitor', value: 'revenue_per_visitor' },
   { label: 'Conversion rate', value: 'conversion_rate' },
-  { label: 'Profit per visitor (PPV)', value: 'profit_per_visitor' },
+  // Named "estimated" because it is. Cost of goods is taken as one shop-wide
+  // percentage at launch rather than per-variant cost, so this metric is
+  // revenue per visitor scaled by a constant and it ranks variations exactly
+  // as revenue does. It stays selectable for experiments that already use it.
+  { label: 'Profit per visitor (estimated)', value: 'profit_per_visitor' },
 ];
 
 /** Classic Light secondary goal catalog → event keys for goal.secondary_events */
@@ -119,30 +123,6 @@ export function normalizeClassicAudienceTargeting(state = {}) {
     sourceMode: normalizeMode(source.sourceMode || source.source_mode),
     countryMode: countryLists.countryMode,
   };
-}
-
-/** Strip geo/device/source + primary metric so batch auto-suggest does not overwrite wizard defaults. */
-export function stripClassicAudienceTargetingFields(audience = {}) {
-  const source = audience && typeof audience === 'object' ? audience : {};
-  const {
-    devices: _devices,
-    sources: _sources,
-    countries: _countries,
-    includeCountries: _includeCountries,
-    include_countries: _includeCountriesSnake,
-    excludeCountries: _excludeCountries,
-    exclude_countries: _excludeCountriesSnake,
-    deviceMode: _deviceMode,
-    device_mode: _deviceModeSnake,
-    sourceMode: _sourceMode,
-    source_mode: _sourceModeSnake,
-    countryMode: _countryMode,
-    country_mode: _countryModeSnake,
-    primaryMetric: _primaryMetric,
-    primary_metric: _primaryMetricSnake,
-    ...rest
-  } = source;
-  return rest;
 }
 
 /** Classic pill labels → Test Wizard traffic_source_rules values */
@@ -846,80 +826,3 @@ export function audiencesEqual(a, b) {
   );
 }
 
-/**
- * Merge AI / draft audience payload into Classic UI state fields.
- */
-export function mergeAudienceAiIntoState(prev = {}, audiencePayload = {}, meta = {}) {
-  const a = audiencePayload && typeof audiencePayload === 'object' ? audiencePayload : {};
-  const next = {
-    ...prev,
-    segment: a.segment || prev.segment || 'all_visitors',
-    trafficAllocation:
-      a.trafficAllocation !== null && a.trafficAllocation !== undefined
-        ? clampTrafficPercent(a.trafficAllocation)
-        : a.traffic_allocation !== null && a.traffic_allocation !== undefined
-          ? clampTrafficPercent(a.traffic_allocation)
-          : Number(prev.trafficAllocation) || 50,
-    primaryMetric: normalizePrimaryMetric(
-      a.primaryMetric || a.primary_metric || prev.primaryMetric
-    ),
-    secondaryMetrics: Array.isArray(a.secondaryMetrics)
-      ? normalizeSecondaryEvents(a.secondaryMetrics)
-      : Array.isArray(a.secondary_events)
-        ? normalizeSecondaryEvents(a.secondary_events)
-        : normalizeSecondaryEvents(prev.secondaryMetrics),
-    customGoals: Array.isArray(a.customGoals)
-      ? normalizeCustomGoals(a.customGoals)
-      : Array.isArray(a.custom_goals)
-        ? normalizeCustomGoals(a.custom_goals)
-        : normalizeCustomGoals(prev.customGoals),
-    ...normalizeClassicAudienceTargeting({
-      ...prev,
-      ...(Array.isArray(a.devices) ? { devices: a.devices } : {}),
-      ...(Array.isArray(a.sources) ? { sources: a.sources } : {}),
-      ...(Array.isArray(a.includeCountries) || Array.isArray(a.include_countries)
-        ? { includeCountries: a.includeCountries || a.include_countries }
-        : {}),
-      ...(Array.isArray(a.excludeCountries) || Array.isArray(a.exclude_countries)
-        ? { excludeCountries: a.excludeCountries || a.exclude_countries }
-        : {}),
-      ...(Array.isArray(a.countries)
-        ? String(a.countryMode || a.country_mode || '').toLowerCase() === 'exclude'
-          ? { excludeCountries: a.countries, countries: a.countries, countryMode: 'exclude' }
-          : { includeCountries: a.countries, countries: a.countries, countryMode: 'include' }
-        : {}),
-      deviceMode: a.deviceMode || a.device_mode || prev.deviceMode,
-      sourceMode: a.sourceMode || a.source_mode || prev.sourceMode,
-      countryMode: a.countryMode || a.country_mode || prev.countryMode,
-    }),
-    minSampleSize:
-      a.minSampleSize !== null && a.minSampleSize !== undefined
-        ? String(a.minSampleSize)
-        : a.min_sample_size !== null && a.min_sample_size !== undefined
-          ? String(a.min_sample_size)
-          : String(prev.minSampleSize ?? '5000'),
-    aiRationale: a.rationale || meta.rationale || prev.aiRationale || null,
-    aiSource: meta.source || a.aiSource || prev.aiSource || null,
-  };
-  return next;
-}
-
-/**
- * AI may optimize targeting and traffic, but the merchant's statistical floor
- * is a safety setting and must not be overwritten by a model response.
- */
-export function mergeAudienceAiIntoStatePreservingSample(
-  prev = {},
-  audiencePayload = {},
-  meta = {}
-) {
-  return mergeAudienceAiIntoState(
-    prev,
-    {
-      ...(audiencePayload && typeof audiencePayload === 'object' ? audiencePayload : {}),
-      minSampleSize: prev.minSampleSize ?? '5000',
-      min_sample_size: undefined,
-    },
-    meta
-  );
-}

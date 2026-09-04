@@ -1,11 +1,11 @@
 api_version = "2025-10"
 
 [[extensions]]
-name = "Pricify cart transform"
+name = "Priceify cart transform"
 handle = "ripspricex-cart-transform"
 uid = "f545f513-d8df-a9e0-57ed-ec6d260f45798c23cafb"
 type = "function"
-description = "Apply direct Pricify price overrides from cart line attributes on Plus/dev stores."
+description = "Apply direct Priceify price overrides from cart line attributes on Plus/dev stores."
 
 [[extensions.targeting]]
 target = "cart.transform.run"

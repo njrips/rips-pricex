@@ -4,7 +4,7 @@
  */
 
 /** Bump when embedded runtime config or script contract changes. Keep ?v= in sync: extensions/ripspricex-theme/blocks/ripspricex-app-embed.liquid. */
-const SCRIPT_VERSION = '1.0.62';
+const SCRIPT_VERSION = '1.0.64';
 
 /**
  * DB/API may use "pricing"; storefront logic expects "price".
@@ -344,6 +344,13 @@ function buildPriceAntiFlickerCss(activeTests, priceSurfaceRegistry = {}) {
 }
 
 /**
+ * Upper bound on how long the pre-script snippet may keep prices hidden on its
+ * own. Comfortably past the runtime's 1.4s guard, so a healthy page is always
+ * released by the runtime and this never fires.
+ */
+const EARLY_ANTI_FLICKER_FAILSAFE_MS = 4000;
+
+/**
  * Synchronous snippet injected before the main storefront script so anti-flicker can hide the page
  * before the deferred runtime executes.
  * @param {object[]} activeTests
@@ -370,7 +377,16 @@ function buildEarlyStorefrontAntiFlickerBootstrap(activeTests, priceSurfaceRegis
     `h.setAttribute("data-ripx-af","${mode}");var id="ripx-anti-flicker-style";` +
     'if(!document.getElementById(id)){var s=document.createElement("style");s.id=id;' +
     `s.textContent=${JSON.stringify(css)};` +
-    '(document.head||h).appendChild(s);}}catch(_e){}})();\n'
+    '(document.head||h).appendChild(s);}' +
+    // This snippet is what hides the page, so it also has to be what guarantees
+    // the page comes back. The runtime's own timeout does not cover every case:
+    // under a consent gate it defers init until the shopper accepts, and it
+    // never runs at all if the script fails to load or throws on the way in. In
+    // strict mode that leaves the whole body at opacity 0 with nothing left to
+    // clear it. The runtime releases within ~1.4s, so this only ever fires when
+    // it did not arrive.
+    `setTimeout(function(){try{h.removeAttribute("data-ripx-af");}catch(_eR){}},${EARLY_ANTI_FLICKER_FAILSAFE_MS});` +
+    '}catch(_e){}})();\n'
   );
 }
 

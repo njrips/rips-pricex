@@ -18,7 +18,6 @@ export default function ClassicAudienceMetricsEditModal({
   liveWarning = '',
   saving = false,
   shopDefaultsReady = true,
-  shopMaxRevenueDropPercent,
   plans = [],
   variations = [],
   shopGuardrails = {},
@@ -115,7 +114,6 @@ export default function ClassicAudienceMetricsEditModal({
             value={draft}
             onChange={setDraft}
             shopDomain={shopDomain}
-            shopMaxRevenueDropPercent={shopMaxRevenueDropPercent}
             significanceEstimate={significanceEstimate}
             disabled={readOnly || saving || !shopDefaultsReady}
           />

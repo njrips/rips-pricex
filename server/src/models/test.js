@@ -126,15 +126,46 @@ async function checkSchedulingColumns() {
   }
 }
 
+/**
+ * Whether tests.metadata is present, cached like the scheduling check.
+ *
+ * Smart Pricing stamps its statistical design, plan id, and arm-to-price map
+ * into this column at launch. Dropping it silently left the sequential decision
+ * guessing a baseline from the pooled rate it was supposed to be measured
+ * against, so the column is written when it exists rather than never.
+ */
+let metadataColumnExists = null;
+
+async function checkMetadataColumn() {
+  if (metadataColumnExists !== null) {
+    return metadataColumnExists;
+  }
+  try {
+    const result = await query(
+      `SELECT column_name
+       FROM information_schema.columns
+       WHERE table_name = 'tests' AND column_name = 'metadata'
+       LIMIT 1`
+    );
+    metadataColumnExists = result.rows.length > 0;
+    return metadataColumnExists;
+  } catch (error) {
+    logger.warn('Could not check for tests.metadata column', { error: error.message });
+    metadataColumnExists = false;
+    return false;
+  }
+}
+
 class TestModel {
   /**
    * Build insert query and parameters for test creation
    *
    * @param {Object} testData - Test data
    * @param {boolean} includeScheduling - Whether to include scheduling columns
+   * @param {boolean} includeMetadata - Whether the metadata column can be written
    * @returns {Object} { sql, params }
    */
-  _buildInsertQuery(testData, includeScheduling = false) {
+  _buildInsertQuery(testData, includeScheduling = false, includeMetadata = false) {
     const {
       shop_domain,
       name,
@@ -202,6 +233,11 @@ class TestModel {
     if (guardrail_config !== undefined) {
       baseColumns.push('guardrail_config');
       baseValues.push(guardrail_config?.enabled ? safeStringifyJSON(guardrail_config, '{}') : null);
+    }
+
+    if (includeMetadata && testData.metadata !== undefined && testData.metadata !== null) {
+      baseColumns.push('metadata');
+      baseValues.push(safeStringifyJSON(testData.metadata, '{}'));
     }
 
     if (includeScheduling) {
@@ -274,8 +310,15 @@ class TestModel {
         }
       }
 
-      const hasSchedulingColumns = await checkSchedulingColumns();
-      const { sql, params } = this._buildInsertQuery(testData, hasSchedulingColumns);
+      const [hasSchedulingColumns, hasMetadataColumn] = await Promise.all([
+        checkSchedulingColumns(),
+        checkMetadataColumn(),
+      ]);
+      const { sql, params } = this._buildInsertQuery(
+        testData,
+        hasSchedulingColumns,
+        hasMetadataColumn
+      );
 
       const result = await query(sql, params);
 
@@ -552,6 +595,9 @@ class TestModel {
       'rollout_started_at',
       'started_at',
       'stopped_at',
+      // Rebuilding an experiment's arms has to rewrite the arm-to-price map that
+      // lives here, or analytics keeps reading the arms the test no longer has.
+      'metadata',
     ]);
 
     const fields = [];
@@ -569,10 +615,11 @@ class TestModel {
         key === 'segments' ||
         key === 'guardrail_config' ||
         key === 'target_ids' ||
-        key === 'rollout_schedule'
+        key === 'rollout_schedule' ||
+        key === 'metadata'
       ) {
         // Use ::jsonb cast for JSONB columns so pg passes string correctly
-        const jsonbCast = key === 'rollout_schedule' ? '::jsonb' : '';
+        const jsonbCast = key === 'rollout_schedule' || key === 'metadata' ? '::jsonb' : '';
         fields.push(`${key} = $${paramIndex}${jsonbCast}`);
         const fallback = key === 'variants' ? '[]' : '{}';
         const val =

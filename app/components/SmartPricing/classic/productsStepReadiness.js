@@ -157,7 +157,7 @@ export function describeAiBandCap(cap, { unit = 'percent' } = {}) {
     }, so suggestions use ${formatBandValue(cap.min, unit)}–${formatBandValue(
       cap.max,
       unit
-    )} instead. Raise Max price change in Settings to test ${requested}.`;
+    )} instead. Raise the max price change to test ${requested}.`;
   }
   if (cap.maxClamped) {
     return `Capped by your ${cap.capPct}% max price change guardrail: suggestions use ${formatBandValue(

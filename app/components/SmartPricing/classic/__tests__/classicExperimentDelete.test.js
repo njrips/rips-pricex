@@ -14,9 +14,17 @@ vi.mock('../../smartPricingInboxPersistence', () => ({
   persistInboxPlansNow: vi.fn(),
 }));
 
+// The browser draft store needs localStorage; this file runs without a DOM, so
+// the one function delete calls is stubbed at the seam instead.
+vi.mock('../classicExperimentHelpers', async importOriginal => ({
+  ...(await importOriginal()),
+  clearClassicWizardDraft: vi.fn(),
+}));
+
 import { apiDelete } from '../../../../services';
 import { readInboxPlans, writeInboxPlans } from '../../smartPricingConstants';
 import { deletePersistedInboxPlan, persistInboxPlansNow } from '../../smartPricingInboxPersistence';
+import { clearClassicWizardDraft } from '../classicExperimentHelpers';
 import {
   buildClassicExperimentDeleteConfirmMessage,
   deleteClassicExperimentSynchronized,
@@ -41,6 +49,17 @@ describe('classicExperimentDelete', () => {
     writeInboxPlans.mockImplementation((_domain, plans) => plans);
   });
 
+  it('also forgets the browser draft, so the experiment stays deleted', async () => {
+    const withId = {
+      ...experiment,
+      plans: [{ id: 'p1', metadata: { experiment_id: 'exp_1' } }],
+    };
+
+    await deleteClassicExperimentSynchronized('demo.myshopify.com', withId);
+
+    expect(clearClassicWizardDraft).toHaveBeenCalledWith('demo.myshopify.com', 'exp_1');
+  });
+
   it('collects plan and linked test ids', () => {
     expect(getClassicExperimentDeleteTargets(experiment)).toEqual({
       planIds: ['p1', 'p2'],
@@ -49,7 +68,7 @@ describe('classicExperimentDelete', () => {
   });
 
   it('mentions linked tests in the confirm message', () => {
-    expect(buildClassicExperimentDeleteConfirmMessage(experiment)).toContain('2 linked Pricify tests');
+    expect(buildClassicExperimentDeleteConfirmMessage(experiment)).toContain('2 linked Priceify tests');
   });
 
   it('deletes inbox plans locally, on server, and linked tests', async () => {

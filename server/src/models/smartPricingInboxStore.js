@@ -402,33 +402,124 @@ async function deleteInboxPlan(shopDomain, planId) {
   };
 }
 
+/**
+ * Applies a merge to named plan rows, and only those rows.
+ *
+ * Patches used to route through saveInboxPlans, which treats the array it is
+ * handed as the shop's complete set and deletes every plan_id absent from it.
+ * The array came from a read taken before the write, so two things went wrong at
+ * once: a plan created in between was deleted outright, and every other plan's
+ * json was rewritten from the stale snapshot, discarding whatever had changed.
+ *
+ * Locking each row and updating it alone keeps a patch to its own plan, and
+ * makes two patches of the same plan queue instead of overwrite.
+ */
+async function patchInboxPlanRows(domain, planIds, merge) {
+  const ids = Array.from(new Set((planIds || []).map(id => String(id || '').trim()).filter(Boolean)));
+  const patched = new Map();
+  if (!ids.length) {
+    return patched;
+  }
+
+  const client = await getClient();
+  let archivedColumns = true;
+  try {
+    await client.query('BEGIN');
+    for (const planId of ids) {
+      let locked;
+      try {
+        locked = await client.query(
+          `SELECT plan_id, plan_json, status, test_id, updated_at, created_at,
+                  COALESCE(archived, false) AS archived, archived_at
+             FROM smart_pricing_inbox_plans
+            WHERE shop_domain = $1 AND plan_id = $2
+            FOR UPDATE`,
+          [domain, planId]
+        );
+      } catch (err) {
+        // Same pre-migration fallback the readers use.
+        if (!/archived/i.test(String(err?.message || ''))) throw err;
+        archivedColumns = false;
+        locked = await client.query(
+          `SELECT plan_id, plan_json, status, test_id, updated_at, created_at
+             FROM smart_pricing_inbox_plans
+            WHERE shop_domain = $1 AND plan_id = $2
+            FOR UPDATE`,
+          [domain, planId]
+        );
+        locked = { rows: locked.rows.map(row => ({ ...row, archived: false, archived_at: null })) };
+      }
+      if (!locked.rows.length) continue;
+
+      const next = normalizePlanJson(merge(mapRowToPlan(locked.rows[0])));
+      if (!next) continue;
+      const { status, testId, archived, archivedAt } = extractPlanFields(next);
+
+      if (archivedColumns) {
+        await client.query(
+          `UPDATE smart_pricing_inbox_plans
+              SET plan_json = $3::jsonb, status = $4, test_id = $5,
+                  archived = $6, archived_at = $7, updated_at = NOW()
+            WHERE shop_domain = $1 AND plan_id = $2`,
+          [
+            domain,
+            planId,
+            JSON.stringify(next),
+            status,
+            testId,
+            archived,
+            archived ? archivedAt : null,
+          ]
+        );
+      } else {
+        await client.query(
+          `UPDATE smart_pricing_inbox_plans
+              SET plan_json = $3::jsonb, status = $4, test_id = $5, updated_at = NOW()
+            WHERE shop_domain = $1 AND plan_id = $2`,
+          [domain, planId, JSON.stringify(next), status, testId]
+        );
+      }
+      patched.set(planId, next);
+    }
+    await client.query('COMMIT');
+  } catch (err) {
+    // Swallowing a failed rollback would replace the real error with its noise.
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+  return patched;
+}
+
 async function patchInboxPlan(shopDomain, planId, patch = {}) {
   const domain = normalizeShopDomain(shopDomain);
   const id = String(planId || '').trim();
   if (!domain || !id) {
     throw new Error('shop_domain and planId are required');
   }
-  const current = await listInboxPlans(domain);
-  const existing = current.plans.find(plan => plan.id === id);
-  if (!existing) {
+
+  const patched = await patchInboxPlanRows(domain, [id], existing => {
+    const next = { ...existing, ...patch, id };
+    if (patch.archived === true) {
+      next.archived = true;
+      next.archived_at = patch.archived_at || new Date().toISOString();
+    } else if (patch.archived === false) {
+      next.archived = false;
+      next.archived_at = null;
+    }
+    return next;
+  });
+
+  if (!patched.has(id)) {
     const err = new Error('Plan not found');
     err.code = 'PLAN_NOT_FOUND';
     throw err;
   }
 
-  const next = { ...existing, ...patch, id };
-  if (patch.archived === true) {
-    next.archived = true;
-    next.archived_at = patch.archived_at || new Date().toISOString();
-  } else if (patch.archived === false) {
-    next.archived = false;
-    next.archived_at = null;
-  }
-
-  const plans = current.plans.map(plan => (plan.id === id ? next : plan));
-  const snapshot = await saveInboxPlans(domain, plans);
+  const snapshot = await listInboxPlans(domain);
   return {
-    plan: snapshot.plans.find(plan => plan.id === id) || next,
+    plan: snapshot.plans.find(plan => plan.id === id) || patched.get(id),
     revision: snapshot.revision,
     counts: snapshot.counts,
   };
@@ -445,8 +536,10 @@ async function patchInboxPlansFromSync(shopDomain, syncRows = []) {
     return listInboxPlans(domain);
   }
 
-  const current = await listInboxPlans(domain);
-  const merged = current.plans.map(plan => {
+  // Only the synced rows are touched. This runs from a background sweep, so
+  // rewriting the shop's whole plan set from a snapshot taken moments earlier
+  // would race whatever the merchant is doing in the wizard right now.
+  await patchInboxPlanRows(domain, [...syncMap.keys()], plan => {
     const sync = syncMap.get(plan.id);
     if (!sync) {
       return plan;
@@ -473,7 +566,7 @@ async function patchInboxPlansFromSync(shopDomain, syncRows = []) {
     return { ...plan, ...patch };
   });
 
-  return saveInboxPlans(domain, merged);
+  return listInboxPlans(domain);
 }
 
 async function findInboxPlanByTestId(shopDomain, testId) {

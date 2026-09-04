@@ -23,7 +23,7 @@ function normalizeShippingTestPayload(payload = {}) {
 }
 
 function validateShippingVariants(_variants = []) {
-  return ['Shipping tests are not supported in Pricify Classic Smart Pricing.'];
+  return ['Shipping tests are not supported in Priceify Classic Smart Pricing.'];
 }
 
 module.exports = {

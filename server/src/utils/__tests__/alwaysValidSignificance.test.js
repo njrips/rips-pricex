@@ -181,4 +181,67 @@ describe('alwaysValidSignificance', () => {
     );
     assert.equal(resolveAnalysisConfidence({}, {}, 0.95), 0.95);
   });
+
+  // The variance proxy scales visitor variance by the value of one order. A
+  // profit test measures profit per visitor, so it has to scale by profit per
+  // order. Scaling by revenue per order instead inflated the variance by the
+  // inverse margin squared, so a profit test asked for several times the
+  // traffic its own numbers justified.
+  describe('value-metric variance', () => {
+    /** Same orders and revenue; profit is a 25% margin on it. */
+    const arms = perVisitorProfit => [
+      {
+        id: 'control',
+        name: 'Control',
+        visitors: 8000,
+        conversions: 240,
+        revenue: 24000,
+        revenuePerVisitor: 3,
+        profit: 8000 * perVisitorProfit,
+        profitPerVisitor: perVisitorProfit,
+      },
+      {
+        id: 'b',
+        name: 'Variant B',
+        visitors: 8000,
+        conversions: 300,
+        revenue: 30000,
+        revenuePerVisitor: 3.75,
+        profit: 8000 * perVisitorProfit * 1.25,
+        profitPerVisitor: perVisitorProfit * 1.25,
+      },
+    ];
+
+    it('scales a profit test by profit per order, not revenue per order', () => {
+      const [control, challenger] = arms(0.75);
+      const profit = twoSampleAlwaysValid(control, challenger, {
+        family: 'profit',
+        alpha: 0.1,
+        mdePercent: 10,
+      });
+      const revenue = twoSampleAlwaysValid(control, challenger, {
+        family: 'revenue',
+        alpha: 0.1,
+        mdePercent: 10,
+      });
+      // Both arms show the same 25% relative gain, so with each family scaled by
+      // its own per-order value the two read the same strength of evidence.
+      // Under the old shared revenue AOV the profit p-value was far weaker.
+      assert.ok(Math.abs(profit.pValue - revenue.pValue) < 1e-6);
+    });
+
+    it('reads a loss-making arm as evidence rather than discarding it', () => {
+      const [control, challenger] = arms(-0.5);
+      const result = twoSampleAlwaysValid(control, challenger, {
+        family: 'profit',
+        alpha: 0.1,
+        mdePercent: 10,
+      });
+      // Negative profit per order is a real reading; squaring its magnitude for
+      // the variance keeps it comparable instead of falling back to the
+      // conversion-only variance.
+      assert.ok(Number.isFinite(result.pValue));
+      assert.ok(result.delta < 0);
+    });
+  });
 });

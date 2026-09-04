@@ -45,7 +45,7 @@ describe('supportMailer SMTP', () => {
     assert.equal(smtp.secure, false);
     assert.equal(smtp.requireTLS, true);
     assert.equal(smtp.user, 'smtp-user');
-    assert.equal(smtp.from, 'Pricify <abtesting-noreply@echologyx.com>');
+    assert.equal(smtp.from, 'Priceify <abtesting-noreply@echologyx.com>');
     assert.equal(isSupportMailerConfigured(), true);
   });
 
@@ -57,6 +57,6 @@ describe('supportMailer SMTP', () => {
   });
 
   it('keeps an explicit From display name', () => {
-    assert.equal(formatFromAddress('Pricify <ops@echologyx.com>'), 'Pricify <ops@echologyx.com>');
+    assert.equal(formatFromAddress('Priceify <ops@echologyx.com>'), 'Priceify <ops@echologyx.com>');
   });
 });

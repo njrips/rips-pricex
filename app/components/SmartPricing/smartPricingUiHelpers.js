@@ -388,7 +388,7 @@ export function resolveNextSmartPricingAction({
     return {
       kind: 'monitor',
       title: liveCount === 1 ? '1 test is running' : `${liveCount} tests are running`,
-      body: 'Check back for results. We optimize profit per visit, not just conversion.',
+      body: 'Check back for results. We optimize revenue per visitor, not just conversion.',
       cta: 'View running tests',
       tab: 'running',
     };

@@ -1,6 +1,10 @@
 /**
- * Shop + experiment revenue drop limit.
- * Always on: the effective cap is the tighter of shop default and experiment threshold.
+ * Per-experiment revenue drop limit. Always on.
+ *
+ * The experiment's own threshold decides the limit. The shop default used to
+ * cap it — the tighter of the two won — but that default is no longer a setting
+ * a merchant can see, so it would have held every test to a number they could
+ * not find. It is now only the starting value for a test that has none.
  */
 
 const DEFAULT_MAX_REVENUE_DROP_PERCENT = 10;
@@ -28,12 +32,12 @@ function audienceGuardrailRows(plan = {}) {
 }
 
 function resolveEffectiveMaxRevenueDropPercent(shopGuardrails = {}, plan = {}) {
-  const shop = clampMaxRevenueDropPercent(
+  const shopDefault = clampMaxRevenueDropPercent(
     shopGuardrails.max_revenue_drop_percent ?? shopGuardrails.maxRevenueDropPercent
   );
   const row = audienceGuardrailRows(plan).find(item => String(item?.id || '') === 'revenue');
-  if (!row) return shop;
-  return Math.min(shop, parseRevenueDropThreshold(row.threshold, shop));
+  if (!row) return shopDefault;
+  return parseRevenueDropThreshold(row.threshold, shopDefault);
 }
 
 function buildRevenueDropGuardrailConfig(shopGuardrails = {}, plan = {}) {

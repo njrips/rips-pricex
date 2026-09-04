@@ -28,7 +28,7 @@ describe('supportMailer ticket notify', () => {
     }
   });
 
-  it('builds a Pricify staff email with ticket details', () => {
+  it('builds a Priceify staff email with ticket details', () => {
     const previous = process.env.SHOPIFY_APP_URL;
     process.env.SHOPIFY_APP_URL = 'https://example.com/';
     try {
@@ -47,7 +47,7 @@ describe('supportMailer ticket notify', () => {
       });
       assert.equal(created.subject, '[PX-8BVE] New ticket: Checkout <blocked>');
       assert.equal(created.replyTo, 'merchant@example.com');
-      assert.equal(created.messageId, '<pricify-ticket-PX-8BVE@echologyx.com>');
+      assert.equal(created.messageId, '<priceify-ticket-PX-8BVE@echologyx.com>');
       assert.match(created.text, /Shop: ripx-plus\.myshopify\.com/);
       assert.match(created.text, /Category: Setup \/ checkout/);
       assert.match(created.text, /Theme embed is off\./);
@@ -69,7 +69,7 @@ describe('supportMailer ticket notify', () => {
       });
       assert.equal(status.subject, '[PX-8BVE] Status updated: Checkout blocked');
       assert.match(status.text, /Status: Waiting on you → Resolved/);
-      assert.equal(status.inReplyTo, '<pricify-ticket-PX-8BVE@echologyx.com>');
+      assert.equal(status.inReplyTo, '<priceify-ticket-PX-8BVE@echologyx.com>');
       assert.equal(status.text.includes('Plan:'), false);
     } finally {
       if (previous === undefined) delete process.env.SHOPIFY_APP_URL;

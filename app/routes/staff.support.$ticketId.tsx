@@ -1,7 +1,7 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from "react-router";
 import { useEffect, useState } from "react";
 import { Form, Link, redirect, useActionData, useLoaderData, useNavigation } from "react-router";
-import { shopHandle, staffQueueBackHref } from "../components/public/pricify/staffQueue";
+import { shopHandle, staffQueueBackHref } from "../components/public/priceify/staffQueue";
 import { useHydrated } from "../hooks/useHydrated";
 import { expressSupportFetch, supportErrorMessage } from "../utils/expressSupportApi.server";
 import { staffToken } from "../utils/staffSupportAuth.server";
@@ -16,8 +16,8 @@ import { summarizeDiagnostics } from "../utils/supportDiagnostics.server";
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
   {
     title: data?.ticket?.public_id
-      ? `${data.ticket.public_id} · Staff · Pricify`
-      : "Ticket · Staff · Pricify",
+      ? `${data.ticket.public_id} · Staff · Priceify`
+      : "Ticket · Staff · Priceify",
   },
 ];
 

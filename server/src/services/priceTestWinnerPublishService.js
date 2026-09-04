@@ -389,6 +389,29 @@ function normalizeMergedPriceConfig(baseCfg, mergedCfg) {
   return merged;
 }
 
+/**
+ * The variants of one product that this price config names outright.
+ *
+ * A Smart Pricing plan scoped to a single SKU carries that id here, which makes
+ * it the only way to tell "this variant was deliberately left alone" apart from
+ * "this variant never came back from Shopify".
+ */
+function targetedVariantKeysForProduct(cfg, productId) {
+  const keys = new Set();
+  const byProduct = cfg && typeof cfg === 'object' ? cfg.byProduct : null;
+  if (!byProduct || typeof byProduct !== 'object') return keys;
+  const pid = toNumericProductId(productId);
+  const gid = pid ? `gid://shopify/Product/${pid}` : '';
+  const override = byProduct[productId] || byProduct[pid] || (gid ? byProduct[gid] : null);
+  const byVariant = override && typeof override === 'object' ? override.byVariant : null;
+  if (!byVariant || typeof byVariant !== 'object') return keys;
+  Object.keys(byVariant).forEach(raw => {
+    const key = toVariantIdKey(raw);
+    if (key) keys.add(key);
+  });
+  return keys;
+}
+
 function getEffectivePriceConfigForPublish(cfg, productId, currentVariantId) {
   if (!cfg || typeof cfg !== 'object') {
     return cfg;
@@ -674,8 +697,19 @@ async function publishWinnerPricesToShopify({
       continue;
     }
     const variants = Array.isArray(product?.variants) ? product.variants : [];
+    // Which variants of this product the test actually names, and which of
+    // those the scan below reaches. Shopify returns a bounded page of variants,
+    // so on a product with more than that the targeted SKU can go unseen — and
+    // a loop that only counts what it saw would then report a clean
+    // "already in sync" over a price it never wrote.
+    const targetedKeys = targetedVariantKeysForProduct(winnerConfig, product?.id);
+    const seenKeys = targetedKeys.size ? new Set() : null;
     for (const variant of variants) {
       summary.variants_scanned += 1;
+      if (seenKeys) {
+        const key = toVariantIdKey(variant?.id);
+        if (key) seenKeys.add(key);
+      }
       const effectiveCfg = getEffectivePriceConfigForPublish(winnerConfig, product.id, variant.id);
       const decision = computeTargetPriceForPublish(
         effectiveCfg,
@@ -731,6 +765,18 @@ async function publishWinnerPricesToShopify({
           error: error?.message || 'Failed to update variant price',
         });
       }
+    }
+    if (seenKeys) {
+      targetedKeys.forEach(key => {
+        if (seenKeys.has(key)) return;
+        summary.error_count += 1;
+        pushLimited(samples.errors, {
+          product_id: product.id,
+          variant_id: key,
+          error:
+            'Shopify did not return this variant for the product, so its price was left unchanged.',
+        });
+      });
     }
   }
 

@@ -15,12 +15,7 @@ const {
   isReadyState,
   PRODUCT_DECISION_STATE,
 } = require('./smartPricingProductDecision');
-const {
-  getShopRolloutReadiness,
-  saveShopRolloutReadiness,
-  foldReadiness,
-  orderByStaleness,
-} = require('./smartPricingRolloutReadinessStore');
+const { foldReadiness, orderByStaleness } = require('./smartPricingRolloutReadinessStore');
 
 /** Products evaluated per sweep. The window rotates, so this bounds work per run, not coverage. */
 const SHOP_CAP = 50;
@@ -43,6 +38,10 @@ function loadDeps(overrides = {}) {
     sendSupportMail: (...args) => require('../support/supportMailer').sendSupportMail(...args),
     acquireJobLease: (...args) => require('../../utils/jobLease').acquireJobLease(...args),
     releaseJobLease: (...args) => require('../../utils/jobLease').releaseJobLease(...args),
+    getShopRolloutReadiness: (...args) =>
+      require('./smartPricingRolloutReadinessStore').getShopRolloutReadiness(...args),
+    saveShopRolloutReadiness: (...args) =>
+      require('./smartPricingRolloutReadinessStore').saveShopRolloutReadiness(...args),
     resolveAppUrl: () =>
       require('../support/supportMailer').firstEnv('SHOPIFY_APP_URL', 'APP_URL') || null,
     logger,
@@ -104,7 +103,7 @@ function formatMoney(value, currency) {
  * Describes one product, and says per product whether it will be applied for you.
  *
  * A batch is usually mixed: some products have the exact evidence that lets
- * Pricify write the price, others only have directional evidence and will wait
+ * Priceify write the price, others only have directional evidence and will wait
  * however long. A single deadline line at the bottom would tell the merchant the
  * wrong thing about most of the list.
  */
@@ -163,9 +162,9 @@ function winnerReadyEmail({ shopDomain, rows, autoApplyAt, appUrl }) {
   const lines = rows.map(row => `• ${describeRow(row)}`);
   const automatic = rows.filter(row => row.decision?.auto?.apply_at).length;
   const deadline = !autoApplyAt
-    ? 'These wait for you — Pricify will not change any price on its own.'
+    ? 'These wait for you — Priceify will not change any price on its own.'
     : automatic === count
-      ? `If you do nothing, Pricify applies these automatically, starting ${new Date(autoApplyAt).toUTCString()}.`
+      ? `If you do nothing, Priceify applies these automatically, starting ${new Date(autoApplyAt).toUTCString()}.`
       : `${automatic} of these will be applied automatically, starting ${new Date(autoApplyAt).toUTCString()}. The rest need you to apply them.`;
   const link = safeHref(appUrl ? `${String(appUrl).replace(/\/+$/, '')}/app/experiments` : '');
 
@@ -183,13 +182,13 @@ function winnerReadyEmail({ shopDomain, rows, autoApplyAt, appUrl }) {
     .join('\n');
 
   return {
-    subject: `${count} ${noun} ready to apply — Pricify`,
+    subject: `${count} ${noun} ready to apply — Priceify`,
     text,
     html: [
       '<!DOCTYPE html><html><body style="margin:0;padding:24px;background:#faf7f2;font-family:Inter,Arial,sans-serif;color:#1c1917;line-height:1.5">',
       '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;margin:0 auto;background:#fff;border:1px solid #eadfd4;border-radius:16px">',
       '<tr><td style="padding:24px 28px">',
-      '<p style="margin:0 0 8px;color:#fc4c02;font-size:12px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase">Pricify</p>',
+      '<p style="margin:0 0 8px;color:#fc4c02;font-size:12px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase">Priceify</p>',
       `<p style="margin:0 0 16px;font-size:18px;font-weight:700">${count} ${noun} reached a decision</p>`,
       '<ul style="margin:0 0 16px;padding-left:18px">',
       ...rows.map(row => `<li style="margin:0 0 6px">${escapeHtml(describeRow(row))}</li>`),
@@ -244,7 +243,7 @@ async function runShopRolloutSweep(shop, deps) {
     return { shop_domain: shop, evaluated: 0, ready: 0, notified: 0 };
   }
 
-  const existing = await getShopRolloutReadiness(shop);
+  const existing = await deps.getShopRolloutReadiness(shop);
   const decisions = {};
   const rowsByTestId = new Map();
 
@@ -329,7 +328,19 @@ async function runShopRolloutSweep(shop, deps) {
     }
   }
 
-  await saveShopRolloutReadiness(shop, map).catch(() => null);
+  // notified_at only stops the next sweep re-sending if it reaches storage. A
+  // failure here after a successful send turns a sweep that runs every few
+  // minutes into a mailing list, so it cannot pass in silence.
+  const persisted = await deps.saveShopRolloutReadiness(shop, map)
+    .then(() => true)
+    .catch(error => {
+      deps.logger.error('Smart Pricing rollout readiness could not be saved', {
+        shopDomain: shop,
+        notified,
+        error: error?.message,
+      });
+      return false;
+    });
 
   return {
     shop_domain: shop,
@@ -338,6 +349,7 @@ async function runShopRolloutSweep(shop, deps) {
     ready: Object.values(decisions).filter(entry => entry.ready).length,
     became_ready: becameReady.length,
     notified,
+    readiness_persisted: persisted,
   };
 }
 

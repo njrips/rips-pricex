@@ -12,7 +12,7 @@ export const meta: MetaFunction = () =>
   publicMeta({
     title: "Privacy",
     description:
-      "How Pricify uses Shopify APIs, shop settings, and storefront assignment data. App Store listing privacy URL.",
+      "How Priceify uses Shopify APIs, shop settings, and storefront assignment data. App Store listing privacy URL.",
     path: "/privacy",
   });
 

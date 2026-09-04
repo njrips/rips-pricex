@@ -1,9 +1,9 @@
-# Pricify — default CLI config (M.A.K. Ripon Partner org / ripx-plus)
+# Priceify — default CLI config (M.A.K. Ripon Partner org / ripx-plus)
 # Learn more: https://shopify.dev/docs/apps/tools/cli/configuration
 #
 # Do not set `handle` unless it is globally unique (taken handles break app preview).
 
-name = "Pricify"
+name = "Priceify"
 client_id = "4c6899f56aea53cbee6e22893c179fa4"
 application_url = "https://jim-pride-scout-ultimately.trycloudflare.com"
 embedded = true

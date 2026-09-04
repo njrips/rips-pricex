@@ -21,6 +21,7 @@ import {
   conversionBarWidth,
   filterSortProductPerformance,
   filterSortVariationProducts,
+  formatMetricMoney,
   formatPrimaryMetricLabel,
   formatAudienceSegmentLabel,
   formatAudienceFactValue,
@@ -143,7 +144,11 @@ describe('classicExperimentDetailsHelpers', () => {
     expect(formatProductDecisionLabel({ status: 'running' })).toBe('Running');
   });
 
-  it('does not mark overview KPIs significant while the sample floor is unmet', () => {
+  it('withholds the confidence reading entirely while the sample floor is unmet', () => {
+    // Settings and the guide both promise nothing is calculated until every
+    // variation clears the floors. Showing "97%" beside "waiting for 5,000
+    // visitors per variation" broke that promise with the very number the floor
+    // exists to reject.
     const kpis = buildOverviewKpis({
       analytics: {
         summary: { visitors: 400, lift: 18, confidence: 97, significant: false },
@@ -151,7 +156,28 @@ describe('classicExperimentDetailsHelpers', () => {
       },
     });
     expect(kpis.significant).toBe(false);
-    expect(kpis.confidence).toBe(97);
+    expect(kpis.confidence).toBeNull();
+  });
+
+  it('does not reach past a withheld reading to a figure cached on the plan', () => {
+    const kpis = buildOverviewKpis({
+      analytics: {
+        summary: { visitors: 400, lift: 18 },
+        significance: { significant: false, sampleReady: false, minSampleSize: 5000 },
+      },
+      plan: { analytics: { confidence_pct: 96 }, confidence_pct: 96 },
+    });
+    expect(kpis.confidence).toBeNull();
+  });
+
+  it('shows the reading again once the floors are met', () => {
+    const kpis = buildOverviewKpis({
+      analytics: {
+        summary: { visitors: 12000, lift: 6, confidence: 93 },
+        significance: { sequential: true, method: 'msprt', significant: true, sampleReady: true },
+      },
+    });
+    expect(kpis.confidence).toBe(93);
   });
 
   it('does not treat sequential confidence as a fixed-horizon call', () => {
@@ -292,6 +318,32 @@ describe('classicExperimentDetailsHelpers', () => {
     expect(buildAudienceSummary(plan).countries).toEqual(['US']);
     expect(buildAudienceSummary(plan).segmentLabel).toBe('All visitors');
     expect(buildMetricsSummary(plan).secondaryEvents).toEqual(['page_view']);
+  });
+
+  it('carries revenue per visitor onto each variation card', () => {
+    // The Variations tab showed traffic and conversion only, so a variation
+    // that converted less but earned more per visitor read as a plain loss.
+    const plan = {
+      price_arms: [
+        { id: 'c', role: 'control', label: 'Control', price: 59, allocation_percent: 50 },
+        { id: 'a', role: 'challenger', label: 'A', price: 64, allocation_percent: 50 },
+      ],
+    };
+    const rows = buildVariationsSummary(plan, {
+      arms: [
+        { arm_id: 'c', visitors: 4000, conversion_rate: 0.0525, revenue_per_visitor: 2.05 },
+        { arm_id: 'a', visitors: 4000, conversion_rate: 0.0495, revenue_per_visitor: 2.275 },
+      ],
+    });
+    expect(rows[0].revenuePerVisitor).toBe(2.05);
+    expect(rows[1].revenuePerVisitor).toBe(2.275);
+  });
+
+  it('leaves revenue per visitor unset when an arm has no live data', () => {
+    const rows = buildVariationsSummary({
+      price_arms: [{ id: 'c', role: 'control', label: 'Control', price: 59 }],
+    });
+    expect(rows[0].revenuePerVisitor).toBeNull();
   });
 
   it('hides the primary custom goal from secondary metric chips', () => {
@@ -798,6 +850,7 @@ describe('classicExperimentDetailsHelpers', () => {
             visitors: 100,
             conversion_rate: 4,
             profit_per_visitor: 1,
+            revenue_per_visitor: 2,
           },
           {
             arm_id: 'a',
@@ -806,6 +859,7 @@ describe('classicExperimentDetailsHelpers', () => {
             visitors: 120,
             conversion_rate: 6,
             profit_per_visitor: 1.5,
+            revenue_per_visitor: 3,
           },
         ],
       },
@@ -819,6 +873,7 @@ describe('classicExperimentDetailsHelpers', () => {
             visitors: 200,
             conversion_rate: 2,
             profit_per_visitor: 2,
+            revenue_per_visitor: 4,
           },
           {
             arm_id: 'a',
@@ -827,6 +882,7 @@ describe('classicExperimentDetailsHelpers', () => {
             visitors: 180,
             conversion_rate: 8,
             profit_per_visitor: 2.5,
+            revenue_per_visitor: 11,
           },
         ],
       },
@@ -863,6 +919,15 @@ describe('classicExperimentDetailsHelpers', () => {
     const searched = filterSortProductPerformance(grid, { query: 'beta' });
     expect(searched).toHaveLength(1);
 
+    // The revenue chart and the revenue sort both need their own figures; they
+    // used to fall back to the profit ones, which are COGS-adjusted estimates.
+    expect(challenger.avg_revenue_per_visitor).toBe(7);
+    expect(challenger.rpvBarWidth).toBe(100);
+    expect(grid.find(row => row.planId === 'p2')?.metricsByArmId.a.revenue_per_visitor).toBe(11);
+    expect(
+      filterSortProductPerformance(grid, { sort: 'rpv_desc' })[0].planId
+    ).toBe('p2');
+
     const merged = mergeExperimentAnalytics(analyticsByTestId, analyticsByTestId.t1);
     expect(merged.multi_test).toBe(true);
     expect(merged.test_count).toBe(2);
@@ -885,6 +950,137 @@ describe('classicExperimentDetailsHelpers', () => {
     expect(mergedWithSummary.summary.visitors).toBe(600);
     expect(mergedWithSummary.summary.confidence).toBe(90);
     expect(mergedWithSummary.summary.significant).toBe(false);
+  });
+
+  // The Totals card reads these two straight off summary, next to visitor and
+  // conversion counts that cover every product. Inheriting them from one test
+  // put a single product's money next to the whole experiment's traffic.
+  it('recomputes profit per visitor across every product test, not just the first', () => {
+    // Callers hand in one of the tests as primary, so any figure the merge
+    // leaves alone silently becomes that one product's.
+    const t1 = {
+      test_id: 't1',
+      arms: [
+        { arm_id: 'a', visitors: 100, profit_per_visitor: 1, projected_ppv: 1.5 },
+        { arm_id: 'b', visitors: 100, profit_per_visitor: 3, projected_ppv: 3.5 },
+      ],
+      summary: { live_weighted_ppv: 2, projected_best_ppv: 3.5 },
+    };
+    const t2 = {
+      test_id: 't2',
+      arms: [
+        { arm_id: 'a', visitors: 300, profit_per_visitor: 5, projected_ppv: 5.5 },
+        { arm_id: 'b', visitors: 300, profit_per_visitor: 9, projected_ppv: 9.5 },
+      ],
+      summary: { live_weighted_ppv: 7, projected_best_ppv: 9.5 },
+    };
+    const merged = mergeExperimentAnalytics({ t1, t2 }, t1);
+
+    // Arm a averages (1+5)/2 = 3, arm b (3+9)/2 = 6, each with 400 visitors.
+    expect(merged.arms.map(arm => arm.profit_per_visitor)).toEqual([3, 6]);
+    expect(merged.summary.live_weighted_ppv).toBe(4.5);
+    // Best forecast is arm b's cross-product mean, (3.5+9.5)/2, not t1's 3.5.
+    expect(merged.summary.projected_best_ppv).toBe(6.5);
+    expect(merged.arms[1].projected_ppv).toBe(6.5);
+    // Live minus forecast has to compare the two merged figures.
+    expect(merged.arms[1].ppv_vs_projection_delta).toBe(-0.5);
+  });
+
+  // Revenue per visitor is the default goal, and the merge used to drop it
+  // entirely: a multi-product experiment showed the profit estimate where the
+  // measured revenue figure belonged, or nothing at all.
+  it('carries revenue per visitor through the merge as well as profit', () => {
+    const t1 = {
+      test_id: 't1',
+      arms: [
+        { arm_id: 'a', visitors: 100, revenue_per_visitor: 2, profit_per_visitor: 1 },
+        { arm_id: 'b', visitors: 100, revenue_per_visitor: 6, profit_per_visitor: 3 },
+      ],
+    };
+    const t2 = {
+      test_id: 't2',
+      arms: [
+        { arm_id: 'a', visitors: 300, revenue_per_visitor: 10, profit_per_visitor: 5 },
+        { arm_id: 'b', visitors: 300, revenue_per_visitor: 18, profit_per_visitor: 9 },
+      ],
+    };
+    const merged = mergeExperimentAnalytics({ t1, t2 }, t1);
+
+    expect(merged.arms.map(arm => arm.revenue_per_visitor)).toEqual([6, 12]);
+    // Both arms carry 400 visitors, so the weighted blend is the plain mean.
+    expect(merged.summary.live_weighted_rpv).toBe(9);
+    // Revenue is measured and profit is COGS-adjusted, so they must not collapse
+    // into one another.
+    expect(merged.summary.live_weighted_ppv).toBe(4.5);
+  });
+
+  // A visitor-weighted mean treats a missing figure as zero, so an experiment
+  // that reports no money at all averaged out to a confident $0.00 in Totals —
+  // which reads as "these prices earn nothing", not "not measured yet".
+  // The server sends `profit_per_visitor: null` for an arm it could not match
+  // to live analytics — an explicit null, not an absent key. Number(null) is 0
+  // rather than NaN, so every finite check downstream waved it through as a
+  // measured zero and the whole experiment averaged down to $0.00.
+  it('treats an explicitly null metric as missing, not as zero', () => {
+    const withNulls = testId => ({
+      test_id: testId,
+      arms: [
+        { arm_id: 'a', visitors: 100, profit_per_visitor: null, revenue_per_visitor: null },
+        { arm_id: 'b', visitors: 100, profit_per_visitor: null, revenue_per_visitor: null },
+      ],
+    });
+    const merged = mergeExperimentAnalytics(
+      { t1: withNulls('t1'), t2: withNulls('t2') },
+      null
+    );
+
+    expect(merged.arms[0].profit_per_visitor).toBeNull();
+    expect(merged.arms[0].revenue_per_visitor).toBeNull();
+    expect(merged.summary.live_weighted_ppv).toBeNull();
+    expect(merged.summary.live_weighted_rpv).toBeNull();
+  });
+
+  it('shows a dash for money that was never measured', () => {
+    expect(formatMetricMoney(null, 'USD')).toBe('—');
+    expect(formatMetricMoney(undefined, 'USD')).toBe('—');
+    expect(formatMetricMoney('', 'USD')).toBe('—');
+    // Zero and negative are real readings: a variation can earn nothing, and
+    // profit per visitor goes negative when a price sells below cost.
+    expect(formatMetricMoney(0, 'USD')).toMatch(/0\.00/);
+    expect(formatMetricMoney(-1.5, 'USD')).toMatch(/1\.50/);
+  });
+
+  it('reports no money figure rather than zero when no arm has one', () => {
+    const bare = testId => ({
+      test_id: testId,
+      arms: [
+        { arm_id: 'a', visitors: 100 },
+        { arm_id: 'b', visitors: 100 },
+      ],
+    });
+    const merged = mergeExperimentAnalytics({ t1: bare('t1'), t2: bare('t2') }, null);
+
+    expect(merged.summary.live_weighted_rpv).toBeNull();
+    expect(merged.summary.live_weighted_ppv).toBeNull();
+    // Same trap on the forecast: a $0.00 best case reads as a real prediction.
+    expect(merged.summary.projected_best_ppv).toBeNull();
+  });
+
+  // An arm reporting nothing has not earned nothing, so the blend has to cover
+  // the traffic that actually reported rather than the whole experiment.
+  it('weights a money figure over the visitors that reported one', () => {
+    const partial = testId => ({
+      test_id: testId,
+      arms: [
+        { arm_id: 'a', visitors: 50, revenue_per_visitor: 4 },
+        { arm_id: 'b', visitors: 150 },
+      ],
+    });
+    const merged = mergeExperimentAnalytics({ t1: partial('t1'), t2: partial('t2') }, null);
+
+    // Arm a alone reported, so $4 stands. Spreading it over arm b's 300
+    // unmeasured visitors as well would have reported $1.
+    expect(merged.summary.live_weighted_rpv).toBe(4);
   });
 
   it('does not mark a multi-SKU experiment ready when only one test is significant', () => {

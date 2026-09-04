@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Form, Link, useLocation } from 'react-router';
 import { useHydrated } from '../../../hooks/useHydrated';
-import PricifyLogo from './PricifyLogo';
+import PriceifyLogo from './PriceifyLogo';
 import { clearStaffOtpDraft } from './staffOtp';
 import { staffQueueBackHref } from './staffQueue';
 
@@ -17,7 +17,7 @@ const SKIP_HIDDEN = {
   border: 0,
 };
 
-export default function StaffPricifyShell({
+export default function StaffPriceifyShell({
   children,
   showQueueNav = false,
   wide = false,
@@ -41,14 +41,14 @@ export default function StaffPricifyShell({
   }, []);
 
   return (
-    <div className="rpx-public staff-app" data-palette="pricify">
+    <div className="rpx-public staff-app" data-palette="priceify">
       <a className="skip" href="#public-main" style={SKIP_HIDDEN}>
         Skip to content
       </a>
       <header className={scrolled ? 'px-header is-scrolled' : 'px-header'}>
         <div className="px-header-inner">
           <div className="staff-brand-lockup">
-            <PricifyLogo to={homeTo} />
+            <PriceifyLogo to={homeTo} />
             <span className="staff-header-badge">Staff</span>
           </div>
           <div className="px-header-actions">
@@ -71,7 +71,7 @@ export default function StaffPricifyShell({
               </>
             ) : (
               <Link className="px-btn px-btn--ghost" to="/" reloadDocument>
-                Back to Pricify
+                Back to Priceify
               </Link>
             )}
           </div>
@@ -82,9 +82,9 @@ export default function StaffPricifyShell({
       </main>
       <footer className="px-footer">
         <div className="px-footer-inner staff-footer-inner">
-          <PricifyLogo to={homeTo} />
+          <PriceifyLogo to={homeTo} />
           <div className="px-footer-bottom staff-footer-bottom">
-            <p>© {new Date().getFullYear()} Pricify. Operator access only.</p>
+            <p>© {new Date().getFullYear()} Priceify. Operator access only.</p>
             <p>Not a merchant Shopify login.</p>
           </div>
         </div>

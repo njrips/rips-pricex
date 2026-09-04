@@ -223,7 +223,7 @@ function buildSmartPricingTestPlan(input = {}) {
       mdePercent,
       confidenceLevel,
       power,
-      decisionMetric: guardrails.objective || 'profit_per_visitor',
+      decisionMetric: guardrails.objective || 'revenue_per_visitor',
     }),
     analysis_method: 'sequential',
     ...(sampleFloor ? { min_sample_size: sampleFloor } : {}),

@@ -28,7 +28,7 @@ export const HOW_IT_WORKS_STEPS = [
   },
   {
     title: 'Measure the results',
-    body: 'Compare conversion, revenue, profit, and other important metrics.',
+    body: 'Compare conversion, revenue per visitor, and other important metrics.',
   },
 ];
 
@@ -71,7 +71,7 @@ export const FEATURE_CARDS = [
   {
     icon: 'icon-tag',
     title: 'Free to use',
-    body: 'Run pricing experiments without paying for another experimentation platform. Pricify is available free on the Shopify App Store.',
+    body: 'Run pricing experiments without paying for another experimentation platform. Priceify is available free on the Shopify App Store.',
   },
 ];
 
@@ -105,7 +105,7 @@ export const RESULTS_POINTS = [
 ];
 
 export const HERO_SETUP_MOCK = {
-  url: 'app.pricify.io/experiments',
+  url: 'app.priceify.io/experiments',
   crumb: 'Experiments',
   title: 'Summer Hoodie Price Test',
   status: 'Running',
@@ -175,7 +175,7 @@ export const RESULTS_BOARD = {
 
 export const WALKTHROUGH_MOCKS = {
   hypothesis: {
-    url: 'app.pricify.io/experiments/new',
+    url: 'app.priceify.io/experiments/new',
     title: 'New Experiment',
     name: 'Summer Collection Price Test',
     hypothesis:
@@ -184,7 +184,7 @@ export const WALKTHROUGH_MOCKS = {
     next: 'Next: Add Products',
   },
   variations: {
-    url: 'app.pricify.io/experiments/setup/products',
+    url: 'app.priceify.io/experiments/setup/products',
     title: 'Products & Prices',
     product: 'Wool Blend Hoodie',
     sku: 'WBH-001',
@@ -192,7 +192,7 @@ export const WALKTHROUGH_MOCKS = {
     variation: '$69.00',
   },
   results: {
-    url: 'app.pricify.io/experiments/summer-test/results',
+    url: 'app.priceify.io/experiments/summer-test/results',
     title: 'Results',
     conversion: { control: '3.2%', variation: '4.4%' },
     revenue: { control: '$1.89', variation: '$3.04' },
@@ -237,8 +237,8 @@ export const USE_CASES = [
 
 export const FAQ_ITEMS = [
   {
-    q: 'Is Pricify really free?',
-    a: 'Yes. Pricify is free to install and free to use for running pricing experiments on your Shopify store — there’s no paid tier required to get started.',
+    q: 'Is Priceify really free?',
+    a: 'Yes. Priceify is free to install and free to use for running pricing experiments on your Shopify store — there’s no paid tier required to get started.',
   },
   {
     q: 'Do I need coding experience?',
@@ -261,8 +261,8 @@ export const FAQ_ITEMS = [
     a: 'Yes. Pause or stop a test from the app at any time. Price tests apply a winning variation to that product’s catalog price automatically, and leave the catalog unchanged when control wins.',
   },
   {
-    q: 'Does Pricify work with my Shopify store?',
-    a: 'Yes. Pricify is a Shopify-native app and uses your existing checkout.',
+    q: 'Does Priceify work with my Shopify store?',
+    a: 'Yes. Priceify is a Shopify-native app and uses your existing checkout.',
   },
 ];
 

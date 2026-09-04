@@ -40,7 +40,7 @@ test('winner ready email', async t => {
       appUrl: 'https://app.example.com',
     });
     assert.match(email.subject, /2 products ready to apply/);
-    assert.match(email.text, /Pricify will not change any price on its own/);
+    assert.match(email.text, /Priceify will not change any price on its own/);
     assert.match(email.text, /Cotton Tee/);
     assert.match(email.text, /Waiting for you to apply it/);
     assert.match(email.text, /control held/);
@@ -48,7 +48,7 @@ test('winner ready email', async t => {
     assert.match(email.text, /https:\/\/app\.example\.com\/app\/experiments/);
   });
 
-  await t.test('states per product whether Pricify applies it', () => {
+  await t.test('states per product whether Priceify applies it', () => {
     // A mixed batch is the normal case: only products with exact evidence get an
     // automatic apply, so one blanket deadline would misdescribe the others.
     const applyAt = '2026-03-01T00:00:00.000Z';
@@ -79,7 +79,7 @@ test('winner ready email', async t => {
       autoApplyAt: applyAt,
       appUrl: null,
     });
-    assert.match(email.text, /Pricify applies these automatically/);
+    assert.match(email.text, /Priceify applies these automatically/);
     assert.doesNotMatch(email.text, /The rest need you/);
   });
 
@@ -212,5 +212,89 @@ test('rollout readiness sweep', async t => {
     });
     assert.equal(result.evaluated, 0);
     assert.deepEqual(released, []);
+  });
+
+  /** A sweep wired to reach the notify branch for one ready product. */
+  function readySweepDeps(overrides = {}) {
+    const saved = [];
+    return {
+      saved,
+      deps: {
+        acquireJobLease: async () => true,
+        releaseJobLease: async () => {},
+        getShopSmartPricingGuardrails: async () => ({
+          winner_ready_notify: true,
+          notification_email: 'pricing@example.com',
+        }),
+        listInboxPlans: async () => ({
+          plans: [{ id: 'SP-1', test_id: 'test-sku-1', status: 'running', title: 'Hoodie' }],
+        }),
+        getShopRolloutReadiness: async () => ({}),
+        saveShopRolloutReadiness: async (_shop, map) => {
+          saved.push(map);
+        },
+        getTestById: async () => ({
+          id: 'test-sku-1',
+          type: 'price',
+          status: 'running',
+          name: 'Smart Pricing · Hoodie',
+          description: 'Created from Smart Pricing plan SP-1',
+          variants: [
+            { id: 'v-control', name: 'Control', config: { price: 40 } },
+            { id: 'v-up', name: 'Higher', config: { price: 46 } },
+          ],
+        }),
+        buildSmartPricingTestAnalytics: async () => ({
+          significance: {
+            sequential: true,
+            method: 'beta_binomial_cs',
+            family: 'conversion',
+            outcomesMatured: true,
+            evidenceValidated: true,
+            sampleReady: true,
+            significant: true,
+            winner: 'variantB',
+            winnerVariantId: 'v-up',
+          },
+          arms: [
+            { name: 'Control', visitors: 6000, conversions: 180, conversion_rate: 3 },
+            { name: 'Higher', visitors: 6000, conversions: 240, conversion_rate: 4 },
+          ],
+        }),
+        sendSupportMail: async () => ({ sent: true }),
+        resolveAppUrl: () => 'https://app.example.com',
+        ...overrides,
+      },
+    };
+  }
+
+  await t.test('emails a ready product once and records that it did', async () => {
+    const { saved, deps } = readySweepDeps();
+
+    const result = await sweepShopRolloutReadiness('demo.myshopify.com', deps);
+
+    assert.equal(result.notified, 1);
+    assert.equal(result.readiness_persisted, true);
+    assert.ok(saved[0]['test-sku-1'].notified_at, 'the send has to be recorded');
+  });
+
+  // notified_at is the only thing stopping the next sweep sending the same
+  // email. If the write is lost and the failure is swallowed, a sweep that runs
+  // every few minutes becomes a mailing list with nothing in the logs to say so.
+  await t.test('reports a lost readiness write after an email was sent', async () => {
+    const logged = [];
+    const { deps } = readySweepDeps({
+      saveShopRolloutReadiness: async () => {
+        throw new Error('key_value_store unavailable');
+      },
+      logger: { info() {}, warn() {}, error: (msg, meta) => logged.push({ msg, meta }) },
+    });
+
+    const result = await sweepShopRolloutReadiness('demo.myshopify.com', deps);
+
+    assert.equal(result.notified, 1);
+    assert.equal(result.readiness_persisted, false);
+    assert.equal(logged.length, 1);
+    assert.match(logged[0].msg, /could not be saved/i);
   });
 });

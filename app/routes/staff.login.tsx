@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from "react-router";
 import { Form, redirect, useActionData, useLoaderData, useNavigation } from "react-router";
-import PricifyIcon from "../components/public/pricify/PricifyIcon";
-import StaffOtpBoxes from "../components/public/pricify/StaffOtpBoxes";
+import PriceifyIcon from "../components/public/priceify/PriceifyIcon";
+import StaffOtpBoxes from "../components/public/priceify/StaffOtpBoxes";
 import { useHydrated } from "../hooks/useHydrated";
 import { useKeyedState } from "../hooks/useKeyedState";
 import {
@@ -12,7 +12,7 @@ import {
   readStaffOtpDraft,
   secondsLeftFromIssued,
   writeStaffOtpDraft,
-} from "../components/public/pricify/staffOtp";
+} from "../components/public/priceify/staffOtp";
 import {
   clearStaffLoginFailures,
   isStaffLoginConfigured,
@@ -26,7 +26,7 @@ import {
   verifyStaffLoginCode,
 } from "../utils/staffSupportAuth.server";
 
-export const meta: MetaFunction = () => [{ title: "Staff login · Pricify" }];
+export const meta: MetaFunction = () => [{ title: "Staff login · Priceify" }];
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const next = safeStaffNext(new URL(request.url).searchParams.get("next"));
@@ -215,15 +215,15 @@ export default function StaffLogin() {
         </p>
         <ul className="staff-points">
           <li>
-            <PricifyIcon name="icon-shield" size={20} />
+            <PriceifyIcon name="icon-shield" size={20} />
             <span>Only verified Echologyx emails can request a code.</span>
           </li>
           <li>
-            <PricifyIcon name="icon-sparkles" size={20} />
+            <PriceifyIcon name="icon-sparkles" size={20} />
             <span>The code expires in 1 minute, same as RipX.</span>
           </li>
           <li>
-            <PricifyIcon name="icon-lifebuoy" size={20} />
+            <PriceifyIcon name="icon-lifebuoy" size={20} />
             <span>After sign-in you can review and reply to shop tickets.</span>
           </li>
         </ul>

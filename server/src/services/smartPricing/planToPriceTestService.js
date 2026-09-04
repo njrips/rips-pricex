@@ -206,12 +206,16 @@ function resolvePlanGoal(plan = {}, guardrails = {}) {
   const planGoal = plan.goal && typeof plan.goal === 'object' ? plan.goal : {};
   const shopStats = resolveShopStatisticalDefaults(guardrails);
   const defaultGoal = guardrails.default_goal_template || guardrails.defaultGoalTemplate || {};
+  // Revenue per visitor is the last resort, matching the shop defaults above
+  // it. This read 'profit_per_visitor', so a plan that named no metric — and a
+  // shop whose guardrails had not loaded — launched on profit, which is only
+  // revenue scaled by an assumed cost percentage.
   const primary =
     planGoal.primary_metric ||
     plan.objective ||
     defaultGoal.primary_metric ||
     guardrails.objective ||
-    'profit_per_visitor';
+    'revenue_per_visitor';
   const cogs =
     planGoal.cogs && typeof planGoal.cogs === 'object'
       ? planGoal.cogs

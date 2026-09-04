@@ -898,7 +898,7 @@ export default function PriceSurfaceMappingsPanel({
                 </Badge>
               ) : null}
             </span>
-            <TooltipWrapper content="Map where Pricify paints test prices on PDP and listing cards. Test overrides run before shop defaults.">
+            <TooltipWrapper content="Map where Priceify paints test prices on PDP and listing cards. Test overrides run before shop defaults.">
               <span className={styles.priceSurfaceHeaderHint}>{registryStatus.hint}</span>
             </TooltipWrapper>
             <span className={styles.priceSurfaceHeaderChevron} aria-hidden>
@@ -933,7 +933,7 @@ export default function PriceSurfaceMappingsPanel({
               </Badge>
             ) : null}
           </span>
-          <TooltipWrapper content="Shop defaults apply to every price test. When a visitor is bucketed, Pricify paints these selectors on the storefront.">
+          <TooltipWrapper content="Shop defaults apply to every price test. When a visitor is bucketed, Priceify paints these selectors on the storefront.">
             <span className={styles.priceSurfaceHeaderHint}>{registryStatus.hint}</span>
           </TooltipWrapper>
         </div>
@@ -1049,7 +1049,7 @@ export default function PriceSurfaceMappingsPanel({
                   Smart selector coverage
                 </Text>
                 <Text as="p" variant="bodySm" tone="subdued">
-                  Pick only the surfaces you want Pricify to paint. Missing surfaces stay untouched.
+                  Pick only the surfaces you want Priceify to paint. Missing surfaces stay untouched.
                 </Text>
               </div>
               <Badge tone={activeScopeTab === 'test' ? 'info' : undefined} size="small">
@@ -1414,7 +1414,7 @@ export default function PriceSurfaceMappingsPanel({
           </Text>
           {pickerModalUrl ? (
             <iframe
-              title="Pricify price surface picker"
+              title="Priceify price surface picker"
               src={pickerModalUrl}
               className={styles.priceSurfacePickerIframe}
             />

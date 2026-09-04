@@ -15,7 +15,7 @@ function normalizeCheckoutExperienceConfig(config = {}) {
 function validateCheckoutExperienceConfig(_config = {}, _opts = {}) {
   return {
     isValid: false,
-    errors: ['Checkout experience tests are not supported in Pricify Classic Smart Pricing.'],
+    errors: ['Checkout experience tests are not supported in Priceify Classic Smart Pricing.'],
   };
 }
 

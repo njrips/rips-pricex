@@ -3,7 +3,7 @@
  * Stored in key_value_store until dedicated columns exist.
  */
 
-const { query } = require('../../utils/database');
+const { query, withTransaction } = require('../../utils/database');
 const { ABSOLUTE_MIN_CONVERSIONS_PER_VARIATION } = require('../../utils/minSampleSize');
 
 const DEFAULT_AUDIENCE_TEMPLATE = Object.freeze({
@@ -286,20 +286,45 @@ async function saveShopSmartPricingGuardrails(shopDomain, patch = {}) {
   if (!normalized) {
     throw new Error('shopDomain is required');
   }
-  const current = await getShopSmartPricingGuardrails(normalized);
-  const next = normalizeGuardrails({
-    ...current,
-    ...patch,
-    updated_at: new Date().toISOString(),
+  const key = kvKey(normalized);
+  // Every setting lives in one JSON blob, so a patch has to read the others
+  // back and rewrite them alongside its own. Read and write have to be one
+  // atomic step: two tabs saving different sections at once would otherwise
+  // each merge onto the same starting value, and the later write would revert
+  // the earlier one — including a consent toggle like auto-apply, which decides
+  // whether prices are written to the catalog unattended.
+  return withTransaction(async client => {
+    // The row may not exist yet, and FOR UPDATE locks nothing that is not there.
+    await client.query(
+      `INSERT INTO key_value_store (key, value, updated_at)
+       VALUES ($1, $2, NOW())
+       ON CONFLICT (key) DO NOTHING`,
+      [key, JSON.stringify({})]
+    );
+    const locked = await client.query(
+      'SELECT value FROM key_value_store WHERE key = $1 FOR UPDATE',
+      [key]
+    );
+    const rawValue = locked.rows?.[0]?.value;
+    let current = { ...DEFAULT_GUARDRAILS };
+    if (rawValue !== null && rawValue !== undefined) {
+      try {
+        current = normalizeGuardrails(typeof rawValue === 'string' ? JSON.parse(rawValue) : rawValue);
+      } catch {
+        // Unreadable stored value; defaults are a safer base than a partial merge.
+      }
+    }
+    const next = normalizeGuardrails({
+      ...current,
+      ...patch,
+      updated_at: new Date().toISOString(),
+    });
+    await client.query('UPDATE key_value_store SET value = $2, updated_at = NOW() WHERE key = $1', [
+      key,
+      JSON.stringify(next),
+    ]);
+    return next;
   });
-  await query(
-    `INSERT INTO key_value_store (key, value, updated_at)
-     VALUES ($1, $2, NOW())
-     ON CONFLICT (key)
-     DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
-    [kvKey(normalized), JSON.stringify(next)]
-  );
-  return next;
 }
 
 // Limits that exist to protect the merchant's catalog. A caller may supply

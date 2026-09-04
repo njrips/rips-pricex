@@ -4,11 +4,12 @@
  */
 
 const { getTestById } = require('../../models/test');
+const logger = require('../../utils/logger');
 const {
   findInboxPlanByTestId,
   getInboxPlanById,
   listInboxPlans,
-  saveInboxPlans,
+  upsertInboxPlan,
   patchInboxPlan,
   countInboxPlansForTest,
 } = require('../../models/smartPricingInboxStore');
@@ -185,6 +186,11 @@ async function recordWinnerApplied({
   const baseline = extractBaselineFromPublish(publish);
   const plan = await resolvePlanForTest(shopDomain, testId, test);
   const appliedAt = new Date().toISOString();
+  // The publisher stops collecting baseline rows past a cap, so on a very large
+  // catalog some variants were written with no record of their old price.
+  // Revert can only restore what is recorded, so the shortfall travels with the
+  // snapshot instead of being discovered when the merchant tries to undo.
+  const truncated = publish?.applied_truncated === true;
 
   if (plan?.id && baseline.length) {
     await patchInboxPlan(shopDomain, plan.id, {
@@ -192,9 +198,18 @@ async function recordWinnerApplied({
         applied_at: appliedAt,
         winner_variant_id: publish?.winner_variant_id || null,
         winner_variant_name: publish?.winner_variant_name || null,
+        truncated,
         variants: baseline,
       },
-    }).catch(() => null);
+    }).catch(err => {
+      logger.error('Smart Pricing could not store the revert baseline on the plan', {
+        shopDomain,
+        testId,
+        planId: plan.id,
+        error: err?.message,
+      });
+      return null;
+    });
   }
 
   await recordEventForTest(shopDomain, testId, eventType, {
@@ -207,6 +222,7 @@ async function recordWinnerApplied({
       winner_variant_id: publish?.winner_variant_id || null,
       winner_variant_name: publish?.winner_variant_name || null,
       updated_count: publish?.summary?.updated_count ?? baseline.length,
+      baseline_truncated: truncated,
       variants: baseline,
       applied_at: appliedAt,
     },
@@ -266,6 +282,12 @@ async function revertSmartPricingProductPrice({
     ? plan.applied_baseline.variants
     : [];
   const baseline = fromEvent.length ? fromEvent : fromPlan;
+  // Set when the apply wrote more variants than the snapshot could hold. Those
+  // variants keep the applied price whatever this revert does, so the caller
+  // has to be able to say so rather than report a clean undo.
+  const baselineTruncated =
+    applyEvent?.payload?.baseline_truncated === true ||
+    plan?.applied_baseline?.truncated === true;
 
   if (!baseline.length) {
     throw new Error('No apply snapshot found for this product. Nothing to revert.');
@@ -449,6 +471,7 @@ async function revertSmartPricingProductPrice({
     drifted,
     unverified,
     errors,
+    baseline_truncated: baselineTruncated,
   };
 }
 
@@ -556,6 +579,11 @@ async function buildFollowUpPlan({
   const shopConf = Number(guardrails.confidence_level);
   const shopPower = Number(guardrails.statistical_power);
   const shopMin = Number(guardrails.min_sample_size_per_variation);
+  // Only 90 and 95 are offered, so anything else means the shop has no usable
+  // value and the round that just finished is the better guide.
+  const followUpConfidence = Number.isFinite(shopConf) && shopConf > 0
+    ? (shopConf === 95 ? 95 : 90)
+    : (Number(statsInput.confidence_level) === 95 ? 95 : 90);
 
   let rebuilt = buildSmartPricingTestPlan({
     shopDomain,
@@ -567,10 +595,16 @@ async function buildFollowUpPlan({
     scenarioPreset: 'conservative',
     variantCount: 2,
     dailyVisitors: plan.daily_visitors,
+    // What was measured about this product carries over from the round that
+    // measured it. What the merchant chose does not: a follow-up round is a new
+    // test they review and launch, so it is judged by the Stat settings in
+    // force now. Confidence used to prefer the parent's stamped level while the
+    // sample floor took the current one, which let one round be decided at 95%
+    // and its follow-up at 90% with nothing on screen explaining why.
     baselineConversionRate: statsInput.baseline_conversion_rate,
     baselinePpv: statsInput.baseline_ppv,
     mdePercent: Number(statsInput.mde_percent) || (Number.isFinite(shopMde) ? shopMde : 10),
-    confidenceLevel: Number(statsInput.confidence_level) || (shopConf === 95 ? 95 : 90),
+    confidenceLevel: followUpConfidence,
     power: Number(statsInput.statistical_power) || (Number.isFinite(shopPower) ? shopPower : 80),
     ...(Number.isFinite(shopMin) && shopMin >= 1 ? { minSampleSize: Math.round(shopMin) } : {}),
     guardrails,
@@ -604,7 +638,12 @@ async function buildFollowUpPlan({
     followUp.experiment_id = plan.experiment_id || plan.metadata.experiment_id;
   }
 
-  await saveInboxPlans(shopDomain, [...stored.plans, followUp]);
+  // Insert this one row rather than rewriting the shop's whole inbox.
+  // saveInboxPlans treats its argument as the complete set and deletes every
+  // plan_id missing from it, and `stored` was read before the plan was built —
+  // so queueing round 2 for two products at once, or alongside a merchant
+  // saving the inbox, deleted whichever plans the losing snapshot had not seen.
+  await upsertInboxPlan(shopDomain, followUp);
 
   await recordProductEvent({
     shopDomain,

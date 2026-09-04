@@ -23,7 +23,7 @@ export default function PublicSectionLink({ hash, className, children, onNavigat
           scheduleScrollToPublicHash(id);
           return;
         }
-        // Hash change is scrolled once by PricifyShell. Do not also scroll here —
+        // Hash change is scrolled once by PriceifyShell. Do not also scroll here —
         // a second pass (smooth + native hash) is the first-click bounce.
         navigate({ pathname: '/', search, hash: `#${id}` }, { preventScrollReset: true });
       }}

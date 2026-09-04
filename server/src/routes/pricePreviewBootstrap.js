@@ -106,7 +106,7 @@ function buildPricePreviewHtml({
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>RipX price preview</title>
+    <title>Priceify price preview</title>
     <style>
       html, body {
         margin: 0;
@@ -299,7 +299,7 @@ function buildPricePreviewHtml({
             var body = document.body || document.documentElement;
             if (!body) return;
             body.innerHTML = '';
-            document.title = titleText || 'RipX price preview';
+            document.title = titleText || 'Priceify price preview';
             var wrap = document.createElement('main');
             wrap.style.cssText =
               'font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;max-width:560px;margin:12vh auto;padding:24px;border:1px solid #ddd;border-radius:14px;box-shadow:0 8px 30px rgba(0,0,0,.08);background:#fff;';
@@ -368,7 +368,7 @@ function buildPricePreviewHtml({
             window.setInterval(function () {
               ensureStatusBar();
               if (hasRipxRuntime()) {
-                if (statusEl) statusEl.textContent = 'RipX price preview ready';
+                if (statusEl) statusEl.textContent = 'Priceify price preview ready';
                 if (dotEl) dotEl.className = 'ripx-price-preview-dot ready';
               }
             }, 1500);
@@ -553,7 +553,7 @@ function buildPricePreviewHtml({
 
           if (hasRipxRuntime()) {
             mirrorRuntimeForConsole();
-            setStatus('RipX price preview ready', true);
+            setStatus('Priceify price preview ready', true);
             try {
               themeScripts.forEach(appendScriptFromParsed);
             } catch (_eScriptsReady) {}
@@ -594,7 +594,7 @@ function buildPricePreviewHtml({
               script.async = false;
               script.onload = function () {
                 mirrorRuntimeForConsole();
-                setStatus('RipX price preview ready', true);
+                setStatus('Priceify price preview ready', true);
                 cleanSimplePreviewAddressBar();
                 try {
                   themeScripts.forEach(appendScriptFromParsed);
@@ -603,26 +603,26 @@ function buildPricePreviewHtml({
               script.onerror = function () {
                 if (secondarySrc && script.src !== secondarySrc) {
                   lastError = 'direct_script_failed_trying_app_proxy';
-                  setStatus('Direct RipX script failed; trying app proxy...', false, true);
+                  setStatus('Direct Priceify script failed; trying app proxy...', false, true);
                   var fallback = document.createElement('script');
                   fallback.src = secondarySrc;
                   fallback.async = false;
                   fallback.onload = script.onload;
                   fallback.onerror = function () {
                     lastError = 'ripx_script_failed';
-                    setStatus('RipX runtime failed to load', false, true);
+                    setStatus('Priceify runtime failed to load', false, true);
                   };
                   (document.head || document.documentElement || document.body).appendChild(fallback);
                   return;
                 }
                 lastError = 'ripx_script_failed';
-                setStatus('RipX runtime failed to load', false, true);
+                setStatus('Priceify runtime failed to load', false, true);
               };
               (document.head || document.documentElement || document.body).appendChild(script);
             }
           } catch (_injectErr) {
             lastError = _injectErr && _injectErr.message ? _injectErr.message : 'inject_failed';
-            setStatus('Could not inject RipX runtime', false, true);
+            setStatus('Could not inject Priceify runtime', false, true);
           }
         }
 

@@ -180,7 +180,12 @@ describe('productsStepReadiness', () => {
     expect(cap.max).toBe(15);
     expect(describeAiBandCap(cap)).toMatch(/entirely above your 15% max price change guardrail/i);
     expect(describeAiBandCap(cap)).toMatch(/suggestions use 10%–15% instead/i);
-    expect(describeAiBandCap(cap)).toMatch(/Raise Max price change in Settings to test 20%–30%/i);
+    // Settings no longer carries this field, so the copy must point at the
+    // one-click raise beside it rather than sending the merchant nowhere.
+    expect(describeAiBandCap(cap)).toMatch(/Raise the max price change to test 20%–30%/i);
+    expect(describeAiBandCap(cap)).not.toMatch(/in Settings/i);
+    // The infeasible case has to offer that button, or the advice is empty.
+    expect(resolveMaxPriceChangeRaise(cap)).toMatchObject({ target: 30, currentPct: 15 });
   });
 
   it('keeps the scaled band above a usable floor for an extreme request', () => {

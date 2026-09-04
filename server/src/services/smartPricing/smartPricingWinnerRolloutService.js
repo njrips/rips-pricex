@@ -3,6 +3,7 @@
  */
 
 const { getTestById } = require('../../models/test');
+const logger = require('../../utils/logger');
 const { applyPersonalization } = require('../personalizationService');
 const {
   resolveWinnerVariantForPublish,
@@ -176,51 +177,79 @@ async function performWinnerRollout({
     test = (await stopTest(testId, shopDomain)) || (await getTestById(testId, shopDomain));
   }
 
-  const updatedTest = await applyPersonalization(testId, shopDomain, {
-    variantIndex: reviewed.variantIndex,
-  });
-
+  // Catalog first, traffic second — the same order the unattended auto-apply
+  // uses. None of the publish steps read personalization state (the winner is
+  // resolved from the index the merchant reviewed), so nothing is lost by
+  // waiting, and a write that throws now leaves the storefront serving the old
+  // price rather than the winner the merchant was just told failed to apply.
   let publish = null;
   if (publishToShopify) {
     const winnerVariant = await resolveWinnerVariantForPublish(
-      updatedTest,
+      test,
       shopDomain,
       reviewed.variantIndex
     );
     if (!winnerVariant) {
-      throw new Error('Could not determine winner variant after personalization');
+      throw new Error('Could not determine the winning variation to publish.');
     }
-    const preloadedProducts = await fetchTargetProductsForPublish(
-      updatedTest,
-      shopDomain,
-      accessToken
-    );
+    const preloadedProducts = await fetchTargetProductsForPublish(test, shopDomain, accessToken);
     publish = await publishWinnerPricesToShopify({
-      test: updatedTest,
+      test,
       winnerVariant,
       shopDomain,
       accessToken,
       preloadedProducts,
       dryRun: false,
     });
-    // Persist previous/new prices so the merchant can revert later.
-    if (publish) {
-      const { recordWinnerApplied } = require('./smartPricingProductLifecycleService');
-      await recordWinnerApplied({
+  }
+
+  // Shopify can refuse individual variants — a deleted SKU, a permission gap, a
+  // rate limit — while accepting the rest, and that returns normally. Moving all
+  // traffic onto a winner whose price only partly exists would charge some
+  // shoppers the old price under a test recorded as decided. Leaving the split
+  // in place keeps the catalog and the traffic in step, and leaves the merchant
+  // a working retry or revert.
+  const publishErrors = Number(publish?.summary?.error_count) || 0;
+  const personalized = publishErrors === 0;
+  if (!personalized) {
+    logger.error('Smart Pricing apply left prices unwritten, so traffic was not personalized', {
+      shopDomain,
+      testId,
+      updatedCount: Number(publish?.summary?.updated_count) || 0,
+      errorCount: publishErrors,
+    });
+  }
+  const updatedTest = personalized
+    ? await applyPersonalization(testId, shopDomain, { variantIndex: reviewed.variantIndex })
+    : test;
+
+  // Persist previous/new prices so the merchant can revert later.
+  if (publish) {
+    const { recordWinnerApplied } = require('./smartPricingProductLifecycleService');
+    await recordWinnerApplied({
+      shopDomain,
+      testId,
+      test: updatedTest,
+      publish,
+      actor: 'merchant',
+      eventType: 'winner_applied',
+    }).catch(err => {
+      // The prices are already written. Failing the whole apply now would be
+      // a lie in the other direction, but a lost snapshot is what leaves
+      // Revert with nothing to restore, so it has to be visible.
+      logger.error('Smart Pricing apply could not save a revert baseline', {
         shopDomain,
         testId,
-        test: updatedTest,
-        publish,
-        actor: 'merchant',
-        eventType: 'winner_applied',
-      }).catch(() => null);
-    }
+        error: err?.message,
+      });
+      return null;
+    });
   }
 
   return {
     test: updatedTest,
     publish,
-    personalized: true,
+    personalized,
     published_to_shopify: Boolean(publishToShopify),
   };
 }

@@ -1,3 +1,15 @@
+// Every input this function can see is a cart line attribute, and a shopper can
+// set those freely when adding to cart — `properties[_ripx_offer_discount_value]`
+// on /cart/add.js reaches this code verbatim. A Shopify Function has no network
+// and no secret, so it cannot tell a real offer assignment from a forged one.
+//
+// So the requested discount is treated as untrusted and capped at half the
+// line's own subtotal. That mirrors the 0.5x price floor the cart transform
+// applies for the same reason: a real offer test never approaches it, while a
+// forged `_ripx_offer_discount_value=100` percent — which asked for the line
+// free before this cap existed — is cut back to the ceiling.
+const MAX_DISCOUNT_RATIO = 0.5;
+
 const DiscountClass = {
   Product: 'PRODUCT',
   Order: 'ORDER',
@@ -61,6 +73,7 @@ function buildCandidates(cartLines) {
     const subtotal = Number.parseFloat(String(line?.cost?.subtotalAmount?.amount || ''));
     if (!(offerValue > 0) || !(subtotal > 0)) continue;
     const roundedSubtotal = Math.round(subtotal * 100) / 100;
+    const ceiling = Math.round(roundedSubtotal * MAX_DISCOUNT_RATIO * 100) / 100;
     let discount = 0;
     if (offerType === 'percent') {
       const pct = Math.max(0, Math.min(100, offerValue));
@@ -68,6 +81,7 @@ function buildCandidates(cartLines) {
     } else {
       discount = Math.round(Math.min(roundedSubtotal, offerValue * qty) * 100) / 100;
     }
+    discount = Math.min(discount, ceiling);
     if (!(discount > 0)) continue;
     candidates.push({
       message: lineMessage(line),

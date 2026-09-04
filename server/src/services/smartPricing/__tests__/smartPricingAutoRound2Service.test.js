@@ -1,6 +1,7 @@
 jest.mock('../../../models/smartPricingInboxStore', () => ({
   listInboxPlans: jest.fn(),
   saveInboxPlans: jest.fn(),
+  upsertInboxPlan: jest.fn(),
   getInboxPlanById: jest.fn(),
   patchInboxPlan: jest.fn(),
   findInboxPlanByTestId: jest.fn(),
@@ -29,8 +30,10 @@ jest.mock('../smartPricingGuardrailsService', () => ({
 const {
   listInboxPlans,
   saveInboxPlans,
+  upsertInboxPlan,
   getInboxPlanById,
 } = require('../../../models/smartPricingInboxStore');
+const { getShopSmartPricingGuardrails } = require('../smartPricingGuardrailsService');
 const { maybeAutoQueueRound2Plan } = require('../smartPricingAutoRound2Service');
 const { buildFollowUpPlan } = require('../smartPricingProductLifecycleService');
 
@@ -50,30 +53,72 @@ const samplePlan = {
   statistical_design: { baseline_conversion_rate: 0.02 },
 };
 
+const SHOP_GUARDRAILS = {
+  min_margin_percent: 35,
+  auto_round2_default: false,
+  max_learning_rounds: 3,
+};
+
 describe('smartPricingAutoRound2Service', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     process.env.SMART_PRICING_AUTO_ROUND2 = 'true';
     getInboxPlanById.mockResolvedValue(samplePlan);
     listInboxPlans.mockResolvedValue({ plans: [samplePlan] });
-    saveInboxPlans.mockResolvedValue({ plans: [] });
+    upsertInboxPlan.mockResolvedValue(null);
+    // Reset per test: the confidence case below replaces this for every call,
+    // since the follow-up path reads guardrails more than once.
+    getShopSmartPricingGuardrails.mockResolvedValue({ ...SHOP_GUARDRAILS });
   });
 
   it('queues a conservative Round 2 plan for applied winners', async () => {
     const result = await maybeAutoQueueRound2Plan('demo.myshopify.com', 'SP-1');
     expect(result.queued).toBe(true);
     expect(result.learning_round).toBe(2);
-    expect(saveInboxPlans).toHaveBeenCalledWith(
+    expect(upsertInboxPlan).toHaveBeenCalledWith(
       'demo.myshopify.com',
-      expect.arrayContaining([
-        expect.objectContaining({ id: 'SP-1' }),
-        expect.objectContaining({
-          parent_plan_id: 'SP-1',
-          learning_round: 2,
-          status: 'queued',
-        }),
-      ])
+      expect.objectContaining({
+        parent_plan_id: 'SP-1',
+        learning_round: 2,
+        status: 'queued',
+      })
     );
+  });
+
+  it('judges the follow-up by the confidence level in force now, not the parent’s', async () => {
+    // A follow-up round is a new test the merchant reviews and launches, so it
+    // is judged by current Stat settings. The parent's stamped level used to
+    // win, which let one round be decided at 95% and its follow-up at 90% with
+    // nothing on screen saying why — while the sample floor already took the
+    // current value.
+    getShopSmartPricingGuardrails.mockResolvedValue({
+      ...SHOP_GUARDRAILS,
+      confidence_level: 90,
+    });
+    getInboxPlanById.mockResolvedValue({
+      ...samplePlan,
+      statistical_design: { confidence_level: 95, baseline_conversion_rate: 0.02 },
+    });
+    const result = await maybeAutoQueueRound2Plan('demo.myshopify.com', 'SP-1');
+    expect(result.queued).toBe(true);
+    expect(result.follow_up_plan.statistical_design.confidence_level).toBe(90);
+  });
+
+  it('falls back to the finished round when the shop has no usable level', async () => {
+    getInboxPlanById.mockResolvedValue({
+      ...samplePlan,
+      statistical_design: { confidence_level: 95, baseline_conversion_rate: 0.02 },
+    });
+    const result = await maybeAutoQueueRound2Plan('demo.myshopify.com', 'SP-1');
+    expect(result.follow_up_plan.statistical_design.confidence_level).toBe(95);
+  });
+
+  it('adds the follow-up without rewriting the rest of the inbox', async () => {
+    // saveInboxPlans deletes every plan absent from the array it is given, and
+    // the array came from a read taken before the plan was built. Queueing two
+    // products at once used to delete whichever plans the losing read missed.
+    await maybeAutoQueueRound2Plan('demo.myshopify.com', 'SP-1');
+    expect(saveInboxPlans).not.toHaveBeenCalled();
   });
 
   it('skips when feature flag and shop default are off', async () => {
@@ -98,7 +143,7 @@ describe('buildFollowUpPlan round caps', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     listInboxPlans.mockResolvedValue({ plans: [samplePlan] });
-    saveInboxPlans.mockResolvedValue({ plans: [] });
+    upsertInboxPlan.mockResolvedValue(null);
   });
 
   it('rejects when max learning rounds is reached', async () => {

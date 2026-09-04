@@ -3,8 +3,18 @@
  * A deployed function does nothing until this binding exists.
  */
 
-const DEFAULT_DISCOUNT_TITLE = 'Pricify Offer Checkout Function';
-const LEGACY_DISCOUNT_TITLES = ['RipsPriceX Offer Checkout Function'];
+const { titleLooksLikeAppFunction } = require('../../utils/appBrandTitles');
+
+const DEFAULT_DISCOUNT_TITLE = 'Priceify Offer Checkout Function';
+/**
+ * Titles this discount has shipped under. The lookup is by exact title, so a
+ * name dropped from this list reads as "no discount attached" and we attach a
+ * second one alongside the one already discounting the merchant's orders.
+ */
+const LEGACY_DISCOUNT_TITLES = [
+  'Pricify Offer Checkout Function',
+  'RipsPriceX Offer Checkout Function',
+];
 const DEFAULT_DISCOUNT_CLASSES = ['PRODUCT'];
 const CHECKOUT_DISCOUNT_FUNCTION_HANDLE = 'ripspricex-checkout-discount';
 const ENSURE_TIMEOUT_MS = 20000;
@@ -73,17 +83,7 @@ function pickCheckoutDiscountFunction(functionsList = []) {
     return api.includes('discount') || title.includes('discount') || title.includes('checkout');
   };
   const discountFns = normalized.filter(looksLikeDiscount);
-  const preferred = discountFns.find(fn => {
-    const title = String(fn?.title || '')
-      .trim()
-      .toLowerCase();
-    return (
-      title.includes('pricify') ||
-      title.includes('ripspricex') ||
-      title.includes('rips price') ||
-      title.includes('ripx')
-    );
-  });
+  const preferred = discountFns.find(fn => titleLooksLikeAppFunction(fn?.title));
   if (preferred) return preferred;
   return discountFns[0] || null;
 }
@@ -432,7 +432,7 @@ async function ensureOfferCheckoutDiscount({
   }
   if (!accessToken) {
     const err = new Error(
-      'Missing Shopify access token. Re-open Pricify from Shopify Admin and try again.'
+      'Missing Shopify access token. Re-open Priceify from Shopify Admin and try again.'
     );
     err.code = 'TOKEN_MISSING';
     throw err;

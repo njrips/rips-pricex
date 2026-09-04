@@ -15,6 +15,7 @@ const {
   shouldRequireSignedAssignment,
   getSignatureSecret,
 } = require('../utils/priceAssignmentSignature');
+const { titleLooksLikeAppFunction } = require('../utils/appBrandTitles');
 
 function stripTrailingSlashes(s) {
   return String(s || '')
@@ -405,10 +406,7 @@ function normalizeShopifyFunctionsSnapshot(functionsList) {
 function pickFunctionByApiType(functionsList, matcher) {
   const normalized = normalizeShopifyFunctionsSnapshot(functionsList);
   const matched = normalized.filter(fn => matcher(String(fn.apiType || '').toLowerCase()));
-  const ripxMatched = matched.find(fn => {
-    const title = String(fn.title || '').toLowerCase();
-    return title.includes('pricify') || title.includes('ripspricex') || title.includes('ripx');
-  });
+  const ripxMatched = matched.find(fn => titleLooksLikeAppFunction(fn.title));
   return ripxMatched || matched[0] || null;
 }
 
@@ -577,7 +575,7 @@ function buildCheckoutPriceDiagnostics(opts = {}) {
     );
   }
   recommendations.push(
-    'Ensure Shopify Plus (or eligible plan) + Discount Function network access + an active automatic discount using the RipX function.'
+    'Ensure Shopify Plus (or eligible plan) + Discount Function network access + an active automatic discount using the Priceify function.'
   );
   recommendations.push(
     'Verify cart lines include RipX properties (_ripx_price_test, _ripx_variant, _ripx_shop) before checkout.'
@@ -622,10 +620,10 @@ function buildCheckoutPriceDiagnostics(opts = {}) {
       ok: false,
       severity: 'error',
       message:
-        'Shopify rejected the stored access token (401). Re-open RipX from Shopify Admin or reinstall the app on this store before checking discount functions.',
+        'Shopify rejected the stored access token (401). Re-open Priceify from Shopify Admin or reinstall the app on this store before checking discount functions.',
     });
     recommendations.unshift(
-      'Fix Shopify OAuth first: uninstall RipX on the store, then reinstall via Domains → install link (or Apps → RipperX). Verify with `npm run diagnose:shop -- --shop=YOUR_STORE.myshopify.com` (expect Admin API OK).'
+      'Fix Shopify OAuth first: uninstall Priceify on the store, then reinstall via Domains → install link (or Apps → Priceify). Verify with `npm run diagnose:shop -- --shop=YOUR_STORE.myshopify.com` (expect Admin API OK).'
     );
   } else if (shopifyFunctionsQueryErrorText) {
     checklist.push({
@@ -714,8 +712,8 @@ function buildCheckoutPriceDiagnostics(opts = {}) {
         severity: matchedCartTransforms.length > 0 ? 'ok' : 'warning',
         message:
           matchedCartTransforms.length > 0
-            ? 'RipX cart transform is installed on the shop.'
-            : 'RipX cart transform function exists but is not installed (no cartTransformCreate binding found). Run /api/settings/cart-transform/ensure.',
+            ? 'Priceify cart transform is installed on the shop.'
+            : 'Priceify cart transform function exists but is not installed (no cartTransformCreate binding found). Run /api/settings/cart-transform/ensure.',
       });
     }
     if (cartTransformFunction?.id && cartTransformsLookupStatus === 'scope_missing') {
@@ -724,7 +722,7 @@ function buildCheckoutPriceDiagnostics(opts = {}) {
         ok: false,
         severity: 'warning',
         message:
-          'Cannot verify cart transform install state because the shop token lacks read_cart_transforms scope. Re-open RipX from Shopify Admin to refresh scopes, then run diagnostics again.',
+          'Cannot verify cart transform install state because the shop token lacks read_cart_transforms scope. Re-open Priceify from Shopify Admin to refresh scopes, then run diagnostics again.',
       });
       recommendations.push(
         'Grant/read_cart_transforms for the app token (re-open/re-install app), then re-run /api/settings/checkout-price-diagnostics.'
@@ -838,9 +836,9 @@ function buildCheckoutPriceDiagnostics(opts = {}) {
             : Array.isArray(shopifyCartTransforms)
               ? matchedCartTransforms.length > 0
                 ? 'Cart Transform infrastructure is deployed and installed, so Direct Price Override can run on Plus/dev stores for the supported hardened flow.'
-                : 'RipX cart transform function is deployed but not installed on the shop yet. Run /api/settings/cart-transform/ensure to bind it.'
+                : 'Priceify cart transform function is deployed but not installed on the shop yet. Run /api/settings/cart-transform/ensure to bind it.'
               : 'Cart Transform infrastructure is deployed, so Direct Price Override can run on Plus/dev stores for the supported hardened flow.'
-          : 'Direct Price Override needs the RipX cart transform extension to be deployed on the shop before it can run.',
+          : 'Direct Price Override needs the Priceify cart transform extension to be deployed on the shop before it can run.',
       },
     },
     checklist,

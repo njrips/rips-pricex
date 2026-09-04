@@ -9,10 +9,15 @@ import { readInboxPlans, setInboxPersistHandler, writeInboxPlans } from '../smar
 import { filterPlansByQuery } from '../smartPricingUiHelpers';
 import { hydrateInboxFromServer, schedulePersistInboxPlans } from '../smartPricingInboxPersistence';
 import {
+  clearClassicWizardDraft,
   formatClassicStatusLabel,
+  getPlanExperimentId,
   getPlanProductTitle,
   groupPlansIntoExperiments,
+  readClassicWizardDrafts,
 } from './classicExperimentHelpers';
+import { selectUnlistedWizardDrafts } from './classicWizardAutosave';
+import ClassicUnfinishedDrafts from './ClassicUnfinishedDrafts';
 import { formatOfferRule, isOfferExperimentType } from './offerSelection';
 import ClassicExperimentRowActions from './ClassicExperimentRowActions';
 import { filterClassicExperimentsByTab, listTabAfterClassicAction } from './classicExperimentListActions';
@@ -86,7 +91,9 @@ async function loadExperimentPlans(shopDomain, hydrateOptions) {
 
 function formatMetricLabel(metric) {
   const raw = String(metric || '').trim();
-  if (!raw) return 'Profit per visitor';
+  // An unspecified goal launches on revenue per visitor, so that is what a
+  // blank metric has to say here.
+  if (!raw) return 'Revenue per visitor';
   if (raw === 'paid_conversion_rate') return 'Paid conversion rate';
   if (raw === 'profit_per_visitor') return 'Profit per visitor';
   return raw.replace(/_/g, ' ');
@@ -102,6 +109,7 @@ export default function ClassicExperimentsList() {
     FILTERS.some(f => f.id === initialFilter) ? initialFilter : 'all'
   );
   const [plans, setPlans] = useState([]);
+  const [localDrafts, setLocalDrafts] = useState([]);
   const [search, setSearch] = useState('');
   // Starts busy for each shop; the first load below never has to flip it on.
   const [loading, setLoading] = useKeyedState(shopDomain, true);
@@ -126,11 +134,14 @@ export default function ClassicExperimentsList() {
   const applyLoad = useCallback(
     result => {
       setPlans(result.plans);
+      // Browser-only drafts are read alongside the plans so the two views of
+      // "what is unfinished" are always taken at the same moment.
+      setLocalDrafts(readClassicWizardDrafts(shopDomain));
       if (result.message) setMessage(result.message);
       setLoading(false);
       setGridBusy('');
     },
-    [setLoading]
+    [shopDomain, setLoading]
   );
 
   // Refreshes triggered by row actions show the spinner again unless the caller
@@ -164,6 +175,19 @@ export default function ClassicExperimentsList() {
     const queried = filterPlansByQuery(plans, search);
     return filterClassicExperimentsByTab(groupPlansIntoExperiments(queried), filter);
   }, [plans, filter, search]);
+
+  const unfinishedDrafts = useMemo(
+    () => selectUnlistedWizardDrafts(localDrafts, plans.map(getPlanExperimentId)),
+    [localDrafts, plans]
+  );
+
+  const discardDraft = useCallback(
+    draft => {
+      clearClassicWizardDraft(shopDomain, draft?.experiment_id);
+      setLocalDrafts(readClassicWizardDrafts(shopDomain));
+    },
+    [shopDomain]
+  );
 
   const stats = useMemo(() => {
     const allExperiments = groupPlansIntoExperiments(plans.filter(p => !p.archived));
@@ -291,6 +315,12 @@ export default function ClassicExperimentsList() {
             <div className={styles.statValue}>{stats.winning}</div>
           </div>
         </div>
+
+        <ClassicUnfinishedDrafts
+          drafts={unfinishedDrafts}
+          onResume={path => navigate(path)}
+          onDiscard={discardDraft}
+        />
 
         <div className={styles.filterRow}>
           <div className={styles.filterPillTrack} role="tablist" aria-label="Filter experiments">

@@ -20,6 +20,14 @@ let timersStarted = false;
 const running = new Set();
 
 /**
+ * How long one instance holds a shop's inbox sync.
+ *
+ * Long enough to cover a slow pass over the shop's 50-test window, short enough
+ * that a crashed instance does not hold the shop past the next interval.
+ */
+const INBOX_SYNC_LEASE_SECONDS = 240;
+
+/**
  * Schedules an async pass that never overlaps itself.
  *
  * Each pass walks every installed shop, so its duration grows with the number of
@@ -106,24 +114,36 @@ async function sweepAllRolloutReadiness() {
 }
 
 async function syncAllInboxes(reason = 'interval') {
+  const { acquireJobLease, releaseJobLease } = require('../utils/jobLease');
   const shops = await listInstalledShops();
   for (const shop of shops) {
-    const stored = await listInboxPlans(shop, { archived: false }).catch(() => ({ plans: [] }));
-    const testIds = [
-      ...new Set(
-        (stored.plans || [])
-          .map(plan => String(plan?.test_id || '').trim())
-          .filter(Boolean)
-      ),
-    ].slice(0, 50);
-    for (const testId of testIds) {
-      await syncSmartPricingInboxForTest(shop, testId, { reason }).catch(err => {
-        logger.warn('inbox interval sync failed', {
-          shop,
-          testId,
-          message: err.message,
+    // The in-process guard below only covers one Node process. Two instances,
+    // or an overlapping deploy, would otherwise sync the same shop at once and
+    // spend the same Shopify and analytics calls twice over.
+    const lease = `inbox_sync.${shop}`;
+    if (!(await acquireJobLease(lease, INBOX_SYNC_LEASE_SECONDS))) {
+      continue;
+    }
+    try {
+      const stored = await listInboxPlans(shop, { archived: false }).catch(() => ({ plans: [] }));
+      const testIds = [
+        ...new Set(
+          (stored.plans || [])
+            .map(plan => String(plan?.test_id || '').trim())
+            .filter(Boolean)
+        ),
+      ].slice(0, 50);
+      for (const testId of testIds) {
+        await syncSmartPricingInboxForTest(shop, testId, { reason }).catch(err => {
+          logger.warn('inbox interval sync failed', {
+            shop,
+            testId,
+            message: err.message,
+          });
         });
-      });
+      }
+    } finally {
+      await releaseJobLease(lease);
     }
   }
 }
@@ -152,7 +172,7 @@ function startBackgroundJobs() {
   }, 45000);
   if (typeof kickoff.unref === 'function') kickoff.unref();
 
-  logger.info('Pricify background jobs started', {
+  logger.info('Priceify background jobs started', {
     inboxMs,
     cancelMs,
     autoWinnerMs,

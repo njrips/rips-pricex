@@ -19,7 +19,11 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const SERVER_SRC = path.join(ROOT, 'server', 'src');
+// Shopify Functions are tested here rather than under vitest because they are
+// plain ESM with no DOM. They were written as .test.mjs and so matched nothing
+// any runner looked at — the same silent gap this script was written to close.
+const TEST_ROOTS = [path.join(ROOT, 'server', 'src'), path.join(ROOT, 'extensions')];
+const TEST_SUFFIXES = ['.test.js', '.test.mjs'];
 
 function findTestFiles(dir, out = []) {
   let entries;
@@ -31,9 +35,10 @@ function findTestFiles(dir, out = []) {
   for (const entry of entries) {
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) {
-      if (entry.name === 'node_modules') continue;
+      // `generated` and `dist` hold build output, not sources under test.
+      if (entry.name === 'node_modules' || entry.name === 'dist') continue;
       findTestFiles(full, out);
-    } else if (entry.isFile() && entry.name.endsWith('.test.js')) {
+    } else if (entry.isFile() && TEST_SUFFIXES.some(suffix => entry.name.endsWith(suffix))) {
       out.push(full);
     }
   }
@@ -68,9 +73,9 @@ function run(command, args) {
 }
 
 function main() {
-  const files = findTestFiles(SERVER_SRC).sort();
+  const files = TEST_ROOTS.flatMap(root => findTestFiles(root)).sort();
   if (files.length === 0) {
-    console.error('No server test files found — check the path in this script.');
+    console.error('No server test files found — check the paths in this script.');
     process.exit(1);
   }
 

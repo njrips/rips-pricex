@@ -103,7 +103,7 @@ router.get(
         cart_transform: 'unknown',
       },
       hints: [
-        'Enable the Pricify theme app embed',
+        'Enable the Priceify theme app embed',
         'Deploy and activate the cart transform function (Plus or development store)',
       ],
     });

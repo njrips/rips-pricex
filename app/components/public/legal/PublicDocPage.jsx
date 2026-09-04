@@ -5,7 +5,7 @@ export default function PublicDocPage({ eyebrow, title, updated, intro, sections
   return (
     <article className={styles.docCard}>
       <Link to="/" className={styles.backLink}>
-        Back to Pricify
+        Back to Priceify
       </Link>
       <p className={styles.eyebrow}>{eyebrow}</p>
       <h1 className={styles.title}>{title}</h1>

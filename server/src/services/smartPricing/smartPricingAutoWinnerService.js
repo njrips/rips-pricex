@@ -456,20 +456,44 @@ async function evaluateSmartPricingAutoWinner(input = {}, depOverrides = {}) {
           preloadedProducts,
           dryRun: false,
         });
-        await deps.applyPersonalization(testId, shopDomain, {
-          variantIndex: decision.variantIndex,
-        });
+        // Shopify can refuse individual variants — a deleted SKU, a permission
+        // gap, a rate limit — while accepting the rest. That returns normally,
+        // so without counting the failures an unattended run records a clean
+        // apply over a catalog that is now half at the old price.
+        const publishErrors = Number(publish?.summary?.error_count) || 0;
+        const publishUpdated = Number(publish?.summary?.updated_count) || 0;
+        // Traffic follows the catalog, never leads it. Personalizing onto a
+        // winner whose price only partly exists would charge some shoppers the
+        // old price with no split left to measure it against.
+        if (publishErrors === 0) {
+          await deps.applyPersonalization(testId, shopDomain, {
+            variantIndex: decision.variantIndex,
+          });
+        }
         const updated = await deps.updateTest(testId, shopDomain, {
           goal: mergeGoalDecision(test, {
             auto_decision: 'challenger',
             auto_decided_at: decidedAt,
             auto_apply: {
-              published: true,
+              published: publishErrors === 0,
               published_at: decidedAt,
               winner_variant_id: decision.winnerVariantId,
+              updated_count: publishUpdated,
+              error_count: publishErrors,
             },
           }),
         });
+        if (publishErrors > 0) {
+          deps.logger.error(
+            'Smart Pricing auto-apply left prices unwritten, so traffic was not personalized',
+            {
+              shopDomain,
+              testId,
+              updatedCount: publishUpdated,
+              errorCount: publishErrors,
+            }
+          );
+        }
         await deps
           .syncSmartPricingInboxForTest(shopDomain, testId, { reason: 'auto_winner' })
           .catch(() => null);
@@ -489,8 +513,15 @@ async function evaluateSmartPricingAutoWinner(input = {}, depOverrides = {}) {
               actor: 'auto_winner',
               eventType: 'auto_applied',
             });
-          } catch {
-            /* non-fatal */
+          } catch (err) {
+            // The catalog has already changed. Without this snapshot there is
+            // nothing for Revert to restore, so the failure must not pass in
+            // silence even though it is too late to undo the write.
+            deps.logger.error('Smart Pricing auto-apply could not save a revert baseline', {
+              shopDomain,
+              testId,
+              error: err?.message,
+            });
           }
         }
         if (planId && deps.maybeAutoQueueRound2Plan) {
@@ -508,7 +539,8 @@ async function evaluateSmartPricingAutoWinner(input = {}, depOverrides = {}) {
           reason: decision.reason,
           test_id: testId,
           test_status: updated?.status || 'stopped',
-          published_to_shopify: true,
+          published_to_shopify: publishErrors === 0,
+          publish_error_count: publishErrors,
           publish,
           variantIndex: decision.variantIndex,
         };

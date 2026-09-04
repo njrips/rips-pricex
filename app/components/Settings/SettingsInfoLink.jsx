@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { BlockStack, Modal, Text } from '@shopify/polaris';
-import { getDocsSection } from '../public/pricify/docsContent';
+import { getDocsSection } from '../public/priceify/docsContent';
 import { IconInfo } from '../SmartPricing/classic/classicIcons';
 import styles from '../SmartPricing/classic/SmartPricingClassic.module.css';
 import { openPublicDocsHref, publicDocsHref } from './settingsGuideLinks';
@@ -46,7 +46,7 @@ export default function SettingsInfoLink({ hash, label }) {
               ))}
               {section ? null : (
                 <Text as="p" variant="bodyMd">
-                  Open the full Pricify guide for this setting.
+                  Open the full Priceify guide for this setting.
                 </Text>
               )}
               <a

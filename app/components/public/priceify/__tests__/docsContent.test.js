@@ -41,7 +41,7 @@ function collectAdminInfoHashes() {
   return [...hashes].sort();
 }
 
-describe('Pricify guides content', () => {
+describe('Priceify guides content', () => {
   it('exposes the Settings info-icon anchors', () => {
     assert.equal(PUBLIC_ROUTES.docs, '/docs');
     assert.equal(PUBLIC_ROUTES.docsSettings, '/docs/settings');

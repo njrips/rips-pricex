@@ -12,7 +12,7 @@ export const meta: MetaFunction = () =>
   publicMeta({
     title: "Terms of Service",
     description:
-      "How merchants use Pricify on Shopify — install, App Pricing, Setup, and applying a winner.",
+      "How merchants use Priceify on Shopify — install, App Pricing, Setup, and applying a winner.",
     path: "/terms",
   });
 

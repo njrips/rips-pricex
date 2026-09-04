@@ -6,21 +6,32 @@ const {
   discountRecordId,
   normalizeShopifyIdentifier,
 } = require('../offerCheckoutDiscountService');
+const { titleLooksLikeAppFunction } = require('../../../utils/appBrandTitles');
 
 describe('offerCheckoutDiscountService', () => {
-  it('prefers the Pricify discount function over other discount functions', () => {
+  it('prefers the Priceify discount function over other discount functions', () => {
     const chosen = pickCheckoutDiscountFunction([
       { id: 'fn-other', title: 'Other app discount', apiType: 'discount' },
-      { id: 'fn-rpx', title: 'Pricify checkout discount', apiType: 'discount' },
-      { id: 'fn-cart', title: 'Pricify cart transform', apiType: 'cart_transform' },
+      { id: 'fn-rpx', title: 'Priceify checkout discount', apiType: 'discount' },
+      { id: 'fn-cart', title: 'Priceify cart transform', apiType: 'cart_transform' },
     ]);
     expect(chosen.id).toBe('fn-rpx');
   });
 
-  it('still prefers a legacy RipsPriceX discount title when no Pricify title exists', () => {
+  it('still prefers a legacy RipsPriceX discount title when no Priceify title exists', () => {
     const chosen = pickCheckoutDiscountFunction([
       { id: 'fn-other', title: 'Other app discount', apiType: 'discount' },
       { id: 'fn-rpx', title: 'RipsPriceX checkout discount', apiType: 'discount' },
+    ]);
+    expect(chosen.id).toBe('fn-rpx');
+  });
+
+  it('still prefers a legacy Pricify discount title', () => {
+    // A shop's function title is whatever it was when the extension was last
+    // deployed there, so shops on the pre-Priceify name must still resolve.
+    const chosen = pickCheckoutDiscountFunction([
+      { id: 'fn-other', title: 'Other app discount', apiType: 'discount' },
+      { id: 'fn-rpx', title: 'Pricify checkout discount', apiType: 'discount' },
     ]);
     expect(chosen.id).toBe('fn-rpx');
   });
@@ -103,9 +114,9 @@ describe('offerCheckoutDiscountService', () => {
       findDiscountByTitle(
         [
           { discountId: 'd1', title: 'Other' },
-          { discountId: 'd2', title: 'Pricify Offer Checkout Function' },
+          { discountId: 'd2', title: 'Priceify Offer Checkout Function' },
         ],
-        'Pricify Offer Checkout Function'
+        'Priceify Offer Checkout Function'
       )?.discountId
     ).toBe('d2');
   });
@@ -117,5 +128,36 @@ describe('offerCheckoutDiscountService', () => {
         { discountId: 'd2', title: 'RipsPriceX Offer Checkout Function' },
       ])?.discountId
     ).toBe('d2');
+  });
+
+  it('reuses a legacy Pricify automatic discount title', () => {
+    // Missing this name reads as "nothing attached", and ensure would then add a
+    // second automatic discount on top of the one already discounting orders.
+    expect(
+      findKnownOfferDiscount([
+        { discountId: 'd1', title: 'Other' },
+        { discountId: 'd2', title: 'Pricify Offer Checkout Function' },
+      ])?.discountId
+    ).toBe('d2');
+  });
+});
+
+describe('titleLooksLikeAppFunction', () => {
+  it('accepts every name this app has shipped extensions under', () => {
+    const titles = [
+      'Priceify checkout discount',
+      'Pricify cart transform',
+      'RipsPriceX Offer Checkout Function',
+      'Rips Price X cart transform',
+      'ripx discount',
+    ];
+    expect(titles.filter(title => !titleLooksLikeAppFunction(title))).toEqual([]);
+  });
+
+  it('rejects another app and empty titles', () => {
+    expect(titleLooksLikeAppFunction('Some other app discount')).toBe(false);
+    expect(titleLooksLikeAppFunction('')).toBe(false);
+    expect(titleLooksLikeAppFunction(null)).toBe(false);
+    expect(titleLooksLikeAppFunction(undefined)).toBe(false);
   });
 });

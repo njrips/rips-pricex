@@ -2,13 +2,13 @@ import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import { useOutletContext } from "react-router";
 
 import { publicMeta } from "../components/public/publicMeta";
-import LandingPage from "../components/public/pricify/LandingPage";
+import LandingPage from "../components/public/priceify/LandingPage";
 import { authenticate } from "../shopify.server";
 import type { PublicOutletContext } from "./_public";
 
 export const meta: MetaFunction = () =>
   publicMeta({
-    title: "Pricify — Test Shopify prices before changing them for everyone",
+    title: "Priceify — Test Shopify prices before changing them for everyone",
     description:
       "Run pricing experiments on your products, compare different prices with real shoppers, and use data to make better pricing decisions — completely free.",
     path: "/",

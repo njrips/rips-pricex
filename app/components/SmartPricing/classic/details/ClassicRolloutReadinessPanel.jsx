@@ -1,7 +1,10 @@
 import { useMemo, useState } from 'react';
 import { Badge, Banner, Button, Modal } from '@shopify/polaris';
+import useClassicShopDomain from '../../../../hooks/useClassicShopDomain';
+import { saveSmartPricingGuardrails } from '../../../../services/smartPricingApi';
 import { formatCurrency } from '../../smartPricingConstants';
 import {
+  formatMetricMoney,
   formatNumber,
   formatRate,
   summarizeRolloutRows,
@@ -35,14 +38,6 @@ function amount(value) {
 function money(value, currency) {
   const n = amount(value);
   if (n === null) return '—';
-  return formatCurrency(n, currency);
-}
-
-/** For measurements where zero is a real reading rather than a missing one. */
-function metricMoney(value, currency) {
-  if (value === null || value === undefined || value === '') return '—';
-  const n = Number(value);
-  if (!Number.isFinite(n)) return '—';
   return formatCurrency(n, currency);
 }
 
@@ -131,7 +126,7 @@ function ProductDetailModal({ row, onClose, onApply, onFinish, busy }) {
           <p className={styles.help}>
             Ready since {formatWhen(decision.ready_since)}
             {waitedDays !== null ? ` (${waitedDays} day${waitedDays === 1 ? '' : 's'} ago)` : ''}
-            {autoAt ? ` · Pricify applies this automatically on ${autoAt}` : ''}
+            {autoAt ? ` · Priceify applies this automatically on ${autoAt}` : ''}
           </p>
         ) : null}
         {decision?.state === 'ready_challenger' && !validated ? (
@@ -175,7 +170,7 @@ function ProductDetailModal({ row, onClose, onApply, onFinish, busy }) {
                     <td>{formatNumber(arm.visitors)}</td>
                     <td>{formatNumber(arm.conversions)}</td>
                     <td>{formatRate(arm.conversion_rate)}</td>
-                    <td>{metricMoney(arm.revenue_per_visitor, currency)}</td>
+                    <td>{formatMetricMoney(arm.revenue_per_visitor, currency)}</td>
                   </tr>
                 );
               })}
@@ -197,6 +192,60 @@ function ProductDetailModal({ row, onClose, onApply, onFinish, busy }) {
         </Modal.Section>
       ) : null}
     </Modal>
+  );
+}
+
+/**
+ * The warning that a price will be written without being asked — and the only
+ * way to stop it.
+ *
+ * Automatic writes are not configured anywhere else: Settings holds the two
+ * stat settings and nothing more. Announcing an unattended catalog change with
+ * no way to refuse it is the one thing this banner must not do, so the switch
+ * lives beside the warning rather than on a page the merchant has to find.
+ */
+function AutoApplyNotice({ applyAt }) {
+  const shopDomain = useClassicShopDomain();
+  const [busy, setBusy] = useState(false);
+  const [turnedOff, setTurnedOff] = useState(false);
+  const [error, setError] = useState('');
+
+  const turnOff = async () => {
+    setBusy(true);
+    setError('');
+    try {
+      // A patch: the endpoint merges onto the stored record, so naming this one
+      // field cannot disturb anything else the shop has set.
+      await saveSmartPricingGuardrails(shopDomain, { auto_apply_winner: false });
+      setTurnedOff(true);
+    } catch (err) {
+      setError(err?.message || 'Could not turn off automatic price writes.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (turnedOff) {
+    return (
+      <Banner tone="success">
+        Automatic price writes are off. Winners now wait for you to apply them, here or on the
+        product.
+      </Banner>
+    );
+  }
+  if (!applyAt) return null;
+
+  return (
+    <Banner tone="info">
+      <p>
+        Automatic price writes are on. The first confirmed winner will be applied on{' '}
+        {formatWhen(applyAt)} unless you apply or override it before then.
+      </p>
+      {error ? <p className={styles.error}>{error}</p> : null}
+      <Button variant="plain" onClick={turnOff} disabled={busy} loading={busy}>
+        Turn off automatic price writes
+      </Button>
+    </Banner>
   );
 }
 
@@ -269,12 +318,7 @@ export default function ClassicRolloutReadinessPanel({
         </Banner>
       ) : null}
 
-      {soonestAuto ? (
-        <Banner tone="info">
-          Automatic price writes are on. The first confirmed winner will be applied on{' '}
-          {formatWhen(soonestAuto)} unless you apply or override it before then.
-        </Banner>
-      ) : null}
+      <AutoApplyNotice applyAt={soonestAuto} />
 
       <div className={styles.tableScroll}>
         <table className={styles.table}>
@@ -320,7 +364,7 @@ export default function ClassicRolloutReadinessPanel({
                         <PriceMove decision={row.decision} currency={rowCurrency} />
                         <div className={`${styles.productSub} ${styles.rolloutDecisionNote}`}>
                           {row.decision?.detail}
-                          {autoAt ? ` Pricify applies this on ${formatWhen(autoAt)}.` : ''}
+                          {autoAt ? ` Priceify applies this on ${formatWhen(autoAt)}.` : ''}
                         </div>
                       </>
                     )}

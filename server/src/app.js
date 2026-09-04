@@ -192,7 +192,7 @@ if (require.main === module) {
   const { startBackgroundJobs } = require('./jobs/backgroundJobs');
   startBackgroundJobs();
   app.listen(PORT, () => {
-    logger.info(`Pricify API listening on :${PORT}`);
+    logger.info(`Priceify API listening on :${PORT}`);
   });
 }
 

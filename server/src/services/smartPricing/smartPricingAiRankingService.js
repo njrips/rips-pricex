@@ -114,7 +114,7 @@ Rules:
 - Respect guardrails: min margin ${guardrails.min_margin_percent ?? 35}%, max price change ${guardrails.max_price_change_percent ?? 15}%.`;
 
   const userPrompt = JSON.stringify({
-    objective: guardrails.objective || 'profit_per_visitor',
+    objective: guardrails.objective || 'revenue_per_visitor',
     candidates,
   });
 

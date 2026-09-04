@@ -63,6 +63,40 @@ describe('minSampleSize', () => {
     assert.match(gated.message, /800/);
   });
 
+  it('withholds the reading, not just the verdict, below the floor', () => {
+    // Settings and the merchant guide both say nothing is calculated until the
+    // floors are met. Publishing a confidence figure drawn from the sample this
+    // floor rejects contradicted that, and read as decisive next to the
+    // waiting message.
+    const gated = applyMinSampleSizeGate(
+      { significant: true, winner: 'variantB', confidence: 97, pValue: 0.03 },
+      [
+        { visitors: 1200, conversions: 40 },
+        { visitors: 800, conversions: 22 },
+      ],
+      1000
+    );
+    assert.equal(gated.confidence, null);
+    assert.equal(gated.pValue, null);
+    assert.equal(gated.evidenceWithheld, true);
+  });
+
+  it('publishes the reading once both floors are met', () => {
+    const gated = applyMinSampleSizeGate(
+      { significant: true, winner: 'variantB', confidence: 93, pValue: 0.07 },
+      [
+        { visitors: 6200, conversions: 130 },
+        { visitors: 6000, conversions: 118 },
+      ],
+      5000,
+      100
+    );
+    assert.equal(gated.sampleReady, true);
+    assert.equal(gated.confidence, 93);
+    assert.equal(gated.pValue, 0.07);
+    assert.equal(gated.evidenceWithheld, undefined);
+  });
+
   it('keeps a ready winner once every arm meets the floor', () => {
     const gated = applyMinSampleSizeGate(
       { significant: true, winner: 'variantB' },

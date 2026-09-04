@@ -14,6 +14,7 @@ import {
   buildVariationSharePreviewUrl,
   buildVariationProductsMatrix,
   filterSortVariationProducts,
+  formatMetricMoney,
   formatNumber,
   formatRate,
   formatSmartPricingPreviewVariantName,
@@ -558,6 +559,13 @@ function VariationCard({
       <div className={styles.selectionBar}>
         <span>Conversion rate</span>
         <strong>{formatRate(arm.conversionRate)}</strong>
+      </div>
+      {/* The money metric each variation is judged on. The card showed traffic
+          and conversion only, so a variation that converted less but earned
+          more per visitor looked like a straight loss. */}
+      <div className={styles.selectionBar}>
+        <span>Revenue / visitor</span>
+        <strong>{formatMetricMoney(arm.revenuePerVisitor, currency)}</strong>
       </div>
 
       <div className={styles.variationPreviewRow} ref={popoverRef}>

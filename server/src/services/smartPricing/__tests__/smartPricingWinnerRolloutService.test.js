@@ -124,6 +124,99 @@ describe('smartPricingWinnerRolloutService', () => {
     expect(result.published_to_shopify).toBe(true);
   });
 
+  // Personalizing first meant a refused catalog write left the storefront
+  // serving the winning price while the merchant was told the apply failed.
+  it('writes the catalog before moving traffic', async () => {
+    const order = [];
+    publishWinnerPricesToShopify.mockImplementation(async () => {
+      order.push('publish');
+      return { summary: { updated_count: 1 }, winner_variant_id: 'variant-b' };
+    });
+    applyPersonalization.mockImplementation(async () => {
+      order.push('personalize');
+      return { ...smartPricingTest, winner_variant_index: 1 };
+    });
+
+    await applySmartPricingWinnerRollout({
+      testId: 'test-1',
+      shopDomain: 'demo.myshopify.com',
+      accessToken: 'token',
+      publishToShopify: true,
+    });
+
+    expect(order).toEqual(['publish', 'personalize']);
+  });
+
+  it('leaves traffic on the old split when the catalog write fails', async () => {
+    publishWinnerPricesToShopify.mockRejectedValueOnce(new Error('shopify rejected the write'));
+
+    await expect(
+      applySmartPricingWinnerRollout({
+        testId: 'test-1',
+        shopDomain: 'demo.myshopify.com',
+        accessToken: 'token',
+        publishToShopify: true,
+      })
+    ).rejects.toThrow(/shopify rejected/i);
+
+    expect(applyPersonalization).not.toHaveBeenCalled();
+  });
+
+  // Shopify accepting some variants and refusing others returns normally. Moving
+  // all traffic onto the winner then charges some shoppers the old price, with
+  // no split left to measure against.
+  it('leaves traffic on the old split when only some variants were written', async () => {
+    publishWinnerPricesToShopify.mockResolvedValueOnce({
+      summary: { updated_count: 3, error_count: 2 },
+      winner_variant_id: 'variant-b',
+    });
+
+    const result = await applySmartPricingWinnerRollout({
+      testId: 'test-1',
+      shopDomain: 'demo.myshopify.com',
+      accessToken: 'token',
+      publishToShopify: true,
+    });
+
+    expect(applyPersonalization).not.toHaveBeenCalled();
+    expect(result.personalized).toBe(false);
+  });
+
+  it('personalizes when every targeted variant was written', async () => {
+    publishWinnerPricesToShopify.mockResolvedValueOnce({
+      summary: { updated_count: 3, error_count: 0 },
+      winner_variant_id: 'variant-b',
+    });
+
+    const result = await applySmartPricingWinnerRollout({
+      testId: 'test-1',
+      shopDomain: 'demo.myshopify.com',
+      accessToken: 'token',
+      publishToShopify: true,
+    });
+
+    expect(applyPersonalization).toHaveBeenCalled();
+    expect(result.personalized).toBe(true);
+  });
+
+  // Nothing to change is not a failure: an already-correct catalog still ends
+  // the split.
+  it('personalizes when the catalog was already in sync', async () => {
+    publishWinnerPricesToShopify.mockResolvedValueOnce({
+      summary: { updated_count: 0, error_count: 0 },
+      winner_variant_id: 'variant-b',
+    });
+
+    await applySmartPricingWinnerRollout({
+      testId: 'test-1',
+      shopDomain: 'demo.myshopify.com',
+      accessToken: 'token',
+      publishToShopify: true,
+    });
+
+    expect(applyPersonalization).toHaveBeenCalled();
+  });
+
   it('blocks catalog winner rollout for offer tests', async () => {
     getTestById.mockResolvedValueOnce({
       ...smartPricingTest,

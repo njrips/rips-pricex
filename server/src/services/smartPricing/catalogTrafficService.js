@@ -90,23 +90,29 @@ function buildMeasuredTrafficMetrics({
   if (views30d <= 0) {
     return null;
   }
+  // A conversion rate is orders per visitor, so the denominator has to be
+  // unique visitors. Counting page views instead inflates it — one shopper
+  // reloading a PDP five times looks like five chances to buy — which drags the
+  // baseline rate down and inflates every sample-size estimate built on it.
+  const visitors30d = Math.max(0, Number(measuredViews?.visitors_30d) || 0) || views30d;
   const units = Math.max(0, Number(units30d) || 0);
   const cvr = clampNumber(Number(shopConversionRate) || DEFAULT_CONVERSION_RATE, 0.005, 0.15);
-  const dailyVisitors = Math.max(1, Math.round(views30d / 30));
+  const dailyVisitors = Math.max(1, Math.round(visitors30d / 30));
   const baselineConversionRate =
-    units > 0 ? Math.min(0.15, Number((units / views30d).toFixed(4))) : Number(cvr.toFixed(4));
+    units > 0 ? Math.min(0.15, Number((units / visitors30d).toFixed(4))) : Number(cvr.toFixed(4));
   return {
-    visitors_30d: views30d,
+    visitors_30d: visitors30d,
     daily_visitors: dailyVisitors,
     baseline_conversion_rate: baselineConversionRate,
-    baseline_source: 'units_per_view_proxy',
+    baseline_source: 'units_per_visitor_proxy',
     traffic_source: 'storefront_measured',
     traffic_confidence: resolveTrafficConfidence({
       units30d: units,
-      visitors30d: views30d,
+      visitors30d: visitors30d,
       trafficSource: 'storefront_measured',
       measuredViews30d: views30d,
     }),
+    measured_visitors_30d: visitors30d,
     measured_views_30d: views30d,
     measured_views_60d: Number(measuredViews?.views_60d) || 0,
   };

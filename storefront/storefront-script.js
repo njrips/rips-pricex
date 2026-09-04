@@ -151,6 +151,17 @@
   var _ripxNativeFetch = typeof window.fetch === 'function' ? window.fetch.bind(window) : null;
   const ANTI_FLICKER_MAX_MS = 1400;
   const ANTI_FLICKER_PRICE_MAX_MS = 1200;
+  /**
+   * Surfaces the listing paint skips, because the dedicated cart pass owns them
+   * and reads its own line data.
+   *
+   * `predictive-search` used to be on this list, which meant search suggestions
+   * kept showing the catalog price to a shopper bucketed into a test arm — the
+   * reapply pass says those cards should "catch up", and they never could. It is
+   * not cart UI: nothing else paints it, so excluding it just left it unpainted.
+   */
+  const RIPX_CART_UI_SELECTOR =
+    '.cart-drawer,.cart-notification,#CartDrawer,#mini-cart,.mini-cart,[data-cart-drawer],.drawer--cart,aside.mini-cart,cart-drawer,.header__cart,.site-header__cart';
   const LIVE_VARIANT_CACHE_MAX_AGE_MS = 5 * 60 * 1000;
   var _ripxTiming = {
     scriptStartMs: RIPX_SCRIPT_STARTED_AT_MS,
@@ -1274,8 +1285,7 @@
       // Only the app-proxy bootstrap uses ?url= as the real storefront target.
       // Live PDPs often have unrelated query params; never treat those as a nested path.
       if (isRipxBootstrapPathname(window.location.pathname)) {
-        var nestedTarget =
-          getLiveSearchParams().get('url') || URL_PARAMS.get('url') || '';
+        var nestedTarget = getLiveSearchParams().get('url') || URL_PARAMS.get('url') || '';
         if (nestedTarget) {
           var parsedTarget = new URL(nestedTarget, window.location.origin);
           var nestedPath = String(parsedTarget.pathname || '').toLowerCase();
@@ -1285,10 +1295,22 @@
     } catch (_eNestedPath) {}
     return String(window.location.pathname || '').toLowerCase();
   }
+  /**
+   * Localized storefronts serve every surface under a language prefix
+   * (/en-gb/collections/all, /fr). Strip it before classifying, otherwise the
+   * locale hides the surface and no price ever paints on those markets.
+   */
+  function stripStorefrontLocalePrefix(pathname) {
+    var path = String(pathname || '');
+    var stripped = path.replace(/^\/[a-z]{2}(?:-[a-z]{2})?(?=\/|$)/, '');
+    return stripped || '/';
+  }
   function inferPriceSurfaceFromPathname(pathname) {
-    var path = String(pathname || '')
-      .trim()
-      .toLowerCase();
+    var path = stripStorefrontLocalePrefix(
+      String(pathname || '')
+        .trim()
+        .toLowerCase()
+    );
     if (!path) return 'home';
     if (path.indexOf('/products/') !== -1) return 'pdp';
     if (path.indexOf('/collections/') !== -1) return 'plp';
@@ -2681,6 +2703,35 @@
       writeLiveVariantCache(testId, variants[testId]);
     });
   }
+  /**
+   * Test ids where the arm just assigned is not the arm we painted from cache.
+   *
+   * A repeat page view paints from the session cache so it does not wait on the
+   * network, and the refresh running alongside it was discarded. So when the
+   * merchant changed weights, paused an arm, or narrowed targeting, a returning
+   * shopper kept seeing the old arm's price for the rest of the cache window —
+   * and the cart attributes seeded from it disagreed with the server.
+   *
+   * Must be called before writeLiveVariantCacheMap, while the cache still holds
+   * the arm that was painted.
+   */
+  function findReassignedTestIds(freshVariants) {
+    if (!freshVariants || typeof freshVariants !== 'object') return [];
+    var changed = [];
+    Object.keys(freshVariants).forEach(function (testId) {
+      var cached = readLiveVariantCache(testId);
+      if (!cached) return;
+      var fresh = freshVariants[testId];
+      if (!fresh || typeof fresh !== 'object') return;
+      var freshId = normalizeVariantForStorefront(fresh).variantId;
+      if (String(cached.variantId == null ? '' : cached.variantId) !==
+        String(freshId == null ? '' : freshId)
+      ) {
+        changed.push(testId);
+      }
+    });
+    return changed;
+  }
   function readLiveVariantCache(testId) {
     var key = String(testId || '');
     if (!key || PREVIEW_MODE) return null;
@@ -3013,7 +3064,17 @@
         Object.keys(safeVariants).forEach(function (testId) {
           recordRipxAssignment(testId, safeVariants[testId], 'live_batch');
         });
+        var reassignedTestIds = findReassignedTestIds(variants);
         writeLiveVariantCacheMap(variants);
+        if (reassignedTestIds.length) {
+          // The page is showing an arm the server no longer assigns. Repaint
+          // from the fresh assignment rather than leave it until the cache ages
+          // out, which is up to five minutes of the wrong price.
+          recordRipxSkip('runtime', 'assignment_changed_since_cache', {
+            testIds: reassignedTestIds,
+          });
+          flushQueuedPriceReapply('assignment_changed');
+        }
         persistRipxLiveDiagnostics('variants_response', {
           requestedTestIds: requestedTestIds,
           assignedTestIds: Object.keys(variants),
@@ -4265,6 +4326,33 @@
       );
     }
     return 'USD';
+  }
+
+  /**
+   * True when this page is priced in a converted presentment currency.
+   *
+   * Test prices are configured once, in the shop's own currency. Under Shopify
+   * Markets the catalog price on screen has been converted and Shopify reports
+   * the rate it used, so painting a configured `70` onto a EUR page reads as
+   * €70.00 — which is neither $70 nor a price the merchant chose. Converting it
+   * ourselves would not help either: the cart line attributes, the checkout
+   * function's fixed price, and the recorded revenue would each need the same
+   * treatment, and the merchant still never set a price for that market.
+   *
+   * So those markets are left on the real catalog price. Skipping is visible in
+   * diagnostics; a wrong price is not.
+   */
+  function isConvertedPresentmentCurrency() {
+    try {
+      var currency = window.Shopify && window.Shopify.currency;
+      var rate = currency && currency.rate;
+      if (rate == null || rate === '') return false;
+      var n = parseFloat(rate, 10);
+      if (!isFinite(n) || n <= 0) return false;
+      return Math.abs(n - 1) > 0.0001;
+    } catch (_eFxRate) {
+      return false;
+    }
   }
 
   /**
@@ -8097,37 +8185,112 @@
     });
 
     var currentDisplay = display;
+    var currentTargetUnit = priceNum;
+    var currentSourceVariantId = normalizeCartVariantId(currentPdpVariantId);
 
-    function recomputeDisplay() {
-      if (priceMode === 'fixed') return currentDisplay;
-      if (priceMode === 'amount') {
-        var useCompareAt = (cfg.priceBase || 'price').toLowerCase() === 'compare_at';
-        var catalogAmt = useCompareAt ? getCatalogCompareAtFromPage() : null;
-        if (catalogAmt === null) catalogAmt = getCatalogPriceFromPage();
-        if (catalogAmt === null) return null;
-        var deltaAmt = parseFloat(cfg.priceDelta, 10);
-        if (isNaN(deltaAmt)) return null;
-        var numAmt = Math.max(0, Math.round((catalogAmt + deltaAmt) * 100) / 100);
-        var roundAmt = parseRoundTo(cfg.roundTo);
-        if (roundAmt > 0) numAmt = Math.round(numAmt / roundAmt) * roundAmt;
-        if (!isFinite(numAmt)) return null;
-        return formatShopPrice(numAmt) || null;
+    /**
+     * Price the variant selected right now, rather than the one selected when
+     * the page loaded.
+     *
+     * The config is re-resolved against the live variant id, so a matrix or
+     * byVariant test priced per variant follows the picker instead of staying
+     * on the first variant's fixed price.
+     *
+     * Returns null when the page no longer carries enough to price it, which
+     * leaves the last good display in place.
+     */
+    function recomputeTarget() {
+      var selectedId = getSelectedVariantId();
+      if (selectedId == null || String(selectedId).trim() === '') {
+        selectedId = currentPdpVariantId;
       }
-      if (priceMode === 'percent') {
-        var useCompareAtPct = (cfg.priceBase || 'price').toLowerCase() === 'compare_at';
-        var catalogPct = useCompareAtPct ? getCatalogCompareAtFromPage() : null;
-        if (catalogPct === null) catalogPct = getCatalogPriceFromPage();
-        if (catalogPct === null) return null;
-        var pctVal = parseFloat(cfg.pricePercent, 10);
-        if (isNaN(pctVal)) return null;
-        var numPct = catalogPct * (1 - pctVal / 100);
-        numPct = Math.max(0, Math.round(numPct * 100) / 100);
-        var roundPct = parseRoundTo(cfg.roundTo);
-        if (roundPct > 0) numPct = Math.round(numPct / roundPct) * roundPct;
-        if (!isFinite(numPct)) return null;
-        return formatShopPrice(numPct) || null;
+      var liveCfg = getEffectivePriceConfig(variant.config, productId, selectedId);
+      var liveMode = (liveCfg.priceMode || 'fixed').toLowerCase();
+      if (liveMode === 'control') return null;
+      var num = null;
+      if (liveMode === 'fixed') {
+        if (liveCfg.price === null || liveCfg.price === undefined || liveCfg.price === '') {
+          return null;
+        }
+        num = parseFloat(liveCfg.price, 10);
+      } else if (liveMode === 'amount' || liveMode === 'percent') {
+        var useCompareAt = (liveCfg.priceBase || 'price').toLowerCase() === 'compare_at';
+        var catalogNow = useCompareAt ? getCatalogCompareAtFromPage() : null;
+        if (catalogNow === null) catalogNow = getCatalogPriceFromPage();
+        if (catalogNow === null) return null;
+        if (liveMode === 'amount') {
+          var deltaAmt = parseFloat(liveCfg.priceDelta, 10);
+          if (isNaN(deltaAmt)) return null;
+          num = catalogNow + deltaAmt;
+        } else {
+          var pctVal = parseFloat(liveCfg.pricePercent, 10);
+          if (isNaN(pctVal)) return null;
+          num = catalogNow * (1 - pctVal / 100);
+        }
+      } else {
+        return null;
       }
-      return currentDisplay;
+      if (isNaN(num) || !isFinite(num)) return null;
+      num = Math.max(0, Math.round(num * 100) / 100);
+      var roundToNow = parseRoundTo(liveCfg.roundTo);
+      if (roundToNow > 0) {
+        num = Math.max(0, Math.round((Math.round(num / roundToNow) * roundToNow) * 100) / 100);
+      }
+      var text = formatShopPrice(num);
+      if (!text) return null;
+      return { display: text, priceNum: num, variantId: selectedId, cfg: liveCfg };
+    }
+
+    /**
+     * Checkout prices from the cart line attributes, never from the DOM.
+     *
+     * They were stamped once at load, so switching variant repainted the shown
+     * price while the attributes still described the variant selected before —
+     * the shopper was charged a price they were never shown, or the clamp in
+     * the cart transform rejected the mismatch and charged full price.
+     */
+    function restampCartAttributes(next) {
+      if (variantIdForCart == null || String(variantIdForCart).trim() === '') return;
+      var nextSourceVariantId = normalizeCartVariantId(next.variantId);
+      if (next.priceNum === currentTargetUnit && nextSourceVariantId === currentSourceVariantId) {
+        return;
+      }
+      currentTargetUnit = next.priceNum;
+      currentSourceVariantId = nextSourceVariantId;
+      var catalogUnitNow = getCatalogPriceFromPage(next.variantId);
+      var discountUnitNow = null;
+      if (catalogUnitNow != null && isFinite(Number(catalogUnitNow))) {
+        discountUnitNow = Math.round((Number(catalogUnitNow) - next.priceNum) * 100) / 100;
+        if (!(discountUnitNow > 0)) discountUnitNow = null;
+      }
+      var methodNow = resolveStorefrontPriceApplicationMethod(
+        next.cfg.priceApplicationMethod,
+        next.priceNum,
+        catalogUnitNow
+      );
+      var nativeVariantIdNow =
+        methodNow === 'native_variant_price' ? resolveMappedNativeVariantId(next.cfg, variant) : '';
+      registerRipxAssignedPrice({
+        testId: testId,
+        productId: productId,
+        variantId: next.variantId,
+        variantIdForCart: variantIdForCart,
+        targetUnit: next.priceNum,
+        display: next.display,
+      });
+      window.__RIPX_PRICE_TEST_CTX__ = { testId: testId, variantId: variantIdForCart };
+      injectPriceTestCartAttributes(
+        testId,
+        variantIdForCart,
+        getAssignmentProofFromVariant(variant),
+        [productId],
+        { targetUnit: next.priceNum, discountUnit: discountUnitNow },
+        {
+          applicationMethod: methodNow,
+          nativeVariantId: nativeVariantIdNow,
+          sourceVariantId: nextSourceVariantId,
+        }
+      );
     }
 
     if (variantIdForCart != null && String(variantIdForCart).trim() !== '') {
@@ -8161,8 +8324,7 @@
 
     var vid = variantId ? String(variantId).replace(/\D/g, '') : '';
 
-    var cartUi =
-      '.cart-drawer,.cart-notification,#CartDrawer,#mini-cart,.mini-cart,[data-cart-drawer],.drawer--cart,aside.mini-cart,cart-drawer,.header__cart,.site-header__cart,predictive-search';
+    var cartUi = RIPX_CART_UI_SELECTOR;
 
     function inCartUi(el) {
       return el.closest && el.closest(cartUi);
@@ -8170,10 +8332,12 @@
 
     var specificSelectors = [];
     var activeTest = getActiveTestById(testId);
+    // Regular-price roles only. A compare_at mapping names the "was" price, so
+    // painting it with the test price destroys the reference the shopper is
+    // comparing against. Leaf detection catches `<s>`/`<del>` on its own, but
+    // not a theme whose compare-at node is a plain span.
     appendConfiguredRegistrySelectors(specificSelectors, 'pdp', 'regular', activeTest);
-    appendConfiguredRegistrySelectors(specificSelectors, 'pdp', 'compare_at', activeTest);
     appendConfiguredRegistrySelectors(specificSelectors, 'quickview', 'regular', activeTest);
-    appendConfiguredRegistrySelectors(specificSelectors, 'quickview', 'compare_at', activeTest);
     if (pid) {
       specificSelectors.push(
         '.product-price[data-product-id="' + pid + '"]',
@@ -8234,44 +8398,22 @@
 
     function paint() {
       var seen = new WeakSet();
+      /**
+       * The selectors above deliberately include containers (`… .price`,
+       * `.product__price`) because plenty of themes have no dedicated amount
+       * node. Resolve every match to the amount leaves inside it instead of
+       * assigning textContent to the match: on Dawn, `.price--large` holds the
+       * regular price, the sale price, the compare-at `<s>` and two
+       * screen-reader labels, and writing the container collapsed all of it
+       * into a single text node.
+       */
       function paintEl(el) {
-        if (!el || seen.has(el) || inCartUi(el)) return;
-        var tagU = el.tagName && String(el.tagName).toUpperCase();
-        if (tagU === 'S' || tagU === 'DEL' || tagU === 'STRIKE') return;
-        // Dawn/OS2: do not replace outer .price blocks that contain real leaf nodes (avoids one-node wipe).
-        try {
-          if (el.querySelector) {
-            var dawnLeaf =
-              el.querySelector('.price-item__regular') ||
-              el.querySelector('.price-item--sale .price-item__sale .price') ||
-              el.querySelector('.price-item--sale .price-item__sale');
-            if (dawnLeaf && dawnLeaf !== el) return;
-          }
-        } catch (e0) {}
-        seen.add(el);
-        var textWrites = 0;
-        var attrWrites = 0;
-        // Avoid continuous mutation churn by writing only when value changed.
-        if (el.textContent !== currentDisplay) {
-          el.textContent = currentDisplay;
-          textWrites += 1;
-        }
-        var variantStr = String(variantIdForCart);
-        if (el.getAttribute('data-test-variant') !== variantStr) {
-          el.setAttribute('data-test-variant', variantStr);
-          attrWrites += 1;
-        }
-        var testStr = String(testId);
-        if (el.getAttribute('data-test-id') !== testStr) {
-          el.setAttribute('data-test-id', testStr);
-          attrWrites += 1;
-        }
-        if (el.getAttribute('data-ripx-price') !== '1') {
-          el.setAttribute('data-ripx-price', '1');
-          attrWrites += 1;
-        }
-        recordRipxPaintEvent('pdp', textWrites, attrWrites);
-        recordRipxPricePaintParity(testId, el, priceNum, 'pdp');
+        if (!el || inCartUi(el)) return;
+        resolveRipxPricePaintTargets(el).forEach(function (target) {
+          if (seen.has(target)) return;
+          seen.add(target);
+          writeRipxPriceNode(target, currentDisplay, testId, variantIdForCart, 'pdp', priceNum);
+        });
       }
       specificSelectors.forEach(function (sel) {
         try {
@@ -8338,8 +8480,11 @@
     } catch (e) {}
 
     function recomputeAndPaint() {
-      var next = recomputeDisplay();
-      if (next) currentDisplay = next;
+      var next = recomputeTarget();
+      if (next) {
+        currentDisplay = next.display;
+        restampCartAttributes(next);
+      }
       if (currentDisplay) paint();
     }
     ['variant:change', 'shopify:section:load', 'product:update'].forEach(function (evt) {
@@ -8437,7 +8582,11 @@
     return catalog;
   }
 
-  function paintPriceNode(el, display, testId, variantIdForCart, scope, targetUnit) {
+  /**
+   * Write one resolved amount node. Callers go through paintPriceNode, which
+   * decides which nodes are safe to write.
+   */
+  function writeRipxPriceNode(el, display, testId, variantIdForCart, scope, targetUnit) {
     if (!el || !display) return;
     var textWrites = 0;
     var attrWrites = 0;
@@ -8476,66 +8625,95 @@
     return test && Array.isArray(test.priceSurfaceMappings) ? test.priceSurfaceMappings : [];
   }
 
+  /**
+   * Dawn-style ids carry a product id alongside ids that must not be mistaken for
+   * one: sections are named `template--21010091114685__featured_collection` and
+   * card links append `?variant=<variantId>`. Taking the trailing numeric token
+   * without removing those returned a section id for wrapper elements and a
+   * variant id for product links, so the card never matched its product.
+   */
   function extractNumericProductIdFromText(value) {
     var raw = String(value || '').trim();
     if (!raw) return '';
-    var gidMatch = raw.match(/Product\/(\d{6,})/i);
+    var gidMatch = raw.match(/(?:^|[^a-z])Product\/(\d+)/i);
     if (gidMatch && gidMatch[1]) return gidMatch[1];
-    // Dawn-style IDs often contain both a section/template id and the product id:
-    // CardLink-template--21010091114685__featured_collection-8276578566333.
-    // The product id is the final long numeric token, not the first one.
-    var matches = raw.match(/\d{6,}/g);
+    var cleaned = raw
+      .replace(/\?[\s\S]*$/, ' ')
+      .replace(/(?:template|sections?)--+\d+/gi, ' ')
+      .replace(/ProductVariant\/\d+/gi, ' ')
+      .replace(/\bvariants?[=/:-]\d+/gi, ' ');
+    var matches = cleaned.match(/\d{6,}/g);
     if (matches && matches.length) return matches[matches.length - 1];
     return '';
   }
 
-  function getProductIdForListingCard(card) {
-    if (!card) return '';
-    var direct =
-      (card.getAttribute &&
-        (card.getAttribute('data-product-id') ||
-          card.getAttribute('data-product') ||
-          card.getAttribute('data-productid'))) ||
-      '';
-    var normalizedDirect = toNumericProductId(direct) || extractNumericProductIdFromText(direct);
-    if (normalizedDirect) return normalizedDirect;
+  /** Product id from one attribute or element id, preferring unambiguous forms. */
+  function normalizeListingProductIdCandidate(value) {
+    var raw = String(value || '').trim();
+    if (!raw) return '';
+    if (/^\d+$/.test(raw)) return raw;
+    var gid = raw.match(/(?:^|[^a-z])Product\/(\d+)/i);
+    if (gid && gid[1]) return gid[1];
+    return extractNumericProductIdFromText(raw);
+  }
+
+  /**
+   * Every product id a card advertises, most trustworthy first. Hrefs are left
+   * out on purpose: a Shopify product URL is `/products/<handle>`, so its only
+   * numeric token is the `?variant=` id.
+   */
+  function collectListingProductIdCandidates(card) {
+    var out = [];
+    function add(value) {
+      var normalized = normalizeListingProductIdCandidate(value);
+      if (normalized && out.indexOf(normalized) === -1) out.push(normalized);
+    }
+    function addDataAttrs(node) {
+      if (!node || !node.getAttribute) return;
+      add(node.getAttribute('data-product-id'));
+      add(node.getAttribute('data-product'));
+      add(node.getAttribute('data-productid'));
+    }
+    addDataAttrs(card);
     try {
-      var withData =
-        card.querySelector &&
-        card.querySelector('[data-product-id], [data-product], [data-productid]');
-      if (withData) {
-        var nestedData =
-          withData.getAttribute('data-product-id') ||
-          withData.getAttribute('data-product') ||
-          withData.getAttribute('data-productid') ||
-          '';
-        var normalizedNested =
-          toNumericProductId(nestedData) || extractNumericProductIdFromText(nestedData);
-        if (normalizedNested) return normalizedNested;
+      if (card.querySelectorAll) {
+        card
+          .querySelectorAll('[data-product-id], [data-product], [data-productid]')
+          .forEach(addDataAttrs);
       }
     } catch (_eDataProduct) {}
-    var idSources = [];
     try {
-      if (card.id) idSources.push(card.id);
-      if (card.getAttribute) {
-        idSources.push(card.getAttribute('aria-labelledby') || '');
-        idSources.push(card.getAttribute('href') || '');
-      }
+      if (card.id) add(card.id);
+      if (card.getAttribute) add(card.getAttribute('aria-labelledby'));
       if (card.querySelectorAll) {
-        card.querySelectorAll('[id], [aria-labelledby], a[href]').forEach(function (node) {
-          if (node.id) idSources.push(node.id);
-          if (node.getAttribute) {
-            idSources.push(node.getAttribute('aria-labelledby') || '');
-            idSources.push(node.getAttribute('href') || '');
-          }
+        card.querySelectorAll('[id], [aria-labelledby]').forEach(function (node) {
+          if (node.id) add(node.id);
+          if (node.getAttribute) add(node.getAttribute('aria-labelledby'));
         });
       }
     } catch (_eIdSources) {}
-    for (var i = 0; i < idSources.length; i += 1) {
-      var extracted = extractNumericProductIdFromText(idSources[i]);
-      if (extracted) return extracted;
+    return out;
+  }
+
+  /**
+   * @param {Element} card
+   * @param {string[]} [preferredIds] the test's target products. An exact match
+   *   anywhere on the card beats guessing, which matters because themes expose
+   *   product ids in several formats on the same card.
+   */
+  function getProductIdForListingCard(card, preferredIds) {
+    if (!card) return '';
+    var candidates = collectListingProductIdCandidates(card);
+    if (!candidates.length) return '';
+    var preferred = (preferredIds || [])
+      .map(function (id) {
+        return toNumericProductId(id);
+      })
+      .filter(Boolean);
+    for (var i = 0; i < preferred.length; i += 1) {
+      if (candidates.indexOf(preferred[i]) !== -1) return preferred[i];
     }
-    return '';
+    return candidates[0];
   }
 
   function appendConfiguredRegistrySelectors(targetList, surface, role, test) {
@@ -8629,20 +8807,156 @@
     return null;
   }
 
+  /** Nodes that hold a single rendered amount, i.e. what we are allowed to rewrite. */
+  var RIPX_PRICE_LEAF_SEL =
+    '.money, .price-item, .price-item--regular, .price-item--sale, .price-item__regular, .price-item__sale, .price__current, [data-product-price], [data-price]';
+
+  /** Compare-at / "was" markup. Repainting it would erase the original price. */
+  var RIPX_COMPARE_AT_SEL =
+    '.price-item--compare, .price--compare, .price__compare, .compare-at-price, .was-price, [data-compare-price], [data-compare-at-price]';
+
+  function isRipxCompareAtPriceNode(el) {
+    if (!el) return true;
+    var tag = el.tagName ? String(el.tagName).toUpperCase() : '';
+    if (tag === 'S' || tag === 'DEL' || tag === 'STRIKE') return true;
+    try {
+      if (el.matches && el.matches(RIPX_COMPARE_AT_SEL)) return true;
+      if (el.closest && el.closest('s, del, strike')) return true;
+      if (el.closest && el.closest(RIPX_COMPARE_AT_SEL)) return true;
+    } catch (_eCompareAt) {}
+    return false;
+  }
+
   /**
-   * Prefer leaf nodes so we do not parse concatenated sale/compare text from a parent.
-   * Dawn themes often omit `.money` and use `.price-item__regular` inside `.price-item--regular`.
+   * Prefer leaf nodes so we do not parse concatenated sale/compare text from a
+   * parent. Dawn themes often omit `.money` and nest the amount inside `.price`.
    */
   function isLeafPricePaintNode(el) {
     if (!el || !el.querySelector) return true;
-    var innerMoney = el.querySelector('.money');
-    if (innerMoney && innerMoney !== el) return false;
+    var nested = null;
+    try {
+      nested = el.querySelector(RIPX_PRICE_LEAF_SEL);
+    } catch (_eLeafSel) {
+      nested = null;
+    }
+    if (nested && nested !== el) return false;
     var innerDawn =
-      el.querySelector('.price-item__regular') ||
       el.querySelector('.price-item--sale .price') ||
       el.querySelector('.price-item--regular .price:not(.price--compare)');
     if (innerDawn && innerDawn !== el) return false;
     return true;
+  }
+
+  /**
+   * Text that renders a currency amount rather than a label. Deliberately
+   * stricter than parsePriceFromDisplay, which reads a bare number out of
+   * anything: "Save 20%" and "2 for 1" must not read as prices here.
+   */
+  var RIPX_AMOUNT_TEXT_RE =
+    /[$€£¥₹৳]\s*\d|\d[\d.,]*\s*(?:[$€£¥₹৳]|zł|(?:usd|eur|gbp|cad|aud|nzd|sek|nok|dkk|pln|chf|kr)\b)/i;
+
+  function containsRipxCompareAtNode(el) {
+    if (!el || !el.querySelector) return false;
+    try {
+      return !!(el.querySelector('s, del, strike') || el.querySelector(RIPX_COMPARE_AT_SEL));
+    } catch (_eHasCompare) {
+      return false;
+    }
+  }
+
+  /**
+   * Walk down to the node that actually renders the amount.
+   *
+   * Themes with no price class on the amount still put it beside other text: a
+   * screen-reader label ("Regular price" then "$100.00"), a "From" prefix, a
+   * unit suffix. Writing the wrapper would drop all of it, so descend while
+   * exactly one child carries an amount. Ambiguity (two amounts, or amount text
+   * sitting directly on the node) stops the walk, since then no single child
+   * holds the whole price.
+   */
+  function findRipxAmountDescendant(el) {
+    var node = el;
+    for (var depth = 0; depth < 4; depth += 1) {
+      var children = node.children;
+      if (!children || !children.length) break;
+      var found = null;
+      var ambiguous = false;
+      for (var i = 0; i < children.length; i += 1) {
+        var child = children[i];
+        if (isRipxCompareAtPriceNode(child)) continue;
+        if (!RIPX_AMOUNT_TEXT_RE.test(child.textContent || '')) continue;
+        if (found) {
+          ambiguous = true;
+          break;
+        }
+        found = child;
+      }
+      if (ambiguous || !found) break;
+      node = found;
+    }
+    return node === el ? null : node;
+  }
+
+  /**
+   * Mapped selectors routinely land on a wrapper rather than the amount. Dawn's
+   * `.price` holds the regular price, the sale price, the compare-at `<s>` and
+   * screen-reader labels, so assigning textContent to it erases the whole block
+   * and leaves a card that can never be repainted or reverted. Resolve a matched
+   * node down to the amount leaves it contains and drop compare-at nodes, so a
+   * container selector paints the price instead of replacing the markup.
+   */
+  function resolveRipxPricePaintTargets(el) {
+    if (!el) return [];
+    if (isRipxCompareAtPriceNode(el)) return [];
+    var nested = [];
+    try {
+      if (el.querySelectorAll) {
+        el.querySelectorAll(RIPX_PRICE_LEAF_SEL).forEach(function (node) {
+          if (!node || isRipxCompareAtPriceNode(node)) return;
+          if (!isLeafPricePaintNode(node)) return;
+          if (nested.indexOf(node) === -1) nested.push(node);
+        });
+      }
+    } catch (_eTargets) {}
+    if (nested.length) return nested;
+    if (!isLeafPricePaintNode(el)) return [];
+    var amountNode = findRipxAmountDescendant(el);
+    if (amountNode) return [amountNode];
+    // No amount node to aim at. Writing el is only safe if it is not also
+    // holding a compare-at price that the write would erase.
+    return containsRipxCompareAtNode(el) ? [] : [el];
+  }
+
+  /**
+   * Paint a selector match. Mapped and heuristic selectors both land on wrappers
+   * routinely, so resolve the match to the amount nodes inside it rather than
+   * assigning textContent to whatever matched.
+   */
+  function paintPriceNode(el, display, testId, variantIdForCart, scope, targetUnit) {
+    resolveRipxPricePaintTargets(el).forEach(function (target) {
+      writeRipxPriceNode(target, display, testId, variantIdForCart, scope, targetUnit);
+    });
+  }
+
+  /**
+   * Base amount for amount/percent tests. Reading a wrapper yields concatenated
+   * text ("Regular price$140.00Sale price$80.00") and parsePriceFromDisplay takes
+   * the last match, which is the compare-at — so discounts were computed off the
+   * pre-sale price. Resolve to the current-price leaf first.
+   */
+  function findRipxCatalogPriceNode(card) {
+    if (!card || !card.querySelector) return null;
+    var container = null;
+    try {
+      container = card.querySelector(
+        '.price, [data-product-price], .product-price, [data-price], .money, .price-item'
+      );
+    } catch (_eCatalogSel) {
+      container = null;
+    }
+    if (!container) return null;
+    var targets = resolveRipxPricePaintTargets(container);
+    return targets.length ? targets[0] : null;
   }
 
   /** Dawn / OS 2.0 `cart-drawer` often renders line prices inside Shadow DOM — light-DOM querySelectorAll misses them. */
@@ -8699,8 +9013,7 @@
     var pm = String(cfg.priceMode || '').toLowerCase();
     if (pm === 'control') return;
 
-    var cartUi =
-      '.cart-drawer,.cart-notification,#CartDrawer,#mini-cart,.mini-cart,[data-cart-drawer],.drawer--cart,aside.mini-cart,cart-drawer,.header__cart,.site-header__cart,predictive-search';
+    var cartUi = RIPX_CART_UI_SELECTOR;
     function inCartUi(el) {
       return el.closest && el.closest(cartUi);
     }
@@ -8711,11 +9024,11 @@
     appendConfiguredRegistrySelectorsForSurfaces(
       configuredSelectors,
       scope === 'cart' ? ['cart', 'global'] : getListingPriceSurfaceKeys(),
-      scope === 'cart' ? ['regular', 'cart_line'] : ['regular', 'compare_at'],
+      scope === 'cart' ? ['regular', 'cart_line'] : ['regular'],
       getActiveTestById(testId)
     );
     var listingSurfaces = scope === 'cart' ? ['cart', 'global'] : getListingPriceSurfaceKeys();
-    var listingRoles = scope === 'cart' ? ['regular', 'cart_line'] : ['regular', 'compare_at'];
+    var listingRoles = scope === 'cart' ? ['regular', 'cart_line'] : ['regular'];
     var priceSurfaceMappingsAuthoritative =
       scope !== 'cart' &&
       hasConfiguredPriceSurfaceMappingsForSurfaces(
@@ -8762,29 +9075,30 @@
             : Array.prototype.slice.call(root.querySelectorAll(sel));
         nodes.forEach(function (el) {
           if (!el) return;
-          var tgn = el.tagName && String(el.tagName).toUpperCase();
-          if (tgn === 'S' || tgn === 'DEL' || tgn === 'STRIKE') return;
-          if (!isLeafPricePaintNode(el)) return;
           if (scope === 'listing' && inCartUi(el)) return;
-          var catalog = pm === 'fixed' ? 0 : getStableCatalogPriceForElement(el);
-          if (pm !== 'fixed' && catalog == null) return;
-          var adjusted = computeAllProductsAdjustedPrice(catalog, cfg);
-          if (adjusted == null) return;
-          var roundToVal = parseRoundTo(cfg.roundTo);
-          if (roundToVal > 0) {
-            adjusted = Math.round(adjusted / roundToVal) * roundToVal;
-            adjusted = Math.max(0, Math.round(adjusted * 100) / 100);
-          }
-          var display = formatShopPrice(adjusted);
-          if (!display) return;
-          paintPriceNode(
-            el,
-            display,
-            testId,
-            variantIdForCart,
-            scope === 'cart' ? 'cart_global_fallback' : 'listing_global_fallback',
-            adjusted
-          );
+          // A mapped selector may match the price wrapper rather than the amount,
+          // so paint the leaves it contains instead of skipping it outright.
+          resolveRipxPricePaintTargets(el).forEach(function (target) {
+            var catalog = pm === 'fixed' ? 0 : getStableCatalogPriceForElement(target);
+            if (pm !== 'fixed' && catalog == null) return;
+            var adjusted = computeAllProductsAdjustedPrice(catalog, cfg);
+            if (adjusted == null) return;
+            var roundToVal = parseRoundTo(cfg.roundTo);
+            if (roundToVal > 0) {
+              adjusted = Math.round(adjusted / roundToVal) * roundToVal;
+              adjusted = Math.max(0, Math.round(adjusted * 100) / 100);
+            }
+            var display = formatShopPrice(adjusted);
+            if (!display) return;
+            paintPriceNode(
+              target,
+              display,
+              testId,
+              variantIdForCart,
+              scope === 'cart' ? 'cart_global_fallback' : 'listing_global_fallback',
+              adjusted
+            );
+          });
         });
       } catch (e) {}
     });
@@ -8838,8 +9152,7 @@
       return;
     }
     var variantIdForCart = variant.variantId != null ? variant.variantId : variant.id;
-    var cartUi =
-      '.cart-drawer,.cart-notification,#CartDrawer,#mini-cart,.mini-cart,[data-cart-drawer],.drawer--cart,aside.mini-cart,cart-drawer,.header__cart,.site-header__cart,predictive-search';
+    var cartUi = RIPX_CART_UI_SELECTOR;
     function inCartUi(el) {
       return el.closest && el.closest(cartUi);
     }
@@ -8893,14 +9206,12 @@
       );
       allWithProductId.forEach(function (card) {
         if (!card || inCartUi(card)) return;
-        var attr = getProductIdForListingCard(card);
+        var attr = getProductIdForListingCard(card, [targetId]);
         if (!attr || toNumericProductId(attr) !== pid) return;
         var cardPriceNum = priceNum;
         var cardDisplay = display || formatShopPrice(0);
         if (priceMode === 'amount' || priceMode === 'percent') {
-          var priceEl = card.querySelector(
-            '.price .money, .price, [data-product-price], .money, .price-item--regular, .price-item__regular, .product-price, [data-price]'
-          );
+          var priceEl = findRipxCatalogPriceNode(card);
           if (priceEl) {
             var catalog = getStableCatalogPriceForElement(priceEl);
             if (catalog != null) {
@@ -8937,20 +9248,22 @@
         }
         var registrySelectors = [];
         var listingSurfaceKeys = getListingPriceSurfaceKeys();
+        // Only regular-price selectors paint. compare_at mappings describe the
+        // "was" price and must not be rewritten with the test price.
         appendConfiguredRegistrySelectorsForSurfaces(
           registrySelectors,
           listingSurfaceKeys,
-          ['regular', 'compare_at'],
+          ['regular'],
           activeTest
         );
         var priceSurfaceMappingsAuthoritative = hasConfiguredPriceSurfaceMappingsForSurfaces(
           listingSurfaceKeys,
-          ['regular', 'compare_at'],
+          ['regular'],
           activeTest
         );
         registrySelectors.forEach(function (sel) {
           try {
-            card.querySelectorAll(sel).forEach(function (el) {
+            querySelectorAllWithShadowRoots(card, sel).forEach(function (el) {
               if (!el || inCartUi(el)) return;
               paintPriceNode(
                 el,
@@ -9043,7 +9356,8 @@
       inspected += nodes.length;
       nodes.forEach(function (node) {
         var root = findProductCardRootForPriceNode(node);
-        var attr = getProductIdForListingCard(root) || getProductIdForListingCard(node);
+        var attr =
+          getProductIdForListingCard(root, ids) || getProductIdForListingCard(node, ids);
         if (!attr) return;
         var targetId = null;
         for (var i = 0; i < ids.length; i += 1) {
@@ -9054,6 +9368,8 @@
         }
         if (!targetId) return;
         matched += 1;
+        var paintTargets = resolveRipxPricePaintTargets(node);
+        if (!paintTargets.length) return;
         var cfg = getEffectivePriceConfig(variant.config, targetId, null);
         var checkoutMethodProof = getConfiguredCheckoutMethodProof(cfg);
         var priceMode = cfg && cfg.priceMode ? String(cfg.priceMode).toLowerCase() : 'fixed';
@@ -9064,7 +9380,7 @@
           if (raw === null || raw === undefined || raw === '') return;
           priceNum = parseFloat(raw, 10);
         } else if (priceMode === 'amount' || priceMode === 'percent') {
-          var catalog = getStableCatalogPriceForElement(node);
+          var catalog = getStableCatalogPriceForElement(paintTargets[0]);
           if (catalog == null) return;
           if (priceMode === 'amount' && cfg.priceDelta != null) {
             var delta = parseFloat(cfg.priceDelta, 10);
@@ -9090,15 +9406,17 @@
         if (checkoutMethodProof && checkoutMethodProof.applicationMethod && pid) {
           rememberRipxPriceMethodForProduct(pid, checkoutMethodProof.applicationMethod);
         }
-        paintPriceNode(
-          node,
-          display,
-          testId,
-          variantIdForCart,
-          'selector_inferred_listing',
-          priceNum
-        );
-        painted += 1;
+        paintTargets.forEach(function (target) {
+          paintPriceNode(
+            target,
+            display,
+            testId,
+            variantIdForCart,
+            'selector_inferred_listing',
+            priceNum
+          );
+        });
+        painted += paintTargets.length;
       });
     });
     if (inspected || matched || painted) {
@@ -9135,8 +9453,7 @@
         getConfiguredCheckoutMethodProof(variant.config)
       );
     }
-    var cartUi =
-      '.cart-drawer,.cart-notification,#CartDrawer,#mini-cart,.mini-cart,[data-cart-drawer],.drawer--cart,aside.mini-cart,cart-drawer,.header__cart,.site-header__cart,predictive-search';
+    var cartUi = RIPX_CART_UI_SELECTOR;
     function inCartUi(el) {
       return el.closest && el.closest(cartUi);
     }
@@ -9147,7 +9464,7 @@
     var collectionListingSurfaces = getListingPriceSurfaceKeys();
     var priceSurfaceMappingsAuthoritative = hasConfiguredPriceSurfaceMappingsForSurfaces(
       collectionListingSurfaces,
-      ['regular', 'compare_at'],
+      ['regular'],
       activeTest
     );
     var excludedProductIds = getExcludedProductIdsForTest(activeTest);
@@ -9183,9 +9500,7 @@
       var cardPriceNum = priceNum;
       var cardDisplay = display || formatShopPrice(0);
       if (priceMode === 'amount' || priceMode === 'percent') {
-        var priceEl = card.querySelector(
-          '.price .money, .price, [data-product-price], .money, .price-item--regular, .price-item__regular, .product-price, [data-price]'
-        );
+        var priceEl = findRipxCatalogPriceNode(card);
         if (priceEl) {
           var catalog = getStableCatalogPriceForElement(priceEl);
           if (catalog != null) {
@@ -9224,12 +9539,12 @@
       appendConfiguredRegistrySelectorsForSurfaces(
         registrySelectors,
         getListingPriceSurfaceKeys(),
-        ['regular', 'compare_at'],
+        ['regular'],
         activeTest
       );
       registrySelectors.forEach(function (sel) {
         try {
-          card.querySelectorAll(sel).forEach(function (el) {
+          querySelectorAllWithShadowRoots(card, sel).forEach(function (el) {
             if (!el || inCartUi(el)) return;
             paintPriceNode(
               el,
@@ -9527,7 +9842,9 @@
       });
       var priceEls = row.querySelectorAll(cartPriceSelectors);
       if (skipIfPainted && priceEls.length) {
-        var first = priceEls[0];
+        // The first match is often a wrapper, and the paint lands on the amount
+        // inside it, so check the resolved node for the already-painted marker.
+        var first = resolveRipxPricePaintTargets(priceEls[0])[0];
         if (
           first &&
           first.getAttribute('data-ripx-price') === '1' &&
@@ -9581,7 +9898,11 @@
           var rowTargetUnit = priceNum;
           var priceEls = row.querySelectorAll(cartPriceSelectors);
           if (priceMode !== 'fixed' && priceEls.length) {
-            var catalog = parsePriceFromDisplay(priceEls[0]);
+            // Must be the stable native price, not whatever the row reads now:
+            // this node is about to be painted, and every cart refresh or drawer
+            // open runs this again. Reading the painted value back would take
+            // another 25% off the already-discounted price, and again after that.
+            var catalog = getStableCatalogPriceForElement(priceEls[0]);
             if (catalog != null && cfg) {
               var rowPrice = priceNum;
               if (priceMode === 'amount' && cfg.priceDelta != null) {
@@ -9654,7 +9975,8 @@
                 if (priceMode === 'amount' || priceMode === 'percent') {
                   var priceEls = row.querySelectorAll(cartPriceSelectors);
                   if (priceEls.length) {
-                    var catalog = parsePriceFromDisplay(priceEls[0]);
+                    // Stable native price — see the note on the product-row path.
+                    var catalog = getStableCatalogPriceForElement(priceEls[0]);
                     if (catalog != null && cfg) {
                       var rowPrice = catalog;
                       if (priceMode === 'amount' && cfg.priceDelta != null) {
@@ -10923,11 +11245,20 @@
       // Get all active test variants from the page
       const testVariants = document.querySelectorAll('[data-test-variant]');
 
+      // Every painted price node carries these attributes, so a page showing
+      // three of them used to report the order total three times. Revenue is
+      // summed server-side while conversions count distinct visitors, so the
+      // repeats inflated revenue per visitor without moving the conversion
+      // count. One order is one conversion per test, however many nodes carry
+      // it, and the arm is taken from the first node seen for that test.
+      const reported = new Set();
+
       testVariants.forEach(element => {
         const testId = element.getAttribute('data-test-id');
         const variantId = element.getAttribute('data-test-variant');
 
-        if (testId && variantId) {
+        if (testId && variantId && !reported.has(testId)) {
+          reported.add(testId);
           trackConversion(testId, variantId, parseFloat(totalPrice) / 100, {
             order_id: orderId,
           });
@@ -11198,13 +11529,15 @@
    * URLs where product cards may appear (collection, home, search, CMS pages with grids).
    * Path-based so we still run price listing when meta product id is missing or wrong.
    */
+  /**
+   * Surfaces that render product cards. Derived from the same classifier the
+   * selector registry uses: prefix matching here meant a localized collection
+   * path resolved to 'plp' for selector lookup while reporting "not a listing
+   * surface" for painting, so the whole listing pipeline was skipped.
+   */
   function isProductListingSurface() {
-    var p = getEffectivePreviewPathname() || '/';
-    if (p === '/' || p === '') return true;
-    if (p.indexOf('/collections/') === 0) return true;
-    if (p.indexOf('/search') === 0) return true;
-    if (p.indexOf('/pages/') === 0) return true;
-    return false;
+    var surface = inferPriceSurfaceFromPathname(getEffectivePreviewPathname() || '/');
+    return surface === 'plp' || surface === 'search' || surface === 'home';
   }
 
   function isCartSurface() {
@@ -11582,8 +11915,7 @@
   var OFFER_PDP_STYLE_ID = 'ripx-offer-pdp-message-style';
   var OFFER_PDP_RELATED_SEL =
     '.recommended-products,.related-products,product-recommendations,.product-recommendations,[data-section-type="recently-viewed"],[id*="related"],[id*="recommend"],[id*="complementary"],.complementary-products';
-  var OFFER_PDP_CART_UI_SEL =
-    '.cart-drawer,.cart-notification,#CartDrawer,#mini-cart,.mini-cart,[data-cart-drawer],.drawer--cart,aside.mini-cart,cart-drawer,.header__cart,.site-header__cart,predictive-search';
+  var OFFER_PDP_CART_UI_SEL = RIPX_CART_UI_SELECTOR;
   var _ripxOfferPdpRetry = {};
   var _ripxOfferPdpMo = null;
   var _ripxOfferPdpMoRoot = null;
@@ -12989,8 +13321,27 @@
   /**
    * Whether this test's storefront logic should run (target match, product cards on listings, or collection test on PDP with product-in-collection data).
    */
+  /** This gate runs on every paint pass, so the skip is recorded once per test. */
+  var _ripxConvertedCurrencyNoted = {};
+  function noteConvertedCurrencySkip(test) {
+    var key = String((test && test.id) || '');
+    if (!key || _ripxConvertedCurrencyNoted[key]) return;
+    _ripxConvertedCurrencyNoted[key] = true;
+    recordRipxSkip('runtime', 'converted_presentment_currency', {
+      testId: key,
+      activeCurrency: getShopCurrency(),
+      rate: String(
+        (window.Shopify && window.Shopify.currency && window.Shopify.currency.rate) || ''
+      ),
+    });
+  }
+
   function shouldRunPriceTestOnCurrentPage(test) {
     if (!test) return false;
+    if (testTypeIsPrice(test) && isConvertedPresentmentCurrency()) {
+      noteConvertedCurrencySkip(test);
+      return false;
+    }
     if (
       testTypeIsOffer(test) &&
       PREVIEW_MODE &&

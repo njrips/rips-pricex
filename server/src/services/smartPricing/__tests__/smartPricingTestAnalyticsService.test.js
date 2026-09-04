@@ -111,6 +111,87 @@ describe('smartPricingTestAnalyticsService', () => {
     expect(result.significance.significant).toBe(true);
     expect(result.winner_arm_id).toBe('arm_1');
     expect(result.winner_variant_id).toBe('v1');
+    // Totals weight each arm by its own traffic: (1.75x100 + 1.84x120) / 220.
+    expect(result.summary.live_weighted_ppv).toBeCloseTo(1.799, 3);
+    expect(result.summary.live_weighted_rpv).toBeCloseTo(2.045, 3);
+  });
+
+  // Totals used to divide by every arm's traffic whether or not that arm had
+  // reported money, so an unmeasured arm pulled the figure toward zero and a
+  // test with no money at all reported a confident $0.00 instead of a blank.
+  it('weights per-visitor money over the traffic that reported it', async () => {
+    getTestById.mockResolvedValue({
+      id: 'test-4',
+      status: 'running',
+      metadata: { smart_pricing_source: 'smart_pricing' },
+      variants: [],
+    });
+    findInboxPlanByTestId.mockResolvedValue({
+      id: 'SP-4',
+      price_arms: [
+        { id: 'c', role: 'control', label: 'Control', price: 59 },
+        { id: 'a', role: 'challenger', label: 'A', price: 54 },
+      ],
+      arm_projections: [],
+    });
+    analyticsService.getTestAnalytics.mockResolvedValue({
+      variants: [
+        // Arms are matched to analytics rows by the price in the name.
+        { id: 'v1', name: '$59.00 Control', visitors: 50, revenuePerVisitor: 4 },
+        // Far more traffic, but no money reported for it yet.
+        { id: 'v2', name: '$54.00 A', visitors: 450 },
+      ],
+      summary: { totalVisitors: 500, totalConversions: 0 },
+      significance: {},
+    });
+
+    const result = await buildSmartPricingTestAnalytics('demo.myshopify.com', 'test-4');
+
+    // $4 stands on its own traffic. Spreading it over all 500 gave $0.40.
+    expect(result.summary.live_weighted_rpv).toBe(4);
+    // Nothing reported profit at all, so there is no figure to show.
+    expect(result.summary.live_weighted_ppv).toBeNull();
+  });
+
+  // Number(null) is 0 rather than NaN, so every "is this a real number" check
+  // written as Number.isFinite(Number(x)) waved unmeasured metrics through as
+  // measured zeros: no forecast became a $0.00 forecast, and an arm with no
+  // analytics row at all became an arm that converted 0% of its visitors.
+  it('leaves unmeasured figures blank rather than reporting them as zero', async () => {
+    getTestById.mockResolvedValue({
+      id: 'test-5',
+      status: 'running',
+      metadata: { smart_pricing_source: 'smart_pricing' },
+      variants: [],
+    });
+    findInboxPlanByTestId.mockResolvedValue({
+      id: 'SP-5',
+      price_arms: [
+        { id: 'c', role: 'control', label: 'Control', price: 59 },
+        { id: 'a', role: 'challenger', label: 'A', price: 54 },
+      ],
+      // No projections were stored for this plan.
+      arm_projections: [],
+    });
+    analyticsService.getTestAnalytics.mockResolvedValue({
+      variants: [{ id: 'v1', name: '$59.00 Control', visitors: 50, conversionRate: 2.5 }],
+      summary: { totalVisitors: 50, totalConversions: 1 },
+      // Still collecting: no lift or confidence has been computed.
+      significance: { significant: false, message: 'Collecting data' },
+    });
+
+    const result = await buildSmartPricingTestAnalytics('demo.myshopify.com', 'test-5');
+    const challenger = result.arms.find(arm => arm.arm_id === 'a');
+
+    expect(result.summary.projected_best_ppv).toBeNull();
+    expect(result.summary.lift).toBeNull();
+    expect(result.summary.confidence).toBeNull();
+    // Never matched to an analytics row, so it has no rate — not a 0% rate.
+    expect(challenger.conversion_rate).toBeNull();
+    expect(challenger.revenue_per_visitor).toBeNull();
+    expect(challenger.projected_ppv).toBeNull();
+    // The control did report, and a real reading still comes through.
+    expect(result.arms.find(arm => arm.arm_id === 'c').conversion_rate).toBe(2.5);
   });
 
   it('does not mark a winner when significance is not ready', async () => {

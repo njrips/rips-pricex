@@ -2,6 +2,22 @@ const { query } = require('../../utils/database');
 
 const ENTITLED_STATUSES = new Set(['ACTIVE', 'active', 'trial', 'TRIAL', 'paid', 'PAID']);
 
+/**
+ * Local-pilot unlock that treats every shop as having paid.
+ *
+ * `.env.example`, the README and the runbooks all ship it switched on, so a
+ * deployment that copies the example env would hand the paid tiers to every
+ * install for free. Ignoring it in production matches how
+ * RIPSPRICEX_ALLOW_UNVERIFIED_API is handled and leaves billing as the only way
+ * in on a live store.
+ */
+function devEntitleAllEnabled() {
+  if (String(process.env.RIPSPRICEX_DEV_ENTITLE_ALL || '').trim().toLowerCase() !== 'true') {
+    return false;
+  }
+  return String(process.env.NODE_ENV || '').toLowerCase() !== 'production';
+}
+
 function pricingPlansUrl(shopDomain, appHandle = process.env.SHOPIFY_APP_HANDLE || 'ripspricex') {
   const storeHandle = String(shopDomain || '')
     .replace(/\.myshopify\.com$/i, '')
@@ -20,7 +36,7 @@ async function getShopEntitlement(shopDomain) {
   const row = rows[0];
   if (!row || row.uninstalled_at) {
     return {
-      entitled: process.env.RIPSPRICEX_DEV_ENTITLE_ALL === 'true',
+      entitled: devEntitleAllEnabled(),
       planHandle: null,
       status: 'none',
       upgradeUrl: pricingPlansUrl(shopDomain),
@@ -28,8 +44,7 @@ async function getShopEntitlement(shopDomain) {
   }
 
   const entitled =
-    process.env.RIPSPRICEX_DEV_ENTITLE_ALL === 'true' ||
-    ENTITLED_STATUSES.has(String(row.entitlement_status || ''));
+    devEntitleAllEnabled() || ENTITLED_STATUSES.has(String(row.entitlement_status || ''));
 
   return {
     entitled,
@@ -105,6 +120,7 @@ function requireEntitlement(capability = 'create') {
 }
 
 module.exports = {
+  devEntitleAllEnabled,
   getShopEntitlement,
   upsertShopInstall,
   markShopUninstalled,

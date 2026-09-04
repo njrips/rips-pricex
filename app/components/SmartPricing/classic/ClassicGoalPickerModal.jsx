@@ -5,7 +5,6 @@ import {
   getGoalMetricDefinitions,
   saveGoalMetricDefinition,
 } from '../../../services/goalMetricsApi';
-import { ROUTES } from '../../../constants/routes';
 import {
   CUSTOM_GOAL_TRIGGER_OPTIONS,
   attachCustomGoal,
@@ -234,9 +233,7 @@ export default function ClassicGoalPickerModal({
         ? 'Fires automatically when the shopper URL matches your pattern.'
         : draft.trigger_type === 'custom_javascript'
           ? 'Return true, a number, or { value } when the event should count.'
-          : 'Pricify watches the storefront and fires this event automatically.';
-
-  const goalsPageHref = shopDomain ? ROUTES.appGoalsMetrics(shopDomain) : null;
+          : 'Priceify watches the storefront and fires this event automatically.';
 
   if (typeof document === 'undefined') return null;
 
@@ -367,18 +364,12 @@ export default function ClassicGoalPickerModal({
                     ) : availableRows.length === 0 ? (
                       <div className={styles.goalPickerEmpty}>
                         <p className={styles.help}>
-                          No matching goals. Create one here, or manage the full library on Goals
-                          &amp; Metrics.
+                          No matching goals. Create one here — this is where the library is kept.
                         </p>
                         <div className={styles.goalPickerEmptyActions}>
                           <Button icon={ButtonIconPlus} onClick={() => setTab('create')}>
                             Create new
                           </Button>
-                          {goalsPageHref ? (
-                            <Button variant="plain" url={goalsPageHref} external>
-                              Open Goals &amp; Metrics
-                            </Button>
-                          ) : null}
                         </div>
                       </div>
                     ) : (
@@ -402,7 +393,7 @@ export default function ClassicGoalPickerModal({
           ) : (
             <div className={styles.goalPickerCreate}>
               <p className={styles.help}>
-                Define how Pricify should fire this event on the storefront. It is saved to your Goals
+                Define how Priceify should fire this event on the storefront. It is saved to your Goals
                 library for reuse.
               </p>
 
@@ -581,14 +572,6 @@ export default function ClassicGoalPickerModal({
         <div className={styles.modalFooter}>
           <span className={styles.help} style={{ margin: 0 }}>
             {selected.length} custom goal{selected.length === 1 ? '' : 's'} selected
-            {goalsPageHref ? (
-              <>
-                {' · '}
-                <Button variant="plain" url={goalsPageHref} external>
-                  Manage Goals library
-                </Button>
-              </>
-            ) : null}
           </span>
           <Button variant="primary" onClick={onClose}>
             Done

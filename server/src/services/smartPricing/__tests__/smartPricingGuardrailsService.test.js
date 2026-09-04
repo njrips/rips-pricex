@@ -140,6 +140,46 @@ describe('smartPricingGuardrailsService', () => {
     assert.equal(normalizeGuardrails({ notificationEmail: 'a@b.co' }).notification_email, 'a@b.co');
   });
 
+  it('keeps settings the Stat settings page no longer sends', () => {
+    // Stat settings posts two fields. saveShopSmartPricingGuardrails spreads
+    // that patch over the stored values and normalizes the result, so anything
+    // the merchant configured before the page shrank has to survive the round
+    // trip rather than snapping back to a default.
+    const stored = normalizeGuardrails({
+      auto_apply_winner: true,
+      auto_apply_delay_days: 7,
+      winner_ready_notify: false,
+      notification_email: 'ops@example.com',
+      max_learning_rounds: 2,
+      max_price_change_percent: 25,
+      min_margin_percent: 20,
+      default_cogs_percent: 40,
+      min_conversions_per_variation: 250,
+      statistical_power: 90,
+      mde_percent: 8,
+    });
+
+    const saved = normalizeGuardrails({
+      ...stored,
+      confidence_level: 95,
+      min_sample_size_per_variation: 2500,
+    });
+
+    assert.equal(saved.confidence_level, 95);
+    assert.equal(saved.min_sample_size_per_variation, 2500);
+    assert.equal(saved.auto_apply_winner, true);
+    assert.equal(saved.auto_apply_delay_days, 7);
+    assert.equal(saved.winner_ready_notify, false);
+    assert.equal(saved.notification_email, 'ops@example.com');
+    assert.equal(saved.max_learning_rounds, 2);
+    assert.equal(saved.max_price_change_percent, 25);
+    assert.equal(saved.min_margin_percent, 20);
+    assert.equal(saved.default_cogs_percent, 40);
+    assert.equal(saved.min_conversions_per_variation, 250);
+    assert.equal(saved.statistical_power, 90);
+    assert.equal(saved.mde_percent, 8);
+  });
+
   it('does not invent a frequentist analysis method', () => {
     assert.equal(normalizeGuardrails({ analysis_method: 'frequentist' }).analysis_method, 'sequential');
   });

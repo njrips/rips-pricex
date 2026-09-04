@@ -5,13 +5,13 @@
 export const PRIVACY_UPDATED = '24 August 2026';
 
 export const PRIVACY_INTRO =
-  'This page describes how Pricify handles data when a merchant installs the app from Shopify. It is a product-practice notice for the App Store listing, not legal advice.';
+  'This page describes how Priceify handles data when a merchant installs the app from Shopify. It is a product-practice notice for the App Store listing, not legal advice.';
 
 export const PRIVACY_SECTIONS = [
   {
     title: 'Who this covers',
     paragraphs: [
-      'Pricify is a Shopify-embedded Smart Pricing app. The tenant is the shop (session.shop). There is no email/password login on this website.',
+      'Priceify is a Shopify-embedded Smart Pricing app. The tenant is the shop (session.shop). There is no email/password login on this website.',
       'Merchants install from the Shopify App Store. Shopify supplies the shop and OAuth session. This public site does not collect a shop domain or a password.',
     ],
   },

@@ -4,7 +4,7 @@ import { PUBLIC_HEADER_NAV } from '../../../constants/publicRoutes';
 import { useKeyedState } from '../../../hooks/useKeyedState';
 import { DEFAULT_APP_STORE_LISTING_URL } from '../../../utils/appStoreListingUrl';
 import { FOOTER_BLURB, FOOTER_COLUMNS, FOOTER_TAGLINE } from './landingContent';
-import PricifyLogo from './PricifyLogo';
+import PriceifyLogo from './PriceifyLogo';
 import PublicSectionLink from './PublicSectionLink';
 import { scheduleScrollPublicPageTop, scheduleScrollToPublicHash } from './scrollToPublicHash';
 
@@ -29,7 +29,7 @@ function InstallLink({ storeUrl, className, children }) {
   );
 }
 
-export default function PricifyShell({
+export default function PriceifyShell({
   children,
   storeUrl = '',
   showNav = true,
@@ -85,13 +85,13 @@ export default function PricifyShell({
   }, [menuOpen, setMenuOpen]);
 
   return (
-    <div className="rpx-public" data-palette="pricify">
+    <div className="rpx-public" data-palette="priceify">
       <a className="skip" href="#public-main" style={SKIP_HIDDEN}>
         Skip to content
       </a>
       <header className={scrolled ? 'px-header is-scrolled' : 'px-header'}>
         <div className={menuOpen ? 'px-header-inner is-open' : 'px-header-inner'}>
-          <PricifyLogo onNavigate={() => setMenuOpen(false)} />
+          <PriceifyLogo onNavigate={() => setMenuOpen(false)} />
           {showNav ? (
             <>
               <button
@@ -151,7 +151,7 @@ export default function PricifyShell({
         <div className="px-footer-inner">
           <div className="px-footer-top">
             <div className="px-footer-brand">
-              <PricifyLogo />
+              <PriceifyLogo />
               <p className="px-footer-blurb">{FOOTER_BLURB}</p>
             </div>
             <div className="px-footer-cols">
@@ -185,7 +185,7 @@ export default function PricifyShell({
             </div>
           </div>
           <div className="px-footer-bottom">
-            <p>© {new Date().getFullYear()} Pricify. All rights reserved.</p>
+            <p>© {new Date().getFullYear()} Priceify. All rights reserved.</p>
             <p>{FOOTER_TAGLINE}</p>
           </div>
         </div>

@@ -47,6 +47,7 @@ When starting a new investigation in this project:
 | 2026-08-17 | [2026-08-17_ADMIN_POLARIS_SKIN.md](./2026-08-17_ADMIN_POLARIS_SKIN.md) | Done | Classic layout; Admin/Polaris tokens + controls on all product UI |
 | 2026-08-18 | [2026-08-18_OFFER_TEST.md](./2026-08-18_OFFER_TEST.md) | Done | Classic Offer Test: 5-step wizard, checkout Discount Function, automatic discount, scope sync |
 | 2026-08-18 | [2026-08-18_REVENUE_GUARDRAIL.md](./2026-08-18_REVENUE_GUARDRAIL.md) | Done | Always-on max revenue drop %; runtime pause vs control RPV |
+| 2026-09-03 | [2026-09-03_CHECKOUT_PRICE_AUTHORITY.md](./2026-09-03_CHECKOUT_PRICE_AUTHORITY.md) | Plan | Move applied price off shopper-settable cart attributes onto function metafields |
 
 ## Quick facts
 

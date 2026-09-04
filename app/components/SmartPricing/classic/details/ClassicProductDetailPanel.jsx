@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Badge, Banner, Button, Modal, TextField } from '@shopify/polaris';
-import { formatCurrency } from '../../smartPricingConstants';
-import { formatNumber, formatRate } from '../classicExperimentDetailsHelpers';
+import {
+  formatMetricMoney,
+  formatNumber,
+  formatRate,
+} from '../classicExperimentDetailsHelpers';
 import {
   applySmartPricingWinner,
   finishSmartPricingProduct,
@@ -25,13 +28,6 @@ const STATE_BADGE = {
   collecting: { tone: null, label: 'Collecting' },
   applied: { tone: 'success', label: 'Applied' },
 };
-
-function money(value, currency) {
-  if (value === null || value === undefined || value === '') return '—';
-  const n = Number(value);
-  if (!Number.isFinite(n)) return '—';
-  return formatCurrency(n, currency);
-}
 
 function formatWhen(iso) {
   if (!iso) return '—';
@@ -191,7 +187,7 @@ export default function ClassicProductDetailPanel({
         <>
           <div className={styles.selectionBar}>
             <span>Current / catalog</span>
-            <strong>{money(plan?.current_price, currency)}</strong>
+            <strong>{formatMetricMoney(plan?.current_price, currency)}</strong>
           </div>
           {decision?.detail ? <p className={styles.help}>{decision.detail}</p> : null}
 
@@ -278,7 +274,11 @@ export default function ClassicProductDetailPanel({
                       <th>Price</th>
                       <th>Visitors</th>
                       <th>Conv.</th>
-                      <th>PPV</th>
+                      {/* Revenue per visitor only. The profit column beside it
+                          was revenue times a fixed shop-wide cost assumption,
+                          so it ranked the arms identically and measured
+                          nothing extra. */}
+                      <th>Revenue / visitor</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -288,10 +288,10 @@ export default function ClassicProductDetailPanel({
                           {arm.label || arm.arm_id || '—'}
                           {arm.role === 'control' ? ' (control)' : ''}
                         </td>
-                        <td>{money(arm.price, currency)}</td>
+                        <td>{formatMetricMoney(arm.price, currency)}</td>
                         <td>{formatNumber(arm.visitors)}</td>
                         <td>{formatRate(arm.conversion_rate)}</td>
-                        <td>{money(arm.revenue_per_visitor, currency)}</td>
+                        <td>{formatMetricMoney(arm.revenue_per_visitor, currency)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -418,14 +418,14 @@ export default function ClassicProductDetailPanel({
       >
         <Modal.Section>
           <p>
-            Catalog prices no longer match what Pricify applied. Forcing revert will overwrite
+            Catalog prices no longer match what Priceify applied. Forcing revert will overwrite
             the current Shopify price with the pre-apply baseline.
           </p>
           {(driftConfirm?.drifted || []).slice(0, 5).map(row => (
             <div key={row.variant_id} className={styles.productSub}>
-              {row.variant_id}: now {money(row.current_price, currency)} (applied{' '}
-              {money(row.expected_applied_price, currency)}) → restore{' '}
-              {money(row.previous_price, currency)}
+              {row.variant_id}: now {formatMetricMoney(row.current_price, currency)} (applied{' '}
+              {formatMetricMoney(row.expected_applied_price, currency)}) → restore{' '}
+              {formatMetricMoney(row.previous_price, currency)}
             </div>
           ))}
         </Modal.Section>

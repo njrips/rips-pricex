@@ -64,14 +64,17 @@ const STATISTICAL_THRESHOLD = {
   CONFIDENCE_LEVEL: 95,
 };
 
-// Settings bounds (min sample size, confidence level) – used by settings and admin routes
+// Legacy analytics fallback, for a test that stamped no confidence level of its
+// own. Smart Pricing tests never reach it: resolveAnalysisConfidence reads the
+// level stamped at launch and falls back to the Smart Pricing default of 0.90.
+//
+// The sample-size and confidence bounds that used to sit here were never read by
+// settings or any route, and had drifted to describe limits the app does not
+// enforce — a 10,000 ceiling against a real cap of 1,000,000, and a default of
+// 100 against a real default of 5,000. smartPricingGuardrailsService owns those
+// ranges; a second, wrong copy of them was only ever going to mislead.
 const SETTINGS_BOUNDS = {
-  MIN_SAMPLE_SIZE: 10,
-  MAX_SAMPLE_SIZE: 10000,
-  CONFIDENCE_LEVEL_MIN: 0.8,
-  CONFIDENCE_LEVEL_MAX: 1,
   DEFAULT_CONFIDENCE_LEVEL: 0.95,
-  DEFAULT_MIN_SAMPLE_SIZE: 100,
 };
 
 // Test health / auto-stop thresholds (min visitors per variant for significance decisions)

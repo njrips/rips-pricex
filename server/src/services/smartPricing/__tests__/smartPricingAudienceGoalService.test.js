@@ -1,5 +1,4 @@
 const {
-  suggestAudienceForPlans,
   suggestGoalForPlan,
   buildBatchPreviewLaunch,
   detectSkuOverlap,
@@ -24,15 +23,6 @@ const { listInboxPlans } = require('../../../models/smartPricingInboxStore');
 describe('smartPricingAudienceGoalService', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-  });
-
-  it('suggests shop default audience template', () => {
-    const audience = suggestAudienceForPlans([], {
-      default_audience_template: { device: 'mobile', customer: 'returning', countries: ['US'] },
-    });
-    expect(audience.segments.device).toBe('mobile');
-    expect(audience.segments.customer).toBe('returning');
-    expect(audience.inherit_from_shop_defaults).toBe(true);
   });
 
   it('suggests conversion_rate for low-traffic plans', () => {

@@ -4,6 +4,7 @@ import { collectActivityLogs, formatActivityRelative, mergeActivityTimeline } fr
 import { getPlanProductTitle, normalizePlanStatus } from './classicExperimentHelpers';
 import { formatOfferRule, isOfferExperimentType } from './offerSelection';
 import { buildPreviewUrl, resolvePreviewBaseUrl } from '../../../utils/previewUrl';
+import { formatCurrency } from '../smartPricingConstants';
 
 /**
  * Pure mappers for Classic experiment details (Overview + tabs).
@@ -152,13 +153,18 @@ export function buildOverviewKpis({ analytics = null, plan = null, experiment = 
     plan?.analytics?.lift_pct ??
     plan?.lift_pct ??
     null;
+  // Below the sample floors there is no reading to show. The server withholds
+  // it, but these fallbacks would otherwise reach past the withheld value to a
+  // figure cached on the plan from an earlier response.
   const confidence =
-    summary.confidence ??
-    significance.confidence ??
-    experiment?.confidence ??
-    plan?.analytics?.confidence_pct ??
-    plan?.confidence_pct ??
-    null;
+    significance.sampleReady === false
+      ? null
+      : (summary.confidence ??
+        significance.confidence ??
+        experiment?.confidence ??
+        plan?.analytics?.confidence_pct ??
+        plan?.confidence_pct ??
+        null);
   const overallRate =
     summary.overall_conversion_rate ??
     plan?.analytics?.overall_rate ??
@@ -260,9 +266,9 @@ export function buildConversionRows({ analytics = null, plan = null } = {}) {
   const winnerArmId = analytics?.winner_arm_id || null;
 
   const rows = (analyticsArms.length ? analyticsArms : planArms).map((arm, index) => {
-    const rate = Number(arm.conversion_rate ?? arm.rate);
-    // A genuine 0% must render as "0.00%", not as the "no data yet" dash.
-    const hasRate = Number.isFinite(rate);
+    // A genuine 0% must render as "0.00%", not as the "no data yet" dash — and
+    // an arm that never reported must not be read as a genuine 0%.
+    const rate = finiteOrNull(arm.conversion_rate ?? arm.rate);
     const control = isControlArm(arm) || (!arm.role && index === 0);
     const id = arm.arm_id || arm.id || `arm_${index}`;
     return {
@@ -271,9 +277,9 @@ export function buildConversionRows({ analytics = null, plan = null } = {}) {
       role: arm.role || (control ? 'control' : 'challenger'),
       isControl: control,
       isWinner: Boolean(winnerArmId && String(winnerArmId) === String(id)),
-      rate: hasRate ? rate : null,
-      visitors: Number.isFinite(Number(arm.visitors)) ? Number(arm.visitors) : null,
-      conversions: Number.isFinite(Number(arm.conversions)) ? Number(arm.conversions) : null,
+      rate,
+      visitors: finiteOrNull(arm.visitors),
+      conversions: finiteOrNull(arm.conversions),
       price: arm.price ?? null,
       allocation: arm.allocation_percent ?? arm.traffic_percent ?? arm.allocation ?? null,
     };
@@ -426,6 +432,7 @@ export function buildVariationsSummary(plan = null, analytics = null, options = 
       deltaPercent: arm.delta_percent ?? null,
       visitors: live?.visitors ?? null,
       conversionRate: live?.conversion_rate ?? null,
+      revenuePerVisitor: live?.revenue_per_visitor ?? null,
       variantId: variant?.id || null,
       variantName: variant?.name || null,
       armIndex: index,
@@ -824,14 +831,38 @@ export function paginateVariationProducts(
   };
 }
 
+/**
+ * A measured number, or null when there is nothing to measure.
+ *
+ * `Number(null)` is 0 and `Number('')` is 0, so the obvious
+ * `Number.isFinite(Number(x))` accepts a missing value as a real zero. Analytics
+ * arms carry explicit nulls for metrics they could not measure, so that
+ * shortcut turned "no data yet" into "$0.00 earned" everywhere it was used.
+ */
+function finiteOrNull(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * Per-visitor money for display. Zero is a real reading — a variation can go a
+ * whole run without earning anything — so only an absent measurement becomes a
+ * dash.
+ */
+export function formatMetricMoney(value, currency) {
+  const n = finiteOrNull(value);
+  return n === null ? '—' : formatCurrency(n, currency);
+}
+
 function meanFinite(values = []) {
-  const nums = values.filter(v => Number.isFinite(Number(v))).map(Number);
+  const nums = values.map(finiteOrNull).filter(n => n !== null);
   if (!nums.length) return null;
   return nums.reduce((sum, n) => sum + n, 0) / nums.length;
 }
 
 function sumFinite(values = []) {
-  const nums = values.filter(v => Number.isFinite(Number(v))).map(Number);
+  const nums = values.map(finiteOrNull).filter(n => n !== null);
   if (!nums.length) return null;
   return nums.reduce((sum, n) => sum + n, 0);
 }
@@ -939,7 +970,6 @@ export function buildVariationAveragePerformance({
     const visitors = meanFinite(samples.map(s => s.visitors));
     const conversions = meanFinite(samples.map(s => s.conversions));
     const conversionRate = meanFinite(samples.map(s => s.conversion_rate));
-    const profitPerVisitor = meanFinite(samples.map(s => s.profit_per_visitor));
     const revenuePerVisitor = meanFinite(samples.map(s => s.revenue_per_visitor));
     const totalVisitors = sumFinite(samples.map(s => s.visitors));
 
@@ -954,7 +984,6 @@ export function buildVariationAveragePerformance({
       avg_visitors: visitors,
       avg_conversions: conversions,
       avg_conversion_rate: conversionRate,
-      avg_profit_per_visitor: profitPerVisitor,
       avg_revenue_per_visitor: revenuePerVisitor,
       total_visitors: totalVisitors,
     };
@@ -968,8 +997,8 @@ export function buildVariationAveragePerformance({
     const n = Number(row.avg_visitors);
     return Number.isFinite(n) && n > max ? n : max;
   }, 0);
-  const maxPpv = rows.reduce((max, row) => {
-    const n = Number(row.avg_profit_per_visitor);
+  const maxRpv = rows.reduce((max, row) => {
+    const n = Number(row.avg_revenue_per_visitor);
     return Number.isFinite(n) && n > max ? n : max;
   }, 0);
 
@@ -977,7 +1006,7 @@ export function buildVariationAveragePerformance({
     ...row,
     conversionBarWidth: conversionBarWidth(row.avg_conversion_rate, maxConversion),
     visitorsBarWidth: conversionBarWidth(row.avg_visitors, maxVisitors),
-    ppvBarWidth: conversionBarWidth(row.avg_profit_per_visitor, maxPpv),
+    rpvBarWidth: conversionBarWidth(row.avg_revenue_per_visitor, maxRpv),
   }));
 }
 
@@ -1040,7 +1069,9 @@ export function buildProductPerformanceGrid({
       planArms
         .filter(arm => !isControlArm(arm))
         .map(arm => metricsByArmId[String(arm.id)])
-        .filter(m => m && Number.isFinite(Number(m.conversion_rate)))
+        // An arm with no rate yet is not a challenger at 0% — it has not
+        // reported, so it cannot be crowned the best of the bunch.
+        .filter(m => m && finiteOrNull(m.conversion_rate) !== null)
         .sort((a, b) => Number(b.conversion_rate) - Number(a.conversion_rate))[0] || null;
 
     return {
@@ -1079,7 +1110,7 @@ export function buildProductPerformanceGrid({
       sort_visitors: controlMetrics?.visitors ?? null,
       sort_conversion_rate:
         bestChallenger?.conversion_rate ?? controlMetrics?.conversion_rate ?? null,
-      sort_ppv: bestChallenger?.profit_per_visitor ?? controlMetrics?.profit_per_visitor ?? null,
+      sort_rpv: bestChallenger?.revenue_per_visitor ?? controlMetrics?.revenue_per_visitor ?? null,
     };
   });
 }
@@ -1208,13 +1239,15 @@ export function filterSortProductPerformance(rows = [], options = {}) {
     return hay.includes(query);
   });
 
+  // Products with no reading sort to the bottom in either direction, rather
+  // than mixing in among the genuine zeros.
   const cmpNum = (a, b, desc = true) => {
-    const aOk = Number.isFinite(Number(a));
-    const bOk = Number.isFinite(Number(b));
-    if (!aOk && !bOk) return 0;
-    if (!aOk) return 1;
-    if (!bOk) return -1;
-    return desc ? Number(b) - Number(a) : Number(a) - Number(b);
+    const left = finiteOrNull(a);
+    const right = finiteOrNull(b);
+    if (left === null && right === null) return 0;
+    if (left === null) return 1;
+    if (right === null) return -1;
+    return desc ? right - left : left - right;
   };
 
   filtered.sort((a, b) => {
@@ -1226,9 +1259,9 @@ export function filterSortProductPerformance(rows = [], options = {}) {
       const byRate = cmpNum(a.sort_conversion_rate, b.sort_conversion_rate, true);
       return byRate || String(a.title || '').localeCompare(String(b.title || ''));
     }
-    if (sort === 'ppv_desc') {
-      const byPpv = cmpNum(a.sort_ppv, b.sort_ppv, true);
-      return byPpv || String(a.title || '').localeCompare(String(b.title || ''));
+    if (sort === 'rpv_desc') {
+      const byRpv = cmpNum(a.sort_rpv, b.sort_rpv, true);
+      return byRpv || String(a.title || '').localeCompare(String(b.title || ''));
     }
     return String(a?.title || '').localeCompare(String(b?.title || ''), undefined, {
       sensitivity: 'base',
@@ -1240,6 +1273,11 @@ export function filterSortProductPerformance(rows = [], options = {}) {
 /**
  * Merge multi-test analytics into a representative payload for Overview KPIs.
  * Sums visitors/conversions; averages lift/confidence across tests with data.
+ *
+ * The profit fields are still merged even though no screen reads them, because
+ * the result has to keep the same shape as the single-test payload the server
+ * returns. Dropping them here would make a merged experiment and a one-product
+ * experiment disagree about what an analytics object contains.
  */
 export function mergeExperimentAnalytics(analyticsByTestId = {}, primary = null) {
   const entries = Object.entries(
@@ -1280,10 +1318,12 @@ export function mergeExperimentAnalytics(analyticsByTestId = {}, primary = null)
       Number.isFinite(summaryConversions) && summaryConversions >= 0
         ? summaryConversions
         : armConversions;
-    const lift = Number(payload.summary?.lift ?? payload.significance?.lift);
-    if (Number.isFinite(lift)) lifts.push(lift);
-    const confidence = Number(payload.summary?.confidence ?? payload.significance?.confidence);
-    if (Number.isFinite(confidence)) confidences.push(confidence);
+    const lift = finiteOrNull(payload.summary?.lift ?? payload.significance?.lift);
+    if (lift !== null) lifts.push(lift);
+    const confidence = finiteOrNull(
+      payload.summary?.confidence ?? payload.significance?.confidence
+    );
+    if (confidence !== null) confidences.push(confidence);
     const sequential =
       payload.significance?.sequential === true || payload.significance?.method === 'msprt';
     if (sequential) anySequential = true;
@@ -1314,27 +1354,68 @@ export function mergeExperimentAnalytics(analyticsByTestId = {}, primary = null)
           conversions: 0,
           _rates: [],
           _ppvs: [],
+          _rpvs: [],
+          _projected: [],
         });
       }
       const agg = armsByKey.get(key);
       agg.visitors += Number(arm.visitors) || 0;
       agg.conversions += Number(arm.conversions) || 0;
-      if (Number.isFinite(Number(arm.conversion_rate)))
-        agg._rates.push(Number(arm.conversion_rate));
-      if (Number.isFinite(Number(arm.profit_per_visitor))) {
-        agg._ppvs.push(Number(arm.profit_per_visitor));
-      }
+      // meanFinite drops nulls on its own, so an unmeasured arm can be pushed
+      // as-is and simply will not count toward the average.
+      agg._rates.push(arm.conversion_rate);
+      agg._ppvs.push(arm.profit_per_visitor);
+      agg._rpvs.push(arm.revenue_per_visitor);
+      agg._projected.push(arm.projected_ppv);
     });
   });
 
   const arms = Array.from(armsByKey.values()).map(arm => {
-    const { _rates, _ppvs, ...rest } = arm;
+    const { _rates, _ppvs, _rpvs, _projected, ...rest } = arm;
+    const livePpv = meanFinite(_ppvs);
+    // Averaged the same way as the live figure, so the two stay comparable and
+    // the delta below is not one product's forecast against every product's
+    // result. Taking the max instead would track whichever product forecast
+    // highest rather than what this arm is expected to earn.
+    const projectedPpv = meanFinite(_projected);
     return {
       ...rest,
       conversion_rate: meanFinite(_rates),
-      profit_per_visitor: meanFinite(_ppvs),
+      profit_per_visitor: livePpv,
+      revenue_per_visitor: meanFinite(_rpvs),
+      projected_ppv: projectedPpv,
+      ppv_vs_projection_delta:
+        Number.isFinite(livePpv) && Number.isFinite(projectedPpv)
+          ? Math.round((livePpv - projectedPpv) * 1000) / 1000
+          : null,
     };
   });
+
+  // Both of these are spread in from the primary test below, which made them
+  // that one product's numbers sitting beside experiment-wide visitor counts.
+  // Weighted over the traffic that reported the metric, not over every arm. An
+  // arm with no figure has not earned nothing; it has not been measured, and
+  // counting it as zero turns "no data yet" into a confident $0.00 in Totals.
+  const weightedByVisitors = key => {
+    let weighted = 0;
+    let weight = 0;
+    arms.forEach(arm => {
+      const value = finiteOrNull(arm[key]);
+      if (value === null) return;
+      const visitors = Number(arm.visitors) || 0;
+      weighted += value * visitors;
+      weight += visitors;
+    });
+    return weight ? weighted / weight : null;
+  };
+  const liveWeightedPpv = weightedByVisitors('profit_per_visitor');
+  const liveWeightedRpv = weightedByVisitors('revenue_per_visitor');
+  const projectedBestPpv = arms.reduce((best, arm) => {
+    if (arm.projected_ppv == null) return best;
+    const value = Number(arm.projected_ppv);
+    if (!Number.isFinite(value)) return best;
+    return best === null || value > best ? value : best;
+  }, null);
 
   const overall =
     visitors > 0 && Number.isFinite(conversions)
@@ -1353,6 +1434,9 @@ export function mergeExperimentAnalytics(analyticsByTestId = {}, primary = null)
       visitors,
       conversions,
       overall_conversion_rate: overall,
+      live_weighted_ppv: liveWeightedPpv,
+      live_weighted_rpv: liveWeightedRpv,
+      projected_best_ppv: projectedBestPpv,
       lift: meanFinite(lifts),
       confidence: confidences.length ? Math.min(...confidences) : null,
       significant,

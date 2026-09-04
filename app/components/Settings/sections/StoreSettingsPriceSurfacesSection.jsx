@@ -236,7 +236,7 @@ export function StoreSettingsPriceSurfacesSection({
 
   const sectionSummary = useMemo(
     () =>
-      'Shop defaults apply to every Classic Smart Pricing test. When a visitor is bucketed, Pricify paints mapped selectors on PDP, listings, and cart.',
+      'Shop defaults apply to every Classic Smart Pricing test. When a visitor is bucketed, Priceify paints mapped selectors on PDP, listings, and cart.',
     []
   );
 

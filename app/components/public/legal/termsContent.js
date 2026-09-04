@@ -1,13 +1,13 @@
 export const TERMS_UPDATED = '24 August 2026';
 
 export const TERMS_INTRO =
-  'These terms describe how merchants use Pricify on Shopify. They are a product notice for this website, not a substitute for Shopify’s terms or legal advice.';
+  'These terms describe how merchants use Priceify on Shopify. They are a product notice for this website, not a substitute for Shopify’s terms or legal advice.';
 
 export const TERMS_SECTIONS = [
   {
     title: 'The service',
     paragraphs: [
-      'Pricify is the Shopify price-testing app used in Admin: price experiments, theme price mapping, checkout readiness, and applying a winner. RipX AI is the in-app assistant for questions and suggestions — not a separate login.',
+      'Priceify is the Shopify price-testing app used in Admin: price experiments, theme price mapping, checkout readiness, and applying a winner. RipX AI is the in-app assistant for questions and suggestions — not a separate login.',
     ],
   },
   {

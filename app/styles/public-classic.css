@@ -1,4 +1,4 @@
-/* Public site — Pricify landing (Figma Desktop 1440)
+/* Public site — Priceify landing (Figma Desktop 1440)
    Body must stay overflow:visible. overflow:auto on body makes it the sticky
    containing block; body is as tall as the page, so the header never sticks. */
 html:has(.rpx-public) {

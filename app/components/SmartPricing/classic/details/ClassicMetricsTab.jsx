@@ -1,5 +1,5 @@
-import { Button } from '@shopify/polaris';
 import { formatPrimaryMetricLabel } from '../classicExperimentDetailsHelpers';
+import DetailFactCard from './DetailFactCard';
 import styles from '../SmartPricingClassic.module.css';
 
 export default function ClassicMetricsTab({ metrics, onEdit }) {
@@ -22,27 +22,20 @@ export default function ClassicMetricsTab({ metrics, onEdit }) {
 
   return (
     <div className={styles.detailStack}>
-      <div className={`${styles.statCard} ${styles.detailFactCard}`}>
-        <div className={styles.detailFactHead}>
-          <div className={styles.statLabel}>Primary metric</div>
-          {onEdit ? (
-            <Button variant="plain" accessibilityLabel="Change primary metric" onClick={onEdit}>
-              Change metric
-            </Button>
-          ) : null}
-        </div>
-        <div className={styles.statValue}>{metrics.primaryMetricLabel}</div>
-      </div>
+      <DetailFactCard
+        label="Primary metric"
+        value={metrics.primaryMetricLabel}
+        action={onEdit ? 'Change metric' : null}
+        actionLabel="Change primary metric"
+        onAction={onEdit}
+      />
 
-      <div className={`${styles.statCard} ${styles.detailFactCard}`}>
-        <div className={styles.detailFactHead}>
-          <div className={styles.statLabel}>Secondary metrics</div>
-          {onEdit ? (
-            <Button variant="plain" accessibilityLabel="Edit secondary metrics" onClick={onEdit}>
-              Edit metrics
-            </Button>
-          ) : null}
-        </div>
+      <DetailFactCard
+        label="Secondary metrics"
+        action={onEdit ? 'Edit metrics' : null}
+        actionLabel="Edit secondary metrics"
+        onAction={onEdit}
+      >
         {secondary.length ? (
           <div className={styles.detailChipRow}>
             {secondary.map((item, index) => (
@@ -57,7 +50,7 @@ export default function ClassicMetricsTab({ metrics, onEdit }) {
         ) : (
           <p className={styles.help}>No secondary goals attached.</p>
         )}
-      </div>
+      </DetailFactCard>
     </div>
   );
 }

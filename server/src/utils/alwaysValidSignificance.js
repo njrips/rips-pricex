@@ -5,9 +5,11 @@
  * (Johari et al. 2015/2019; Optimizely Stats Engine).
  *
  * IMPORTANT: variance is estimated from accumulating aggregates, and value
- * metrics use an AOV proxy rather than event-level second moments. This module
- * must not authorize automatic catalog writes until a validated e-process or
- * confidence sequence replaces those approximations.
+ * metrics model each visitor as Bernoulli(p) times a constant order value
+ * rather than using event-level second moments. That proxy omits the spread of
+ * order values among buyers, so it understates variance when order sizes vary —
+ * the optimistic direction. This module must not authorize automatic catalog
+ * writes until a validated e-process or confidence sequence replaces it.
  */
 
 const { isSmartPricingTest } = require('../services/smartPricing/smartPricingTestIdentity');
@@ -65,13 +67,6 @@ function pooledRate(a, b) {
   return n > 0 ? x / n : 0;
 }
 
-function pooledAov(a, b) {
-  const x = (Number(a?.conversions) || 0) + (Number(b?.conversions) || 0);
-  const revenue =
-    familyRevenue(a) + familyRevenue(b);
-  return x > 0 ? revenue / x : 0;
-}
-
 function familyRevenue(variant) {
   const direct = Number(variant?.revenue);
   if (Number.isFinite(direct) && direct > 0) return direct;
@@ -80,12 +75,38 @@ function familyRevenue(variant) {
   return visitors * rpv;
 }
 
+function familyProfit(variant) {
+  const direct = Number(variant?.profit);
+  if (Number.isFinite(direct)) return direct;
+  const visitors = asPositive(variant?.visitors);
+  const ppv = Number(variant?.profitPerVisitor) || 0;
+  return visitors * ppv;
+}
+
+/**
+ * What one order is worth in the units the test is measured in.
+ *
+ * The variance proxy below scales visitor-level variance by this, so a profit
+ * test has to use profit per order. It used revenue per order for both value
+ * families, which inflated a profit test's variance by roughly the inverse
+ * margin squared and made it ask for several times the traffic its own numbers
+ * justify.
+ */
+function pooledValuePerOrder(a, b, family) {
+  const x = (Number(a?.conversions) || 0) + (Number(b?.conversions) || 0);
+  if (!(x > 0)) return 0;
+  const total = family === 'profit' ? familyProfit(a) + familyProfit(b) : familyRevenue(a) + familyRevenue(b);
+  return total / x;
+}
+
 function observationVariance(a, b, family) {
   const p = clamp01(pooledRate(a, b));
   if (family === 'conversion') return Math.max(p * (1 - p), 1e-12);
-  const aov = pooledAov(a, b);
-  if (!(aov > 0)) return Math.max(p * (1 - p), 1e-12);
-  return Math.max(p * (1 - p) * aov * aov, 1e-12);
+  // Magnitude, not signed value: a test price selling $5 below cost varies as
+  // much per order as one earning $5, and variance is the square either way.
+  const perOrder = Math.abs(pooledValuePerOrder(a, b, family));
+  if (!(perOrder > 0)) return Math.max(p * (1 - p), 1e-12);
+  return Math.max(p * (1 - p) * perOrder * perOrder, 1e-12);
 }
 
 function absoluteMde({ family, baselineRate, baselineMean, mdePercent }) {

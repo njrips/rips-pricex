@@ -21,7 +21,7 @@ export const PRODUCT_FILTERS = [
 ];
 
 export const PLAN_TABS = [
-  { id: 'design', label: 'Prices & profit' },
+  { id: 'design', label: 'Prices & revenue' },
   { id: 'stats', label: 'Test length' },
   { id: 'safety', label: 'Safety checks' },
   { id: 'batch', label: 'All products' },
@@ -40,12 +40,6 @@ export function formatCurrency(amount, currency = 'USD') {
 export function formatPriceArmsSummary(plan) {
   const arms = Array.isArray(plan?.price_arms) ? plan.price_arms : [];
   return arms.map(arm => formatCurrency(arm.price, plan.currency)).join(' · ');
-}
-
-export function countPassingGuardrails(plan) {
-  const checks = Array.isArray(plan?.guardrail_checks) ? plan.guardrail_checks : [];
-  const passed = checks.filter(c => c.passed).length;
-  return { passed, total: checks.length };
 }
 
 export function inboxStorageKey(domain) {
@@ -98,7 +92,13 @@ export function writeInboxPlans(domain, plans, { persist = true } = {}) {
   } catch {
     // fall through and write
   }
-  localStorage.setItem(inboxStorageKey(domain), nextRaw);
+  try {
+    localStorage.setItem(inboxStorageKey(domain), nextRaw);
+  } catch {
+    // This copy is a cache; the server holds the plans. Letting a full or
+    // blocked storage throw here used to abort the caller mid-launch, which
+    // cost the merchant the launch rather than just the local copy.
+  }
   if (typeof window !== 'undefined') {
     window.dispatchEvent(
       new CustomEvent('ripx-smart-pricing-inbox-updated', { detail: { domain } })

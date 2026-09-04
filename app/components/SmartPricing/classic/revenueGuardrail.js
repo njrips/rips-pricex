@@ -60,27 +60,21 @@ export function revenueDropPercentFromRows(
   return parseRevenueDropThreshold(row?.threshold, fallback);
 }
 
-export function capRevenueGuardrailRows(
-  rows = [],
-  shopMaxDropPercent = DEFAULT_MAX_REVENUE_DROP_PERCENT
-) {
-  const shopCap = clampMaxRevenueDropPercent(shopMaxDropPercent);
-  const experimentCap = revenueDropPercentFromRows(rows, shopCap);
-  return ensureRevenueGuardrailRows([
-    {
-      ...ensureRevenueGuardrailRows(rows, shopCap)[0],
-      threshold: formatRevenueDropThreshold(Math.min(shopCap, experimentCap)),
-    },
-  ]);
-}
-
+/**
+ * The threshold this experiment will launch with.
+ *
+ * Each experiment owns its own limit. There was a shop-wide ceiling here too,
+ * and the tighter of the two won, but the shop value is no longer a setting a
+ * merchant can see — leaving it in would have capped every test at a number
+ * they could not find or change. `fallback` is only the starting value for an
+ * experiment that has never had one; the allowed range still applies.
+ */
 export function revenueGuardrailGoalConfig(
   rows = [],
   fallback = DEFAULT_MAX_REVENUE_DROP_PERCENT
 ) {
-  const effectiveRows = capRevenueGuardrailRows(rows, fallback);
   return {
     auto_stop: true,
-    max_revenue_drop_percent: revenueDropPercentFromRows(effectiveRows, fallback),
+    max_revenue_drop_percent: revenueDropPercentFromRows(rows, fallback),
   };
 }

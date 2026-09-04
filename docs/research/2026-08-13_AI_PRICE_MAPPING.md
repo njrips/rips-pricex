@@ -302,6 +302,32 @@ Still open: storefront unmapped-node ping (Phase 4), theme-publish drift webhook
 
 **Pass 2 (check/fix):** Horizon (2026 default) uses `.price` / `.compare-at-price` inside `{% stylesheet %}` — extractor now reads those blocks; theme file listing discovers extra price-related filenames; HTML probe honors `s.`/`del.` tag prefixes so compare-at is not the regular node; cloned compare-at selectors are rejected; Horizon pack added.
 
+**Pass 3 (runtime paint correctness, storefront 1.0.63):** mapping quality was fine; applying it was not. Six defects on home/collection surfaces, all reproduced against the pilot shop's stored mappings in `storefront/__tests__/priceSurfacePaint.test.js`:
+
+| Defect | Effect | Fix |
+|--------|--------|-----|
+| `paintPriceNode` assigned `textContent` to whatever a selector matched | A wrapper mapping (`.price`) collapsed Dawn's whole price block — sale price, compare-at and a11y labels — into one text node | `paintPriceNode` resolves a match to its amount leaves (`resolveRipxPricePaintTargets`) and `writeRipxPriceNode` does the write |
+| Listing painters collected `['regular','compare_at']` and painted both with the test price | Mapped `s.price-item--regular` (plp/compare_at) overwrote the "was" price | Only `regular` selectors paint; `isRipxCompareAtPriceNode` refuses `<s>`/`<del>`/compare classes centrally |
+| amount/percent base read from the price wrapper | `parsePriceFromDisplay` takes the last amount, so themes rendering compare-at last discounted off the pre-sale price | `findRipxCatalogPriceNode` reads the current-price leaf |
+| `isProductListingSurface()` used prefix matching | `/en-gb/collections/all` resolved to `plp` for selector lookup but "not a listing surface" for painting, so localized markets never painted | Derived from `inferPriceSurfaceFromPathname`, which now strips the locale prefix |
+| `extractNumericProductIdFromText` took the trailing numeric token | Returned Dawn section ids (`template--21010091114685__…`) and `?variant=` ids, so cards matched no product | Strips template/section/variant spans; hrefs dropped as a source; callers pass target ids so an exact match wins |
+| Compare-at-only coverage counted as "surface mapped" | Suppressed the built-in fallback selectors, painting nothing | Authoritative check considers `regular` only |
+
+Also: `mergeThemePackMappings` replaces a previous pack's selector for the same surface+role instead of stacking (the pilot shop had accumulated Dawn + Horizon + Legacy selectors for `plp regular` simultaneously, which is what made the wrapper mappings live); listing registry queries pierce shadow roots.
+
+**Pass 3b — the product page had the same bug, worse.** Pass 3 fixed the listing painters, which route through `paintPriceNode`. `applyPriceTest` (the product page) does not: it carries its own inline `paintEl`, so none of those fixes reached the surface where the purchase decision is made. Its guards were a tag check for `<s>`/`<del>` and a leaf check for `.price-item__regular` / `.price-item__sale` — class names Dawn does not use. Two of `applyPriceTest`'s own fallback selectors are `[data-product-id="…"] .price` and `product-info[data-product-id="…"] .price`, and Dawn's `<product-info>` carries `data-product-id`, so on every Dawn product page the mapped leaf was painted and then the wrapper was painted over it, leaving:
+
+```html
+<div class="price price--large price--on-sale" data-ripx-price="1">$70.00</div>
+```
+
+The regular price, the struck `$140.00`, the sale price and both screen-reader labels were gone, and the compare-at guard never fired because the selector matched the container, not the `<s>`. `paintEl` now delegates to `resolveRipxPricePaintTargets` + `writeRipxPriceNode`, so the product page and the listings make the same decisions; `pdp`/`quickview` `compare_at` roles no longer feed the paint list. Covered by `describe('painting a product page')`, which the harness drives through the real nested `paintEl` (`loadPdpPainter`).
+
+Two follow-ons from that work:
+
+- `writeRipxPriceNode` refuses a falsy display. `paintEl` assigned `currentDisplay` unconditionally, so a variant change whose `recomputeDisplay()` returned null blanked the price.
+- The wrapper fallback (no price-classed leaf inside a matched container, common on themes that class the wrapper only) now descends to the sole amount-bearing child via `findRipxAmountDescendant` rather than writing the container, which preserves screen-reader labels and "From" prefixes; and it refuses to write a container whose only amount is a compare-at. Amount detection requires a currency symbol or code, because `parsePriceFromDisplay` happily reads `20` out of "Save 20%".
+
 ## Files (as-built, for implementers)
 
 - `server/src/utils/priceSurfaceThemeExtract.js`

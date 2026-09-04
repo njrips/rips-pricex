@@ -161,7 +161,7 @@ function buildStatisticalDesign(params = {}) {
   if (!selected) {
     return {
       primary_metric: 'conversion_rate',
-      decision_metric: params.decisionMetric || 'profit_per_visitor',
+      decision_metric: params.decisionMetric || 'revenue_per_visitor',
       planning_method: 'fixed_horizon_two_proportion',
       baseline_conversion_rate: params.baselineConversionRate || 0,
       baseline_source: params.baselineSource || null,
@@ -195,7 +195,7 @@ function buildStatisticalDesign(params = {}) {
 
   return {
     primary_metric: 'conversion_rate',
-    decision_metric: params.decisionMetric || 'profit_per_visitor',
+    decision_metric: params.decisionMetric || 'revenue_per_visitor',
     planning_method: 'fixed_horizon_two_proportion',
     baseline_conversion_rate: Number(params.baselineConversionRate) || 0,
     baseline_source: params.baselineSource || null,

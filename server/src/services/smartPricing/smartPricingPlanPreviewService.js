@@ -409,12 +409,14 @@ async function ensureExperimentPreviewTest(domain, primaryPlan, experimentPlans)
       payload.shop_domain = domain;
 
       if (test?.id) {
-        // updateTest allow-list has no metadata column — refresh matrix/targets only.
+        // Metadata carries the arm-to-price map and statistical design, so a
+        // rebuilt matrix has to bring it along or analytics reads the old arms.
         test = await updateTest(test.id, domain, {
           name: payload.name,
           target_id: payload.target_id,
           target_ids: payload.target_ids,
           variants: payload.variants,
+          metadata: payload.metadata,
           status: 'draft',
         });
         created = false;

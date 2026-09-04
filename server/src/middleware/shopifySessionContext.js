@@ -128,27 +128,74 @@ function requireShopifySession(req, res, next) {
  * with an ID token; the server proves itself with the shared-secret HMAC. A
  * caller with neither can no longer act on a shop just by naming it.
  */
-function requireShopSessionOrInternal(req, res, next) {
+function acceptInternalServiceCall(req) {
   const claimed = getShopDomain(req);
   const proof = req.get(INTERNAL_HEADER) || '';
-  if (claimed && proof && isValidInternalServiceToken(claimed, proof)) {
-    req.shopDomain = claimed;
-    req.shopSessionVerified = true;
-    req.internalServiceCall = true;
-    if (req.body?.access_token || req.body?.accessToken) {
-      req.shopifyAccessToken = req.body.access_token || req.body.accessToken;
-    }
-    if (req.get('X-Shopify-Access-Token')) {
-      req.shopifyAccessToken = req.get('X-Shopify-Access-Token');
-    }
+  if (!claimed || !proof || !isValidInternalServiceToken(claimed, proof)) {
+    return false;
+  }
+  req.shopDomain = claimed;
+  req.shopSessionVerified = true;
+  req.internalServiceCall = true;
+  if (req.body?.access_token || req.body?.accessToken) {
+    req.shopifyAccessToken = req.body.access_token || req.body.accessToken;
+  }
+  if (req.get('X-Shopify-Access-Token')) {
+    req.shopifyAccessToken = req.get('X-Shopify-Access-Token');
+  }
+  return true;
+}
+
+function requireShopSessionOrInternal(req, res, next) {
+  if (acceptInternalServiceCall(req)) {
     return next();
   }
   return requireShopifySession(req, res, next);
 }
 
+/**
+ * For endpoints whose request body is itself the authority, and so may only be
+ * spoken by our own React Router server.
+ *
+ * Entitlement sync is the case that matters: the body says "this shop is paid",
+ * and the loader only sends it after asking Shopify. A merchant's own ID token
+ * proves they are signed in, not that they have a plan, so accepting one here
+ * would let any installed shop grant itself a subscription by posting a body.
+ */
+function requireInternalService(req, res, next) {
+  if (acceptInternalServiceCall(req)) {
+    return next();
+  }
+  // Local smoke checks run without any credentials; the flag is already refused
+  // in production, so this cannot widen a live deployment.
+  if (bypassEnabled()) {
+    const claimed = getShopDomain(req);
+    if (!claimed) {
+      return rejectUnauthenticated(res, 'Shop domain required');
+    }
+    logger.warn('Unverified internal API request allowed by bypass flag', {
+      path: req.originalUrl,
+      method: req.method,
+      shopDomain: claimed,
+      flag: BYPASS_ENV,
+    });
+    req.shopDomain = claimed;
+    req.shopSessionVerified = false;
+    return next();
+  }
+  logger.warn('Rejected internal API request without a service token', {
+    path: req.originalUrl,
+    method: req.method,
+  });
+  return res
+    .status(401)
+    .json({ success: false, error: 'Internal service authentication required' });
+}
+
 module.exports = {
   requireShopifySession,
   requireShopSessionOrInternal,
+  requireInternalService,
   bypassEnabled,
   BYPASS_ENV,
   RETRY_HEADER,

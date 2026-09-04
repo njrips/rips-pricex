@@ -1,8 +1,5 @@
-import { useState } from 'react';
-import { Button, TextField } from '@shopify/polaris';
-import SettingsInfoLink from '../../Settings/SettingsInfoLink';
-import { IconCheck, IconChevron } from './classicIcons';
-import { formatVisitorCount } from './estimateSignificanceDuration';
+import { TextField } from '@shopify/polaris';
+import { IconCheck } from './classicIcons';
 import styles from './SmartPricingClassic.module.css';
 
 export const EXPERIMENT_TYPES = [
@@ -23,16 +20,9 @@ export default function SetupStepPanel({
   onNameChange,
   hypothesis,
   onHypothesisChange,
-  onGenerateHypothesis,
-  hypothesisBusy = false,
   experimentType = 'price_test',
   onExperimentTypeChange,
-  minSampleSize,
-  onMinSampleSizeChange,
-  significanceEstimate = null,
 }) {
-  const [advancedOpen, setAdvancedOpen] = useState(false);
-
   return (
     <div>
       <div className={styles.field}>
@@ -52,19 +42,7 @@ export default function SetupStepPanel({
       </div>
 
       <div className={styles.field}>
-        <div className={styles.labelRow}>
-          <span className={styles.label}>Hypothesis</span>
-          {typeof onGenerateHypothesis === 'function' ? (
-            <Button
-              variant="plain"
-              onClick={onGenerateHypothesis}
-              disabled={hypothesisBusy}
-              loading={hypothesisBusy}
-            >
-              Generate with AI
-            </Button>
-          ) : null}
-        </div>
+        <span className={styles.label}>Hypothesis</span>
         <TextField
           id="classic-hypothesis"
           label=""
@@ -103,48 +81,6 @@ export default function SetupStepPanel({
           );
         })}
       </div>
-
-      <details
-        className={styles.advanced}
-        open={advancedOpen}
-        onToggle={e => setAdvancedOpen(e.currentTarget.open)}
-      >
-        <summary className={styles.advancedSummary}>
-          Advanced options
-          <IconChevron size={16} up={advancedOpen} />
-        </summary>
-        <div className={styles.advancedBody}>
-          <div className={styles.field} style={{ marginBottom: 0, marginTop: 14 }}>
-            <div className={styles.labelRow}>
-              <span className={styles.label}>Minimum sample size per variation</span>
-              <SettingsInfoLink hash="min-sample" label="Minimum sample" />
-            </div>
-            <TextField
-              id="classic-min-sample"
-              label="Minimum sample size per variation"
-              labelHidden
-              type="number"
-              min={1}
-              value={String(minSampleSize ?? '')}
-              onChange={onMinSampleSizeChange}
-              autoComplete="off"
-            />
-            {significanceEstimate?.recommendedSampleSize &&
-            String(minSampleSize) !== String(significanceEstimate.recommendedSampleSize) ? (
-              <div className={styles.labelRow}>
-                <Button
-                  variant="plain"
-                  onClick={() =>
-                    onMinSampleSizeChange(String(significanceEstimate.recommendedSampleSize))
-                  }
-                >
-                  Use planning sample ({formatVisitorCount(significanceEstimate.recommendedSampleSize)})
-                </Button>
-              </div>
-            ) : null}
-          </div>
-        </div>
-      </details>
     </div>
   );
 }

@@ -1,7 +1,7 @@
 import { Link, useLocation, useNavigate } from 'react-router';
 import { scheduleScrollPublicPageTop } from './scrollToPublicHash';
 
-export default function PricifyLogo({ compact = false, decorative = false, onNavigate, to = '/' }) {
+export default function PriceifyLogo({ compact = false, decorative = false, onNavigate, to = '/' }) {
   const { pathname, hash, search } = useLocation();
   const navigate = useNavigate();
   const markSize = compact ? 22 : 28;
@@ -10,12 +10,12 @@ export default function PricifyLogo({ compact = false, decorative = false, onNav
     <>
       <img
         className="px-logo-mark"
-        src="/pricify/logo-mark.svg"
+        src="/priceify/logo-mark.svg"
         alt=""
         width={markSize}
         height={markSize}
       />
-      <span className="px-logo-word">Pricify</span>
+      <span className="px-logo-word">Priceify</span>
     </>
   );
 
@@ -27,7 +27,7 @@ export default function PricifyLogo({ compact = false, decorative = false, onNav
     <Link
       to={to}
       className={className}
-      aria-label={to === '/' ? 'Pricify home' : 'Pricify staff home'}
+      aria-label={to === '/' ? 'Priceify home' : 'Priceify staff home'}
       onClick={(event) => {
         onNavigate?.();
         if (pathname !== '/' || to !== '/') return;

@@ -7,19 +7,49 @@ import { stampStatisticalFields } from './sampleSizePolicy';
 import { isOfferExperimentType } from './offerSelection';
 import { ensureRevenueGuardrailRows, revenueGuardrailGoalConfig } from './revenueGuardrail';
 
+/**
+ * How many unfinished experiments the browser keeps.
+ *
+ * A single slot meant starting a second experiment silently destroyed the
+ * first, which autosave turned from a rare accident into the normal outcome.
+ */
+export const CLASSIC_WIZARD_DRAFT_LIMIT = 5;
+
 export function classicWizardDraftKey(domain) {
   return `ripx_sp_classic_wizard_${String(domain || 'default')}`;
 }
 
-export function readClassicWizardDraft(domain) {
+function draftIdOf(draft) {
+  return String(draft?.experiment_id || '').trim();
+}
+
+function savedAtOf(draft) {
+  const parsed = Date.parse(draft?.saved_at || '');
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+/** Unfinished experiments in this browser, most recently saved first. */
+export function readClassicWizardDrafts(domain) {
   try {
     const raw = localStorage.getItem(classicWizardDraftKey(domain));
-    if (!raw) return null;
+    if (!raw) return [];
     const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === 'object' ? parsed : null;
+    // Older builds stored one snapshot under this key rather than a list.
+    const list = Array.isArray(parsed) ? parsed : [parsed];
+    return list
+      .filter(draft => draft && typeof draft === 'object' && draftIdOf(draft))
+      .sort((a, b) => savedAtOf(b) - savedAtOf(a));
   } catch {
-    return null;
+    return [];
   }
+}
+
+/** One saved experiment, or the most recent when no id is given. */
+export function readClassicWizardDraft(domain, experimentId) {
+  const drafts = readClassicWizardDrafts(domain);
+  const id = String(experimentId || '').trim();
+  if (!id) return drafts[0] || null;
+  return drafts.find(draft => draftIdOf(draft) === id) || null;
 }
 
 export function writeClassicWizardDraft(domain, snapshot) {
@@ -27,12 +57,39 @@ export function writeClassicWizardDraft(domain, snapshot) {
     ...(snapshot || {}),
     saved_at: new Date().toISOString(),
   };
-  localStorage.setItem(classicWizardDraftKey(domain), JSON.stringify(payload));
-  return payload;
+  const others = readClassicWizardDrafts(domain).filter(
+    draft => draftIdOf(draft) !== draftIdOf(payload)
+  );
+  let queue = [payload, ...others].slice(0, CLASSIC_WIZARD_DRAFT_LIMIT);
+  for (;;) {
+    try {
+      localStorage.setItem(classicWizardDraftKey(domain), JSON.stringify(queue));
+      return payload;
+    } catch (err) {
+      // A 100-product experiment is a few hundred kilobytes. Give up the
+      // oldest draft rather than the one the merchant is editing right now.
+      if (queue.length <= 1) throw err;
+      queue = queue.slice(0, -1);
+    }
+  }
 }
 
-export function clearClassicWizardDraft(domain) {
-  localStorage.removeItem(classicWizardDraftKey(domain));
+/** Forget one saved experiment, or all of them when no id is given. */
+export function clearClassicWizardDraft(domain, experimentId) {
+  const id = String(experimentId || '').trim();
+  const remaining = id
+    ? readClassicWizardDrafts(domain).filter(draft => draftIdOf(draft) !== id)
+    : [];
+  try {
+    if (!remaining.length) {
+      localStorage.removeItem(classicWizardDraftKey(domain));
+      return;
+    }
+    localStorage.setItem(classicWizardDraftKey(domain), JSON.stringify(remaining));
+  } catch {
+    // Blocked storage must not take down a launch or a delete, both of which
+    // clear the draft as their last step.
+  }
 }
 
 export function getPlanExperimentId(plan) {
@@ -182,7 +239,10 @@ export function groupPlansIntoExperiments(plans = []) {
         representative?.goal?.primary_metric ||
         representative?.objective ||
         representative?.metadata?.audience_ui?.primaryMetric ||
-        'Profit per visitor';
+        // Matches the actual default an unspecified goal launches with. This
+        // read "Profit per visitor", so the list named a metric no such
+        // experiment was ever judged on.
+        'Revenue per visitor';
 
       const typeRaw =
         representative?.experiment_type ||

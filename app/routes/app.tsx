@@ -100,14 +100,19 @@ function syncShopIntoExpressApi({
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const started = Date.now();
   // Do not call billing.check() here. A 401 invalidates the offline session and
-  // an App Pricing hang blocks the iframe on "Loading Pricify…".
+  // an App Pricing hang blocks the iframe on "Loading Priceify…".
   const { session } = await authenticate.admin(request);
 
   const shop = session.shop;
   const accessToken = session.accessToken || "";
   const appHandle = process.env.SHOPIFY_APP_HANDLE || "ripspricex";
   const upgradeUrl = buildPricingPlansUrl(shop, appHandle);
-  const devEntitleAll = process.env.RIPSPRICEX_DEV_ENTITLE_ALL === "true";
+  // Mirrors devEntitleAllEnabled on the server: the local-pilot unlock ships
+  // switched on in .env.example, so production must ignore it or a copied env
+  // would unlock the paid tiers for every install.
+  const devEntitleAll =
+    process.env.RIPSPRICEX_DEV_ENTITLE_ALL === "true" &&
+    String(process.env.NODE_ENV || "").toLowerCase() !== "production";
   const apiBase = process.env.RIPSPRICEX_API_URL || "http://127.0.0.1:3456";
   const scope = String(
     session.scope || process.env.SCOPES || process.env.SHOPIFY_SCOPES || "",

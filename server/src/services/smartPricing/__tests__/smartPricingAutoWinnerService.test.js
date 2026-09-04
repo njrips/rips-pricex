@@ -338,7 +338,7 @@ describe('evaluateSmartPricingAutoWinner', () => {
       },
       maybeAutoQueueRound2Plan: async () => ({ queued: false }),
       listRunningSmartPricingTests: async () => [],
-      logger: { info() {}, warn() {} },
+      logger: { info() {}, warn() {}, error() {} },
       ...overrides,
     };
   }
@@ -457,6 +457,78 @@ describe('evaluateSmartPricingAutoWinner', () => {
     assert.equal(injected.calls.stop, 1);
   });
 
+  // Shopify refuses variants one at a time — a deleted SKU, a permission gap —
+  // and returns normally with the rest written. Recording that as a clean apply
+  // leaves a catalog half at the new price with nothing saying so, on a run
+  // nobody was watching.
+  it('does not record a clean apply when some prices were refused', async () => {
+    const logged = [];
+    const injected = deps({
+      publishWinnerPricesToShopify: async () => ({
+        summary: { updated_count: 3, error_count: 2 },
+      }),
+      logger: { info() {}, warn() {}, error: (msg, meta) => logged.push({ msg, meta }) },
+    });
+    let patched = null;
+    injected.updateTest = async (_id, _shop, patch) => {
+      patched = patch;
+      return { ...priceTest(), ...patch, status: 'stopped' };
+    };
+
+    const result = await evaluateSmartPricingAutoWinner(
+      {
+        shopDomain: 'demo.myshopify.com',
+        test: priceTest(),
+        plan: { id: 'SP-1' },
+        analytics: sequentialAnalytics({
+          significant: true,
+          winner: 'variantB',
+          winnerVariantId: 'v-up',
+        }),
+      },
+      injected
+    );
+
+    assert.equal(result.action, 'apply_variation');
+    assert.equal(result.published_to_shopify, false);
+    assert.equal(result.publish_error_count, 2);
+    assert.equal(patched.goal.auto_apply.published, false);
+    assert.equal(patched.goal.auto_apply.error_count, 2);
+    assert.equal(patched.goal.auto_apply.updated_count, 3);
+    assert.equal(logged.length, 1);
+    // Traffic must not follow a catalog that only partly moved: personalizing
+    // here would charge some shoppers the old price with no split measuring it.
+    assert.equal(injected.calls.personalize, 0);
+  });
+
+  it('still reports a clean apply when every price was written', async () => {
+    const injected = deps();
+    let patched = null;
+    injected.updateTest = async (_id, _shop, patch) => {
+      patched = patch;
+      return { ...priceTest(), ...patch, status: 'stopped' };
+    };
+
+    const result = await evaluateSmartPricingAutoWinner(
+      {
+        shopDomain: 'demo.myshopify.com',
+        test: priceTest(),
+        plan: { id: 'SP-1' },
+        analytics: sequentialAnalytics({
+          significant: true,
+          winner: 'variantB',
+          winnerVariantId: 'v-up',
+        }),
+      },
+      injected
+    );
+
+    assert.equal(result.published_to_shopify, true);
+    assert.equal(result.publish_error_count, 0);
+    assert.equal(patched.goal.auto_apply.published, true);
+    assert.equal(injected.calls.personalize, 1);
+  });
+
   it('queues round 2 after a successful variation apply', async () => {
     const injected = deps();
     injected.calls.round2 = [];
@@ -549,7 +621,7 @@ describe('evaluateShopAutoWinners', () => {
       findInboxPlanByTestId: async (_shop, id) =>
         id === 'test-inbox' ? { id: 'SP-1' } : { id: 'SP-db' },
       getTestAnalytics: async () => sequentialAnalytics(),
-      logger: { info() {}, warn() {} },
+      logger: { info() {}, warn() {}, error() {} },
       syncSmartPricingInboxForTest: async () => ({ synced: true }),
       getShopSession: async () => ({ access_token: 'tok' }),
       updateTest: async (id, _shop, patch) => ({ ...priceTest({ id }), ...patch }),

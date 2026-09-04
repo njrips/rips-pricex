@@ -5,7 +5,7 @@ import { login } from "../../shopify.server";
 import { loginErrorMessage } from "./error.server";
 import { runShopLogin } from "../../utils/shopifyShopLogin.server";
 import { resolveAppStoreListingUrlFromEnv } from "../../utils/appStoreListingUrl";
-import PricifyShell from "../../components/public/pricify/PricifyShell";
+import PriceifyShell from "../../components/public/priceify/PriceifyShell";
 import styles from "../../components/public/publicStyles";
 import PublicShopOpenForm from "../../components/shared/PublicShopOpenForm";
 import { IconArrowLeft } from "../../components/SmartPricing/classic/classicIcons";
@@ -34,10 +34,10 @@ export default function Auth() {
   const loaderShopError = errors?.shop || "";
 
   return (
-    <PricifyShell storeUrl={storeUrl}>
+    <PriceifyShell storeUrl={storeUrl}>
       <section className={styles.hero}>
         <Link to="/" className={styles.backLink}>
-          <IconArrowLeft /> Back to Pricify
+          <IconArrowLeft /> Back to Priceify
         </Link>
         <p className={styles.eyebrow}>CLI</p>
         <h1 className={styles.title}>Shop handle</h1>
@@ -56,6 +56,6 @@ export default function Auth() {
           </Link>
         </p>
       </section>
-    </PricifyShell>
+    </PriceifyShell>
   );
 }

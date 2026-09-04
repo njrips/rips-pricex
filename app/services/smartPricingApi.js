@@ -331,28 +331,6 @@ export async function ensureSmartPricingPlanPreviewTest(domain, planId, extras =
   return unwrapData(res);
 }
 
-export async function suggestSmartPricingAudience(domain, plans = [], options = {}) {
-  const res = await apiPost(
-    '/smart-pricing/plans/suggest-audience',
-    {
-      plans,
-      use_ai: options.useAi === true || options.use_ai === true,
-      catalog_hints: options.catalogHints || options.catalog_hints || undefined,
-    },
-    domain ? { params: { domain } } : {}
-  );
-  return unwrapData(res);
-}
-
-export async function suggestSmartPricingHypothesis(domain, body = {}) {
-  const res = await apiPost(
-    '/smart-pricing/plans/suggest-hypothesis',
-    body,
-    domain ? { params: { domain } } : {}
-  );
-  return unwrapData(res);
-}
-
 export async function suggestSmartPricingPrices(domain, body = {}) {
   const res = await apiPost(
     '/smart-pricing/plans/suggest-prices',

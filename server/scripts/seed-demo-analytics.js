@@ -72,14 +72,14 @@ function makeRandom(seedText) {
  * story: control, variation 1, then variation 2 when the test has three arms.
  */
 function pickWinner(index, armCount) {
-  const cycle = index % 3;
+  // Cycle over the arms the test actually has. A fixed modulo 3 gave two-arm
+  // tests control, variation 1, variation 1: the back-to-back repetition this
+  // is meant to avoid, and it handed variation 1 twice control's share of wins.
+  const cycleLength = Math.min(3, Math.max(2, armCount));
+  const cycle = index % cycleLength;
   if (cycle === 0) return { key: 'control_wins', winnerArm: 0 };
   if (cycle === 1) return { key: 'variant_1_wins', winnerArm: 1 };
-  const winnerArm = armCount > 2 ? 2 : 1;
-  return {
-    key: winnerArm === 2 ? 'variant_2_wins' : 'variant_1_wins',
-    winnerArm,
-  };
+  return { key: 'variant_2_wins', winnerArm: 2 };
 }
 
 function firstNumber(...values) {
@@ -132,10 +132,10 @@ function resolveArmPrices(test, catalogPrice, random) {
 /**
  * Conversion rate per arm.
  *
- * Shoppers respond to price, so the rate is moved by how far each arm sits from
- * the control price before the scenario is applied. That keeps the two headline
- * numbers in tension the way a real price test does: a higher price converts
- * less often but can still win on revenue per visitor.
+ * Every arm sits on a common base rate of 2.2-2.8% and the designated winner is
+ * lifted roughly to double it, so the gap clears the noise floor at the visitor
+ * counts this script seeds and the winner gates actually resolve. Revenue per
+ * visitor still turns on price, which resolveArmPrices supplies per arm.
  */
 function resolveArmRates(armCount, winnerArm, random) {
   const baseRate = 0.022 + random() * 0.006;
@@ -145,7 +145,7 @@ function resolveArmRates(armCount, winnerArm, random) {
     }
     if (index === winnerArm) return baseRate * 2.2;
     return baseRate;
-  }).map(rate => Math.min(0.35, Math.max(0.008, rate)));
+  });
 }
 
 function multinomialSplit(total, weights, random) {

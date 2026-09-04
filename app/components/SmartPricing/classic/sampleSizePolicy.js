@@ -191,7 +191,7 @@ export function computeVisitorsPerVariant({
  * traffic enough?" when the sample size is the constraint rather than the goal.
  * Required n falls monotonically as the lift grows, so bisect on the lift.
  */
-export function detectableLiftPercent({
+function detectableLiftPercent({
   visitorsPerVariant = 0,
   baselineConversionRate = null,
   confidenceLevel = DEFAULT_CONFIDENCE_LEVEL,

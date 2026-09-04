@@ -160,18 +160,33 @@ function buildMappingIdentity(row) {
   return `${row.surface}:${row.role}:${row.selector}`;
 }
 
+/**
+ * Apply a theme pack, replacing any selector a previous pack contributed for the
+ * same surface and role.
+ *
+ * Merging by surface+role+selector meant every pack a merchant tried stayed
+ * behind it: trying Dawn, then Horizon, then Legacy left three different
+ * "plp regular" selectors live at once, and the storefront painted all of them.
+ * Selectors the merchant chose by hand or with visual pick are kept, since only
+ * pack-supplied guesses are safe to discard.
+ */
 export function mergeThemePackMappings(existingRows, packKey, options = {}) {
   const pack = PRICE_SURFACE_THEME_PACKS[packKey];
   if (!pack) {
     return normalizePriceSurfaceMappingsForEditor(existingRows);
   }
   const limit = Number(options.limit) || MAX_PRICE_SURFACE_MAPPINGS;
+  const packRows = normalizePriceSurfaceMappings(pack.mappings);
+  const packSlots = new Set(packRows.map(row => `${row.surface}:${row.role}`));
+  const kept = normalizePriceSurfaceMappingsForEditor(existingRows).filter(row => {
+    if (row.source !== 'theme_pack') {
+      return true;
+    }
+    return !packSlots.has(`${row.surface}:${row.role}`);
+  });
   const merged = [];
   const seen = new Set();
-  [
-    ...normalizePriceSurfaceMappings(pack.mappings),
-    ...normalizePriceSurfaceMappingsForEditor(existingRows),
-  ].forEach(row => {
+  [...packRows, ...kept].forEach(row => {
     const key = buildMappingIdentity(row);
     if (seen.has(key)) {
       return;
