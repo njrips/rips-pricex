@@ -16,6 +16,9 @@ database.sqlite
 .env
 .env.local
 .env.*.local
+# Timestamped copies made before editing a deployed .env. Not matched by the
+# rules above, so without this a routine `git add -A` would stage real secrets.
+.env.bak*
 
 !.env.example
 
