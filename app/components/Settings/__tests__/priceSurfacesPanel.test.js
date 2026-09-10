@@ -448,6 +448,85 @@ describe('saving', () => {
     }
   });
 
+  it('removes the row whose delete button was clicked, not the last one', async () => {
+    savedMappings = [
+      { surface: 'pdp', role: 'regular', selector: '.first' },
+      { surface: 'plp', role: 'regular', selector: '.second' },
+      { surface: 'cart', role: 'regular', selector: '.third' },
+    ];
+    await render();
+    const selectorValues = () => boxes('.product__price').map(node => node.value);
+    expect(selectorValues()).toEqual(['.first', '.second', '.third']);
+
+    await click(buttonLabelled(/^Remove row 1$/));
+    expect(selectorValues()).toEqual(['.second', '.third']);
+
+    await click(buttonLabelled(/^Remove row 1$/));
+    expect(selectorValues()).toEqual(['.third']);
+  });
+
+  it('toggles the row its switch belongs to', async () => {
+    savedMappings = [
+      { surface: 'pdp', role: 'regular', selector: '.first' },
+      { surface: 'plp', role: 'regular', selector: '.second' },
+    ];
+    await render();
+    const states = () => switches().map(node => node.getAttribute('aria-checked'));
+    expect(states()).toEqual(['true', 'true']);
+
+    await click(switches()[0]);
+    expect(states()).toEqual(['false', 'true']);
+
+    await click(switches()[0]);
+    expect(states()).toEqual(['true', 'true']);
+  });
+
+  it('parks a switched-off row: nothing to edit, but it can come back or go', async () => {
+    savedMappings = [
+      { surface: 'pdp', role: 'regular', selector: '.first' },
+      { surface: 'plp', role: 'regular', selector: '.second' },
+    ];
+    await render();
+    await click(switches()[0]);
+
+    // Editing what an ignored row would paint is editing nothing.
+    expect(boxes('.product__price')[0].disabled).toBe(true);
+    expect(surfaceSelects()[0].disabled).toBe(true);
+    // A disabled Pick has to say why, not just go grey.
+    const offPick = buttonLabelled(/^Pick unavailable: Turn this row on/);
+    expect(offPick).toBeTruthy();
+    expect(isDisabled(offPick)).toBe(true);
+
+    // The two ways out of an off row stay live.
+    expect(switches()[0].disabled).toBe(false);
+    expect(isDisabled(buttonLabelled(/^Remove row 1$/))).toBe(false);
+
+    // And it really is only that row.
+    expect(boxes('.product__price')[1].disabled).toBe(false);
+    expect(surfaceSelects()[1].disabled).toBe(false);
+  });
+
+  it('lets a switched-off row still be deleted', async () => {
+    savedMappings = [
+      { surface: 'pdp', role: 'regular', selector: '.first' },
+      { surface: 'plp', role: 'regular', selector: '.second' },
+    ];
+    await render();
+    await click(switches()[0]);
+    await click(buttonLabelled(/^Remove row 1$/));
+    expect(boxes('.product__price').map(node => node.value)).toEqual(['.second']);
+  });
+
+  it('saves a switched-off row as off rather than dropping it', async () => {
+    savedMappings = [{ surface: 'pdp', role: 'regular', selector: '.first' }];
+    await render();
+    await click(switches()[0]);
+    await click(buttonNamed('Save'));
+    expect(savedBodies).toHaveLength(1);
+    expect(savedBodies[0].mappings).toHaveLength(1);
+    expect(savedBodies[0].mappings[0].enabled).toBe(false);
+  });
+
   it('reports a bad URL row instead of saving it', async () => {
     await render();
     await addRow();

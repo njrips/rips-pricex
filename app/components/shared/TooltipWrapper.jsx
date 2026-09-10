@@ -39,6 +39,14 @@ function TooltipWrapper({
       accessibilityLabel={accessibilityLabel}
       preferredPosition={preferredPosition}
       hoverDelay={hoverDelay}
+      // A hover hint must never eat a click. Polaris only sets pointer-events
+      // to none on the overlay when this is passed, so without it the tooltip
+      // floats over whatever sits next to its activator and swallows the next
+      // click there. In a list of rows with small icon buttons that reads as a
+      // dead button: the hint raised over one row covers the button on the
+      // next. Every tooltip here is plain text, so there is nothing in one to
+      // mouse into and nothing lost by making them all inert.
+      dismissOnMouseOut
     >
       {children}
     </Tooltip>

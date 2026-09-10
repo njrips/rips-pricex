@@ -342,4 +342,39 @@ describe('banner order', () => {
     const text = container.textContent;
     expect(text.indexOf('Estimated collection window')).toBeLessThan(text.indexOf('Basics'));
   });
+
+  /**
+   * The estimate used to print its whole derivation on the way to Launch:
+   * traffic inputs, the sparse-store caveat and the powered-reference note, all
+   * above the summary they were introducing. What to do about it got lost in
+   * how it was worked out.
+   */
+  it('shows what to do about the estimate and keeps the arithmetic behind a hint', async () => {
+    await renderPanel({
+      significanceEstimate: {
+        durationFeasibility: 'not_feasible',
+        summary: 'Your 5,000-visitor minimum cannot be reached. Choose a higher-traffic product.',
+        method: '~8 visitors/day on the slowest product, a conservative planning prior.',
+      },
+    });
+
+    expect(container.textContent).toContain('Choose a higher-traffic product');
+    expect(container.textContent).not.toContain('conservative planning prior');
+
+    const hint = [...container.querySelectorAll('button')].find(node =>
+      /How this is worked out/.test(node.textContent || '')
+    );
+    expect(hint).toBeTruthy();
+    expect(hint.getAttribute('aria-label')).toContain('conservative planning prior');
+  });
+
+  it('still prints the whole paragraph for a caller that only passes one', async () => {
+    await renderPanel({ estimatedTimeDetail: 'Everything in one paragraph.' });
+    expect(container.textContent).toContain('Everything in one paragraph.');
+    expect(
+      [...container.querySelectorAll('button')].some(node =>
+        /How this is worked out/.test(node.textContent || '')
+      )
+    ).toBe(false);
+  });
 });

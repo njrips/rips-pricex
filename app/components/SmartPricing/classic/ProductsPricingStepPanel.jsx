@@ -5,6 +5,7 @@ import ClassicProductPickerModal from './ClassicProductPickerModal';
 import OfferArmsEditor from './OfferArmsEditor';
 import { isOfferExperimentType } from './offerSelection';
 import SettingsInfoLink from '../../Settings/SettingsInfoLink';
+import TooltipWrapper from '../../shared/TooltipWrapper';
 import {
   aiSuggestBlockedReason,
   armHasAiPrices,
@@ -706,6 +707,16 @@ export default function ProductsPricingStepPanel({
     .map(row => row?.name)
     .filter(Boolean)
     .join(', ');
+  // The count is the part a merchant scanning the step needs; which tests hold
+  // the products, and what frees them, only matters once they ask. A per-product
+  // test name runs to a full product title, so two of them printed inline turned
+  // a footnote into a paragraph.
+  const withheldSummary = `${withheldCount} product${withheldCount === 1 ? '' : 's'} not shown`;
+  const withheldDetail = `${withheldSummary}: ${
+    withheldCount === 1 ? 'it is' : 'they are'
+  } in another price test${
+    withheldTestNames ? ` (${withheldTestNames})` : ''
+  }. End that test to reuse ${withheldCount === 1 ? 'it' : 'them'} here.`;
   // A dollar band moves in cents, a percent band in whole points. Zero is not a
   // band, so both floors start one step above it -- normalizeAiPriceBand
   // rejects 0 anyway, and the spinner should not walk into a rejected value.
@@ -858,10 +869,14 @@ export default function ProductsPricingStepPanel({
           beats letting the merchant hunt for a product that never appears. */}
       {withheldCount > 0 && !loading && !loadError ? (
         <p className={styles.help}>
-          {withheldCount} product{withheldCount === 1 ? '' : 's'} not shown:{' '}
-          {withheldCount === 1 ? 'it is' : 'they are'} in another price test
-          {withheldTestNames ? ` (${withheldTestNames})` : ''}. End that test to reuse{' '}
-          {withheldCount === 1 ? 'it' : 'them'} here.
+          <TooltipWrapper content={withheldDetail}>
+            {/* A button, not a span: the reason has to be reachable by keyboard
+                and not only by hovering a mouse. The accessible name carries
+                the whole sentence, so nothing here is hover-only. */}
+            <button type="button" className={styles.helpHint} aria-label={withheldDetail}>
+              {withheldSummary}
+            </button>
+          </TooltipWrapper>
         </p>
       ) : null}
 

@@ -230,6 +230,42 @@ describe('estimateSignificanceDuration', () => {
     expect(result.detail).toMatch(/planning prior—not an AI promise/i);
     expect(result.detail).toMatch(/needs about .+ eligible visitors\/day/i);
     expect(result.detail).not.toMatch(/years?/i);
+
+    // Review prints `summary` and hides `method`, so what a merchant must act
+    // on has to be in the first and the arithmetic in the second. Printed
+    // together this ran to six sentences on the way to Launch.
+    expect(result.summary).toMatch(/cannot be reached inside a practical/i);
+    expect(result.summary).toMatch(/needs about .+ eligible visitors\/day/i);
+    expect(result.summary).toMatch(/Choose a higher-traffic product/i);
+    expect(result.summary).not.toMatch(/planning prior/i);
+    expect(result.summary).not.toMatch(/visitors\/variation\/day/i);
+
+    expect(result.method).toMatch(/visitors\/variation\/day/i);
+    expect(result.method).toMatch(/planning prior—not an AI promise/i);
+    expect(result.method).toMatch(/qualified conversion baseline/i);
+    expect(result.method).not.toMatch(/Choose a higher-traffic product/i);
+
+    // Between them they still say everything the one paragraph said. Splitting
+    // regroups the sentences, so compare the set rather than the order.
+    const sentences = text =>
+      text
+        .split(/(?<=\.)\s+/)
+        .map(part => part.trim())
+        .filter(Boolean)
+        .sort();
+    expect(sentences(`${result.summary} ${result.method}`)).toEqual(sentences(result.detail));
+  });
+
+  it('has nothing to explain when no timeline could be computed', () => {
+    const result = estimateSignificanceDuration({
+      products: [{ variant_id: 'v1', daily_visitors: 0 }],
+      variations: [{ id: 'control', traffic: 50 }, { id: 'a', traffic: 50 }],
+      trafficAllocation: 50,
+      minSampleSize: 5000,
+    });
+
+    expect(result.summary).toBe(result.detail);
+    expect(result.method).toBe('');
   });
 
   it('says the floor is already sufficient when it exceeds the powered sample', () => {

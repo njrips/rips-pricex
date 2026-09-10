@@ -1,5 +1,5 @@
 /**
- * RipX Storefront Integration Script
+ * Priceify Storefront Integration Script
  * @version 1.0.0
  *
  * Multi-platform: works on Shopify and standalone sites.
@@ -847,7 +847,7 @@
       primaryBlocker = {
         code: 'assignment_missing',
         title: 'Shipping assignment not injected',
-        detail: 'Reload the preview product page or open the RipX preview link again.',
+        detail: 'Reload the preview product page or open the Priceify preview link again.',
       };
     } else if (cartEmpty) {
       primaryBlocker = {
@@ -859,7 +859,7 @@
     } else if (!cartHasAssignment) {
       primaryBlocker = {
         code: 'cart_props_missing',
-        title: 'Cart line missing RipX properties',
+        title: 'Cart line missing Priceify properties',
         detail:
           'A line is in cart but _ripx_price_test / _ripx_variant are missing. Try add-to-cart again or open /cart and wait a few seconds.',
       };
@@ -892,8 +892,8 @@
         'If trail shows cart_repair_already_complete, cart assignment is ready for checkout.',
         'Before checkout navigation, trail should include checkout_handoff_started.',
         'In backend logs, checkout rate loading should show POST /api/track/shipping-carrier-rates.',
-        'If checkout still shows native Standard, run RipX Diagnostics > Run live debug, then Apply shipping.',
-        'In RipX app: Diagnostics tab > Run live debug to probe carrier callback and list stale Shopify carriers.',
+        'If checkout still shows native Standard, run Priceify Diagnostics > Run live debug, then Apply shipping.',
+        'In Priceify: Diagnostics tab > Run live debug to probe carrier callback and list stale Shopify carriers.',
         debugTestId
           ? 'Carrier debug trace: GET /api/track/shipping-carrier-rates/debug?test_id=' +
             debugTestId
@@ -9839,8 +9839,8 @@
     _ripxMatrixMismatchNoticeShown = true;
     var matrix = (detail && detail.matrixProductIds) || [];
     var msg =
-      'RipX preview: this page is not in the selected arm’s price matrix. ' +
-      'Open Preview from the product row that owns this price in RipX (matrix product: ' +
+      'Priceify preview: this page is not in the selected arm’s price matrix. ' +
+      'Open Preview from the product row that owns this price in Priceify (matrix product: ' +
       (matrix[0] || 'unknown') +
       ').';
     var el = document.createElement('div');
@@ -10935,8 +10935,8 @@
     var label = document.createElement('span');
     label.id = 'ripx-visual-picker-label';
     label.textContent = PRICE_SURFACE_PICK_MODE
-      ? 'Click a price node to map it for RipX price surfaces. The selector will be sent back to the wizard.'
-      : 'Click an element to select it. Selector will be sent to the editor or copy below.';
+      ? 'Click a price on this page to map it. The selector goes back to Priceify automatically.'
+      : 'Click an element to select it. The selector goes back to Priceify, or copy it below.';
     label.setAttribute('style', 'flex:1;min-width:120px;');
     var selectorInput = document.createElement('input');
     selectorInput.type = 'text';
@@ -10968,7 +10968,7 @@
       } catch (e) {}
     };
     var sendBtn = document.createElement('button');
-    sendBtn.textContent = 'Send to RipX';
+    sendBtn.textContent = 'Send to Priceify';
     sendBtn.setAttribute(
       'style',
       'background:#059669;color:#fff;border:none;padding:6px 12px;border-radius:4px;cursor:pointer;font-size:13px;font-weight:600;'
@@ -11034,12 +11034,14 @@
       if (window.opener && !window.opener.closed) {
         sendBtn.textContent = 'Sent!';
         setTimeout(function () {
-          sendBtn.textContent = 'Send to RipX';
+          sendBtn.textContent = 'Send to Priceify';
         }, 2000);
       } else {
-        sendBtn.textContent = 'Open from editor tab';
+        // Nothing to send to: this tab was not opened by the app, so copying
+        // is the only way back. Saying that beats naming a tab that is gone.
+        sendBtn.textContent = 'Copy it instead';
         setTimeout(function () {
-          sendBtn.textContent = 'Send to RipX';
+          sendBtn.textContent = 'Send to Priceify';
         }, 2500);
       }
     };
@@ -11100,10 +11102,11 @@
       selectorInput.value = selector;
       postVisualSelector(selector, el);
       if (IN_IFRAME || (window.opener && !window.opener.closed)) {
-        label.textContent = 'Selector sent to RipX. You can pick another element or close.';
+        label.textContent = 'Selector sent to Priceify. Pick another price or close.';
         label.setAttribute('style', 'flex:1;min-width:120px;color:#34d399;');
       } else {
-        label.textContent = 'Copy the selector below and paste it in the editor.';
+        label.textContent =
+          'Copy the selector below and paste it into the price surface row in Priceify.';
         label.setAttribute('style', 'flex:1;min-width:120px;color:#fbbf24;');
       }
     }
@@ -11253,8 +11256,8 @@
           setHighlight(null);
           if (!selectorInput.value) {
             label.textContent = PRICE_SURFACE_PICK_MODE
-              ? 'Click a price node to map it for RipX price surfaces. The selector will be sent back to the wizard.'
-              : 'Click an element to select it. Selector will be sent to the editor or copy below.';
+              ? 'Click a price on this page to map it. The selector goes back to Priceify automatically.'
+              : 'Click an element to select it. The selector goes back to Priceify, or copy it below.';
             label.setAttribute('style', 'flex:1;min-width:120px;');
           }
           return;
@@ -13854,7 +13857,7 @@
     var fab = document.createElement('button');
     fab.id = 'ripx-preview-debug-fab';
     fab.type = 'button';
-    fab.textContent = 'RipX QA';
+    fab.textContent = 'Priceify QA';
     fab.style.position = 'fixed';
     fab.style.right = '16px';
     fab.style.bottom = '16px';
@@ -13900,7 +13903,7 @@
     var title = document.createElement('div');
     title.style.fontWeight = '700';
     title.style.fontSize = '14px';
-    title.textContent = 'RipX Preview Console';
+    title.textContent = 'Priceify Preview Console';
     var subtitle = document.createElement('div');
     subtitle.style.fontSize = '11px';
     subtitle.style.color = '#475569';
@@ -15645,12 +15648,12 @@
       },
       checkout: {
         storefrontScriptRunsOnHostedCheckout: false,
-        note: 'checkout.shopify.com does not load the RipX storefront script. Shipping checkout uses carrier-service callbacks plus delivery customization driven by _ripx_price_test/_ripx_variant line properties.',
+        note: 'checkout.shopify.com does not load the Priceify storefront script. Shipping checkout uses carrier-service callbacks plus delivery customization driven by _ripx_price_test/_ripx_variant line properties.',
       },
       shipping: shippingCallbackHealth,
       interpret: {
         if_password_page: isPasswordPage
-          ? 'RipX does not run on /password — enter the store first.'
+          ? 'Priceify does not run on /password — enter the store first.'
           : null,
         if_preview_ok_but_no_paint:
           variant && variant.isPreview && variant.config && !isPasswordPage
@@ -15689,7 +15692,7 @@
                 cur +
                 ') is not in the arm byProduct matrix (' +
                 keys.join(', ') +
-                '). Open Preview from that product’s row in RipX Variations — do not reuse a sticky preview on another PDP.'
+                '). Open Preview from that product’s row in Priceify Variations — do not reuse a sticky preview on another PDP.'
               );
             }
           } catch (_eMm) {}

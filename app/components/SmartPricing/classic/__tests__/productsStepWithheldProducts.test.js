@@ -4,6 +4,10 @@
  * tests over one product is two answers to what it costs. The catalog used to
  * drop them in silence, which left a merchant scrolling for a product that was
  * never going to appear.
+ *
+ * Only the count is on the step. The rest -- which tests hold them and what
+ * frees them -- is a tooltip, because a per-product test name is a whole
+ * product title and two of them inline read as a paragraph, not a footnote.
  */
 import { act, createElement as h } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -79,8 +83,14 @@ async function renderPanel(props = {}) {
   });
 }
 
+/** The hint the count hangs off, whose accessible name holds the detail. */
+const withheldHint = () =>
+  Array.from(container.querySelectorAll('button')).find(node =>
+    /not shown/.test(node.textContent || '')
+  );
+
 describe('products held by another test', () => {
-  it('says how many are missing and why', async () => {
+  it('shows the count on the step and keeps the reason to a tooltip', async () => {
     await renderPanel({
       withheldByOtherTests: {
         total: 4,
@@ -91,8 +101,35 @@ describe('products held by another test', () => {
     });
 
     expect(container.textContent).toContain('4 products not shown');
-    expect(container.textContent).toContain('in another price test');
-    expect(container.textContent).toContain('Summer pricing');
+    // The long part is not printed on the step.
+    expect(container.textContent).not.toContain('Summer pricing');
+    expect(container.textContent).not.toContain('in another price test');
+
+    const hint = withheldHint();
+    expect(hint.getAttribute('aria-label')).toContain('in another price test');
+    expect(hint.getAttribute('aria-label')).toContain('Summer pricing');
+  });
+
+  it('reveals the reason on hover', async () => {
+    vi.useFakeTimers();
+    try {
+      await renderPanel({
+        withheldByOtherTests: {
+          total: 4,
+          live: 4,
+          paused: 0,
+          tests: [{ test_id: 'other', name: 'Summer pricing', live: true }],
+        },
+      });
+      await act(async () => {
+        withheldHint().dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+        await vi.advanceTimersByTimeAsync(1000);
+      });
+      expect(document.body.textContent).toContain('in another price test');
+      expect(document.body.textContent).toContain('Summer pricing');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('reads as one product, not "1 products"', async () => {
@@ -101,7 +138,7 @@ describe('products held by another test', () => {
     });
 
     expect(container.textContent).toContain('1 product not shown');
-    expect(container.textContent).toContain('it is in another price test');
+    expect(withheldHint().getAttribute('aria-label')).toContain('it is in another price test');
   });
 
   it('says what frees them up', async () => {
@@ -109,7 +146,9 @@ describe('products held by another test', () => {
       withheldByOtherTests: { total: 2, live: 2, paused: 0, tests: [] },
     });
 
-    expect(container.textContent).toMatch(/end that test to reuse them here/i);
+    expect(withheldHint().getAttribute('aria-label')).toMatch(
+      /end that test to reuse them here/i
+    );
   });
 
   it('names at most two tests, so the line stays a line', async () => {
@@ -126,8 +165,8 @@ describe('products held by another test', () => {
       },
     });
 
-    expect(container.textContent).toContain('Test A, Test B');
-    expect(container.textContent).not.toContain('Test C');
+    expect(withheldHint().getAttribute('aria-label')).toContain('Test A, Test B');
+    expect(withheldHint().getAttribute('aria-label')).not.toContain('Test C');
   });
 
   it('stays quiet when nothing was withheld', async () => {

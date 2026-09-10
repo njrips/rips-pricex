@@ -21,6 +21,7 @@ import {
 import { IconControlBaseline } from './classicIcons';
 import { priceSurfacesUnmapped } from '../../../utils/checkoutReadinessClient';
 import SettingsInfoLink from '../../Settings/SettingsInfoLink';
+import TooltipWrapper from '../../shared/TooltipWrapper';
 import styles from './SmartPricingClassic.module.css';
 
 function formatPriceModeLabel(mode, { bulkPercent = '10', bulkDirection = 'increase' } = {}) {
@@ -142,6 +143,11 @@ export default function ReviewLaunchStepPanel({
   const durationNotFeasible =
     significanceEstimate?.durationFeasibility === 'not_feasible' ||
     Number(estimatedDays) > PRACTICAL_TEST_MAX_DAYS;
+  // What the merchant has to act on stays in the banner; how it was worked out
+  // goes behind a hint. Older callers only pass the whole paragraph, so fall
+  // back to that rather than showing nothing.
+  const durationSummary = significanceEstimate?.summary || estimatedTimeDetail;
+  const durationMethod = significanceEstimate?.summary ? significanceEstimate.method || '' : '';
   const durationRange = significanceEstimate?.practicalDurationRange || '';
   const durationTitle = durationNotFeasible
     ? 'Traffic does not support a practical test'
@@ -238,9 +244,20 @@ export default function ReviewLaunchStepPanel({
             introduces. The method belongs in the guide the Analysis row links
             to. */}
         <p>
-          {estimatedTimeDetail ||
+          {durationSummary ||
             `From ${audience?.trafficAllocation ?? 50}% experiment traffic and the products you selected.`}
         </p>
+        {/* The arithmetic behind the estimate, and the caveats on the traffic
+            it was built from. Worth reading once, not on the way to Launch. */}
+        {durationMethod ? (
+          <p className={styles.help}>
+            <TooltipWrapper content={durationMethod}>
+              <button type="button" className={styles.helpHint} aria-label={durationMethod}>
+                How this is worked out
+              </button>
+            </TooltipWrapper>
+          </p>
+        ) : null}
       </Banner>
 
       {offerDiscountMissing ? (

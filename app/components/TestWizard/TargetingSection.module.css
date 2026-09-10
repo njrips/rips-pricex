@@ -5650,6 +5650,19 @@
   flex-shrink: 0;
 }
 
+/* A row that is off is kept and ignored. Its controls are already disabled, so
+   this only has to make the row read as parked at a glance rather than as one
+   more mapped selector. The switch and Remove keep full contrast: they are the
+   two things still worth clicking. */
+.priceSurfaceMappingGridRowOff {
+  opacity: 0.62;
+}
+
+.priceSurfaceMappingGridRowOff:hover,
+.priceSurfaceMappingGridRowOff:focus-within {
+  opacity: 1;
+}
+
 /* One switch instead of a status badge beside a checkbox: the pair repeated
    itself and took most of the Actions column, and Remove is now an icon. */
 .priceSurfaceRowToggle {

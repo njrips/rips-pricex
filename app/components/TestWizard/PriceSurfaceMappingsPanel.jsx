@@ -157,14 +157,24 @@ function PriceSurfaceMappingRows({
       {rows.map((row, index) => {
         const duplicate = row.selector.trim() && duplicateKeys.has(buildMappingKey(row));
         const urlRow = isUrlRow(row);
+        // A row that is off is kept and ignored, so editing what it would paint
+        // is editing nothing. Its fields go read-only and only the switch that
+        // brings it back and the button that removes it stay live.
+        const rowEnabled = row.enabled !== false;
         const launchUrl = getPickerLaunchUrl?.(row) || '';
-        const pickBlockedReason = launchUrl ? '' : getPickBlockedReason?.(row) || '';
+        const pickBlockedReason = !rowEnabled
+          ? 'Turn this row on to pick a price for it.'
+          : launchUrl
+            ? ''
+            : getPickBlockedReason?.(row) || '';
         const isPicking =
           pickTarget?.scope === scope && pickTarget?.index === index && Boolean(launchUrl);
         return (
           <div
             key={row.id || `${scope}-surface-${index}`}
-            className={styles.priceSurfaceMappingGridRow}
+            className={`${styles.priceSurfaceMappingGridRow} ${
+              rowEnabled ? '' : styles.priceSurfaceMappingGridRowOff
+            }`}
           >
             <div className={styles.priceSurfaceRowNumber} aria-hidden>
               {index + 1}
@@ -174,6 +184,7 @@ function PriceSurfaceMappingRows({
               labelHidden
               options={buildSurfaceOptions()}
               value={row.surface}
+              disabled={!rowEnabled}
               onChange={value => onUpdate(index, { surface: value })}
             />
             {urlRow ? (
@@ -183,6 +194,7 @@ function PriceSurfaceMappingRows({
                 value={row.pageUrl || ''}
                 onChange={value => onUpdate(index, { pageUrl: value })}
                 autoComplete="off"
+                disabled={!rowEnabled}
                 placeholder="/pages/black-friday"
                 error={row.pageUrl ? priceSurfacePageUrlError(row.pageUrl) || undefined : undefined}
               />
@@ -192,6 +204,7 @@ function PriceSurfaceMappingRows({
                 labelHidden
                 options={buildRoleOptions()}
                 value={row.role}
+                disabled={!rowEnabled}
                 onChange={value => onUpdate(index, { role: value })}
               />
             )}
@@ -202,6 +215,7 @@ function PriceSurfaceMappingRows({
                 value={row.selector}
                 onChange={value => onUpdate(index, { selector: value })}
                 autoComplete="off"
+                disabled={!rowEnabled}
                 placeholder=".product__price"
                 error={duplicate ? 'Duplicate selector.' : undefined}
               />
@@ -221,7 +235,7 @@ function PriceSurfaceMappingRows({
                 <Button
                   size="slim"
                   variant={isPicking ? 'primary' : 'secondary'}
-                  disabled={!launchUrl}
+                  disabled={!launchUrl || !rowEnabled}
                   // A tooltip is only read on hover, and a disabled control is
                   // the last thing anyone hovers. The reason goes into the
                   // accessible name as well so it is never hover-only.

@@ -266,6 +266,9 @@ export function estimateSignificanceDuration({
   const missingTraffic = perSku.some(row => !row.days);
   if (!perSku.length || missingTraffic) {
     const zeroAllocation = slowestVariationPercent <= 0;
+    const unavailableDetail = zeroAllocation
+      ? 'At least one variation has 0% traffic, so it can never reach the minimum sample. Give every variation a positive allocation.'
+      : 'A reliable timeline is unavailable because one or more selected products lack visitor data. The estimate needs measured visitors/day for every selected product.';
     return {
       days: null,
       earliestDays: null,
@@ -280,9 +283,11 @@ export function estimateSignificanceDuration({
       comparisonCount,
       slowestVariationPercent,
       perSkuEstimates: [],
-      detail: zeroAllocation
-        ? 'At least one variation has 0% traffic, so it can never reach the minimum sample. Give every variation a positive allocation.'
-        : 'A reliable timeline is unavailable because one or more selected products lack visitor data. The estimate needs measured visitors/day for every selected product.',
+      detail: unavailableDetail,
+      // Nothing was computed, so there is no method to explain -- the whole
+      // message is the thing to act on.
+      summary: unavailableDetail,
+      method: '',
     };
   }
 
@@ -396,5 +401,12 @@ export function estimateSignificanceDuration({
         row.days <= PRACTICAL_TEST_MAX_DAYS ? 'practical' : 'not_feasible',
     })),
     detail: `${inputs}${evidenceNote}${floorNote}${targetNote}${feasibilityNote}`,
+    // The same sentences, split by what a merchant has to act on versus how the
+    // number was arrived at. Printed as one paragraph this ran to six sentences
+    // of arithmetic and caveats above a summary it was only introducing, so the
+    // part that says what to do got lost in the part that says how it was
+    // worked out. Review shows `summary` and keeps `method` behind a hint.
+    summary: `${floorNote}${feasibilityNote}`.trim(),
+    method: `${inputs}${evidenceNote}${targetNote}`.trim(),
   };
 }

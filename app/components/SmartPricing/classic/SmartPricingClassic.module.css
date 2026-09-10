@@ -724,6 +724,25 @@ button.stepItem {
   line-height: 16px; /* Figma hypothesis helper */
 }
 
+/* A help line whose detail sits in a tooltip. The dotted underline is the only
+   thing telling a merchant there is more to read, so it carries the affordance
+   rather than looking like plain muted text. */
+.helpHint {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+  cursor: help;
+}
+
+.helpHint:hover,
+.helpHint:focus-visible {
+  color: var(--classic-text, inherit);
+}
+
 .sectionLabel {
   margin: 0 0 8px; /* Figma Experiment type label → grid gap 8 */
   font-family: var(--ripx-font-classic, var(--ripx-font-ui, 'Inter', system-ui, sans-serif));
