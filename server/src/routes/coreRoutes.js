@@ -3,6 +3,7 @@ const {
   requireShopSessionOrInternal,
   requireInternalService,
 } = require('../middleware/shopifySessionContext');
+const { asyncHandler } = require('../middleware/asyncHandler');
 const {
   getShopEntitlement,
   setEntitlement,
@@ -15,13 +16,13 @@ const logger = require('../utils/logger');
 
 const router = express.Router();
 
-router.get('/billing/status', requireShopSessionOrInternal, async (req, res) => {
+router.get('/billing/status', requireShopSessionOrInternal, asyncHandler(async (req, res) => {
   const entitlement = await getShopEntitlement(req.shopDomain);
   res.json({
     shop: req.shopDomain,
     ...entitlement,
   });
-});
+}));
 
 /**
  * Sync Admin-session entitlement into Express shops table.
@@ -31,7 +32,7 @@ router.get('/billing/status', requireShopSessionOrInternal, async (req, res) => 
  * exactly as far as the caller is: our loader, which reads that state from
  * Shopify. A merchant's own session token says nothing about their plan.
  */
-router.post('/billing/sync-entitlement', requireInternalService, async (req, res) => {
+router.post('/billing/sync-entitlement', requireInternalService, asyncHandler(async (req, res) => {
   const body = req.body || {};
   const entitled = body.entitled === true || ['ACTIVE', 'active', 'trial', 'TRIAL', 'paid', 'PAID'].includes(String(body.status || ''));
   const planHandle = body.planHandle || body.plan_handle || null;
@@ -41,9 +42,9 @@ router.post('/billing/sync-entitlement', requireInternalService, async (req, res
   });
   const entitlement = await getShopEntitlement(req.shopDomain);
   res.json({ shop: req.shopDomain, ...entitlement, synced: true });
-});
+}));
 
-router.post('/billing/dev-entitle', requireShopSessionOrInternal, async (req, res) => {
+router.post('/billing/dev-entitle', requireShopSessionOrInternal, asyncHandler(async (req, res) => {
   if (process.env.NODE_ENV === 'production' && process.env.RIPSPRICEX_ALLOW_DEV_BILLING !== 'true') {
     return res.status(403).json({ error: 'Not allowed' });
   }
@@ -51,9 +52,9 @@ router.post('/billing/dev-entitle', requireShopSessionOrInternal, async (req, re
   await setEntitlement(req.shopDomain, { status, planHandle });
   const entitlement = await getShopEntitlement(req.shopDomain);
   res.json(entitlement);
-});
+}));
 
-router.post('/shops/install', requireShopSessionOrInternal, async (req, res) => {
+router.post('/shops/install', requireShopSessionOrInternal, asyncHandler(async (req, res) => {
   await upsertShopInstall(req.shopDomain);
   const accessToken = req.shopifyAccessToken || req.body?.access_token || req.body?.accessToken;
   let scope = req.body?.scope || process.env.SHOPIFY_SCOPES || process.env.SCOPES || null;
@@ -97,12 +98,12 @@ router.post('/shops/install', requireShopSessionOrInternal, async (req, res) => 
     session_saved: Boolean(accessToken),
     upgradeUrl: pricingPlansUrl(req.shopDomain),
   });
-});
+}));
 
-router.post('/shops/uninstall', requireShopSessionOrInternal, async (req, res) => {
+router.post('/shops/uninstall', requireShopSessionOrInternal, asyncHandler(async (req, res) => {
   await markShopUninstalled(req.shopDomain);
   await deleteShopSession(req.shopDomain).catch(() => {});
   res.json({ ok: true });
-});
+}));
 
 module.exports = router;

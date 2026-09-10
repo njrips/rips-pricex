@@ -1,23 +1,19 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useOutletContext, useSearchParams } from 'react-router';
-import { Badge, Banner, Button } from '@shopify/polaris';
 import type { AppOutletContext } from '../lib/api.client';
 import { rpxApi } from '../lib/api.client';
-import { useThemeEmbedRedirect } from '../lib/useThemeEmbedRedirect';
-import { apiGet, getShopDomain } from '../services/api';
+import { getShopDomain } from '../services/api';
 import SettingsStatSettingsPanel from '../components/Settings/sections/SettingsStatSettingsPanel';
 import { StoreSettingsPriceSurfacesSection } from '../components/Settings/sections/StoreSettingsPriceSurfacesSection';
 import SettingsPlanPanel, {
   usePlanBillingState,
 } from '../components/Settings/sections/SettingsPlanPanel';
-import useCartTransformStatus from '../hooks/useCartTransformStatus';
-import useCheckoutDiscountStatus from '../hooks/useCheckoutDiscountStatus';
 import ClassicAdminShell from '../components/SmartPricing/classic/ClassicAdminShell';
 import { useKeyedState } from '../hooks/useKeyedState';
 import { withCurrentEmbeddedSearch } from '../utils/shopifyEmbeddedSearch';
 import styles from '../components/SmartPricing/classic/SmartPricingClassic.module.css';
 
-type TabId = 'plan' | 'stats' | 'installation' | 'price-surfaces';
+type TabId = 'plan' | 'stats' | 'price-surfaces';
 
 const TABS: { id: TabId; label: string; title: string; subtitle: string }[] = [
   {
@@ -35,18 +31,10 @@ const TABS: { id: TabId; label: string; title: string; subtitle: string }[] = [
       'When a test may be called. These two settings decide it for every experiment you launch.',
   },
   {
-    id: 'installation',
-    label: 'Installation',
-    title: 'Theme embed, cart transform & checkout discount',
-    subtitle:
-      'Advanced install details — readiness progress lives on Setup. Snippet, script, and ensure live here.',
-  },
-  {
     id: 'price-surfaces',
     label: 'Price surfaces',
     title: 'Theme price selectors',
-    subtitle:
-      'Map where test prices paint on PDP and listings. Shop defaults apply to every Classic price test.',
+    subtitle: 'Tell Priceify where each price shows, so a running test can repaint it.',
   },
 ];
 
@@ -55,7 +43,6 @@ function normalizeTab(raw: string | null): TabId {
     .trim()
     .toLowerCase();
   if (value === 'plan' || value === 'billing') return 'plan';
-  if (value === 'installation' || value === 'setup') return 'installation';
   if (value === 'price-surfaces' || value === 'price_surfaces' || value === 'surfaces') {
     return 'price-surfaces';
   }
@@ -89,26 +76,22 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [guardrailsLoading, setGuardrailsLoading] = useKeyedState(target, true);
 
-  const [installSnippet, setInstallSnippet] = useState('');
-  const [scriptUrl, setScriptUrl] = useState('');
-  const [liveThemeName, setLiveThemeName] = useState<string | null>(null);
-  const { open: openEmbed, embedUrl, themeName } = useThemeEmbedRedirect(ctx, {
-    prefetch: tab === 'installation',
-  });
-  const cart = useCartTransformStatus(shopDomain, { enabled: tab === 'installation' });
-  const discount = useCheckoutDiscountStatus(shopDomain, { enabled: tab === 'installation' });
-
   const activeMeta = useMemo(() => TABS.find(item => item.id === tab) || TABS[1], [tab]);
 
-  // Canonicalize legacy aliases in the URL (?tab=billing|setup → plan|installation).
+  // Canonicalize legacy aliases in the URL (?tab=billing → plan). The former
+  // Installation tab is gone — everything it did lives on Setup — so saved
+  // links to it are sent there rather than silently landing on Stat settings.
   useEffect(() => {
     const raw = String(searchParams.get('tab') || '')
       .trim()
       .toLowerCase();
+    if (raw === 'installation' || raw === 'setup') {
+      navigate(withCurrentEmbeddedSearch(searchParams, '/app/setup'), { replace: true });
+      return;
+    }
     let canonical: TabId | null = null;
     if (raw === 'billing') canonical = 'plan';
     else if (raw === 'guardrails') canonical = 'stats';
-    else if (raw === 'setup') canonical = 'installation';
     else if (raw === 'price_surfaces' || raw === 'surfaces') canonical = 'price-surfaces';
     if (!canonical || canonical === raw) return;
     setSearchParams(
@@ -119,7 +102,7 @@ export default function SettingsPage() {
       },
       { replace: true }
     );
-  }, [searchParams, setSearchParams]);
+  }, [navigate, searchParams, setSearchParams]);
 
   useEffect(() => {
     if (tab !== 'price-surfaces' || !automap) return;
@@ -154,29 +137,6 @@ export default function SettingsPage() {
       cancelled = true;
     };
   }, [target, setGuardrailsLoading]);
-
-  useEffect(() => {
-    if (tab !== 'installation') return;
-    let cancelled = false;
-    apiGet('/settings/installation')
-      .then(res => {
-        if (cancelled) return;
-        const data = res?.data?.data || res?.data || {};
-        setInstallSnippet(String(data.snippetHtml || ''));
-        setScriptUrl(String(data.scriptUrl || data.directUrl || ''));
-        const name = data?.mainTheme?.name ? String(data.mainTheme.name) : null;
-        setLiveThemeName(name);
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setInstallSnippet('');
-          setLiveThemeName(null);
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [tab, shopDomain]);
 
   const setTab = useCallback(
     (next: TabId) => {
@@ -233,16 +193,6 @@ export default function SettingsPage() {
     }
   };
 
-  const ensureCart = async () => {
-    await cart.ensure();
-    await cart.refresh();
-  };
-
-  const ensureDiscount = async () => {
-    await discount.ensure();
-    await discount.refresh();
-  };
-
   const footerPrimary =
     tab === 'plan'
       ? {
@@ -260,13 +210,7 @@ export default function SettingsPage() {
             busyLabel: saving ? 'Saving…' : 'Loading…',
             disabled: guardrailsLoading,
           }
-        : tab === 'installation'
-          ? {
-              label: cart.busy ? 'Ensuring…' : 'Ensure cart transform',
-              onClick: () => void ensureCart(),
-              busy: cart.busy,
-            }
-          : null;
+        : null;
 
   const footerSecondary =
     tab === 'plan' && planState.needsSetup && !planState.loading
@@ -274,21 +218,12 @@ export default function SettingsPage() {
           label: 'Open Setup checklist',
           onClick: () => navigate('/app/setup'),
         }
-      : tab === 'installation' && embedUrl
+      : tab === 'price-surfaces'
         ? {
-            label: 'Enable theme app embed',
-            href: embedUrl,
-            target: '_top',
-            onClick: () => {
-              void openEmbed();
-            },
+            label: 'Open Setup checklist',
+            onClick: () => navigate('/app/setup'),
           }
-        : tab === 'price-surfaces'
-          ? {
-              label: 'Open Setup checklist',
-              onClick: () => navigate('/app/setup'),
-            }
-          : undefined;
+        : undefined;
 
   return (
     <ClassicAdminShell
@@ -317,111 +252,8 @@ export default function SettingsPage() {
         />
       ) : null}
 
-      {tab === 'installation' ? (
-        <div className={styles.adminStack}>
-          <div style={{ marginBottom: 16 }}>
-            <Banner tone="info" title="Advanced install details">
-              <p>
-                Overall readiness and primary ensure CTAs live on{' '}
-                <Button variant="plain" onClick={() => navigate('/app/setup')}>
-                  Setup
-                </Button>
-                .
-              </p>
-            </Banner>
-          </div>
-          <div className={styles.adminRow}>
-            <div className={styles.adminRowHead}>
-              <p className={styles.adminRowTitle}>Theme embed & app proxy</p>
-              <Badge tone={embedUrl ? undefined : 'warning'}>
-                {embedUrl ? 'Confirm in theme editor' : 'API key missing'}
-              </Badge>
-            </div>
-            <p className={styles.adminRowBody}>
-              Enable the Priceify theme app embed for PDP paint. The app proxy serves{' '}
-              <code>/apps/ripspricex/script.js</code> when the embed cannot load the script.
-              {themeName || liveThemeName ? (
-                <>
-                  {' '}
-                  Deep link targets live theme <strong>{themeName || liveThemeName}</strong>.
-                </>
-              ) : null}
-            </p>
-            {scriptUrl ? (
-              <p className={styles.help}>
-                Script URL: <code>{scriptUrl}</code>
-              </p>
-            ) : null}
-            {installSnippet ? <pre className={styles.adminCodeBlock}>{installSnippet}</pre> : null}
-            <div className={styles.adminRowActions}>
-              {embedUrl ? (
-                <Button
-                  variant="primary"
-                  onClick={() => {
-                    void openEmbed();
-                  }}
-                >
-                  Enable theme app embed
-                </Button>
-              ) : (
-                <p className={styles.help}>
-                  Missing API key — cannot build the theme embed deep link.
-                </p>
-              )}
-              <Button onClick={() => navigate('/app/setup')}>Open Setup checklist</Button>
-            </div>
-          </div>
-
-          <div className={styles.adminRow}>
-            <div className={styles.adminRowHead}>
-              <p className={styles.adminRowTitle}>Cart transform</p>
-              <Badge tone={cart.installed ? 'success' : 'warning'}>
-                {cart.installed ? 'Installed' : 'Needs ensure'}
-              </Badge>
-            </div>
-            <p className={styles.adminRowBody}>{cart.status}</p>
-            {cart.error ? <p className={styles.error}>{cart.error}</p> : null}
-            <div className={styles.adminRowActions}>
-              <Button
-                variant="primary"
-                disabled={cart.busy}
-                loading={cart.busy}
-                onClick={() => void ensureCart()}
-              >
-                Ensure cart transform
-              </Button>
-              <Button onClick={() => setTab('price-surfaces')}>Open price surfaces</Button>
-            </div>
-          </div>
-
-          <div className={styles.adminRow}>
-            <div className={styles.adminRowHead}>
-              <p className={styles.adminRowTitle}>Checkout discount</p>
-              <Badge tone={discount.installed ? 'success' : 'warning'}>
-                {discount.installed ? 'Attached' : 'Needs ensure'}
-              </Badge>
-            </div>
-            <p className={styles.adminRowBody}>{discount.status}</p>
-            {discount.error ? <p className={styles.error}>{discount.error}</p> : null}
-            <div className={styles.adminRowActions}>
-              <Button
-                variant="primary"
-                disabled={discount.busy}
-                loading={discount.busy}
-                onClick={() => void ensureDiscount()}
-              >
-                Ensure checkout discount
-              </Button>
-              <Button onClick={() => navigate('/app/setup')}>Open Setup checklist</Button>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
       {tab === 'price-surfaces' ? (
         <StoreSettingsPriceSurfacesSection
-          showAllAppSections
-          bare
           shopDomain={shopDomain}
           autoMapRequestToken={autoMapToken}
         />

@@ -497,3 +497,192 @@ describe('painting a product page', () => {
     );
   });
 });
+
+describe('a selector mapped to one specific URL', () => {
+  // Every other surface is inferred from the path, so a custom landing page
+  // classifies as 'home' along with every other /pages/ URL and could not be
+  // mapped on its own. A url mapping names its page instead.
+  const urlRow = (pageUrl, selector = '.landing-price') => ({
+    surface: 'url',
+    role: 'regular',
+    pageUrl,
+    selector,
+    priority: 0,
+  });
+
+  const resolve = (mappings, role = 'regular') => {
+    const { resolveConfiguredPriceSurfaceSelectors } = loadStorefrontFunctions(
+      ['resolveConfiguredPriceSurfaceSelectors'],
+      { shopMappings: mappings }
+    );
+    return resolveConfiguredPriceSurfaceSelectors('home', role, null);
+  };
+
+  it('applies on the page it names', () => {
+    setPathname('/pages/black-friday');
+    expect(resolve([urlRow('/pages/black-friday')])).toContain('.landing-price');
+  });
+
+  it('stays off every other page', () => {
+    setPathname('/pages/about-us');
+    expect(resolve([urlRow('/pages/black-friday')])).toEqual([]);
+  });
+
+  it('accepts the full URL a merchant pastes from the address bar', () => {
+    setPathname('/pages/black-friday');
+    expect(resolve([urlRow('https://demo.myshopify.com/pages/black-friday')])).toContain(
+      '.landing-price'
+    );
+  });
+
+  it('ignores campaign parameters on either side', () => {
+    setPathname('/pages/black-friday');
+    expect(resolve([urlRow('https://demo.myshopify.com/pages/black-friday?utm_source=email')])).
+      toContain('.landing-price');
+  });
+
+  it('ignores a trailing slash and letter case', () => {
+    setPathname('/pages/Black-Friday/');
+    expect(resolve([urlRow('/pages/black-friday')])).toContain('.landing-price');
+  });
+
+  it('still matches on a localized copy of the page', () => {
+    // A merchant pastes the URL in their own language; shoppers arrive on /de/.
+    setPathname('/de/pages/black-friday');
+    expect(resolve([urlRow('/pages/black-friday')])).toContain('.landing-price');
+  });
+
+  it('does not paint the compare-at price', () => {
+    // A url mapping is pinned to the regular price. Handing it back for a
+    // compare-at lookup would strike through the wrong node.
+    setPathname('/pages/black-friday');
+    expect(resolve([urlRow('/pages/black-friday')], 'compare_at')).toEqual([]);
+  });
+
+  it('is ignored when switched off', () => {
+    setPathname('/pages/black-friday');
+    const off = { ...urlRow('/pages/black-friday'), enabled: false };
+    expect(resolve([off])).toEqual([]);
+  });
+
+  it('is ignored when it names no page at all', () => {
+    setPathname('/pages/black-friday');
+    expect(resolve([urlRow('')])).toEqual([]);
+  });
+
+  it('comes before the selectors inferred for the page type', () => {
+    setPathname('/pages/black-friday');
+    const out = resolve([
+      { surface: 'home', role: 'regular', selector: '.theme-price', priority: 9 },
+      urlRow('/pages/black-friday'),
+    ]);
+    // The merchant pointed at this page by name, so their selector leads even
+    // though the home mapping carries a higher priority.
+    expect(out[0]).toBe('.landing-price');
+    expect(out).toContain('.theme-price');
+  });
+
+  it('does not suppress the built-in fallbacks on pages it does not cover', () => {
+    // A matching url mapping puts the painter into authoritative mode. A
+    // non-matching one must not, or one landing page would silence the theme
+    // selectors everywhere else.
+    const { hasConfiguredPriceSurfaceMappingsForSurfaces } = loadStorefrontFunctions(
+      ['hasConfiguredPriceSurfaceMappingsForSurfaces'],
+      { shopMappings: [urlRow('/pages/black-friday')] }
+    );
+    setPathname('/collections/all');
+    expect(hasConfiguredPriceSurfaceMappingsForSurfaces(['plp'], ['regular'], null)).toBe(false);
+    setPathname('/pages/black-friday');
+    expect(hasConfiguredPriceSurfaceMappingsForSurfaces(['home'], ['regular'], null)).toBe(true);
+  });
+});
+
+/**
+ * The all-products global fallback runs when a test carries no per-product
+ * prices, so repainting every amount on the page is what it is for. Products
+ * the merchant excluded are the exception, and this was the one painter that
+ * never checked — the product-card, collection-listing and cart painters all
+ * consult the same exclusion list.
+ */
+describe('all-products global fallback and excluded products', () => {
+  const EXCLUDED = '7654321';
+  const INCLUDED = '1234567';
+
+  function load(excludedProductIds) {
+    return loadStorefrontFunctions(
+      [
+        'paintAllProductsGlobalPrices',
+        'canUseAllProductsGlobalFallback',
+        'computeAllProductsAdjustedPrice',
+        'isRipxPriceNodeExcluded',
+        'ripxPriceNodeHasNoProductId',
+        'findProductCardRootForPriceNode',
+        'getActiveTestById',
+        'getExcludedProductIdsForTest',
+        'isProductScopeTargetType',
+        'shouldDisableCartUiPricePaint',
+        'shouldPreferNativeCartRendering',
+        'shouldBlockCartFallbackPaint',
+      ],
+      {
+        activeTests: [{ id: 'test-1', excludedProductIds: excludedProductIds }],
+      }
+    );
+  }
+
+  function variant() {
+    // 10% off, with no byProduct map, which is what puts the fallback in play.
+    return { id: 'v-1', variantId: 'v-1', config: { priceMode: 'percent', pricePercent: 10 } };
+  }
+
+  function priceTextFor(productId) {
+    const link = document.getElementById(
+      `CardLink-template--21010091114685__featured_collection-${productId}`
+    );
+    const card = link.closest('li');
+    return card.querySelector('.price-item--regular').textContent.trim();
+  }
+
+  beforeEach(() => {
+    setPathname('/collections/all');
+    document.body.innerHTML = `<main>
+      ${dawnCardMarkup({ productId: INCLUDED, price: '$100.00' })}
+      ${dawnCardMarkup({ productId: EXCLUDED, price: '$100.00' })}
+    </main>`;
+  });
+
+  it('leaves an excluded product at its catalog price', () => {
+    const api = load([EXCLUDED]);
+    expect(api.missing).toEqual([]);
+
+    api.paintAllProductsGlobalPrices('test-1', variant(), 'listing');
+
+    expect(priceTextFor(INCLUDED)).toContain('90');
+    // Before this check the excluded card was repainted like any other, so a
+    // product the merchant deliberately kept out of the test showed, and was
+    // charged, the test price.
+    expect(priceTextFor(EXCLUDED)).toBe('$100.00');
+  });
+
+  it('paints every product when the test excludes none', () => {
+    const api = load([]);
+    api.paintAllProductsGlobalPrices('test-1', variant(), 'listing');
+
+    expect(priceTextFor(INCLUDED)).toContain('90');
+    expect(priceTextFor(EXCLUDED)).toContain('90');
+  });
+
+  it('reports prices it could not attribute to a product', () => {
+    const api = load([EXCLUDED]);
+    // A theme that renders a bare price with nothing identifying the product.
+    document.body.innerHTML = '<main><span class="money">$100.00</span></main>';
+
+    api.paintAllProductsGlobalPrices('test-1', variant(), 'listing');
+
+    const reported = api.diagnostics.find(
+      entry => entry.kind === 'price_exclusion_unenforceable'
+    );
+    expect(reported).toBeTruthy();
+    expect(reported.detail.nodes).toBeGreaterThan(0);
+  });
+});

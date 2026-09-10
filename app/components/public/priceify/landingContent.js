@@ -92,8 +92,8 @@ export const EXPERIMENT_POINTS = [
     body: 'See how each price point is performing in real time.',
   },
   {
-    title: 'Guardrail metrics',
-    body: 'Monitor key metrics so you can see how the experiment affects your store.',
+    title: 'Revenue guardrail',
+    body: 'A test that costs you revenue per visitor pauses itself, at a limit you set per experiment.',
   },
 ];
 

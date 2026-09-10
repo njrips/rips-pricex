@@ -61,7 +61,7 @@ describe('Priceify FAQ copy', () => {
     );
     assert.deepEqual(
       EXPERIMENT_POINTS.map((point) => point.title),
-      ['Control vs. variation', 'Traffic allocation', 'Performance comparison', 'Guardrail metrics']
+      ['Control vs. variation', 'Traffic allocation', 'Performance comparison', 'Revenue guardrail']
     );
     assert.match(PROBLEM_CARDS[0].body, /everyone at once/);
     assert.match(PROBLEM_CARDS[1].body, /not what you assume they will/);

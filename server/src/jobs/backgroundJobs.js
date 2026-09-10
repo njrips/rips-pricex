@@ -13,6 +13,7 @@ const {
 const {
   sweepShopRolloutReadiness,
 } = require('../services/smartPricing/smartPricingRolloutNotifyService');
+const { sweepExpiredData } = require('../services/dataRetentionService');
 
 let timersStarted = false;
 
@@ -26,6 +27,14 @@ const running = new Set();
  * that a crashed instance does not hold the shop past the next interval.
  */
 const INBOX_SYNC_LEASE_SECONDS = 240;
+
+/**
+ * How long one instance holds the retention sweep.
+ *
+ * The sweep is shop-agnostic, so unlike the per-shop passes every instance
+ * would otherwise run the same deletes against the same rows at the same time.
+ */
+const RETENTION_LEASE_SECONDS = 600;
 
 /**
  * Schedules an async pass that never overlaps itself.
@@ -113,6 +122,17 @@ async function sweepAllRolloutReadiness() {
   }
 }
 
+/**
+ * Trims the ledger tables nothing else removes rows from.
+ *
+ * Not per-shop, so it takes a lease of its own rather than reusing the per-shop
+ * pattern above.
+ */
+async function sweepRetention() {
+  const { withJobLease } = require('../utils/jobLease');
+  await withJobLease('data_retention', RETENTION_LEASE_SECONDS, () => sweepExpiredData());
+}
+
 async function syncAllInboxes(reason = 'interval') {
   const { acquireJobLease, releaseJobLease } = require('../utils/jobLease');
   const shops = await listInstalledShops();
@@ -155,11 +175,15 @@ function startBackgroundJobs() {
   const cancelMs = Number(process.env.RIPSPRICEX_CANCEL_POLICY_MS || 10 * 60 * 1000);
   const autoWinnerMs = Number(process.env.RIPSPRICEX_AUTO_WINNER_MS || 3 * 60 * 1000);
   const readinessMs = Number(process.env.RIPSPRICEX_ROLLOUT_READINESS_MS || 10 * 60 * 1000);
+  // Retention is measured in days, so an hour between passes is frequent enough
+  // to keep the tables bounded while leaving each pass small.
+  const retentionMs = Number(process.env.RIPSPRICEX_RETENTION_SWEEP_MS || 60 * 60 * 1000);
 
   everyInterval('inbox-sync', inboxMs, () => syncAllInboxes('interval'));
   everyInterval('rollout-readiness', readinessMs, sweepAllRolloutReadiness);
   everyInterval('cancel-policy', cancelMs, pauseStaleRunningOnCancelPolicy);
   everyInterval('auto-winner', autoWinnerMs, evaluateAllAutoWinners);
+  everyInterval('data-retention', retentionMs, sweepRetention);
 
   // First pass shortly after boot, so a restart does not wait a whole interval.
   // It goes through the same guard as the timers: readiness runs before the
@@ -177,6 +201,7 @@ function startBackgroundJobs() {
     cancelMs,
     autoWinnerMs,
     readinessMs,
+    retentionMs,
   });
 }
 
@@ -186,4 +211,5 @@ module.exports = {
   pauseStaleRunningOnCancelPolicy,
   evaluateAllAutoWinners,
   sweepAllRolloutReadiness,
+  sweepRetention,
 };

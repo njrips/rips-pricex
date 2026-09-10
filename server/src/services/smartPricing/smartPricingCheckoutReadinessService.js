@@ -10,6 +10,7 @@ const {
   getConfiguredBatchResolveUrls,
 } = require('../priceCheckoutDiagnostics');
 const { getShopPriceSurfaceMappings } = require('../priceSurfaceRegistryService');
+const { resolveThemeAppEmbedStatus } = require('../themeAppEmbedService');
 const { buildPriceSurfaceReadinessSummary } = require('../../utils/priceSurfaceRegistry');
 const { SETTINGS_PRICE_SURFACES_TAB } = require('../../utils/checkoutReadinessHints');
 const {
@@ -247,9 +248,22 @@ async function resolveSmartPricingCheckoutReadiness(
     }
   }
 
+  // Read from the live theme rather than left unset. Setup showed every shop
+  // "confirm in theme editor" indefinitely while this was missing, including
+  // shops that had enabled the embed long ago.
+  const themeEmbed = await resolveThemeAppEmbedStatus(domain, {
+    accessToken,
+    forceRefresh,
+  }).catch(() => ({ status: 'unknown', reason: 'lookup_failed', theme: null }));
+
   const readiness = {
     ready,
     status,
+    theme_embed: {
+      status: themeEmbed.status,
+      reason: themeEmbed.reason,
+      theme_name: themeEmbed.theme?.name || null,
+    },
     checks_passed: summary.checks_passed ?? 0,
     checks_total: summary.checks_total ?? 0,
     checks_warning: summary.checks_warning ?? 0,

@@ -6,6 +6,7 @@
 const logger = require('../../utils/logger');
 const { query } = require('../../utils/database');
 const { normalizeShopDomain } = require('./smartPricingCatalogUtils');
+const { chatJson } = require('./smartPricingAiProvider');
 
 const AI_CACHE_TTL_MS =
   Number.parseInt(process.env.SMART_PRICING_AI_RANKING_CACHE_TTL_MS || '', 10) ||
@@ -36,22 +37,6 @@ function buildCompactCandidatePayload(rows = []) {
     tags: row.tags,
     recommended_scenario_preset: row.recommended_scenario_preset,
   }));
-}
-
-function parseAiResponse(content) {
-  if (!content) {
-    return null;
-  }
-  const trimmed = String(content).trim();
-  const jsonMatch = trimmed.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) {
-    return null;
-  }
-  try {
-    return JSON.parse(jsonMatch[0]);
-  } catch {
-    return null;
-  }
 }
 
 async function readAiCache(shopDomain, scope) {
@@ -85,14 +70,6 @@ async function writeAiCache(shopDomain, scope, payload) {
 }
 
 async function callOpenAiRanking(candidates, guardrails = {}) {
-  const apiKey = String(process.env.OPENAI_API_KEY || '').trim();
-  if (!apiKey) {
-    return null;
-  }
-  const OpenAI = require('openai').default;
-  const openai = new OpenAI({ apiKey });
-  const model = process.env.OPENAI_CHAT_MODEL || 'gpt-4o-mini';
-
   const systemPrompt = `You are a Shopify pricing strategist for RipX Smart Pricing.
 Given deterministic SKU metrics, return strict JSON only:
 {
@@ -113,22 +90,19 @@ Rules:
 - Never suggest testing SKUs tagged price_recently_changed unless margin is exceptional.
 - Respect guardrails: min margin ${guardrails.min_margin_percent ?? 35}%, max price change ${guardrails.max_price_change_percent ?? 15}%.`;
 
-  const userPrompt = JSON.stringify({
-    objective: guardrails.objective || 'revenue_per_visitor',
-    candidates,
-  });
-
-  const completion = await openai.chat.completions.create({
-    model,
+  // Shared helper so this path gets the same timeout, single retry and
+  // truncation check as price suggestions. It runs while a merchant waits for
+  // the opportunity list, so a hung request would stall that page.
+  return chatJson({
+    label: 'opportunity_ranking',
+    systemPrompt,
+    userPrompt: JSON.stringify({
+      objective: guardrails.objective || 'revenue_per_visitor',
+      candidates,
+    }),
     temperature: 0.2,
-    response_format: { type: 'json_object' },
-    messages: [
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: userPrompt },
-    ],
+    maxTokens: 900,
   });
-
-  return parseAiResponse(completion.choices?.[0]?.message?.content);
 }
 
 function mergeAiRanking(opportunities = [], aiPayload = null) {

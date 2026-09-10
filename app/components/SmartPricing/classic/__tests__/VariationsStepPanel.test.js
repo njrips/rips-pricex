@@ -1,7 +1,13 @@
 import {
   buildNextVariation,
   createDefaultVariations,
+  getVariationsStepContinueState,
   nextChallengerLetter,
+  setVariationTraffic,
+  sliderFillPercent,
+  splitEvenly,
+  trafficRemaining,
+  variationTrafficHeadroom,
   variationsFromPlanArms,
 } from '../variationsStepHelpers';
 
@@ -36,5 +42,153 @@ describe('VariationsStepPanel naming', () => {
 
     expect(rows.map(row => row.letter)).toEqual([null, 'A']);
     expect(rows.map(row => row.role)).toEqual(['Control', 'Variation A']);
+  });
+});
+
+describe('variation traffic split', () => {
+  it('opens with control holding all traffic', () => {
+    // A pre-filled 50/50 is a decision the merchant never made. Nothing reaches
+    // a shopper until they deliberately hand traffic to a challenger.
+    const rows = createDefaultVariations();
+    expect(rows.map(row => row.traffic)).toEqual([100, 0]);
+    expect(trafficRemaining(rows)).toBe(0);
+  });
+
+  it('changes only the row that was edited', () => {
+    // This used to rescale the others proportionally, so nudging control
+    // silently rewrote a challenger the merchant had just typed.
+    const rows = [
+      { id: 'control', traffic: 60 },
+      { id: 'var_a', traffic: 25 },
+      { id: 'var_b', traffic: 15 },
+    ];
+    const next = setVariationTraffic(rows, 0, 50);
+    expect(next.map(row => row.traffic)).toEqual([50, 25, 15]);
+  });
+
+  it('caps a row at what the other rows leave free', () => {
+    const rows = [
+      { id: 'control', traffic: 70 },
+      { id: 'var_a', traffic: 10 },
+    ];
+    // 20 is free, so 80 cannot be taken.
+    expect(setVariationTraffic(rows, 1, 80).map(row => row.traffic)).toEqual([70, 30]);
+    expect(setVariationTraffic(rows, 1, 15).map(row => row.traffic)).toEqual([70, 15]);
+  });
+
+  it('never lets an edit push the split over 100', () => {
+    const rows = createDefaultVariations();
+    // Control already holds everything, so a challenger has no room until it
+    // is reduced — which is the flow the step is built around.
+    expect(variationTrafficHeadroom(rows, 1)).toBe(0);
+    expect(setVariationTraffic(rows, 1, 60).map(row => row.traffic)).toEqual([100, 0]);
+
+    const freed = setVariationTraffic(rows, 0, 40);
+    expect(variationTrafficHeadroom(freed, 1)).toBe(60);
+    expect(setVariationTraffic(freed, 1, 60).map(row => row.traffic)).toEqual([40, 60]);
+  });
+
+  it('refuses a negative or unparseable share', () => {
+    const rows = [
+      { id: 'control', traffic: 50 },
+      { id: 'var_a', traffic: 50 },
+    ];
+    expect(setVariationTraffic(rows, 1, -10)[1].traffic).toBe(0);
+    expect(setVariationTraffic(rows, 1, 'abc')[1].traffic).toBe(0);
+    expect(setVariationTraffic(rows, 1, 33.6)[1].traffic).toBe(34);
+  });
+
+  it('puts an even split back in one call', () => {
+    const rows = splitEvenly(createDefaultVariations());
+    expect(rows.map(row => row.traffic)).toEqual([50, 50]);
+    expect(trafficRemaining(rows)).toBe(0);
+  });
+});
+
+describe('sliderFillPercent', () => {
+  it('measures the thumb against the range, not against 100', () => {
+    // The painted fill has to line up with the thumb. On a 5–100 slider the
+    // thumb at 5 is hard left, but the old `${value}%` painted 5% of the track,
+    // so the fill ran ahead of the thumb everywhere below the midpoint.
+    expect(sliderFillPercent(5, 5, 100)).toBe(0);
+    expect(sliderFillPercent(100, 5, 100)).toBe(100);
+    expect(sliderFillPercent(52.5, 5, 100)).toBeCloseTo(50);
+  });
+
+  it('is the plain percentage on a full-width track', () => {
+    expect(sliderFillPercent(0, 0, 100)).toBe(0);
+    expect(sliderFillPercent(30, 0, 100)).toBe(30);
+    expect(sliderFillPercent(100, 0, 100)).toBe(100);
+  });
+
+  it('stays on the track for values outside the range', () => {
+    expect(sliderFillPercent(-20, 0, 100)).toBe(0);
+    expect(sliderFillPercent(180, 0, 100)).toBe(100);
+    // A zero-width range has no position to report rather than dividing by zero.
+    expect(sliderFillPercent(50, 40, 40)).toBe(0);
+  });
+});
+
+describe('getVariationsStepContinueState', () => {
+  it('blocks the default split, where the challenger has nothing', () => {
+    const gate = getVariationsStepContinueState({ variations: createDefaultVariations() });
+    expect(gate.disabled).toBe(true);
+    expect(gate.reason).toBe('zero_traffic_arm');
+    expect(gate.hint).toMatch(/Variation A would get no traffic/i);
+  });
+
+  it('names how much is still unassigned', () => {
+    const gate = getVariationsStepContinueState({
+      variations: [
+        { id: 'control', name: 'Control', traffic: 40 },
+        { id: 'var_a', name: 'Variation A', traffic: 25 },
+      ],
+    });
+    expect(gate.disabled).toBe(true);
+    expect(gate.reason).toBe('under_allocated');
+    expect(gate.hint).toMatch(/35% of traffic is unassigned/i);
+  });
+
+  it('recovers a draft saved over 100 before the cap existed', () => {
+    const gate = getVariationsStepContinueState({
+      variations: [
+        { id: 'control', name: 'Control', traffic: 80 },
+        { id: 'var_a', name: 'Variation A', traffic: 60 },
+      ],
+    });
+    expect(gate.disabled).toBe(true);
+    expect(gate.reason).toBe('over_allocated');
+    expect(gate.hint).toMatch(/140%/);
+    expect(gate.hint).toMatch(/40%/);
+  });
+
+  it('lists the shape of the problem when several arms are starved', () => {
+    const gate = getVariationsStepContinueState({
+      variations: [
+        { id: 'control', name: 'Control', traffic: 100 },
+        { id: 'var_a', name: 'Variation A', traffic: 0 },
+        { id: 'var_b', name: 'Variation B', traffic: 0 },
+      ],
+    });
+    expect(gate.disabled).toBe(true);
+    expect(gate.hint).toMatch(/Every variation needs a share/i);
+  });
+
+  it('needs something to compare against', () => {
+    const gate = getVariationsStepContinueState({
+      variations: [{ id: 'control', name: 'Control', traffic: 100 }],
+    });
+    expect(gate.disabled).toBe(true);
+    expect(gate.reason).toBe('too_few_arms');
+  });
+
+  it('clears once the split is complete and every arm has a share', () => {
+    const gate = getVariationsStepContinueState({
+      variations: [
+        { id: 'control', name: 'Control', traffic: 70 },
+        { id: 'var_a', name: 'Variation A', traffic: 30 },
+      ],
+    });
+    expect(gate).toEqual({ disabled: false, reason: '', hint: '' });
   });
 });

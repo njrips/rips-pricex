@@ -1,15 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useOutletContext } from 'react-router';
-import { Banner, BlockStack, Box, Card, Text, TextField } from '@shopify/polaris';
-import { ProductIcon } from '@shopify/polaris-icons';
 import PriceSurfaceMappingsPanel from '../../TestWizard/PriceSurfaceMappingsPanel';
 import targetingStyles from '../../TestWizard/TargetingSection.module.css';
-import { SectionTitleWithTip } from '../primitives/SectionTitleWithTip';
-import { SECTION_HELP } from '../config/settingsSectionHelp';
 import {
   buildPriceSurfacePickerPath,
   inferPriceSurfaceFromHref,
   inferPriceSurfaceRoleFromPickerHints,
+  priceSurfacePageUrlError,
+  priceSurfacePagePath,
+  priceSurfacePickerPath,
 } from '../../../utils/priceSurfaceRegistry';
 import {
   buildVisualPickerLaunchUrl,
@@ -22,7 +21,10 @@ import {
 import { apiGet, getApiBaseUrl } from '../../../services';
 import { useKeyedState } from '../../../hooks/useKeyedState';
 import classicStyles from '../../SmartPricing/classic/SmartPricingClassic.module.css';
-import styles from '../Settings.module.css';
+
+// These surfaces are all previewed on a product page, so each needs a real
+// product handle before Pick can open anything.
+const PRODUCT_PAGE_PICK_SURFACES = new Set(['pdp', 'recommendation', 'quickview', 'global']);
 
 function productPathFromResource(product) {
   const handle = String(product?.handle || '')
@@ -32,12 +34,15 @@ function productPathFromResource(product) {
   return `/products/${encodeURIComponent(handle)}`;
 }
 
-export function StoreSettingsPriceSurfacesSection({
-  showAllAppSections,
-  shopDomain = '',
-  autoMapRequestToken = 0,
-  bare = false,
-}) {
+/**
+ * Settings → Price surfaces: the mapping table and nothing else.
+ *
+ * A sample product is still fetched so a product-page row can be picked
+ * without the merchant typing a URL. Any other page — a landing page, a
+ * hand-built bundle page — is reached with a Specific URL row, which is why
+ * there is no longer a shop-wide "product path" field above the table.
+ */
+export function StoreSettingsPriceSurfacesSection({ shopDomain = '', autoMapRequestToken = 0 }) {
   const outletCtx = useOutletContext() || {};
   const envPassword = String(
     outletCtx.devStorefrontPassword || getDevStorefrontPasswordDefault() || ''
@@ -56,8 +61,7 @@ export function StoreSettingsPriceSurfacesSection({
     [shopDomain]
   );
   const [pickerProduct, setPickerProduct] = useKeyedState(shopDomain, initialPickerProduct);
-  const { path: pickerProductPath, loading: pickerProductLoading } = pickerProduct;
-  const [manualProductPath, setManualProductPath] = useState('');
+  const { path: pickerProductPath } = pickerProduct;
   const pickTargetRef = useRef(null);
   const shopPickHandlerRef = useRef(null);
 
@@ -77,7 +81,15 @@ export function StoreSettingsPriceSurfacesSection({
     const domain = String(shopDomain || '').trim();
     if (!domain) return undefined;
     let cancelled = false;
-    apiGet('/shopify/store-resources?type=product&first=1', { shop: domain })
+    // Published only: an unpublished product 404s on the storefront, so it
+    // would open the picker on an error page. Several are requested because the
+    // first one back can be a draft-handle oddity with no handle at all.
+    apiGet(
+      `/shopify/store-resources?type=product&first=5&query=${encodeURIComponent(
+        'published_status:published'
+      )}`,
+      { shop: domain }
+    )
       .then(res => {
         if (cancelled) return;
         const product = Array.isArray(res?.data?.resources)
@@ -93,49 +105,42 @@ export function StoreSettingsPriceSurfacesSection({
     };
   }, [shopDomain, setPickerProduct]);
 
-  const resolvedProductPath = useMemo(() => {
-    const manual = String(manualProductPath || '').trim();
-    if (manual) {
-      if (manual.startsWith('/products/')) return manual;
-      if (manual.startsWith('products/')) return `/${manual}`;
-      if (!manual.includes('/')) return `/products/${encodeURIComponent(manual)}`;
-      try {
-        const url = new URL(manual);
-        if (url.pathname.includes('/products/')) return url.pathname;
-      } catch {
-        // keep as path-like input
-      }
-      return manual.startsWith('/') ? manual : `/${manual}`;
-    }
-    return pickerProductPath || '';
-  }, [manualProductPath, pickerProductPath]);
+  const resolvedProductPath = pickerProductPath || '';
+  const { loading: pickerProductLoading } = pickerProduct;
 
   const localDevPasswordUi = isLocalDevStorefrontPasswordUiEnabled();
   // When .env provides the password, never render the Settings password field.
   const allowPasswordField = localDevPasswordUi && !envPassword;
 
   const getPickerLaunchUrl = useCallback(
-    (surface = 'pdp') => {
+    row => {
       const domain = String(shopDomain || '').trim();
       if (!domain) {
         return '';
       }
+      const surface = String(row?.surface || 'pdp').toLowerCase();
       const password = resolveStorefrontPasswordForPreview(
         domain,
         envPassword || (allowPasswordField ? storefrontPassword : '')
       );
-      const path = buildPriceSurfacePickerPath(surface, {
-        productPath: resolvedProductPath || undefined,
-        collectionPath: '/collections/all',
-      });
-      // Avoid opening homepage for PDP picks when no product is available yet.
-      if (
-        (surface === 'pdp' ||
-          surface === 'recommendation' ||
-          surface === 'quickview' ||
-          surface === 'global') &&
-        (!resolvedProductPath || path === '/')
-      ) {
+      // A url row names its own page, so it skips the per-surface templates
+      // entirely. Only the path travels: previewing a custom domain through the
+      // shop domain reaches the same page and is the only host the proxy can
+      // unlock a storefront password on.
+      const path =
+        surface === 'url'
+          ? priceSurfacePickerPath(row?.pageUrl)
+          : buildPriceSurfacePickerPath(surface, {
+              productPath: resolvedProductPath || undefined,
+              collectionPath: '/collections/all',
+            });
+      if (!path) {
+        return '';
+      }
+      // Without a product handle these surfaces fall back to the homepage,
+      // where the price the merchant means to click is not on the page.
+      // getPickBlockedReason explains this on the disabled button.
+      if (PRODUCT_PAGE_PICK_SURFACES.has(surface) && (!resolvedProductPath || path === '/')) {
         return '';
       }
       const baseUrl = resolvePreviewBaseUrl({
@@ -159,6 +164,39 @@ export function StoreSettingsPriceSurfacesSection({
       );
     },
     [shopDomain, storefrontPassword, resolvedProductPath, allowPasswordField, envPassword]
+  );
+
+  /**
+   * Why Pick cannot run for a row, in the row's own terms.
+   *
+   * Pick is gated on a preview URL, and a row cannot always produce one. Left
+   * unexplained the button reads as broken, which is what it looked like while
+   * the sample-product lookup was silently returning nothing.
+   */
+  const getPickBlockedReason = useCallback(
+    row => {
+      if (!String(shopDomain || '').trim()) {
+        return 'Connect your shop to pick a price on your storefront.';
+      }
+      const surface = String(row?.surface || 'pdp').toLowerCase();
+      if (surface === 'url') {
+        const pageUrl = String(row?.pageUrl || '').trim();
+        if (!pageUrl) {
+          return 'Enter this row\u2019s page URL first, then Pick opens that page.';
+        }
+        return priceSurfacePageUrlError(pageUrl) || '';
+      }
+      if (PRODUCT_PAGE_PICK_SURFACES.has(surface)) {
+        if (pickerProductLoading) {
+          return 'Finding a product to preview\u2026';
+        }
+        if (!resolvedProductPath) {
+          return 'No published product to preview this on. Publish a product to your Online Store, or add a Specific URL row and pick on a page you name.';
+        }
+      }
+      return '';
+    },
+    [shopDomain, pickerProductLoading, resolvedProductPath]
   );
 
   useEffect(() => {
@@ -206,7 +244,9 @@ export function StoreSettingsPriceSurfacesSection({
       } else if (inferredSurface) {
         patch.surface = inferredSurface;
       }
-      if (roleHint) {
+      // A url row is pinned to the regular price and to the page the merchant
+      // named, so neither the inferred role nor the inferred surface applies.
+      if (roleHint && intendedSurface !== 'url') {
         patch.role = roleHint;
       }
       const handler = shopPickHandlerRef.current;
@@ -234,21 +274,21 @@ export function StoreSettingsPriceSurfacesSection({
     return () => clearTimeout(timeout);
   }, [pickTarget]);
 
-  const sectionSummary = useMemo(
-    () =>
-      'Shop defaults apply to every Classic Smart Pricing test. When a visitor is bucketed, Priceify paints mapped selectors on PDP, listings, and cart.',
-    []
-  );
 
   const beginVisualPick = useCallback(
     target => {
       const surface = String(target?.surface || 'pdp').toLowerCase();
-      const needsProduct =
-        surface === 'pdp' ||
-        surface === 'recommendation' ||
-        surface === 'quickview' ||
-        surface === 'global';
-      if (needsProduct && !resolvedProductPath) {
+      if (surface === 'url') {
+        if (!priceSurfacePagePath(target?.pageUrl)) {
+          return;
+        }
+      } else if (
+        (surface === 'pdp' ||
+          surface === 'recommendation' ||
+          surface === 'quickview' ||
+          surface === 'global') &&
+        !resolvedProductPath
+      ) {
         return;
       }
       // Stamp intended surface onto pick target so href inference cannot rewrite PDP → home.
@@ -262,151 +302,39 @@ export function StoreSettingsPriceSurfacesSection({
     [resolvedProductPath]
   );
 
-  const body = bare ? (
-    <div className={classicStyles.adminStackTight}>
-      <p className={classicStyles.help}>{sectionSummary}</p>
-      <Banner tone="info" title="One mapping for all price tests">
-        <p>
-          Suggest from theme or Auto-map (scans theme files + live pages), then verify with
-          visual pick on a real product page. Test Wizard can still add per-test overrides when
-          needed.
-        </p>
-      </Banner>
-      {shopDomain ? (
-        <TextField
-          label="Product path for visual pick"
-          value={manualProductPath}
-          onChange={setManualProductPath}
-          autoComplete="off"
-          placeholder={
-            pickerProductLoading
-              ? 'Loading a sample product…'
-              : resolvedProductPath || '/products/your-product-handle'
-          }
-          helpText={
-            resolvedProductPath
-              ? `Pick PDP opens ${resolvedProductPath}. Override with a handle or /products/… path if needed.`
-              : 'Enter a product handle so Pick PDP opens a real product page (not the homepage).'
-          }
-        />
-      ) : (
+  // Only the mapping table is rendered. What each column means, and how a row
+  // reaches the storefront, lives in the guide behind the tab's info icon
+  // rather than in prose above a table that already says it.
+  if (!shopDomain) {
+    return (
+      <div className={classicStyles.adminStackTight}>
         <p className={classicStyles.help}>
           Open Settings from a connected shop to edit theme price selectors.
         </p>
-      )}
-      {shopDomain ? (
-        <PriceSurfaceMappingsPanel
-          mode="shop"
-          styles={targetingStyles}
-          testMappings={[]}
-          shopDomain={shopDomain}
-          storefrontPassword={envPassword || storefrontPassword}
-          envStorefrontPassword={envPassword}
-          onStorefrontPasswordChange={
-            allowPasswordField ? handleStorefrontPasswordChange : undefined
-          }
-          productPath={resolvedProductPath}
-          autoMapRequestToken={autoMapRequestToken}
-          getPickerLaunchUrl={getPickerLaunchUrl}
-          pickTarget={pickTarget}
-          onBeginVisualPick={beginVisualPick}
-          onCancelVisualPick={() => {
-            pickTargetRef.current = null;
-            setPickTarget(null);
-          }}
-          onRegisterShopPickHandler={handler => {
-            shopPickHandlerRef.current = handler;
-          }}
-          onTestMappingsChange={() => {}}
-        />
-      ) : null}
-    </div>
-  ) : (
-        <BlockStack gap="400">
-          <div className={styles.sectionHeader}>
-            <div className={styles.sectionHeaderIcon}>
-              <ProductIcon />
-            </div>
-            <div className={styles.sectionHeaderContent}>
-              <SectionTitleWithTip
-                title="Theme price selectors"
-                tip={SECTION_HELP.themePriceSelectors}
-              />
-              <Text as="p" variant="bodySm" tone="subdued">
-                {sectionSummary}
-              </Text>
-            </div>
-          </div>
-
-          <Banner tone="info" title="One mapping for all price tests">
-            <p>
-              Configure selectors once here. Test Wizard can still add per-test overrides when a
-              theme needs a one-off. Auto-map scans theme files and live pages; visual pick is
-              the fallback for custom blocks.
-            </p>
-          </Banner>
-
-          {shopDomain ? (
-            <TextField
-              label="Product path for visual pick"
-              value={manualProductPath}
-              onChange={setManualProductPath}
-              autoComplete="off"
-              placeholder={
-                pickerProductLoading
-                  ? 'Loading a sample product…'
-                  : resolvedProductPath || '/products/your-product-handle'
-              }
-              helpText={
-                resolvedProductPath
-                  ? `Pick PDP opens ${resolvedProductPath}. Override with a handle or /products/… path if needed.`
-                  : 'Enter a product handle so Pick PDP opens a real product page (not the homepage).'
-              }
-            />
-          ) : null}
-
-          {!shopDomain ? (
-            <Text as="p" variant="bodySm" tone="caution">
-              Open Settings from a connected shop to edit theme price selectors.
-            </Text>
-          ) : (
-            <PriceSurfaceMappingsPanel
-              mode="shop"
-              styles={targetingStyles}
-              testMappings={[]}
-              shopDomain={shopDomain}
-              storefrontPassword={envPassword || storefrontPassword}
-              envStorefrontPassword={envPassword}
-              onStorefrontPasswordChange={
-                allowPasswordField ? handleStorefrontPasswordChange : undefined
-              }
-              productPath={resolvedProductPath}
-              autoMapRequestToken={autoMapRequestToken}
-              getPickerLaunchUrl={getPickerLaunchUrl}
-              pickTarget={pickTarget}
-              onBeginVisualPick={beginVisualPick}
-              onCancelVisualPick={() => {
-                pickTargetRef.current = null;
-                setPickTarget(null);
-              }}
-              onRegisterShopPickHandler={handler => {
-                shopPickHandlerRef.current = handler;
-              }}
-              onTestMappingsChange={() => {}}
-            />
-          )}
-        </BlockStack>
-  );
-
-  if (bare) {
-    return body;
+      </div>
+    );
   }
 
   return (
-    <Card
-      className={`${styles.settingsPanelCard} ${showAllAppSections ? styles.settingsPanelCardFull : ''}`}
-    >
-      <Box padding="500">{body}</Box>
-    </Card>
+    <PriceSurfaceMappingsPanel
+      styles={targetingStyles}
+      shopDomain={shopDomain}
+      storefrontPassword={envPassword || storefrontPassword}
+      envStorefrontPassword={envPassword}
+      onStorefrontPasswordChange={allowPasswordField ? handleStorefrontPasswordChange : undefined}
+      productPath={resolvedProductPath}
+      autoMapRequestToken={autoMapRequestToken}
+      getPickerLaunchUrl={getPickerLaunchUrl}
+      getPickBlockedReason={getPickBlockedReason}
+      pickTarget={pickTarget}
+      onBeginVisualPick={beginVisualPick}
+      onCancelVisualPick={() => {
+        pickTargetRef.current = null;
+        setPickTarget(null);
+      }}
+      onRegisterShopPickHandler={handler => {
+        shopPickHandlerRef.current = handler;
+      }}
+    />
   );
 }

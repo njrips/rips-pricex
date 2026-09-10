@@ -11,6 +11,12 @@ import {
   resolveMinSampleSize,
   validateClassicAudienceUi,
 } from '../classicAudienceEdit';
+import {
+  GOAL_METRIC_OPTIONS,
+  classicMetricOptionsFor,
+  normalizePrimaryMetric,
+  primaryMetricLabel,
+} from '../../targeting/smartPricingAudienceHelpers';
 
 describe('canEditClassicAudienceMetrics', () => {
   it('allows draft, queued, running, and paused', () => {
@@ -177,6 +183,7 @@ describe('applyAudienceUiToPlans', () => {
     expect(next[0].goal.significance_level).toBe(0.9);
     expect(next[0].goal.guardrails).toEqual({
       auto_stop: true,
+      enabled: true,
       max_revenue_drop_percent: 10,
     });
     expect(next[0].metadata.audience_ui.guardrails.map(row => row.id)).toEqual(['revenue']);
@@ -244,5 +251,46 @@ describe('applyAudienceUiToPlans', () => {
     expect(next.every(row => row.statistical_design.estimated_duration_days > 0)).toBe(true);
     expect(next.every(row => row.statistical_design.duration_feasibility)).toBe(true);
     expect(next.every(row => row.statistical_design.traffic_evidence)).toBe(true);
+  });
+});
+
+describe('profit per visitor, after it stopped being offered', () => {
+  // Cost of goods was one shop-wide percentage, which made profit per visitor
+  // revenue per visitor scaled by a constant: it ranked variations identically
+  // while reading like a separate measurement. New experiments cannot pick it.
+  it('is not among the metrics a new experiment can choose', () => {
+    expect(GOAL_METRIC_OPTIONS.map(option => option.value)).toEqual([
+      'revenue_per_visitor',
+      'conversion_rate',
+    ]);
+    expect(classicMetricOptionsFor([]).map(option => option.value)).not.toContain(
+      'profit_per_visitor'
+    );
+  });
+
+  it('comes back as an option for an experiment already running on it', () => {
+    // Without this the audience editor would show no selected metric, and the
+    // first pill clicked would silently re-goal a live test.
+    const values = classicMetricOptionsFor(['profit_per_visitor']).map(option => option.value);
+    expect(values).toContain('profit_per_visitor');
+    expect(values).toContain('revenue_per_visitor');
+  });
+
+  it('is offered back when only a secondary metric uses it', () => {
+    expect(
+      classicMetricOptionsFor(['revenue_per_visitor', 'profit_per_visitor']).map(o => o.value)
+    ).toContain('profit_per_visitor');
+  });
+
+  it('survives being read back rather than resetting to revenue', () => {
+    expect(normalizePrimaryMetric('profit_per_visitor')).toBe('profit_per_visitor');
+  });
+
+  it('still names itself on an experiment that uses it', () => {
+    expect(primaryMetricLabel('profit_per_visitor')).toBe('Profit per visitor (estimated)');
+  });
+
+  it('falls back to revenue for a metric that never existed', () => {
+    expect(normalizePrimaryMetric('vibes_per_visitor')).toBe('revenue_per_visitor');
   });
 });

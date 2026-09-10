@@ -692,24 +692,23 @@ async function linkInboxPlanToTest(shopDomain, planId, testId, { status = 'runni
     return null;
   }
 
-  const current = await listInboxPlans(domain);
-  const existing = current.plans.find(plan => plan.id === id);
-  if (!existing) {
-    return null;
-  }
+  const nextStatus =
+    String(status || 'running')
+      .trim()
+      .toLowerCase() || 'running';
 
-  const nextStatus = String(status || 'running')
-    .trim()
-    .toLowerCase();
-  const updated = {
+  // One locked row rather than a whole-inbox save. `saveInboxPlans` deletes
+  // every plan missing from the array it is handed, so linking from a snapshot
+  // read a moment earlier would delete any plan created in between — and a
+  // launch runs alongside the wizard, the bulk launch and the background sync.
+  const patched = await patchInboxPlanRows(domain, [id], existing => ({
     ...existing,
     test_id: tid,
-    status: nextStatus || 'running',
+    status: nextStatus,
     launched_at: new Date().toISOString(),
-  };
-  const plans = current.plans.map(plan => (plan.id === id ? updated : plan));
-  const snapshot = await saveInboxPlans(domain, plans);
-  return snapshot.plans.find(plan => plan.id === id) || updated;
+  }));
+
+  return patched.get(id) || null;
 }
 
 module.exports = {

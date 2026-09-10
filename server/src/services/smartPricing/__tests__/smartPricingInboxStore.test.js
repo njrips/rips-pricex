@@ -10,6 +10,7 @@ const {
   deleteInboxPlan,
   patchInboxPlan,
   patchInboxPlansFromSync,
+  linkInboxPlanToTest,
 } = require('../../../models/smartPricingInboxStore');
 
 /**
@@ -172,6 +173,38 @@ describe('smartPricingInboxStore', () => {
     expect(client.query).toHaveBeenCalledWith('BEGIN');
     expect(client.query).toHaveBeenCalledWith('COMMIT');
     expect(client.release).toHaveBeenCalled();
+  });
+
+  // Launching read the whole inbox, stamped the test id onto one plan, then
+  // saved the array back — and that save deletes every plan missing from it. A
+  // plan created in between (the wizard, a bulk launch, the background sync)
+  // was deleted. Linking has to touch one locked row like every other patch.
+  it('links a plan to its test without deleting the rest of the inbox', async () => {
+    const client = lockingClient({
+      'SP-1': { plan_id: 'SP-1', plan_json: { id: 'SP-1', title: 'Hoodie', status: 'queued' } },
+    });
+    getClient.mockResolvedValueOnce(client);
+
+    const linked = await linkInboxPlanToTest('demo.myshopify.com', 'SP-1', 99);
+
+    expect(findCall(client, 'DELETE')).toBeUndefined();
+    expect(findCall(client, 'FOR UPDATE')).toBeTruthy();
+    const updates = sqlCalls(client).filter(call =>
+      call[0].includes('UPDATE smart_pricing_inbox_plans')
+    );
+    expect(updates).toHaveLength(1);
+    expect(updates[0][1][1]).toBe('SP-1');
+    expect(String(linked.test_id)).toBe('99');
+    expect(linked.status).toBe('running');
+    expect(linked.launched_at).toBeTruthy();
+  });
+
+  it('reports a plan it cannot find rather than emptying the inbox', async () => {
+    const client = lockingClient({});
+    getClient.mockResolvedValueOnce(client);
+
+    expect(await linkInboxPlanToTest('demo.myshopify.com', 'SP-missing', 99)).toBeNull();
+    expect(findCall(client, 'DELETE')).toBeUndefined();
   });
 
   it('reports a missing plan instead of creating one', async () => {

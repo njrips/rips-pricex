@@ -34,6 +34,24 @@ describe('catalogProductViewStore', () => {
     expect(sql).not.toContain('event_date');
   });
 
+  // The tracker stamps `day` from `toISOString()`, which is a UTC calendar
+  // date. `CURRENT_DATE` is the date in the database session's timezone, and
+  // nothing sets that, so on any non-UTC server the 30- and 60-day windows sat
+  // a day off the rows they were cutting for part of every day.
+  it('cuts its windows on the same UTC day the tracker writes', async () => {
+    query.mockResolvedValueOnce({ rows: [] });
+    await fetchCatalogProductViewMetrics('demo.myshopify.com');
+    const [productSql] = query.mock.calls[0];
+    expect(productSql).toContain("(NOW() AT TIME ZONE 'UTC')::date");
+    expect(productSql).not.toContain('CURRENT_DATE');
+
+    query.mockResolvedValueOnce({ rows: [] });
+    await fetchCatalogCollectionViewMetrics('demo.myshopify.com');
+    const [collectionSql] = query.mock.calls[1];
+    expect(collectionSql).toContain("(NOW() AT TIME ZONE 'UTC')::date");
+    expect(collectionSql).not.toContain('CURRENT_DATE');
+  });
+
   it('keys metrics by product gid and carries unique visitors separately', async () => {
     query.mockResolvedValueOnce({
       rows: [

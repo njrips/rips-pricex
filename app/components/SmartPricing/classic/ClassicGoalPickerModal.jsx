@@ -61,8 +61,10 @@ export default function ClassicGoalPickerModal({
   createMetricRole = 'secondary',
 }) {
   const [tab, setTab] = useState(initialTab === 'create' ? 'create' : 'browse');
-  // This modal is mounted only while it is open, so the trap is always on.
-  const focusTrapRef = useFocusTrap(true);
+  // This modal is mounted only while it is open, so the trap is always on. It
+  // owns Escape because the audience editor that can host it stands its own
+  // Escape handler down while this is up.
+  const focusTrapRef = useFocusTrap(true, onClose);
   const initialCatalog = useMemo(
     () =>
       String(shopDomain || '').trim()

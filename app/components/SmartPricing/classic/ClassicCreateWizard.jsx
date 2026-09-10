@@ -3,6 +3,7 @@ import { collapseCountrySelection, resolveCountryLists } from './countrySelectio
 import { estimateSignificanceDuration } from './estimateSignificanceDuration';
 import { shopDesignFromGuardrails, stampStatisticalFields } from './sampleSizePolicy';
 import { useNavigate, useSearchParams } from 'react-router';
+import { Banner, Button } from '@shopify/polaris';
 import PageShell from '../../shared/PageShell';
 import { ROUTES } from '../../../constants';
 import { apiGet } from '../../../services';
@@ -22,8 +23,23 @@ import { useSmartPricingLaunch } from '../../../hooks/useSmartPricingLaunch';
 import { useSmartPricingCheckoutReadiness } from '../../../hooks/useSmartPricingCheckoutReadiness';
 import { readInboxPlans, writeInboxPlans } from '../smartPricingConstants';
 import { persistInboxPlansNow } from '../smartPricingInboxPersistence';
-/** Classic wizard: products per experiment (not parallel-test capacity). */
-const CLASSIC_MAX_PRODUCT_SELECTION = 100;
+/**
+ * Products per experiment (not parallel-test capacity).
+ *
+ * Nothing downstream requires a cap: the batch endpoint takes any number of
+ * variant ids, tests are one JSONB row each, and checkout prices ride on cart
+ * line attributes rather than a size-limited metafield. What the number really
+ * protects is the storefront: launching an experiment starts one test per
+ * product, and every running test is embedded in the script that loads on every
+ * page, so the selection size lands on shopper page weight.
+ *
+ * It was 100 from the first commit with no recorded reason, and at 100 it bit
+ * ordinary catalogs -- a 118-product store could not select its own catalog.
+ * The wizard can only ever show what the opportunities endpoint returns, which
+ * is 120 products, so 250 sits clear of anything reachable today while still
+ * bounding that page weight.
+ */
+const CLASSIC_MAX_PRODUCT_SELECTION = 250;
 /** Long enough that typing does not write on every keystroke. */
 const WIZARD_AUTOSAVE_DELAY_MS = 600;
 import {
@@ -44,8 +60,11 @@ import {
   shouldAutosaveWizardSnapshot,
 } from './classicWizardAutosave';
 import SetupStepPanel, { EXPERIMENT_TYPES } from './SetupStepPanel';
-import VariationsStepPanel, { createDefaultVariations, trafficTotal } from './VariationsStepPanel';
-import { variationsFromPlanArms } from './variationsStepHelpers';
+import VariationsStepPanel, { createDefaultVariations } from './VariationsStepPanel';
+import {
+  getVariationsStepContinueState,
+  variationsFromPlanArms,
+} from './variationsStepHelpers';
 import ProductsPricingStepPanel from './ProductsPricingStepPanel';
 import AudienceSuccessStepPanel, { createDefaultAudienceState } from './AudienceSuccessStepPanel';
 import { ensureRevenueGuardrailRows, revenueGuardrailGoalConfig } from './revenueGuardrail';
@@ -69,6 +88,7 @@ import {
   capAiBandToShopMax,
   clampAiBandValue,
   describeAiBandCap,
+  describeAiSuggestionSource,
   describeGuardrailLimitedSuggestions,
   normalizeAiPriceBand,
   resolvePricingRows,
@@ -80,7 +100,15 @@ import {
   normalizeOfferConfig,
   offerByArmFromPlanArms,
 } from './offerSelection';
+import { priceSurfacesUnmapped } from '../../../utils/checkoutReadinessClient';
+import SettingsInfoLink from '../../Settings/SettingsInfoLink';
 import styles from './SmartPricingClassic.module.css';
+
+/**
+ * The first step is where the merchant picks the type, so until it is behind
+ * them there is no telling whether price selectors matter to this run at all.
+ */
+const FIRST_STEP_AFTER_TYPE_CHOSEN = 1;
 
 function createExperimentId() {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -135,14 +163,6 @@ function rebuildPlanArmsFromVariations(
   });
 }
 
-function hasPositiveVariationTraffic(variations = []) {
-  return (
-    Array.isArray(variations) &&
-    variations.length >= 2 &&
-    variations.every(row => Number(row?.traffic) > 0)
-  );
-}
-
 // The two fetchers below return results instead of writing state, so effects can
 // start them without setting state synchronously.
 async function fetchShopGuardrails(shopDomain) {
@@ -170,10 +190,24 @@ async function fetchCatalog(shopDomain) {
     return {
       rows,
       defaults: data?.default_selected_variant_ids || rows.map(r => r.variant_id).filter(Boolean),
+      // Products another price test is holding are not in `rows`. Saying so
+      // beats letting a merchant hunt for a product that is simply not
+      // offered, which is what the silent version of this filter caused.
+      withheld: data?.summary?.withheld_by_other_tests || null,
+      // A catalog larger than one snapshot is loaded in part. The picker used
+      // to present that part as the whole catalog, so the rest of the shop's
+      // products looked like they did not exist.
+      catalogTruncated: Boolean(data?.summary?.catalog_truncated),
       error: '',
     };
   } catch (err) {
-    return { rows: [], defaults: [], error: formatCatalogLoadError(err) };
+    return {
+      rows: [],
+      defaults: [],
+      withheld: null,
+      catalogTruncated: false,
+      error: formatCatalogLoadError(err),
+    };
   }
 }
 
@@ -213,11 +247,14 @@ export default function ClassicCreateWizard() {
   const [variations, setVariations] = useState(createDefaultVariations);
 
   const [opportunities, setOpportunities] = useState([]);
+  /** How many products the catalog withheld because another test is pricing them. */
+  const [withheldByOtherTests, setWithheldByOtherTests] = useState(null);
+  /** True when the shop has more products than one catalog snapshot loads. */
+  const [catalogTruncated, setCatalogTruncated] = useState(false);
+  const [catalogSearching, setCatalogSearching] = useState(false);
   const [selectedIds, setSelectedIds] = useState([]);
   const [maxSelection] = useState(CLASSIC_MAX_PRODUCT_SELECTION);
   const [pickMode, setPickMode] = useState('manual');
-  const [productSearch, setProductSearch] = useState('');
-  const [collectionId, setCollectionId] = useState('');
   const [collectionOptions, setCollectionOptions] = useState([
     { label: 'All products', value: '' },
   ]);
@@ -387,8 +424,6 @@ export default function ClassicCreateWizard() {
       variations,
       selectedIds,
       pickMode,
-      productSearch,
-      collectionId,
       activeArmIndex,
       pricingByArm,
       priceOverrides,
@@ -409,8 +444,6 @@ export default function ClassicCreateWizard() {
       variations,
       selectedIds,
       pickMode,
-      productSearch,
-      collectionId,
       activeArmIndex,
       pricingByArm,
       priceOverrides,
@@ -499,10 +532,6 @@ export default function ClassicCreateWizard() {
       }
       if (Array.isArray(snapshot.selectedIds)) setSelectedIds(snapshot.selectedIds);
       if (snapshot.pickMode) setPickMode(snapshot.pickMode);
-      if (snapshot.productSearch !== null && snapshot.productSearch !== undefined)
-        setProductSearch(String(snapshot.productSearch));
-      if (snapshot.collectionId !== null && snapshot.collectionId !== undefined)
-        setCollectionId(String(snapshot.collectionId));
       if (Number.isFinite(Number(snapshot.activeArmIndex))) {
         setActiveArmIndex(Number(snapshot.activeArmIndex));
       }
@@ -708,12 +737,14 @@ export default function ClassicCreateWizard() {
   }, [pickMode]);
 
   const applyCatalog = useCallback(
-    ({ requestId, rows, defaults, error }) => {
+    ({ requestId, rows, defaults, withheld, catalogTruncated: truncated, error }) => {
       if (productsLoadRequestId.current !== requestId) return;
       if (error) {
         setProductsLoadError(error);
       } else {
         setOpportunities(rows);
+        setWithheldByOtherTests(withheld || null);
+        setCatalogTruncated(Boolean(truncated));
         setProductsLoadError('');
         setSelectedIds(prev => {
           if (prev.length > 0) return prev;
@@ -732,6 +763,42 @@ export default function ClassicCreateWizard() {
     setLoadingProducts(true);
     applyCatalog({ requestId, ...(await fetchCatalog(shopDomain)) });
   }, [shopDomain, applyCatalog, setLoadingProducts]);
+
+  /**
+   * Look up products the catalog snapshot did not load.
+   *
+   * A big catalog arrives in part, and the picker can only filter what it was
+   * given -- so a merchant searching for their 400th product found nothing and
+   * had no way to test it. This asks Shopify by title and folds the answers
+   * into the catalog the wizard already holds, which is what everything after
+   * this step reads: the pricing table, the cap, and launch itself.
+   */
+  const searchCatalog = useCallback(
+    async query => {
+      const q = String(query || '').trim();
+      if (!q) return;
+      setCatalogSearching(true);
+      try {
+        const data = await getSmartPricingOpportunities(shopDomain, {
+          filter: 'all',
+          productSearch: q,
+        });
+        const found = Array.isArray(data?.opportunities) ? data.opportunities : [];
+        if (!found.length) return;
+        setOpportunities(prev => {
+          const seen = new Set(prev.map(row => String(row.variant_id || '')));
+          const added = found.filter(row => row.variant_id && !seen.has(String(row.variant_id)));
+          return added.length ? [...prev, ...added] : prev;
+        });
+      } catch {
+        // A failed lookup leaves the merchant with the catalog they already
+        // have, which is the same place they were before searching.
+      } finally {
+        setCatalogSearching(false);
+      }
+    },
+    [shopDomain]
+  );
 
   useEffect(() => {
     if (!draftHydrated) return undefined;
@@ -1240,7 +1307,6 @@ export default function ClassicCreateWizard() {
             currency: row.currency || 'USD',
             margin_percent: row.margin_percent,
             units_sold_30d: row.units_sold_30d,
-            revenue_30d: row.revenue_30d,
             opportunity_score: row.opportunity_score,
             recommended_scenario_preset: row.recommended_scenario_preset,
           })),
@@ -1272,12 +1338,17 @@ export default function ClassicCreateWizard() {
           });
           return next;
         });
+        const source = result?.source || result?.data?.source || 'deterministic';
         const baseSummary =
           result?.summary ||
           result?.data?.summary ||
           (suggestions.length
-            ? 'AI price suggestions applied.'
-            : 'No AI prices returned — try Re-suggest or adjust the band.');
+            ? 'Prices applied.'
+            : 'No prices returned — try Re-suggest or adjust the band.');
+        const sourceNotice = describeAiSuggestionSource({
+          source,
+          skippedReason: result?.ai_skipped_reason || result?.data?.ai_skipped_reason,
+        });
         const limitedNotice = describeGuardrailLimitedSuggestions(
           suggestions.filter(item => item?.guardrail_limited).length,
           suggestions.length,
@@ -1285,8 +1356,10 @@ export default function ClassicCreateWizard() {
           { unit }
         );
         setAiPriceMeta({
-          source: result?.source || result?.data?.source || 'deterministic',
-          summary: [bandNotice, baseSummary, limitedNotice].filter(Boolean).join(' '),
+          source,
+          summary: [bandNotice, baseSummary, sourceNotice, limitedNotice]
+            .filter(Boolean)
+            .join(' '),
           busy: false,
         });
         if (suggestions.length) {
@@ -1519,14 +1592,12 @@ export default function ClassicCreateWizard() {
       return;
     }
     if (step === 1) {
-      if (trafficTotal(variations) !== 100) {
+      // Continue is already disabled while this is unmet, and the panel prints
+      // the same sentence in place. This stays as the backstop for a keyboard
+      // activation that beats the disabled state.
+      if (variationsStepGate.disabled) {
         setMessageType('error');
-        setMessage('Traffic must total 100%.');
-        return;
-      }
-      if (!hasPositiveVariationTraffic(variations)) {
-        setMessageType('error');
-        setMessage('Every variation must receive more than 0% traffic.');
+        setMessage(variationsStepGate.hint);
         return;
       }
       setProductsLoadError('');
@@ -1598,9 +1669,11 @@ export default function ClassicCreateWizard() {
         setMessage('Still loading shop experiment defaults. Try again in a moment.');
         return;
       }
-      if (trafficTotal(variations) !== 100 || !hasPositiveVariationTraffic(variations)) {
+      // Same gate the Variations step uses, so a split broken by an edit made
+      // after that step is reported in the words the merchant saw there.
+      if (variationsStepGate.disabled) {
         setMessageType('error');
-        setMessage('Every variation needs more than 0% traffic and the split must total 100%.');
+        setMessage(variationsStepGate.hint);
         return;
       }
       const launchAudienceCheck = validateClassicAudienceUi(
@@ -1668,6 +1741,8 @@ export default function ClassicCreateWizard() {
   };
 
   const continueLabel = step === 4 ? 'Launch experiment' : 'Continue';
+  // A reduce over at most five rows; the compiler memoizes it on its own.
+  const variationsStepGate = getVariationsStepContinueState({ variations });
   const productsStepGate = useMemo(
     () =>
       getProductsStepContinueState({
@@ -1697,6 +1772,54 @@ export default function ClassicCreateWizard() {
       priceMode,
     ]
   );
+
+  /**
+   * Why Launch cannot run, in the order the launch handler checks.
+   *
+   * The handler has always had six gates; the button reflected one of them. So
+   * a merchant reading a red "Checkout is not ready" alert still saw an
+   * enabled Launch, clicked it, and got that same sentence handed back as an
+   * error. This is the shared answer: the button refuses up front and says
+   * why, and the handler keeps every check, because it is the one that must
+   * not be wrong.
+   *
+   * `code` lets the review step skip explaining a reason it already covers
+   * with a richer block of its own.
+   */
+  const launchGate = (() => {
+    if (!shopGuardrailsReady) {
+      return { disabled: true, code: 'loading', reason: 'Loading shop experiment defaults…' };
+    }
+    if (variationsStepGate.disabled) {
+      return { disabled: true, code: 'variations', reason: variationsStepGate.hint };
+    }
+    const audienceCheck = validateClassicAudienceUi(audience || createDefaultAudienceState());
+    if (!audienceCheck.ok) {
+      return { disabled: true, code: 'audience', reason: audienceCheck.message };
+    }
+    if (checkoutLoading) {
+      return { disabled: true, code: 'checkout_loading', reason: 'Checking checkout readiness…' };
+    }
+    if (!launchCheckoutReady) {
+      return {
+        disabled: true,
+        code: 'checkout',
+        reason: isOfferTest
+          ? 'Offer checkout is not ready. Fix Setup before launching.'
+          : 'Checkout is not ready. Fix Setup before launching.',
+      };
+    }
+    // enrichPlansForLaunch maps these one for one, so the count it would
+    // produce is this count, without building the plans on every render.
+    if (!plans.length) {
+      return {
+        disabled: true,
+        code: 'products',
+        reason: 'No products to launch. Go back to Products and select at least one.',
+      };
+    }
+    return { disabled: false, code: '', reason: '' };
+  })();
 
   const shopDesign = shopDesignFromGuardrails(shopGuardrails);
   const significanceEstimate = useMemo(
@@ -1732,9 +1855,34 @@ export default function ClassicCreateWizard() {
   );
   const estimatedDays = significanceEstimate.days;
 
+  // A price test only reaches shoppers by repainting the theme through mapped
+  // selectors. With none mapped the experiment still launches, splits traffic
+  // and reports numbers, but every visitor sees the catalog price — so it
+  // measures nothing. That is worth saying while the run is still being built
+  // rather than at the end of it, and it stands until the merchant fixes it.
+  const priceSurfacesMissing =
+    !isOfferTest &&
+    step >= FIRST_STEP_AFTER_TYPE_CHOSEN &&
+    priceSurfacesUnmapped(checkoutReadiness);
+
   return (
     <PageShell message={message} messageType={messageType} onCloseMessage={() => setMessage('')}>
       <ClassicWizardShell
+        notice={
+          priceSurfacesMissing ? (
+            <Banner tone="warning">
+              <span className={styles.noticeLine}>
+                No price selectors mapped.
+                {/* The why and the how live in the guide this already opens,
+                    rather than as a paragraph everyone reads once. */}
+                <SettingsInfoLink hash="price-surfaces" label="Price surfaces" />
+                <Button variant="plain" onClick={openPriceSurfaceSettings}>
+                  Add price surfaces
+                </Button>
+              </span>
+            </Banner>
+          ) : null
+        }
         stepIndex={step}
         experimentType={experimentType}
         onBackToList={backToList}
@@ -1742,15 +1890,21 @@ export default function ClassicCreateWizard() {
         onContinue={goNext}
         continueLabel={continueLabel}
         continueDisabled={
+          (step === 1 && variationsStepGate.disabled) ||
           (step === 2 && productsStepGate.disabled) ||
-          ((step === 0 || step === 3 || step === 4) && !shopGuardrailsReady)
+          (step === 4 && launchGate.disabled) ||
+          ((step === 0 || step === 3) && !shopGuardrailsReady)
         }
         continueDisabledReason={
-          step === 2
-            ? productsStepGate.hint
-            : (step === 0 || step === 3 || step === 4) && !shopGuardrailsReady
-              ? 'Loading shop experiment defaults…'
-              : ''
+          step === 1
+            ? variationsStepGate.hint
+            : step === 2
+              ? productsStepGate.hint
+              : step === 4
+                ? launchGate.reason
+                : (step === 0 || step === 3) && !shopGuardrailsReady
+                  ? 'Loading shop experiment defaults…'
+                  : ''
         }
         continueBusy={busy || launching}
         showCancel={step === 0}
@@ -1814,12 +1968,23 @@ export default function ClassicCreateWizard() {
             variations={variations}
             onChange={setVariations}
             experimentType={experimentType}
+            trafficAllocation={audience?.trafficAllocation}
+            onTrafficAllocationChange={next =>
+              handleAudienceChange({
+                ...(audience || createDefaultAudienceState()),
+                trafficAllocation: next,
+              })
+            }
           />
         ) : null}
 
         {step === 2 ? (
           <ProductsPricingStepPanel
             opportunities={opportunities}
+            withheldByOtherTests={withheldByOtherTests}
+            catalogTruncated={catalogTruncated}
+            onCatalogSearch={catalogTruncated ? searchCatalog : null}
+            catalogSearching={catalogSearching}
             selectedIds={selectedIds}
             onSelectedIdsChange={setSelectedIds}
             maxSelection={maxSelection}
@@ -1834,10 +1999,6 @@ export default function ClassicCreateWizard() {
                 setSelectedIds(ids);
               }
             }}
-            productSearch={productSearch}
-            onProductSearchChange={setProductSearch}
-            collectionId={collectionId}
-            onCollectionChange={setCollectionId}
             collectionOptions={collectionOptions}
             variations={variations}
             activeArmIndex={activeArmIndex}
@@ -1913,6 +2074,8 @@ export default function ClassicCreateWizard() {
             shopDomain={shopDomain}
             significanceEstimate={significanceEstimate}
             disabled={!shopGuardrailsReady}
+            // Asked for on Variations, beside the split it feeds.
+            showTrafficAllocation={false}
           />
         ) : null}
 
@@ -1937,12 +2100,23 @@ export default function ClassicCreateWizard() {
             checkoutReady={launchCheckoutReady}
             checkoutLoading={checkoutLoading}
             checkoutReadiness={checkoutReadiness}
-            shopDomain={shopDomain}
             onFixSetup={openCheckoutSetup}
             onFixPriceSurfaces={openPriceSurfaceSettings}
             onRefreshCheckout={() => refreshCheckoutReadiness()}
             onEditStep={goToStep}
             plans={plans}
+            autoApplyWinner={shopGuardrails.auto_apply_winner === true}
+            autoApplyDelayDays={Number(shopGuardrails.auto_apply_delay_days) || 0}
+            // Only the reasons this panel does not already explain with a
+            // block of its own. Checkout has its alert and its Re-check
+            // action; repeating it in a second banner would say the same
+            // thing twice, in two tones.
+            launchBlockedReason={
+              launchGate.disabled &&
+              ['variations', 'audience', 'products'].includes(launchGate.code)
+                ? launchGate.reason
+                : ''
+            }
           />
         ) : null}
       </ClassicWizardShell>

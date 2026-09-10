@@ -31,10 +31,19 @@ function visibleFocusable(container) {
  * hook stands down and lets it manage its own keys.
  *
  * @param {boolean} active - Whether the dialog is open.
+ * @param {() => void} [onEscape] - Closes the dialog on Escape. Pass it unless
+ *   the dialog already handles Escape itself, or keyboard users have no way out
+ *   of the trap other than tabbing to the close button.
  * @returns {import('react').RefObject<HTMLElement>} Attach to the dialog element.
  */
-export default function useFocusTrap(active) {
+export default function useFocusTrap(active, onEscape) {
   const containerRef = useRef(null);
+  // Held in a ref so a new callback identity does not re-run the effect below,
+  // which would pull focus back to the first control mid-interaction.
+  const escapeRef = useRef(onEscape);
+  useEffect(() => {
+    escapeRef.current = onEscape;
+  }, [onEscape]);
 
   useEffect(() => {
     if (!active || typeof document === 'undefined') return undefined;
@@ -54,13 +63,24 @@ export default function useFocusTrap(active) {
     }
 
     const onKeyDown = event => {
-      if (event.key !== 'Tab') return;
+      if (event.key !== 'Tab' && event.key !== 'Escape') return;
       const activeEl = document.activeElement;
       const nested =
         activeEl && typeof activeEl.closest === 'function'
           ? activeEl.closest('[role="dialog"],[role="listbox"]')
           : null;
       if (nested && nested !== container && !container.contains(nested)) return;
+
+      if (event.key === 'Escape') {
+        // Without this the trap has no keyboard exit but the close button, and
+        // a dialog nested inside another can leave its parent's Escape handler
+        // standing down with nothing taking over.
+        if (!escapeRef.current) return;
+        event.preventDefault();
+        event.stopPropagation();
+        escapeRef.current();
+        return;
+      }
 
       const items = visibleFocusable(container);
       if (!items.length) {

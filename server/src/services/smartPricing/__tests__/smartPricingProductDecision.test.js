@@ -52,13 +52,23 @@ function significance(overrides = {}) {
   };
 }
 
-function decide({ sig = {}, test = {}, guardrails = {}, readiness = null, plan = null } = {}) {
+function decide({
+  sig = {},
+  test = {},
+  guardrails = {},
+  readiness = null,
+  plan = null,
+  autoApplied = false,
+  autoPublishIncomplete = false,
+} = {}) {
   return resolveProductRolloutDecision({
     test: priceTest(test),
     analytics: { significance: significance(sig), arms: arms() },
     plan,
     guardrails,
     readiness,
+    autoApplied,
+    autoPublishIncomplete,
   });
 }
 
@@ -199,6 +209,51 @@ describe('resolveProductRolloutDecision', () => {
     assert.equal(decision.state, PRODUCT_DECISION_STATE.APPLIED);
     assert.equal(decision.can_apply, false);
     assert.equal(decision.sort_rank, 4);
+  });
+
+  it('reports an automatic apply that only wrote some variants as unfinished', () => {
+    // Shopify refuses individual variants — a deleted SKU, a permission gap, a
+    // rate limit — while accepting the rest. Calling that applied would tell
+    // the merchant a price is live across a catalogue that is still split.
+    const decision = decide({
+      sig: CHALLENGER_WIN,
+      autoApplied: true,
+      autoPublishIncomplete: true,
+    });
+    assert.equal(decision.state, PRODUCT_DECISION_STATE.BLOCKED);
+    assert.equal(decision.reason, 'apply_incomplete');
+    // Must stay actionable, or the only route left is a re-run.
+    assert.equal(decision.can_apply, true);
+    assert.equal(decision.action, 'apply');
+    assert.notEqual(decision.label, 'Applied');
+  });
+
+  it('still reads a partial apply as unfinished on later requests', () => {
+    // The live signal above is gone by the next request; the record the
+    // auto-apply left on the test row has to carry it.
+    const decision = decide({
+      sig: CHALLENGER_WIN,
+      test: {
+        goal: { auto_decision: 'challenger', auto_apply: { published: false, updated_count: 4, error_count: 2 } },
+      },
+    });
+    assert.equal(decision.state, PRODUCT_DECISION_STATE.BLOCKED);
+    assert.equal(decision.reason, 'apply_incomplete');
+    assert.equal(decision.can_apply, true);
+    assert.match(decision.detail, /4 variants/);
+    assert.match(decision.detail, /refused 2/);
+  });
+
+  it('reads an automatic apply that wrote every variant as applied', () => {
+    const decision = decide({
+      sig: CHALLENGER_WIN,
+      test: {
+        goal: { auto_decision: 'challenger', auto_apply: { published: true, updated_count: 6, error_count: 0 } },
+      },
+      autoApplied: true,
+    });
+    assert.equal(decision.state, PRODUCT_DECISION_STATE.APPLIED);
+    assert.equal(decision.can_apply, false);
   });
 
   it('schedules the automatic write from when the product became ready', () => {

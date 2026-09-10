@@ -101,6 +101,47 @@ describe('alwaysValidSignificance', () => {
     assert.equal(result.family, 'revenue');
   });
 
+  // The sequential decision compares whichever metric the goal names, but the
+  // `lift` it returned was passed straight through from the fixed-horizon
+  // conversion-rate test. On a revenue-per-visitor test that put a conversion
+  // figure beside a decision revenue had made, so "+5% lift" described
+  // something that took no part in picking the winner.
+  it('quotes lift on the metric that decided the test', () => {
+    const arms = [
+      // Conversion rate is flat at 2%; RPV is up 50%.
+      { id: 'control', visitors: 15000, conversions: 300, revenue: 9000, revenuePerVisitor: 0.6 },
+      { id: 'up', visitors: 15000, conversions: 300, revenue: 13500, revenuePerVisitor: 0.9 },
+    ];
+
+    const revenue = applyAlwaysValidDecision({ significant: false, lift: 0 }, arms, {
+      goal: { primary_metric: 'revenue_per_visitor' },
+      alpha: 0.1,
+      mdePercent: 10,
+    });
+    assert.equal(revenue.liftFamily, 'revenue');
+    assert.equal(revenue.lift, 50);
+    // The conversion-rate reading is still available, just not presented as the
+    // lift of a revenue decision.
+    assert.equal(revenue.fixedHorizon.lift, 0);
+
+    const conversion = applyAlwaysValidDecision({ significant: false }, arms, {
+      goal: { primary_metric: 'conversion_rate' },
+      alpha: 0.1,
+      mdePercent: 10,
+    });
+    assert.equal(conversion.liftFamily, 'conversion');
+    assert.equal(conversion.lift, 0);
+  });
+
+  it('reports no lift when control earns nothing to compare against', () => {
+    const decision = applyAlwaysValidDecision({ significant: false, lift: 999 }, [
+      { id: 'control', visitors: 5000, conversions: 0, revenue: 0, revenuePerVisitor: 0 },
+      { id: 'up', visitors: 5000, conversions: 50, revenue: 2000, revenuePerVisitor: 0.4 },
+    ], { goal: { primary_metric: 'revenue_per_visitor' }, alpha: 0.1, mdePercent: 10 });
+    // A percentage of zero is not a number, so say nothing rather than invent one.
+    assert.equal(decision.lift, null);
+  });
+
   it('calibrates the mixture scale to the absolute MDE', () => {
     assert.ok(Math.abs(absoluteMde({ family: 'conversion', baselineRate: 0.05, mdePercent: 10 }) - 0.005) < 1e-9);
   });

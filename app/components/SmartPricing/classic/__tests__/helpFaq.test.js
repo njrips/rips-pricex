@@ -2,10 +2,14 @@ import { describe, it } from 'vitest';
 import assert from 'node:assert/strict';
 import {
   HELP_FAQ_ITEMS,
+  HELP_TABS,
+  countTicketsAwaitingMerchant,
+  filterHelpFaq,
   formatTicketTime,
   isPublicIdFormat,
   attentionTicketToPrompt,
   pickAttentionTicket,
+  resolveHelpTab,
   shouldAutoOpenAttention,
   ticketCategoryLabel,
   merchantTicketLookupError,
@@ -98,5 +102,57 @@ describe('helpFaq', () => {
       ),
       null,
     );
+  });
+
+  it('offers exactly the two jobs Help is for', () => {
+    assert.deepEqual(
+      HELP_TABS.map((tab) => tab.id),
+      ['answers', 'tickets'],
+    );
+  });
+
+  it('opens on answers, because most visits are a question', () => {
+    assert.equal(resolveHelpTab(null), 'answers');
+    assert.equal(resolveHelpTab(''), 'answers');
+    assert.equal(resolveHelpTab('nonsense'), 'answers');
+    assert.equal(resolveHelpTab('tickets'), 'tickets');
+    assert.equal(resolveHelpTab(' TICKETS '), 'tickets');
+  });
+
+  // The loader redirects to a reply support is waiting on. That has to win, or
+  // the merchant lands on a thread while the tab bar claims to be elsewhere.
+  it('lets an open ticket override the tab in the URL', () => {
+    assert.equal(resolveHelpTab('answers', { hasSelectedTicket: true }), 'tickets');
+    assert.equal(resolveHelpTab(null, { hasSelectedTicket: true }), 'tickets');
+    assert.equal(resolveHelpTab(null, { hasSelectedTicket: false }), 'answers');
+  });
+
+  it('counts only the tickets waiting on the merchant', () => {
+    assert.equal(countTicketsAwaitingMerchant(), 0);
+    assert.equal(countTicketsAwaitingMerchant(null), 0);
+    assert.equal(
+      countTicketsAwaitingMerchant([
+        { status: 'waiting_merchant' },
+        { status: 'WAITING_MERCHANT' },
+        { status: 'waiting_staff' },
+        { status: 'closed' },
+        {},
+      ]),
+      2,
+    );
+  });
+
+  it('searches the answer as well as the question', () => {
+    assert.equal(filterHelpFaq(HELP_FAQ_ITEMS, '').length, HELP_FAQ_ITEMS.length);
+    assert.equal(filterHelpFaq(HELP_FAQ_ITEMS, '   ').length, HELP_FAQ_ITEMS.length);
+
+    const bodyOnly = filterHelpFaq(HELP_FAQ_ITEMS, 'cart transform');
+    assert.ok(bodyOnly.length > 0);
+
+    const cased = filterHelpFaq(HELP_FAQ_ITEMS, 'UNINSTALL');
+    assert.ok(cased.some((item) => /uninstall/i.test(item.q)));
+
+    assert.deepEqual(filterHelpFaq(HELP_FAQ_ITEMS, 'zzzznope'), []);
+    assert.deepEqual(filterHelpFaq(null, 'anything'), []);
   });
 });

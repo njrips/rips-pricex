@@ -10,11 +10,14 @@ function unwrapBody(res) {
   return body;
 }
 
+// See useCartTransformStatus: `checking` keeps a not-yet-asked state from
+// reading as a failed check.
 const CHECKING = {
   status: 'Checking checkout discount…',
   installed: false,
   functionAvailable: false,
   verified: false,
+  checking: true,
   error: /** @type {string | null} */ (null),
 };
 
@@ -30,6 +33,7 @@ function describeStatus(data) {
       installed: true,
       functionAvailable,
       verified: true,
+      checking: false,
       error: null,
     };
   }
@@ -42,6 +46,7 @@ function describeStatus(data) {
     installed: false,
     functionAvailable,
     verified: true,
+    checking: false,
     error: null,
   };
 }
@@ -60,6 +65,7 @@ async function loadStatus(shopDomain) {
         installed: false,
         functionAvailable: false,
         verified: false,
+        checking: false,
         error: e?.response?.data?.error || e?.message || 'Status failed',
       },
       data: null,
@@ -112,6 +118,7 @@ export default function useCheckoutDiscountStatus(shopDomain, { enabled = true }
         installed: true,
         functionAvailable: true,
         verified: true,
+        checking: false,
       }));
       await refresh();
       return data;
@@ -131,6 +138,7 @@ export default function useCheckoutDiscountStatus(shopDomain, { enabled = true }
     installed: state.installed,
     functionAvailable: state.functionAvailable,
     verified: state.verified,
+    checking: state.checking === true,
     busy,
     error: state.error,
     refresh,

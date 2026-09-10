@@ -17,6 +17,7 @@ const { resolveReviewedWinnerIndex } = require('./smartPricingWinnerRolloutPolic
 const {
   acquireJobLease,
   releaseJobLease,
+  startJobLeaseHeartbeat,
   productRolloutLeaseName,
   ROLLOUT_LEASE_SECONDS,
 } = require('../../utils/jobLease');
@@ -141,6 +142,10 @@ async function applySmartPricingWinnerRollout({
   if (!(await acquireJobLease(lease, ROLLOUT_LEASE_SECONDS, { failClosed: true }))) {
     throw new Error('This product is already being applied. Give it a moment and refresh.');
   }
+  // Publishing walks every targeted variant against Shopify's rate limit, which
+  // can outlast the lease's TTL. Without renewal it would lapse mid-write and
+  // let a second writer in.
+  const stopHeartbeat = startJobLeaseHeartbeat(lease, ROLLOUT_LEASE_SECONDS);
   try {
     return await performWinnerRollout({
       test,
@@ -153,6 +158,7 @@ async function applySmartPricingWinnerRollout({
       running,
     });
   } finally {
+    stopHeartbeat();
     await releaseJobLease(lease);
   }
 }
@@ -270,9 +276,11 @@ async function finishSmartPricingProductWithoutPriceChange({ testId, shopDomain 
   if (!(await acquireJobLease(lease, ROLLOUT_LEASE_SECONDS, { failClosed: true }))) {
     throw new Error('This product is already being finished. Give it a moment and refresh.');
   }
+  const stopHeartbeat = startJobLeaseHeartbeat(lease, ROLLOUT_LEASE_SECONDS);
   try {
     return await performProductFinish({ testId, shopDomain });
   } finally {
+    stopHeartbeat();
     await releaseJobLease(lease);
   }
 }

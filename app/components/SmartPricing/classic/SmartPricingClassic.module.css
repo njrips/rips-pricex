@@ -51,7 +51,8 @@
 .topBar,
 .stepper,
 .card,
-.footer {
+.footer,
+.wizardNotice {
   max-width: 768px;
   width: 100%;
 }
@@ -368,40 +369,83 @@ button.stepItem {
   margin: 0;
 }
 
+/*
+ * The launch button. Polaris `size="large"` does the sizing; this adds the
+ * depth that separates a commit from a navigation, and lifts on hover so the
+ * button answers the pointer.
+ *
+ * Each shadow is declared twice: an rgba fallback, then a brand-tinted
+ * color-mix that browsers without it simply ignore.
+ */
+.launchBtn :global(.Polaris-Button) {
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.12),
+    0 6px 16px -6px rgba(48, 48, 48, 0.4);
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.12),
+    0 6px 16px -6px color-mix(in srgb, var(--classic-orange) 50%, transparent);
+  transition:
+    transform 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.launchBtn :global(.Polaris-Button:hover:not([disabled]):not([aria-disabled='true'])) {
+  transform: translateY(-1px);
+  box-shadow:
+    0 2px 4px rgba(0, 0, 0, 0.14),
+    0 12px 24px -8px rgba(48, 48, 48, 0.5);
+  box-shadow:
+    0 2px 4px rgba(0, 0, 0, 0.14),
+    0 12px 24px -8px color-mix(in srgb, var(--classic-orange) 62%, transparent);
+}
+
+.launchBtn :global(.Polaris-Button:active:not([disabled]):not([aria-disabled='true'])) {
+  transform: translateY(0);
+}
+
+/* The rocket leans into the launch on hover. */
+.launchBtn :global(.Polaris-Button__Icon svg) {
+  transition: transform 140ms ease;
+}
+
+.launchBtn
+  :global(
+    .Polaris-Button:hover:not([disabled]):not([aria-disabled='true']) .Polaris-Button__Icon svg
+  ) {
+  transform: translate(1px, -2px);
+}
+
+/* A blocked or in-flight launch should not look eager. */
+.launchBtn :global(.Polaris-Button[disabled]),
+.launchBtn :global(.Polaris-Button[aria-disabled='true']) {
+  box-shadow: none;
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .launchBtn :global(.Polaris-Button),
+  .launchBtn :global(.Polaris-Button__Icon svg) {
+    transition: none;
+  }
+
+  .launchBtn :global(.Polaris-Button:hover:not([disabled]):not([aria-disabled='true'])) {
+    transform: none;
+  }
+
+  .launchBtn
+    :global(
+      .Polaris-Button:hover:not([disabled]):not([aria-disabled='true']) .Polaris-Button__Icon svg
+    ) {
+    transform: none;
+  }
+}
+
 .iconTrailingBtn :global(.Polaris-Button) {
   flex-direction: row-reverse;
 }
 
 .iconTrailingBtn :global(.Polaris-Button__Content) {
   flex-direction: row-reverse;
-}
-
-/* Compact left-aligned Polaris action (Browse / Show all) — do not stretch */
-.compactAction {
-  display: flex;
-  justify-content: flex-start;
-  width: fit-content;
-  max-width: 100%;
-  margin-top: 8px;
-}
-
-.compactAction :global(.Polaris-Button) {
-  width: auto;
-  max-width: 100%;
-  justify-content: flex-start;
-}
-
-.compactAction :global(.Polaris-Button__Content) {
-  justify-content: flex-start;
-}
-
-.compactAction :global(.Polaris-Icon) {
-  margin: 0;
-}
-
-.compactAction :global(.Polaris-Button__Text) {
-  line-height: 20px;
-  white-space: nowrap;
 }
 
 /*
@@ -418,6 +462,7 @@ button.stepItem {
 .variationRemove :global(.Polaris-Button),
 .productsHeaderActions :global(.Polaris-Button),
 .selectionBar :global(.Polaris-Button--variantPlain),
+.selectionCard :global(.Polaris-Button--variantPlain),
 .adminRowActions :global(.Polaris-Button--variantPlain) {
   --pc-button-padding-block: 0px;
   --pc-button-padding-inline: 0px;
@@ -978,6 +1023,85 @@ button.stepItem {
   margin-top: 24px; /* Figma section gap after guardrails help */
 }
 
+/* Step 4 is three decisions, not one column of fields: who is in the
+   experiment, what it is measured on, and when to pull the plug. The rule
+   between groups carries that without another level of nested cards. */
+.stepSection + .stepSection {
+  margin-top: 28px;
+  padding-top: 24px;
+  border-top: 1px solid var(--classic-line);
+}
+
+.stepSectionTitle {
+  margin: 0 0 14px;
+  font-family: var(--ripx-font-classic, var(--ripx-font-ui, 'Inter', system-ui, sans-serif));
+  font-size: var(--classic-fs-label);
+  font-weight: var(--classic-fw-semibold);
+  letter-spacing: -0.28px;
+  color: var(--classic-ink);
+  line-height: 20px;
+}
+
+.labelRow .stepSectionTitle {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin-bottom: 0;
+}
+
+/* Guardrail on/off. Same shape as the price-surface row switch so one control
+   means the same thing in both places. */
+.guardrailSwitch {
+  flex: 0 0 auto;
+  position: relative;
+  width: 32px;
+  height: 18px;
+  padding: 0;
+  /* A hairline border is too faint for a control whose only job is to read as
+     on or off at a glance, so the off track uses the strong border token. */
+  border: 1px solid var(--classic-line-strong, #b5b5b5);
+  border-radius: 999px;
+  background: var(--classic-wash, #e3e3e3);
+  cursor: pointer;
+  transition:
+    background 140ms ease,
+    border-color 140ms ease;
+}
+
+.guardrailSwitch:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.guardrailSwitch:not(.guardrailSwitchOn):not(:disabled):hover {
+  border-color: var(--classic-muted, #8a8a8a);
+}
+
+.guardrailSwitch:focus-visible {
+  outline: 2px solid var(--classic-orange);
+  outline-offset: 2px;
+}
+
+.guardrailSwitchKnob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.24);
+  transition: transform 140ms ease;
+}
+
+.guardrailSwitchOn {
+  background: var(--classic-orange);
+  border-color: var(--classic-orange);
+}
+
+.guardrailSwitchOn .guardrailSwitchKnob {
+  transform: translateX(14px);
+}
+
 /* Variations */
 /* Variations */
 .trafficBanner {
@@ -1160,12 +1284,33 @@ button.stepItem {
   border-radius: 999px;
   appearance: none;
   -webkit-appearance: none;
+  /* The unfilled rail is drawn in the border colour, not the surface wash. Wash
+     is #f7f7f7 on a #ffffff card, a 3% difference that read as blank paper
+     rather than as the rest of the track. The border colour clears 11% on light
+     and stays visible on every dark theme, where it composites over the card. */
   background: linear-gradient(
     to right,
     var(--classic-orange) 0%,
     var(--classic-orange) var(--slider-fill, 50%),
-    var(--classic-wash) var(--slider-fill, 50%),
-    var(--classic-wash) 100%
+    var(--classic-line) var(--slider-fill, 50%),
+    var(--classic-line) 100%
+  );
+  /* Three bands: taken by this row, free to take, and blocked because another
+     row holds it. Blocked is a faded copy of the rail, so the track visibly
+     thins out where the thumb will stop. Fading the rail itself is the only
+     theme-safe way to do this: the palette's greys sit on different sides of
+     the card colour from one theme to the next, so any fixed second colour
+     would invert somewhere. `--slider-cap` defaults to 100%, which leaves
+     sliders that have no cap painting as a plain two-band track. The rule above
+     is the fallback where color-mix is unsupported and this whole rule drops. */
+  background: linear-gradient(
+    to right,
+    var(--classic-orange) 0%,
+    var(--classic-orange) var(--slider-fill, 50%),
+    var(--classic-line) var(--slider-fill, 50%),
+    var(--classic-line) var(--slider-cap, 100%),
+    color-mix(in srgb, var(--classic-line) 32%, transparent) var(--slider-cap, 100%),
+    color-mix(in srgb, var(--classic-line) 32%, transparent) 100%
   );
   outline: none;
   cursor: pointer;
@@ -1173,7 +1318,8 @@ button.stepItem {
 }
 
 .slider:disabled {
-  opacity: 0.55;
+  /* Muted, but not so far that the rail fades back into the card. */
+  opacity: 0.65;
   cursor: not-allowed;
 }
 
@@ -1207,6 +1353,29 @@ button.stepItem {
   line-height: 16.5px;
   text-align: right;
   white-space: nowrap;
+}
+
+/* The percentage next to a slider is typed as well as dragged, so it is a field
+   rather than a label. Narrow enough that "100%" fits and nothing wider can. */
+.percentField {
+  display: inline-block;
+  /* Fits "100" and its "%" suffix, plus the ~30px Polaris reserves for the
+     stepper. The stepper is only visible on hover but still holds its column,
+     so the room has to be there whether or not it is on screen. */
+  width: 112px;
+  flex: 0 0 auto;
+}
+
+/* Allocation slider and its field share a row; the track takes what is left. */
+.allocationRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.allocationRow .slider {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .addVariation {
@@ -1434,29 +1603,6 @@ button.stepItem {
   color: var(--classic-muted);
 }
 
-.productCardSkeleton {
-  pointer-events: none;
-  cursor: default;
-}
-
-.skeletonThumb,
-.skeletonLine {
-  background: var(--classic-wash);
-  border-radius: 6px;
-  animation: productSkeletonPulse 1.2s ease-in-out infinite;
-}
-
-.skeletonLine {
-  height: 12px;
-  width: 70%;
-}
-
-.skeletonLineMuted {
-  height: 10px;
-  width: 48%;
-  margin-top: 8px;
-}
-
 @keyframes productSkeletonPulse {
   0%,
   100% {
@@ -1464,18 +1610,62 @@ button.stepItem {
   }
   50% {
     opacity: 1;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .skeletonThumb,
-  .skeletonLine {
-    animation: none;
-  }
-}
+  }}
 
 .choiceCardCompact {
   padding: 12px 14px;
+}
+
+/* The products step's scope summary: what is selected on the left, the way to
+   change it on the right. One card for both pick modes. */
+.selectionCard {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin: 4px 0 10px;
+  padding: 14px 16px;
+  border-radius: var(--classic-radius-sm);
+  background: var(--classic-panel-tint, #f7f7f7);
+  border: 1px solid var(--classic-line);
+}
+
+.selectionCardMain {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  /* Lets the row wrap the button underneath on narrow widths instead of
+     squeezing the count until it truncates. */
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.selectionCardIcon {
+  display: inline-flex;
+  color: var(--classic-orange-deep, #1a1a1a);
+  flex-shrink: 0;
+}
+
+.selectionCardText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.selectionCardCount {
+  font-size: var(--classic-fs-label);
+  font-weight: var(--classic-fw-semibold);
+  color: var(--classic-orange-deep, #1a1a1a);
+  line-height: 1.4;
+}
+
+/* Under the count rather than opposite it, so the actions read as belonging to
+   the number they change instead of competing with the Browse button. */
+.selectionCardText .selectionBarActions {
+  justify-content: flex-start;
+  gap: 12px;
 }
 
 .allProductsBox {
@@ -1504,59 +1694,14 @@ button.stepItem {
   flex-shrink: 0;
 }
 
-.clearSelectionLink {
-  border: 0;
-  background: transparent;
-  color: var(--classic-muted);
-  font-family: inherit;
-  font-size: 12px;
-  font-weight: var(--classic-fw-regular);
-  line-height: 16px;
-  cursor: pointer;
-  padding: 0;
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-
-.clearSelectionLink:hover {
-  color: var(--classic-ink);
-}
-
-.clearSelectionLink:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-  text-decoration: none;
-}
-
 .successBannerInline {
   margin-bottom: 0;
   border-radius: 6px 12px 0 0;
   border-bottom: 0;
 }
 
-.allProductsBox .chipGrid {
-  border: 0;
-  background: transparent;
-  padding: 0;
-  margin-bottom: 12px;
-}
-
-.allProductsBox .showAllBtn,
-.allProductsBox .compactAction {
+.allProductsBox .showAllBtn {
   margin-top: 0;
-}
-
-.productChipLabel {
-  max-width: 140px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.productChipMore {
-  color: var(--classic-muted);
-  font-weight: var(--classic-fw-semibold);
-  padding-left: 12px;
 }
 
 .aiSuggestBanner {
@@ -1629,6 +1774,24 @@ button.stepItem {
   flex: 1 1 auto;
   min-width: 0;
   margin-bottom: 0;
+}
+
+/* Polaris wraps a tooltip activator in an unstyled span, so the info icon's
+   wrapper becomes the flex item in place of the button and the button's own
+   flex-shrink stops applying. Every row here is a label plus that one icon,
+   so holding the span to its content keeps the icon hard against the edge. */
+.labelRow > span {
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+/* Keeps the text, the info icon and the action on one centred row. The icon is
+   a 28px inline-flex button, which sits off the baseline of plain text. */
+.noticeLine {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
 }
 
 .infoIconLink {
@@ -1711,26 +1874,6 @@ button.stepItem {
   background: var(--classic-panel-tint, #f7f7f7);
   border: 1px solid var(--classic-line, #e3e3e3);
   border-radius: 6px;
-}
-
-.collectionPlus {
-  font-weight: var(--classic-fw-bold);
-  color: var(--classic-muted);
-  line-height: 1;
-}
-
-.collectionName {
-  font-weight: var(--classic-fw-semibold);
-}
-
-.collectionPillHasSelection {
-  border-color: rgba(var(--accent-primary-rgb), 0.45);
-  background: var(--classic-orange-soft);
-}
-
-.collectionPillHasSelection .collectionPlus,
-.collectionPillActive .collectionPlus {
-  color: var(--classic-orange);
 }
 
 .bulkBarLabel {
@@ -2271,8 +2414,7 @@ button.stepItem {
 
   .goalPickerPanes {
     grid-template-columns: 1fr;
-  }
-}
+  }}
 
 .audiencePanel.field {
   margin-bottom: var(--classic-space-field);
@@ -2298,59 +2440,6 @@ button.stepItem {
   margin-bottom: 0;
 }
 
-.productGridShell {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  border: 1px solid var(--classic-line);
-  border-radius: 6px;
-  padding: 9px;
-  margin-bottom: 12px;
-  background: var(--classic-panel-tint, #f7f7f7); /* Figma grid shell */
-}
-
-.productGridShell .productGrid {
-  width: 100%;
-}
-
-.productGrid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-  margin-bottom: 0;
-}
-
-.productGridShell .showAllBtn,
-.productGridShell .compactAction {
-  margin-top: 8px;
-  width: auto;
-  align-self: flex-start;
-}
-
-.productCard {
-  position: relative;
-  display: grid;
-  grid-template-columns: 48px 1fr;
-  gap: 12px;
-  align-items: flex-start;
-  text-align: left;
-  border: 1px solid var(--classic-line);
-  border-radius: 6px;
-  padding: 13px 36px 13px 13px;
-  background: var(--classic-card); /* Figma #ffffff */
-  cursor: pointer;
-  font-family: inherit;
-  min-height: 76px;
-  transition: border-color 0.15s ease, background 0.15s ease;
-}
-
-.productGrid .productName {
-  font-size: 14px; /* Figma product card title */
-  font-weight: var(--classic-fw-medium);
-  line-height: 20px;
-  color: var(--classic-ink);
-}
-
 .productMeta {
   display: flex;
   flex-direction: column;
@@ -2359,27 +2448,7 @@ button.stepItem {
   padding-top: 0;
 }
 
-.productGrid .productSub {
-  font-size: 12px;
-  font-weight: var(--classic-fw-regular);
-  line-height: 16px;
-  color: var(--classic-muted);
-}
-
-.productCard:hover {
-  border-color: rgba(var(--accent-primary-rgb), 0.35);
-}
-
-.productCardSelected {
-  border-color: var(--classic-orange);
-  background: var(--classic-orange-soft);
-}
-
-/* Selected product / mode cards: plain orange check (not filled circle) */
-.productCardSelected .checkCorner,
-.productCardSelected .checkInline,
-.choiceCardSelected .checkCorner,
-.choiceCardSelected .checkInline.checkCorner {
+.choiceCardSelected .checkCorner,.choiceCardSelected .checkInline.checkCorner {
   width: 16px;
   height: 16px;
   border-radius: 0;
@@ -2472,34 +2541,6 @@ button.stepItem {
   gap: 8px;
 }
 
-.selectAllLink {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--classic-line);
-  background: var(--classic-card);
-  min-height: 32px;
-  padding: 6px 12px;
-  border-radius: 8px;
-  font-family: inherit;
-  font-size: 12px;
-  font-weight: var(--classic-fw-medium);
-  line-height: 1;
-  color: var(--classic-ink);
-  cursor: pointer;
-  white-space: nowrap;
-}
-
-.selectAllLink:hover:not(:disabled) {
-  border-color: var(--classic-orange-border);
-  color: var(--classic-orange-deep, #1a1a1a);
-}
-
-.selectAllLink:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-
 .groupTabRow {
   display: inline-flex;
   gap: 4px;
@@ -2537,23 +2578,6 @@ button.stepItem {
   color: var(--classic-ink);
   box-shadow: 0 1px 0 rgba(0, 0, 0, 0.05);
   font-weight: var(--classic-fw-medium);
-}
-
-.productsFooterActions {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 10px;
-  margin-bottom: 4px;
-  width: 100%;
-}
-
-.emptyProducts {
-  padding: 16px;
-  border: 1px dashed var(--classic-line);
-  border-radius: var(--classic-radius-sm);
-  background: var(--classic-wash);
-  margin-bottom: 12px;
 }
 
 .productsDivider {
@@ -2872,29 +2896,6 @@ button.stepItem {
   opacity: 0.9;
 }
 
-.deltaPos {
-  display: inline-flex;
-  align-items: center;
-  min-height: 18px;
-  padding: 0 6px;
-  border-radius: 999px;
-  color: #2f8f5b;
-  font-weight: var(--classic-fw-medium);
-  font-size: 11px;
-  background: rgba(63, 177, 113, 0.15);
-}
-
-.deltaNeg {
-  display: inline-flex;
-  align-items: center;
-  min-height: 18px;
-  padding: 0 6px;
-  border-radius: 999px;
-  color: #b91c1c;
-  font-weight: var(--classic-fw-medium);
-  font-size: 11px;
-  background: rgba(185, 28, 28, 0.1);
-}
 
 /* Product rows: white. Accordion variant rows: separate wash. */
 .table tbody tr.productPriceRow > td {
@@ -3125,6 +3126,7 @@ button.stepItem {
   margin-bottom: 0;
 }
 
+.reviewHead h2,
 .reviewHead h3 {
   margin: 0;
   font-family: var(--ripx-font-classic, var(--ripx-font-ui, 'Inter', system-ui, sans-serif));
@@ -3275,6 +3277,34 @@ button.stepItem {
   gap: 8px;
 }
 
+/* Two columns of stacked label/value pairs. The single-column rows below put a
+   fixed 96px label beside each value, which reads fine for three facts and runs
+   very tall for eleven. */
+.reviewGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 20px;
+}
+
+.reviewGridItem {
+  min-width: 0;
+}
+
+.reviewGridItem .kvLabel {
+  margin: 0 0 2px;
+}
+
+/* Country lists are long enough to wrap awkwardly in half the width. */
+.reviewGridWide {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 620px) {
+  .reviewGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 .reviewRow {
   display: flex;
   gap: 16px;
@@ -3319,47 +3349,6 @@ button.stepItem {
   gap: 12px 24px;
 }
 
-.reviewProductList {
-  border: 1px solid var(--classic-line);
-  border-radius: 10px;
-  overflow: hidden;
-  background: var(--classic-card);
-}
-
-.reviewProductRow {
-  display: grid;
-  grid-template-columns: 40px minmax(0, 1fr) auto;
-  gap: 8px;
-  align-items: center;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--classic-line);
-}
-
-.reviewProductMeta {
-  min-width: 0;
-  overflow: hidden;
-}
-
-.reviewArmChips {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 6px;
-}
-
-.reviewProductRow:last-child {
-  border-bottom: 0;
-}
-
-.reviewThumb {
-  width: 40px;
-  height: 40px;
-  border-radius: 10px;
-  object-fit: cover;
-  background: var(--classic-table-head);
-  display: block;
-  flex-shrink: 0;
-}
 
 .conversionRow {
   margin: 0 0 16px; /* Figma conversion rows gap */
@@ -3405,8 +3394,7 @@ button.stepItem {
     width: 168px;
     min-width: 168px;
     justify-content: center;
-  }
-}
+  }}
 
 .overviewMeta {
   display: flex;
@@ -3634,8 +3622,7 @@ button.stepItem {
 
   .variationsProductsFooter .tablePager {
     justify-content: space-between;
-  }
-}
+  }}
 
 .variationPreviewRow {
   position: relative;
@@ -3737,123 +3724,16 @@ button.stepItem {
   margin-left: 8px;
 }
 
-.compactSearch {
-  margin-bottom: 18px;
-}
-
-.compactSearch .label {
-  margin-bottom: 8px;
-}
-
-.compactSearch .help {
-  margin-top: 8px;
-}
-
-.collectionsLabel {
-  margin: 16px 0 8px;
-  font-size: var(--classic-fs-overline);
-  font-weight: var(--classic-fw-extrabold);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--classic-muted);
-}
-
-.collectionPill {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  min-height: 32px;
-  padding: 6px 12px;
-  border-radius: 999px;
-  border: 1px solid var(--classic-line);
-  background: var(--classic-card);
-  font-family: inherit;
-  font-size: var(--classic-fs-meta);
-  font-weight: var(--classic-fw-semibold);
-  cursor: pointer;
-  color: var(--classic-ink);
-  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
-}
-
-.collectionPill:hover {
-  border-color: rgba(var(--accent-primary-rgb), 0.4);
-}
-
-.collectionPillActive {
-  border-color: var(--classic-orange);
-  background: var(--classic-orange-soft);
-  color: var(--classic-ink);
-}
-
-.collectionPillFilled {
-  /* Kept for backwards compatibility; prefer soft selection states */
-  border-color: var(--classic-orange);
-  background: var(--classic-orange-soft);
-  color: var(--classic-ink);
-}
-
-.collectionPillFilled .collectionCount {
-  color: var(--classic-muted);
-}
-
 .collectionCount {
   color: var(--classic-muted);
   font-weight: var(--classic-fw-semibold);
   font-size: var(--classic-fs-help);
 }
 
-.browseBtn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 8px !important;
-  margin-top: 10px;
-  gap: 4px;
-  min-height: 32px;
-  padding: 6px 12px;
-  font-size: var(--classic-fs-meta);
-}
-
 .successBanner {
   background: var(--classic-success-bg);
   border-color: var(--classic-success);
   color: var(--classic-success);
-}
-
-.chipGrid {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  padding: 12px;
-  border: 1px solid var(--classic-line);
-  border-radius: var(--classic-radius-sm);
-  background: var(--classic-wash);
-  margin-bottom: 10px;
-}
-
-.productChip {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  min-height: 32px;
-  padding: 4px 12px 4px 4px;
-  border-radius: 999px;
-  background: var(--classic-card);
-  border: 1px solid var(--classic-line);
-  font-size: var(--classic-fs-meta);
-  font-weight: var(--classic-fw-semibold);
-  color: var(--classic-ink);
-}
-
-.productChip img,
-.chipThumb {
-  width: 28px;
-  height: 28px;
-  border-radius: 8px;
-  object-fit: cover;
-  background: var(--classic-wash);
-  display: block;
 }
 
 .tableToolbar {
@@ -4096,11 +3976,13 @@ button.stepItem {
 
 .aiBarInput,
 .aiBar .bulkInput {
-  width: 64px !important;
+  /* Wider than the other compact fields: a number input paints its stepper
+     inside the box, and at the old 64px the arrows sat on top of the digits. */
+  width: 86px !important;
   min-height: 34px;
-  padding: 6px 8px !important;
+  padding: 6px 4px 6px 10px !important;
   margin: 0 !important;
-  text-align: center;
+  text-align: left;
   background: var(--classic-card, #ffffff) !important;
   border: 1px solid var(--classic-line, #e3e3e3) !important;
   border-radius: 10px !important;
@@ -4729,9 +4611,6 @@ button.stepItem {
   justify-content: center;
 }
 
-.reviewProductList .productSub {
-  font-size: 11px;
-}
 
 /* Figma pricing table: Product left · Base right · Test price center · Δ right */
 .productsStep .tableScroll .table th:first-child,
@@ -5059,14 +4938,7 @@ button.stepItem {
     padding: 22px 16px;
   }
 
-  .typeGrid,
-  .modeRow,
-  .modeRow3,
-  .productGrid,
-  .statGrid,
-  .overviewSplit,
-  .detailCardGrid,
-  .modalBody {
+  .typeGrid,.modeRow,.modeRow3,.statGrid,.overviewSplit,.detailCardGrid,.modalBody {
     grid-template-columns: 1fr;
   }
 
@@ -5104,8 +4976,7 @@ button.stepItem {
 
   .overviewSplit {
     grid-template-columns: 1fr;
-  }
-}
+  }}
 
 :global([data-theme='dark']) .page,
 :global([data-theme='dark']) .listPage,
@@ -5152,24 +5023,7 @@ button.stepItem {
   background: var(--classic-orange);
 }
 
-:global([data-theme='dark']) .card,
-:global([data-theme='dark']) .statCard,
-:global([data-theme='dark']) .expTableWrap,
-:global([data-theme='dark']) .variationBlock,
-:global([data-theme='dark']) .choiceCard,
-:global([data-theme='dark']) .productCard,
-:global([data-theme='dark']) .productGridShell,
-:global([data-theme='dark']) .reviewSection,
-:global([data-theme='dark']) .allProductsBox,
-:global([data-theme='dark']) .audiencePanel,
-:global([data-theme='dark']) .modal,
-:global([data-theme='dark']) .modalSide,
-:global([data-theme='dark']) .modalFooter,
-:global([data-theme='dark']) .variationQrPopover,
-:global([data-theme='dark']) .variationsProductsTableScroll .table th:first-child,
-:global([data-theme='dark']) .variationsProductsTableScroll .table td:first-child,
-:global([data-theme='dark']) .countryField,
-:global([data-theme='dark']) .filterPillTrack {
+:global([data-theme='dark']) .card,:global([data-theme='dark']) .statCard,:global([data-theme='dark']) .expTableWrap,:global([data-theme='dark']) .variationBlock,:global([data-theme='dark']) .choiceCard,:global([data-theme='dark']) .reviewSection,:global([data-theme='dark']) .allProductsBox,:global([data-theme='dark']) .audiencePanel,:global([data-theme='dark']) .modal,:global([data-theme='dark']) .modalSide,:global([data-theme='dark']) .modalFooter,:global([data-theme='dark']) .variationQrPopover,:global([data-theme='dark']) .variationsProductsTableScroll .table th:first-child,:global([data-theme='dark']) .variationsProductsTableScroll .table td:first-child,:global([data-theme='dark']) .countryField,:global([data-theme='dark']) .filterPillTrack {
   background: var(--classic-card);
   color: var(--classic-ink);
   border-color: var(--classic-line);
@@ -5217,6 +5071,7 @@ button.stepItem {
 :global([data-theme='dark']) .choiceTitle,
 :global([data-theme='dark']) .modalTitle,
 :global([data-theme='dark']) .modalMainTitle,
+:global([data-theme='dark']) .reviewHead h2,
 :global([data-theme='dark']) .reviewHead h3,
 :global([data-theme='dark']) .panelTitle {
   color: var(--classic-ink);
@@ -5352,10 +5207,7 @@ button.stepItem {
   -webkit-text-fill-color: var(--classic-ink) !important;
 }
 
-:global([data-theme='dark']) .trafficBanner,
-:global([data-theme='dark']) .segment,
-:global([data-theme='dark']) .table th,
-:global([data-theme='dark']) .chipGrid {
+:global([data-theme='dark']) .trafficBanner,:global([data-theme='dark']) .segment,:global([data-theme='dark']) .table th {
   background: var(--classic-table-head, var(--classic-wash));
 }
 
@@ -5901,8 +5753,7 @@ button.stepItem {
 
   .settingsRowNote {
     grid-column: 1;
-  }
-}
+  }}
 
 /* Points at the tab that owns a setting shown here read-only. */
 .settingsFootnote {
@@ -6376,8 +6227,7 @@ button.stepItem {
   .activityItem {
     grid-template-columns: 1fr;
     gap: 4px;
-  }
-}
+  }}
 
 /* Classic admin pages (Setup / Settings) — checklist rows */
 .adminStack {
@@ -6410,11 +6260,64 @@ button.stepItem {
   color: var(--classic-ink);
 }
 
+/* Keeps the title and its explanation icon together on the left, so the badge
+   still sits alone on the right of the row. */
+.adminRowHeadMain {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+
+/* The icon is a hover affordance, not a control competing with the step's
+   buttons, so it only gains weight once it is pointed at. */
+.adminRowHeadMain .infoIconLink {
+  width: 24px;
+  height: 24px;
+  opacity: 0.55;
+}
+
+.adminRowHeadMain .infoIconLink:hover,
+.adminRowHeadMain .infoIconLink:focus-visible {
+  opacity: 1;
+}
+
 .adminRowBody {
   margin: 0;
   font-size: var(--classic-fs-meta);
   color: var(--classic-muted);
   line-height: 1.45;
+}
+
+/* One checked thing per line, its status flush right, for a step that covers
+   more than one. Separated by rules so a pair of statuses reads as a short
+   list rather than as two half-finished sentences. */
+.adminStatusLines {
+  display: grid;
+  gap: 0;
+  margin: 4px 0 2px;
+  border: 1px solid var(--classic-line);
+  border-radius: var(--classic-radius-sm);
+  background: var(--classic-surface, #fff);
+}
+
+.adminStatusLine {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+}
+
+.adminStatusLine + .adminStatusLine {
+  border-top: 1px solid var(--classic-line);
+}
+
+.adminStatusLineLabel {
+  font-size: var(--classic-fs-label);
+  font-weight: var(--classic-fw-regular);
+  line-height: 18px;
+  color: var(--classic-ink);
 }
 
 .adminRowActions {
@@ -6512,4 +6415,3 @@ button.stepItem {
   flex-direction: column;
   gap: 14px;
 }
-

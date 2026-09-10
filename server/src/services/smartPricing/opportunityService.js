@@ -18,6 +18,7 @@ const {
   isAiRankingEnabled,
 } = require('./smartPricingAiRankingService');
 const { getShopSmartPricingGuardrails } = require('./smartPricingGuardrailsService');
+const { getPriceTestEnrollment, findHold } = require('./priceTestEnrollmentService');
 
 const CACHE_TTL_MS =
   Number.parseInt(process.env.SMART_PRICING_OPPORTUNITY_CACHE_TTL_MS || '', 10) ||
@@ -222,6 +223,60 @@ function buildDefaultSelectedVariantIds(opportunities = []) {
     .filter(Boolean);
 }
 
+/**
+ * Drop the SKUs another price test is holding, and say how many went.
+ *
+ * Withholding them silently would leave a merchant hunting for a product that
+ * is simply not offered, so the count travels with the payload for the picker
+ * to explain. Nothing here is a substitute for the check at launch: this list
+ * is a convenience, and the server still refuses a double enrollment.
+ */
+async function withholdEnrolledProducts(shopDomain, opportunities = []) {
+  const rows = Array.isArray(opportunities) ? opportunities : [];
+  const empty = { live: 0, paused: 0, total: 0, tests: [] };
+  if (!rows.length) {
+    return { opportunities: rows, withheld: empty };
+  }
+  let enrollment = null;
+  try {
+    enrollment = await getPriceTestEnrollment(shopDomain);
+  } catch (err) {
+    // Failing open here shows a product that may already be under test, and
+    // the launch guard will refuse it. Failing closed would empty the catalog
+    // over a transient database error, which is worse.
+    logger.warn('Smart pricing opportunities: could not resolve price test enrollment', {
+      shopDomain,
+      error: err?.message,
+    });
+    return { opportunities: rows, withheld: empty };
+  }
+
+  const testNames = new Map();
+  const kept = [];
+  let live = 0;
+  let paused = 0;
+  rows.forEach(row => {
+    const hold = findHold(enrollment, {
+      variantId: row?.variant_id,
+      productId: row?.product_id,
+    });
+    if (!hold) {
+      kept.push(row);
+      return;
+    }
+    if (hold.live) live += 1;
+    else paused += 1;
+    if (!testNames.has(hold.test_id)) {
+      testNames.set(hold.test_id, { test_id: hold.test_id, name: hold.test_name, live: hold.live });
+    }
+  });
+
+  return {
+    opportunities: kept,
+    withheld: { live, paused, total: live + paused, tests: [...testNames.values()] },
+  };
+}
+
 function buildListPayload(opportunities, meta = {}) {
   const generatedAt = meta.generated_at || new Date().toISOString();
   const generatedMs = new Date(generatedAt).getTime();
@@ -244,6 +299,8 @@ function buildListPayload(opportunities, meta = {}) {
     summary: {
       eligible_count: meta.eligible_count ?? opportunities.length,
       catalog_product_count: meta.catalog_product_count ?? null,
+      catalog_truncated: Boolean(meta.catalog_truncated),
+      catalog_max_products: meta.catalog_max_products ?? null,
       sku_count: meta.sku_count ?? null,
       order_metrics_variant_count: meta.order_metrics_variant_count ?? null,
       shop_conversion_rate: meta.shop_conversion_rate ?? null,
@@ -257,6 +314,9 @@ function buildListPayload(opportunities, meta = {}) {
       guardrails: meta.guardrails || null,
       focus_collection_ids: meta.focus_collection_ids || null,
       product_search: meta.product_search || null,
+      // SKUs another price test is holding, withheld from this list. The picker
+      // says so rather than letting a product look as if it never existed.
+      withheld_by_other_tests: meta.withheld_by_other_tests || null,
     },
     filters: buildFilterCounts(opportunities),
     warnings: meta.warnings || [],
@@ -403,6 +463,8 @@ async function loadCatalogOpportunities(shopDomain, accessToken, options = {}) {
       ai_source: aiSource,
       eligible_count: scored.length,
       catalog_product_count: snapshot.catalog_product_count,
+      catalog_truncated: Boolean(snapshot.catalog_truncated),
+      catalog_max_products: snapshot.catalog_max_products ?? null,
       sku_count: snapshot.sku_count,
       order_metrics_variant_count: snapshot.order_metrics_variant_count,
       measured_view_sku_count: snapshot.measured_view_sku_count,
@@ -465,8 +527,14 @@ async function listOpportunities({
     collectionId,
     productSearch,
   });
-  const opportunities = applyFilters(catalogPayload.opportunities || [], { filter, search });
+  // Which products another test is holding has to be answered now, not when
+  // this payload was built. The catalog snapshot is cached for twelve hours,
+  // and it baked the answer in: launch a test and every product in it stayed
+  // freely selectable in the next test you created that day.
+  const held = await withholdEnrolledProducts(shopDomain, catalogPayload.opportunities || []);
+  const opportunities = applyFilters(held.opportunities, { filter, search });
   return buildListPayload(opportunities, {
+    withheld_by_other_tests: held.withheld,
     generated_at: catalogPayload.generated_at,
     source: catalogPayload.source,
     cache_scope: catalogPayload.cache_scope,
@@ -474,6 +542,8 @@ async function listOpportunities({
     ai_source: catalogPayload.ai_source,
     eligible_count: catalogPayload.eligible_count,
     catalog_product_count: catalogPayload.catalog_product_count,
+    catalog_truncated: Boolean(catalogPayload.catalog_truncated),
+    catalog_max_products: catalogPayload.catalog_max_products ?? null,
     sku_count: catalogPayload.sku_count,
     order_metrics_variant_count: catalogPayload.order_metrics_variant_count,
     shop_conversion_rate: catalogPayload.shop_conversion_rate,

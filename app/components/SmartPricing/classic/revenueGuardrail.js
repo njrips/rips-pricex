@@ -22,16 +22,19 @@ export function parseRevenueDropThreshold(raw, fallback = DEFAULT_MAX_REVENUE_DR
   return clampMaxRevenueDropPercent(n, safeFallback);
 }
 
-export function createRevenueGuardrailRow(maxDropPercent = DEFAULT_MAX_REVENUE_DROP_PERCENT) {
+export function createRevenueGuardrailRow(
+  maxDropPercent = DEFAULT_MAX_REVENUE_DROP_PERCENT,
+  on = true
+) {
   const n = clampMaxRevenueDropPercent(maxDropPercent);
   return {
     id: 'revenue',
     label: 'Revenue per visitor',
-    hint: 'Always on. Auto-pauses if any variation drops past this vs control.',
+    hint: 'Auto-pauses if any variation drops past this vs control.',
     rule: 'Must not drop',
     threshold: `-${n}%`,
-    on: true,
-    locked: true,
+    on: on !== false,
+    locked: false,
   };
 }
 
@@ -46,10 +49,18 @@ export function ensureRevenueGuardrailRows(
     {
       ...next,
       threshold: prev.threshold || next.threshold,
-      on: true,
-      locked: true,
+      // Only an explicit false turns it off. An experiment saved before the
+      // guardrail was switchable has no `on` at all, and defaulting those to
+      // off would quietly drop the protection they launched with.
+      on: prev.on !== false,
+      locked: false,
     },
   ];
+}
+
+/** Whether this experiment's revenue guardrail is armed. */
+export function revenueGuardrailEnabledFromRows(rows = []) {
+  return ensureRevenueGuardrailRows(rows)[0].on !== false;
 }
 
 export function revenueDropPercentFromRows(
@@ -74,7 +85,13 @@ export function revenueGuardrailGoalConfig(
   fallback = DEFAULT_MAX_REVENUE_DROP_PERCENT
 ) {
   return {
+    // `auto_stop` here is read by the auto-winner service, not by the
+    // guardrail, so switching the guardrail off must not touch it -- doing so
+    // would also stop winners from being applied. `enabled` is the guardrail's
+    // own switch, and the threshold is kept either way so turning it back on
+    // restores the number the merchant chose.
     auto_stop: true,
+    enabled: revenueGuardrailEnabledFromRows(rows),
     max_revenue_drop_percent: revenueDropPercentFromRows(rows, fallback),
   };
 }

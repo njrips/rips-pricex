@@ -68,7 +68,6 @@ describe('catalogMetricsService', () => {
           },
         ],
       ]),
-      new Set(),
       { defaultCogsPercent: 55 }
     );
 
@@ -96,8 +95,7 @@ describe('catalogMetricsService', () => {
           variants: [{ id: 'gid://shopify/ProductVariant/99', price: '25.00' }],
         },
       ],
-      new Map(),
-      new Set()
+      new Map()
     );
     expect(rows).toHaveLength(0);
   });

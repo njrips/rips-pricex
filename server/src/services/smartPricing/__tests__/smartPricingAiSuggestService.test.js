@@ -128,18 +128,11 @@ describe('smartPricingAiSuggestService', () => {
     expect(result.suggestions.length).toBe(1);
   });
 
-  it('suggestPrices resolves shortened arm ids from the model', async () => {
+  it('suggestPrices maps a reply addressed by row position onto the real ids', async () => {
     hasOpenAiKey.mockReturnValue(true);
     chatJson.mockResolvedValue({
       summary: 'Lift tee price modestly.',
-      suggestions: [
-        {
-          variant_id: 'gid://shopify/ProductVariant/1',
-          arm_id: 'b',
-          delta_percent: 12,
-          reason: 'Healthy margin',
-        },
-      ],
+      prices: [{ v: 0, deltas: [12] }],
     });
     const result = await suggestPrices({
       variants: [
@@ -156,8 +149,113 @@ describe('smartPricingAiSuggestService', () => {
       guardrails: { min_margin_percent: 35, max_price_change_percent: 20 },
     });
     expect(result.source).toBe('openai');
+    expect(result.suggestions[0].variant_id).toBe('gid://shopify/ProductVariant/1');
     expect(result.suggestions[0].arm_id).toBe('var_b');
     expect(result.suggestions[0].price).toBeGreaterThan(20);
+    expect(result.fallback_pair_count).toBe(0);
   });
 
+  it('suggestPrices asks for enough output tokens to answer the whole request', async () => {
+    hasOpenAiKey.mockReturnValue(true);
+    chatJson.mockResolvedValue({ prices: [{ v: 0, deltas: [10, 15, 20] }] });
+    const variants = Array.from({ length: 30 }, (_, i) => ({
+      variant_id: `gid://shopify/ProductVariant/${i}`,
+      title: `Product ${i}`,
+      current_price: 20 + i,
+      margin_percent: 55,
+    }));
+    await suggestPrices({
+      variants,
+      arms: [{ id: 'var_a' }, { id: 'var_b' }, { id: 'var_c' }],
+      minPct: 10,
+      maxPct: 20,
+    });
+    // A fixed ceiling used to cut the reply in half for a request this size.
+    const { maxTokens } = chatJson.mock.calls[0][0];
+    expect(maxTokens).toBeGreaterThan(900);
+  });
+
+  it('suggestPrices says how many prices the model did not return', async () => {
+    hasOpenAiKey.mockReturnValue(true);
+    chatJson.mockResolvedValue({
+      summary: 'Raised the tee.',
+      prices: [{ v: 0, deltas: [12] }],
+    });
+    const result = await suggestPrices({
+      variants: [
+        { variant_id: 'v1', title: 'Tee', current_price: 20, margin_percent: 50 },
+        { variant_id: 'v2', title: 'Mug', current_price: 30, margin_percent: 50 },
+      ],
+      arms: [{ id: 'var_b' }],
+      minPct: 10,
+      maxPct: 15,
+    });
+    expect(result.ai_pair_count).toBe(1);
+    expect(result.fallback_pair_count).toBe(1);
+    expect(result.summary).toContain('spread');
+    expect(result.suggestions).toHaveLength(2);
+  });
+
+  it('suggestPrices ignores a row position it never sent', async () => {
+    hasOpenAiKey.mockReturnValue(true);
+    chatJson.mockResolvedValue({ prices: [{ v: 7, deltas: [12] }] });
+    const result = await suggestPrices({
+      variants: [{ variant_id: 'v1', title: 'Tee', current_price: 20, margin_percent: 50 }],
+      arms: [{ id: 'var_b' }],
+      minPct: 10,
+      maxPct: 15,
+    });
+    expect(result.source).toBe('deterministic');
+    expect(result.ai_attempted).toBe(true);
+  });
+
+  it('suggestPrices skips the model when the caller asks it to, and says why', async () => {
+    hasOpenAiKey.mockReturnValue(true);
+    const result = await suggestPrices({
+      variants: [{ variant_id: 'v1', title: 'Tee', current_price: 20, margin_percent: 50 }],
+      arms: [{ id: 'var_b' }],
+      minPct: 10,
+      maxPct: 15,
+      useAi: false,
+    });
+    expect(chatJson).not.toHaveBeenCalled();
+    expect(result.source).toBe('deterministic');
+    expect(result.ai_skipped_reason).toBe('disabled_by_request');
+  });
+
+  it('suggestPrices records that a dollar band never reaches the model', async () => {
+    hasOpenAiKey.mockReturnValue(true);
+    const result = await suggestPrices({
+      variants: [{ variant_id: 'v1', title: 'Tee', current_price: 20, margin_percent: 50 }],
+      arms: [{ id: 'var_b' }],
+      unit: 'amount',
+      minAmount: 4,
+      maxAmount: 8,
+    });
+    expect(chatJson).not.toHaveBeenCalled();
+    expect(result.ai_skipped_reason).toBe('amount_band');
+  });
+
+  it('suggestPrices never sends a shop identifier or a field the model cannot use', async () => {
+    hasOpenAiKey.mockReturnValue(true);
+    chatJson.mockResolvedValue({ prices: [{ v: 0, deltas: [12] }] });
+    await suggestPrices({
+      variants: [
+        {
+          variant_id: 'gid://shopify/ProductVariant/1',
+          title: 'Tee',
+          current_price: 20,
+          margin_percent: 50,
+          revenue_30d: 4200,
+        },
+      ],
+      arms: [{ id: 'var_b' }],
+      minPct: 10,
+      maxPct: 15,
+    });
+    const { userPrompt } = chatJson.mock.calls[0][0];
+    expect(userPrompt).not.toContain('gid://shopify');
+    expect(userPrompt).not.toContain('4200');
+    expect(userPrompt).not.toContain('myshopify');
+  });
 });

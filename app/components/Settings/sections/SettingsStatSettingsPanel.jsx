@@ -16,11 +16,13 @@ function FieldLabel({ htmlFor, children, hash, label }) {
 /**
  * The two settings that decide when a test may be called.
  *
- * They act in sequence rather than independently, which is worth saying on the
- * page: the sample floor decides when the maths is allowed to start, and the
- * confidence level decides when its answer counts as a winner. Presented as two
- * unrelated numbers, merchants read the confidence level as the only gate and
- * expect calls that the sample floor is still holding back.
+ * Confidence sits first even though the sample floor acts first, because
+ * confidence is the one merchants come here to change — two options, a real
+ * trade-off — while the sample floor is a number most shops set once. The note
+ * under both fields carries the ordering that the layout no longer implies.
+ *
+ * Each field says only what it is; the reasoning lives on its info icon, which
+ * shows the guide summary on hover and the full guide on click.
  *
  * @param {{
  *   loading?: boolean, saving?: boolean, message?: string | null, error?: string | null,
@@ -53,23 +55,23 @@ export default function SettingsStatSettingsPanel({
       ) : null}
       {error ? <p className={styles.error}>{error}</p> : null}
 
-      <div style={{ marginBottom: 16 }}>
-        <Banner tone="info" title="How these two work together">
-          <p>
-            No result is calculated until every variation has reached the minimum sample size.
-            Once it has, a variation is only called the winner when the confidence level below is
-            reached.
-          </p>
-          <p>
-            A second floor of 100 conversions per variation applies as well, and is not
-            configurable: below it a confidence figure would be wrong rather than merely early.
-            Whichever floor a test is still short of is the one it names while it collects.
-          </p>
-          <p>
-            These apply to experiments you launch from now on. Tests already running keep the
-            settings they launched with, so their results stay valid.
-          </p>
-        </Banner>
+      <div className={styles.field}>
+        <FieldLabel htmlFor="confidence-level" hash="confidence" label="Confidence level">
+          Confidence level
+        </FieldLabel>
+        <Select
+          id="confidence-level"
+          label="Confidence level"
+          labelHidden
+          options={[
+            { label: '90% (recommended)', value: '90' },
+            { label: '95% (stricter)', value: '95' },
+          ]}
+          value={String(confidenceLevel ?? '90')}
+          disabled={disabled}
+          onChange={onConfidenceLevel}
+        />
+        <p className={styles.help}>How sure the maths must be before calling a winner.</p>
       </div>
 
       <div className={styles.field}>
@@ -87,33 +89,18 @@ export default function SettingsStatSettingsPanel({
           disabled={disabled}
           onChange={onMinSampleSize}
           autoComplete="off"
-          helpText="Visitors every variation must reach before anything is calculated — counted per variation, so the slowest one sets the pace. Applies to every test, so it is no longer asked for when you create one."
+          helpText="Visitors each variation must reach before anything is calculated."
         />
       </div>
 
-      <div className={styles.field}>
-        <FieldLabel htmlFor="confidence-level" hash="confidence" label="Confidence level">
-          Confidence level
-        </FieldLabel>
-        <Select
-          id="confidence-level"
-          label="Confidence level"
-          labelHidden
-          options={[
-            { label: '90% (recommended)', value: '90' },
-            { label: '95% (stricter)', value: '95' },
-          ]}
-          value={String(confidenceLevel ?? '90')}
-          disabled={disabled}
-          onChange={onConfidenceLevel}
-        />
-        <p className={styles.help}>
-          How sure the maths has to be before a variation is called the winner. 90% accepts about
-          a 1-in-10 chance of a false winner, 95% about 1-in-20 — stricter, but it needs more
-          traffic and more orders to reach. The percentage shown on a running experiment is the
-          evidence collected so far, not this setting; this is the line it has to cross.
-        </p>
-      </div>
+      {/* The one thing neither field can say on its own: they are a sequence,
+          not two independent numbers. Without it, the confidence level reads as
+          the only gate and merchants expect calls the sample floor is holding
+          back. Everything else moved to the info icons. */}
+      <p className={styles.help}>
+        Sample size decides when the maths may start; confidence decides when it may call a
+        winner. Both apply to experiments launched from now on.
+      </p>
     </div>
   );
 }

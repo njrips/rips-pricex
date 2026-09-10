@@ -21,10 +21,18 @@ export const CUSTOMER_OPTIONS = [
 export const GOAL_METRIC_OPTIONS = [
   { label: 'Revenue per visitor', value: 'revenue_per_visitor' },
   { label: 'Conversion rate', value: 'conversion_rate' },
-  // Named "estimated" because it is. Cost of goods is taken as one shop-wide
-  // percentage at launch rather than per-variant cost, so this metric is
-  // revenue per visitor scaled by a constant and it ranks variations exactly
-  // as revenue does. It stays selectable for experiments that already use it.
+];
+
+/**
+ * Profit per visitor, no longer offered.
+ *
+ * Cost of goods was taken as one shop-wide percentage at launch rather than
+ * per-variant cost, which made the metric revenue per visitor scaled by a
+ * constant: it ranked every variation exactly as revenue did, while reading
+ * like a separate measurement. It is kept here, and only here, so an experiment
+ * launched on it still names its own goal correctly.
+ */
+export const LEGACY_GOAL_METRIC_OPTIONS = [
   { label: 'Profit per visitor (estimated)', value: 'profit_per_visitor' },
 ];
 
@@ -50,6 +58,27 @@ export const ALL_CLASSIC_METRIC_OPTIONS = (() => {
   });
   return out;
 })();
+
+/**
+ * The metric pills to offer, given what this experiment already uses.
+ *
+ * A retired metric is added back only when the experiment is on it. Without
+ * that, opening the audience editor on such an experiment would show no
+ * selected pill, and the first pill clicked would look like a correction rather
+ * than the goal change it is.
+ *
+ * @param {Array<string|null|undefined>} [currentValues]
+ * @returns {{label: string, value: string}[]}
+ */
+export function classicMetricOptionsFor(currentValues = []) {
+  const inUse = new Set(
+    (Array.isArray(currentValues) ? currentValues : [currentValues])
+      .filter(Boolean)
+      .map(value => String(value).trim().toLowerCase())
+  );
+  const retired = LEGACY_GOAL_METRIC_OPTIONS.filter(option => inUse.has(option.value));
+  return retired.length ? [...ALL_CLASSIC_METRIC_OPTIONS, ...retired] : ALL_CLASSIC_METRIC_OPTIONS;
+}
 
 /** How a custom secondary goal fires on the storefront */
 export const CUSTOM_GOAL_TRIGGER_OPTIONS = [
@@ -94,6 +123,40 @@ export const CLASSIC_SOURCE_OPTIONS = [
   'Referral',
 ];
 
+/**
+ * The three mutually exclusive visitor pools, with the help line the audience
+ * step shows for whichever one is picked. Beside the device and source lists so
+ * the audience step and the review summary read from one source and cannot
+ * drift into calling the same segment different things.
+ */
+export const CLASSIC_SEGMENT_OPTIONS = [
+  {
+    value: 'all_visitors',
+    label: 'All visitors',
+    help: 'Everyone who matches the rest of this audience enters the experiment.',
+  },
+  {
+    value: 'new_visitors',
+    label: 'New visitors',
+    help: 'First-time visitors only. Useful when returning shoppers already know your prices.',
+  },
+  {
+    value: 'returning',
+    label: 'Returning visitors',
+    help: 'Visitors who have been here before, so a price change is one they can compare.',
+  },
+];
+
+/**
+ * An unrecognised value is returned as-is rather than folded into "All
+ * visitors": it would launch as whatever it is, and the summary before launch
+ * should not paper over that.
+ */
+export function classicSegmentLabel(value) {
+  const known = CLASSIC_SEGMENT_OPTIONS.find(option => option.value === value);
+  return known ? known.label : value || '—';
+}
+
 /** Classic step 4 defaults: all devices/sources selected, no country filter (worldwide). */
 export function normalizeClassicAudienceTargeting(state = {}) {
   const source = state && typeof state === 'object' ? state : {};
@@ -135,7 +198,11 @@ export const CLASSIC_SOURCE_TO_RULES = {
   Referral: ['referral'],
 };
 
-const PRIMARY_METRIC_SET = new Set(ALL_CLASSIC_METRIC_OPTIONS.map(o => o.value));
+// Includes the retired metric: a running experiment's stored goal must survive
+// being read back, or editing its audience would silently re-goal the test.
+const PRIMARY_METRIC_SET = new Set(
+  [...ALL_CLASSIC_METRIC_OPTIONS, ...LEGACY_GOAL_METRIC_OPTIONS].map(o => o.value)
+);
 const SECONDARY_BY_VALUE = new Map(SECONDARY_METRIC_OPTIONS.map(o => [o.value, o]));
 const SECONDARY_BY_LABEL = new Map(SECONDARY_METRIC_OPTIONS.map(o => [o.label.toLowerCase(), o]));
 
@@ -212,7 +279,7 @@ export function primaryMetricLabel(raw, { primaryCustomGoal = null } = {}) {
   const value = normalizePrimaryMetric(raw);
   return (
     ALL_CLASSIC_METRIC_OPTIONS.find(o => o.value === value)?.label ||
-    GOAL_METRIC_OPTIONS.find(o => o.value === value)?.label ||
+    LEGACY_GOAL_METRIC_OPTIONS.find(o => o.value === value)?.label ||
     value.replace(/_/g, ' ')
   );
 }

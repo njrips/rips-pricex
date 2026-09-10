@@ -7,6 +7,52 @@ import {
 } from '../productActionAvailability';
 
 describe('resolveProductActionAvailability', () => {
+  /**
+   * Applying a winner leaves the test serving that price for ever, and nothing
+   * ever turned it off -- so the product stayed out of every future test with
+   * no way for a merchant to free it.
+   */
+  describe('releasing a decided product', () => {
+    it('is offered once a stopped test is still serving its winner', () => {
+      const actions = resolveProductActionAvailability({
+        planStatus: 'applied',
+        testStatus: 'stopped',
+        decision: { state: 'applied', personalization_mode: 'personalized' },
+      });
+      expect(actions.canRelease).toBe(true);
+    });
+
+    it('is not offered while the test is still running', () => {
+      const actions = resolveProductActionAvailability({
+        planStatus: 'running',
+        testStatus: 'running',
+        decision: { personalization_mode: 'rollout' },
+      });
+      expect(actions.canRelease).toBe(false);
+      expect(actions.reasons.release).toMatch(/stop this test/i);
+    });
+
+    it('is not offered when the merchant kept the catalog price', () => {
+      // A control decision never held the product, so there is nothing to give
+      // back.
+      const actions = resolveProductActionAvailability({
+        planStatus: 'completed',
+        testStatus: 'completed',
+        decision: { state: 'applied', personalization_mode: 'control' },
+      });
+      expect(actions.canRelease).toBe(false);
+    });
+
+    it('is not offered twice, once the product has already been let go', () => {
+      const actions = resolveProductActionAvailability({
+        planStatus: 'completed',
+        testStatus: 'stopped',
+        decision: { personalization_mode: 'none' },
+      });
+      expect(actions.canRelease).toBe(false);
+    });
+  });
+
   it('allows stop while collecting on a dedicated test', () => {
     const actions = resolveProductActionAvailability({
       planStatus: 'running',

@@ -86,7 +86,12 @@ export const rpxApi = {
     api(ctx, `/smart-pricing/inbox/plans/${encodeURIComponent(planId)}`, {
       method: "DELETE",
     }),
-  checkoutReadiness: (ctx: ApiTarget) =>
+  /**
+   * `refresh` bypasses the server's readiness cache. Pass it when the merchant
+   * asked for a fresh check — a merchant who just switched the theme app embed
+   * off must not be shown the cached "enabled" for the next five minutes.
+   */
+  checkoutReadiness: (ctx: ApiTarget, { refresh = false }: { refresh?: boolean } = {}) =>
     api<{
       success?: boolean;
       ready?: boolean;
@@ -103,7 +108,7 @@ export const rpxApi = {
       checks?: unknown[];
       message?: string;
       price_surface?: Record<string, unknown>;
-    }>(ctx, "/smart-pricing/checkout-readiness"),
+    }>(ctx, `/smart-pricing/checkout-readiness${refresh ? "?refresh=1" : ""}`),
   status: (ctx: ApiTarget) =>
     api<{ entitled?: boolean; capabilities?: Record<string, boolean> }>(
       ctx,

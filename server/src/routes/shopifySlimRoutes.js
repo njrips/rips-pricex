@@ -19,15 +19,32 @@ router.get(
     const token = await accessToken(req);
     const type = String(req.query.type || 'collection');
     const first = Math.min(Number(req.query.first) || 40, 100);
+    // Passed through to Shopify's own resource query, which is how a caller
+    // asks for something narrower — `published_status:published` for a product
+    // that a storefront preview can actually load, for instance.
+    const search = String(req.query.query || '').trim();
     if (!token) {
       return res.json({ success: true, resources: [], collections: [] });
     }
     try {
+      if (type === 'product' && typeof shopifyService.listProducts === 'function') {
+        const result = await shopifyService.listProducts(
+          req.shopDomain,
+          token,
+          search,
+          first,
+          null
+        );
+        // listProducts pages, so it answers with { list, pageInfo } where
+        // listCollections answers with a bare array.
+        const products = Array.isArray(result) ? result : result?.list || [];
+        return res.json({ success: true, resources: products, products });
+      }
       if (type === 'collection' && typeof shopifyService.listCollections === 'function') {
         const collections = await shopifyService.listCollections(
           req.shopDomain,
           token,
-          '',
+          search,
           first,
           null
         );

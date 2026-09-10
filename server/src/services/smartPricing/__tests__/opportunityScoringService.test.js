@@ -15,7 +15,6 @@ describe('opportunityScoringService', () => {
     revenue_30d: 1800,
     baseline_conversion_rate: 0.01,
     baseline_ppv: 0.26,
-    has_active_price_test: false,
   };
 
   it('scores high-traffic high-margin SKUs highest', () => {
@@ -25,13 +24,25 @@ describe('opportunityScoringService', () => {
     expect(scored.tags).toEqual(expect.arrayContaining(['high_margin', 'high_traffic']));
   });
 
-  it('excludes variants with active price tests', () => {
+  it('leaves out a SKU with no price to test from', () => {
+    const scored = scoreSkuRows([
+      baseRow,
+      { ...baseRow, variant_id: 'gid://shopify/ProductVariant/2', current_price: 0 },
+    ]);
+    expect(scored).toHaveLength(1);
+    expect(scored[0].variant_id).toBe('gid://shopify/ProductVariant/1');
+  });
+
+  it('does not decide here whether another test already holds the SKU', () => {
+    // This score is cached for hours. Dropping a row at bake time meant it
+    // could not come back when the test holding it ended, so the product stayed
+    // hidden from the create wizard long after it was free. `opportunityService`
+    // resolves the holder per request instead.
     const scored = scoreSkuRows([
       baseRow,
       { ...baseRow, variant_id: 'gid://shopify/ProductVariant/2', has_active_price_test: true },
     ]);
-    expect(scored).toHaveLength(1);
-    expect(scored[0].variant_id).toBe('gid://shopify/ProductVariant/1');
+    expect(scored).toHaveLength(2);
   });
 
   it('flags low-data SKUs with conservative recommendation', () => {

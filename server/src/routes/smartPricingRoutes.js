@@ -67,8 +67,12 @@ const {
   maybeAutoQueueRound2Plan,
 } = require('../services/smartPricing/smartPricingAutoRound2Service');
 const {
+  previewResumeConflicts,
+} = require('../services/smartPricing/priceTestEnrollmentService');
+const {
   stopSmartPricingProduct,
   resumeSmartPricingProduct,
+  releaseSmartPricingProduct,
   revertSmartPricingProductPrice,
   rerunSmartPricingProduct,
   buildSmartPricingProductReport,
@@ -468,9 +472,16 @@ router.get(
   asyncHandler(async (req, res) => {
     const runningPriceTests = await countRunningPriceTests(req.shopDomain).catch(() => 0);
     const accessToken = await resolveShopifyAccessToken(req);
+    // Setup's "Check again" is a promise to go and look, so it has to be able
+    // to bypass the readiness cache. Without this, a merchant who just changed
+    // the theme app embed sees the previous answer for the whole cache window.
+    const forceRefresh = ['1', 'true', 'yes'].includes(
+      String(req.query?.refresh || '').trim().toLowerCase()
+    );
     const readiness = await resolveSmartPricingCheckoutReadiness(req.shopDomain, {
       runningPriceTests,
       accessToken,
+      forceRefresh,
     });
     return sendSuccess(res, HTTP_STATUS.OK, { readiness });
   })
@@ -706,6 +717,9 @@ router.post(
       minAmount: body.min_amount ?? body.minAmount ?? null,
       maxAmount: body.max_amount ?? body.maxAmount ?? null,
       objective: body.objective || guardrails.objective || 'revenue_per_visitor',
+      // The client has always sent use_ai; honouring it gives an operator a way
+      // to ask for the deterministic spread without unsetting the API key.
+      useAi: body.use_ai !== false && body.useAi !== false,
     });
     return sendSuccess(res, HTTP_STATUS.OK, {
       ...result,
@@ -989,8 +1003,34 @@ function sendProductActionError(res, err) {
       plan_count: err.planCount || null,
     });
   }
+  // Also a conflict, not bad input: the request is well formed, another test
+  // is simply pricing this product already.
+  if (err.code === 'PRODUCT_IN_ANOTHER_TEST') {
+    return sendError(res, HTTP_STATUS.CONFLICT, err.message, {
+      code: 'PRODUCT_IN_ANOTHER_TEST',
+      conflict: err.conflict || null,
+    });
+  }
   return sendValidationError(res, [err.message]);
 }
+
+/**
+ * Asked before Resume, so the merchant is told which products another test has
+ * taken while this one was paused -- and can start the rest -- rather than
+ * meeting one 409 per product after pressing the button.
+ */
+router.post(
+  '/tests/resume-preflight',
+  asyncHandler(async (req, res) => {
+    const body = req.body && typeof req.body === 'object' ? req.body : {};
+    const testIds = Array.isArray(body.test_ids) ? body.test_ids : [];
+    const result = await previewResumeConflicts({
+      shopDomain: req.shopDomain,
+      testIds,
+    });
+    return sendSuccess(res, HTTP_STATUS.OK, result);
+  })
+);
 
 router.post(
   '/tests/:testId/stop-product',
@@ -1016,6 +1056,28 @@ router.post(
         shopDomain: req.shopDomain,
       });
       return sendSuccess(res, HTTP_STATUS.OK, result, 'Product resumed.');
+    } catch (err) {
+      return sendProductActionError(res, err);
+    }
+  })
+);
+
+router.post(
+  '/tests/:testId/release-product',
+  asyncHandler(async (req, res) => {
+    try {
+      const result = await releaseSmartPricingProduct({
+        testId: req.params.testId,
+        shopDomain: req.shopDomain,
+      });
+      return sendSuccess(
+        res,
+        HTTP_STATUS.OK,
+        result,
+        result.released
+          ? 'Product released. It can be used in a new price test.'
+          : 'This product was already free to use in a new price test.'
+      );
     } catch (err) {
       return sendProductActionError(res, err);
     }

@@ -12,6 +12,7 @@ import { persistInboxPlansNow } from '../smartPricingInboxPersistence';
 import { ButtonIconMore } from './classicIcons';
 import { enrichInboxPlansForLaunch, rollupExperimentStatus } from './classicExperimentHelpers';
 import { appendActivityToPlans, createActivityEntry } from './classicActivity';
+import { planResume, resumeConflictListMessage } from './resumeConflicts';
 import {
   buildClassicWizardResumePath,
   collectExperimentTestIds,
@@ -212,6 +213,20 @@ export default function ClassicExperimentRowActions({
       const testIds = collectExperimentTestIds(experiment?.plans);
       if (!testIds.length) {
         throw new Error('No linked test to resume.');
+      }
+      // While this experiment sat paused its products were free, and the
+      // create wizard would have offered them, so some may now belong to a
+      // live test. Resuming part of an experiment is the merchant's call to
+      // make, and this row has nowhere to ask -- so send them to the page that
+      // does rather than starting some products and quietly skipping others.
+      const preflight = await apiPost('/smart-pricing/tests/resume-preflight', {
+        test_ids: testIds,
+      })
+        .then(res => res?.data || res || {})
+        .catch(() => null);
+      const resumePlan = planResume(preflight, testIds);
+      if (resumePlan.action !== 'resume_all') {
+        throw new Error(resumeConflictListMessage(resumePlan));
       }
       await Promise.all(
         testIds.map(id =>

@@ -11,10 +11,6 @@ const {
   extractGidNumericId,
 } = require('./smartPricingCatalogUtils');
 const {
-  getActivePriceTestVariantIds,
-  variantHasActivePriceTest,
-} = require('./activePriceTestVariantsService');
-const {
   getShopSmartPricingGuardrails,
   marginPercentFromDefaultCogs,
 } = require('./smartPricingGuardrailsService');
@@ -27,6 +23,17 @@ const {
   enrichSkuRowsWithTrafficCrossCheck,
   summarizeTrafficCrossChecks,
 } = require('./catalogAnalyticsCrossCheckService');
+
+/**
+ * How much of the catalog Smart Pricing loads in one snapshot.
+ *
+ * One experiment covers up to 250 products, so stopping at 120 meant a shop
+ * could not fill even a single experiment from its own catalog, and the rest
+ * of the products were simply invisible -- not filtered with a reason, just
+ * never fetched. Anything past this is reachable by searching, which queries
+ * Shopify directly rather than this snapshot.
+ */
+const DEFAULT_MAX_CATALOG_PRODUCTS = 250;
 
 const DEFAULT_ASSUMED_MARGIN_PERCENT = 45;
 const DEFAULT_CONVERSION_RATE = 0.025;
@@ -108,10 +115,16 @@ function prioritizeSkuRows(rows = []) {
   });
 }
 
+/**
+ * Whether a product is already under test is deliberately NOT stamped here.
+ * This snapshot is cached for twelve hours, and baking the answer in meant the
+ * catalog lied in both directions: a product stayed selectable for hours after
+ * a test claimed it, and stayed hidden for hours after its test ended.
+ * `opportunityService` resolves it per request instead.
+ */
 function flattenCatalogRows(
   products = [],
   orderMetrics = new Map(),
-  activePriceTests = new Set(),
   {
     shopConversionRate = DEFAULT_CONVERSION_RATE,
     defaultCogsPercent = 55,
@@ -183,10 +196,6 @@ function flattenCatalogRows(
           variant.inventoryQuantity !== null && variant.inventoryQuantity !== undefined
             ? Number(variant.inventoryQuantity)
             : null,
-        has_active_price_test: variantHasActivePriceTest(activePriceTests, {
-          variantId,
-          productId,
-        }),
         product_type: product.productType || '',
         _default_cogs_percent: defaultCogsPercent,
       });
@@ -234,7 +243,7 @@ function buildProductQueries({ focusCollectionIds = [], productSearch = '' } = {
 }
 
 async function fetchCatalogProducts(shopDomain, accessToken, options = {}) {
-  const maxProducts = Number(options.maxProducts) || 120;
+  const maxProducts = Number(options.maxProducts) || DEFAULT_MAX_CATALOG_PRODUCTS;
   const queries = buildProductQueries({
     focusCollectionIds: options.focusCollectionIds,
     productSearch: options.productSearch,
@@ -263,11 +272,15 @@ async function fetchCatalogProducts(shopDomain, accessToken, options = {}) {
   return {
     products: Array.from(productMap.values()).slice(0, maxProducts),
     currency,
+    // Hitting the cap means the shop has more products than we loaded. Saying
+    // so lets the picker admit it is showing part of the catalog instead of
+    // presenting a truncated list as the whole thing.
+    truncated: productMap.size >= maxProducts,
   };
 }
 
 async function buildCatalogMetricsSnapshot(shopDomain, accessToken, options = {}) {
-  const maxProducts = Number(options.maxProducts) || 120;
+  const maxProducts = Number(options.maxProducts) || DEFAULT_MAX_CATALOG_PRODUCTS;
   const guardrails =
     options.guardrails || (await getShopSmartPricingGuardrails(shopDomain).catch(() => null));
 
@@ -275,7 +288,7 @@ async function buildCatalogMetricsSnapshot(shopDomain, accessToken, options = {}
     options.focusCollectionIds ||
     (Array.isArray(guardrails?.focus_collection_ids) ? guardrails.focus_collection_ids : []);
 
-  const [catalog, orderMetrics, activePriceTests, viewMetrics, cogsStore] = await Promise.all([
+  const [catalog, orderMetrics, viewMetrics, cogsStore] = await Promise.all([
     fetchCatalogProducts(shopDomain, accessToken, {
       maxProducts,
       focusCollectionIds,
@@ -287,7 +300,6 @@ async function buildCatalogMetricsSnapshot(shopDomain, accessToken, options = {}
         maxPages: options.maxOrderPages || 16,
       })
       .catch(() => new Map()),
-    getActivePriceTestVariantIds(shopDomain).catch(() => new Set()),
     loadMeasuredViewMetricsMap(shopDomain, { daysBack: options.daysBack || 60 }),
     getSkuCogsOverrides(shopDomain).catch(() => ({ overrides: {} })),
   ]);
@@ -309,7 +321,7 @@ async function buildCatalogMetricsSnapshot(shopDomain, accessToken, options = {}
   }
 
   const skuRows = enrichSkuRowsWithTrafficCrossCheck(
-    flattenCatalogRows(productsWithCurrency, orderMetrics, activePriceTests, {
+    flattenCatalogRows(productsWithCurrency, orderMetrics, {
       shopConversionRate,
       defaultCogsPercent: guardrails?.default_cogs_percent ?? 55,
       viewMetrics,
@@ -330,6 +342,8 @@ async function buildCatalogMetricsSnapshot(shopDomain, accessToken, options = {}
     shop_domain: shopDomain,
     currency: catalog.currency || 'USD',
     catalog_product_count: productsWithCurrency.length,
+    catalog_truncated: Boolean(catalog.truncated),
+    catalog_max_products: maxProducts,
     sku_count: skuRows.length,
     order_metrics_variant_count: orderMetrics.size,
     measured_view_sku_count: measuredViewSkuCount,
@@ -351,6 +365,7 @@ async function buildCatalogMetricsSnapshot(shopDomain, accessToken, options = {}
 }
 
 module.exports = {
+  DEFAULT_MAX_CATALOG_PRODUCTS,
   buildCatalogMetricsSnapshot,
   estimateMarginPercent,
   estimateTrafficMetrics,

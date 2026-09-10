@@ -5,6 +5,7 @@ import {
   normalizeAiPriceBand,
   capAiBandToShopMax,
   describeAiBandCap,
+  describeAiSuggestionSource,
   describeGuardrailLimitedSuggestions,
   resolveMaxPriceChangeRaise,
   resolveRaiseForAttempt,
@@ -16,8 +17,78 @@ import {
   getAiSuggestCopy,
   hasAnyTestPriceChange,
   hasProductSelection,
+  limitSelectionToProducts,
   resolvePricingRows,
 } from '../productsStepReadiness';
+
+describe('limitSelectionToProducts', () => {
+  /** `count` products, each carrying `variantsEach` variants. */
+  function catalog(count, variantsEach) {
+    const rows = [];
+    for (let p = 0; p < count; p += 1) {
+      for (let v = 0; v < variantsEach; v += 1) {
+        rows.push({ product_id: `p${p}`, variant_id: `p${p}v${v}`, title: `Product ${p}` });
+      }
+    }
+    return rows;
+  }
+
+  it('counts the cap in products, not in variant ids', () => {
+    // The bug behind "Select all doesn't select all": slicing the id list at
+    // 100 stopped a three-variant catalog at 33 of its 60 products.
+    const rows = catalog(60, 3);
+    const kept = limitSelectionToProducts(
+      rows,
+      rows.map(r => r.variant_id),
+      100
+    );
+
+    expect(kept).toHaveLength(180);
+    expect(new Set(kept.map(id => id.split('v')[0])).size).toBe(60);
+  });
+
+  it('never leaves a product half selected at the cap', () => {
+    const rows = catalog(10, 4);
+    const kept = limitSelectionToProducts(
+      rows,
+      rows.map(r => r.variant_id),
+      3
+    );
+
+    expect(new Set(kept.map(id => id.split('v')[0])).size).toBe(3);
+    expect(kept).toHaveLength(12);
+  });
+
+  it('keeps every variant of a product already inside the cap', () => {
+    const rows = catalog(2, 3);
+    expect(limitSelectionToProducts(rows, ['p0v0', 'p1v0', 'p0v2'], 2)).toEqual([
+      'p0v0',
+      'p1v0',
+      'p0v2',
+    ]);
+  });
+
+  it('drops duplicates and blanks without spending cap on them', () => {
+    const rows = catalog(2, 1);
+    expect(limitSelectionToProducts(rows, ['p0v0', 'p0v0', '', null, 'p1v0'], 2)).toEqual([
+      'p0v0',
+      'p1v0',
+    ]);
+  });
+
+  it('treats an id the catalog does not know as its own product', () => {
+    // A resumed draft can name a variant that has since left the catalog, and
+    // dropping it would quietly shrink the merchant's selection on reload.
+    const rows = catalog(1, 1);
+    expect(limitSelectionToProducts(rows, ['ghost', 'p0v0'], 2)).toEqual(['ghost', 'p0v0']);
+    expect(limitSelectionToProducts(rows, ['ghost', 'p0v0'], 1)).toEqual(['ghost']);
+  });
+
+  it('survives an empty catalog and an empty request', () => {
+    expect(limitSelectionToProducts([], [], 100)).toEqual([]);
+    expect(limitSelectionToProducts(undefined, undefined, 100)).toEqual([]);
+  });
+});
 
 const variations = [
   { id: 'control', name: 'Control' },
@@ -337,5 +408,35 @@ describe('productsStepReadiness', () => {
         summary: 'AI price suggestions applied.',
       }).body
     ).toMatch(/Band updated/);
+  });
+
+  describe('describeAiSuggestionSource', () => {
+    it('stays quiet when the prices really did come from the model', () => {
+      expect(describeAiSuggestionSource({ source: 'openai' })).toBe('');
+    });
+
+    it('says a dollar band is spread by Priceify, not by AI', () => {
+      expect(
+        describeAiSuggestionSource({ source: 'deterministic', skippedReason: 'amount_band' })
+      ).toMatch(/dollar band/i);
+    });
+
+    it('says when AI was unavailable or switched off', () => {
+      expect(
+        describeAiSuggestionSource({ source: 'deterministic', skippedReason: 'unavailable' })
+      ).toMatch(/unavailable/i);
+      expect(
+        describeAiSuggestionSource({
+          source: 'deterministic',
+          skippedReason: 'disabled_by_request',
+        })
+      ).toMatch(/turned off/i);
+    });
+
+    it('says when the model answered but the answer was unusable', () => {
+      expect(describeAiSuggestionSource({ source: 'deterministic' })).toMatch(
+        /did not return usable prices/i
+      );
+    });
   });
 });

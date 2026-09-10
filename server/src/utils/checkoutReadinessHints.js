@@ -2,7 +2,9 @@
  * Actionable hints appended to checkout readiness messages.
  */
 
-const SETTINGS_INSTALLATION_TAB = 'Settings → Installation';
+// Install and ensure actions all live on Setup now; Settings no longer has
+// an Installation tab to send a merchant to.
+const SETUP_PAGE = 'Setup';
 const SETTINGS_PRICE_SURFACES_TAB = 'Settings → Price surfaces';
 
 function withHint(message, hint) {
@@ -23,11 +25,8 @@ function enrichCheckoutReadinessCheck(check = {}) {
   let actionPath = null;
 
   if (id === 'pricing_direct_price_override_ready' && check.ok === false) {
-    actionPath = `${SETTINGS_INSTALLATION_TAB} → Cart transform → Ensure`;
-    message = withHint(
-      message,
-      `Fix in Priceify: open ${actionPath}, then re-run Setup or Review.`
-    );
+    actionPath = `${SETUP_PAGE} → Checkout functions → Check and install`;
+    message = withHint(message, `Fix in Priceify: open ${actionPath}, then re-check readiness.`);
   } else if (id === 'pricing_assignment_signing_ready' && check.ok === false) {
     actionPath =
       'Server env: RIPX_PRICE_ASSIGNMENT_SIGNATURE_SECRET or RIPX_CHECKOUT_PRICE_SECRET';
@@ -48,8 +47,8 @@ function enrichCheckoutReadinessCheck(check = {}) {
     actionPath = 'Shopify Admin → Apps → Priceify (re-open the app to refresh the offline token)';
     message = withHint(message, `Reconnect via ${actionPath}.`);
   } else if (id === 'storefront_runtime_ready' && check.ok === false) {
-    actionPath = `${SETTINGS_INSTALLATION_TAB} → theme app embed and app proxy`;
-    message = withHint(message, `Verify storefront setup under ${actionPath} or open Setup.`);
+    actionPath = `${SETUP_PAGE} → Theme app embed`;
+    message = withHint(message, `Verify storefront setup under ${actionPath}.`);
   } else if (id === 'shopify_oauth_health' && check.ok === false) {
     actionPath = 'Shopify Admin → Apps → Priceify (open in a fresh session)';
     message = withHint(message, `Reconnect the store via ${actionPath}.`);
@@ -64,6 +63,6 @@ function enrichCheckoutReadinessCheck(check = {}) {
 
 module.exports = {
   enrichCheckoutReadinessCheck,
-  SETTINGS_INSTALLATION_TAB,
   SETTINGS_PRICE_SURFACES_TAB,
+  SETUP_PAGE,
 };

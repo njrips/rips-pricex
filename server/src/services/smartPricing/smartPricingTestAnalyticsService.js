@@ -469,6 +469,11 @@ async function buildSmartPricingTestAnalytics(shopDomain, testId) {
       // An auto-apply that just landed must read as applied, not ready again.
       autoApplied:
         autoWinner?.enforced === true && autoWinner?.action !== 'stop_winner_ready',
+      // A partial write is not an apply. Reported separately so the verdict can
+      // stay actionable instead of claiming the price is live everywhere.
+      autoPublishIncomplete:
+        autoWinner?.action === 'apply_variation' &&
+        Number(autoWinner?.publish_error_count) > 0,
       analytics: { significance, arms: armRows, revenue_guardrail: revenueGuardrail },
       plan,
       guardrails: shopGuardrails,

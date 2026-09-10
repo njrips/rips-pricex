@@ -92,6 +92,75 @@ async function acquireJobLease(name, ttlSeconds = DEFAULT_LEASE_SECONDS, options
   }
 }
 
+/**
+ * Pushes the expiry out while the holder is still working.
+ *
+ * The TTL has to be short or a crashed process blocks the job until it lapses,
+ * but the guarded work is not short: writing a winning price walks a catalogue
+ * of up to 2000 variants against Shopify's rate limit. Without this the lease
+ * lapses mid-write, a second caller acquires it, and two writers race over the
+ * same catalogue — the exact outcome the lease exists to prevent.
+ *
+ * @returns {Promise<boolean>} false when the lease has already been taken over.
+ */
+async function renewJobLease(name) {
+  const key = leaseKey(name);
+  if (!key || key === 'job_lease.') return true;
+  try {
+    const result = await query(
+      `UPDATE key_value_store
+          SET updated_at = NOW()
+        WHERE key = $1 AND value = $2
+        RETURNING key`,
+      [key, HOLDER]
+    );
+    return (result.rowCount || 0) > 0;
+  } catch (error) {
+    // Treated as still held: a storage hiccup is not evidence of a takeover,
+    // and the caller is already mid-write with nothing useful to do about it.
+    logger.warn('could not renew job lease', { job: name, message: error.message });
+    return true;
+  }
+}
+
+/**
+ * Renews `name` in the background until the returned function is called.
+ *
+ * @param {string} name
+ * @param {number} [ttlSeconds] - Must match the TTL the lease was taken with.
+ * @returns {() => void} Stops renewing. Safe to call more than once.
+ */
+function startJobLeaseHeartbeat(name, ttlSeconds = DEFAULT_LEASE_SECONDS) {
+  const ttl =
+    Number.isFinite(Number(ttlSeconds)) && Number(ttlSeconds) > 0
+      ? Math.floor(Number(ttlSeconds))
+      : DEFAULT_LEASE_SECONDS;
+  // A third of the TTL, so two beats can fail before the lease is at risk.
+  const periodMs = Math.max(1000, Math.floor((ttl * 1000) / 3));
+  let stopped = false;
+
+  const timer = setInterval(() => {
+    if (stopped) return;
+    renewJobLease(name)
+      .then(held => {
+        if (held || stopped) return;
+        // Someone else now owns it, so this process is no longer the only
+        // writer. Nothing here can undo work already done; surface it.
+        logger.error('job lease was taken over while its work was still running', {
+          job: name,
+        });
+      })
+      .catch(() => null);
+  }, periodMs);
+  // Never a reason to keep the process alive for a heartbeat.
+  if (typeof timer.unref === 'function') timer.unref();
+
+  return function stopJobLeaseHeartbeat() {
+    stopped = true;
+    clearInterval(timer);
+  };
+}
+
 /** Frees the lease, but only if this process still holds it. */
 async function releaseJobLease(name) {
   const key = leaseKey(name);
@@ -115,9 +184,11 @@ async function withJobLease(name, ttlSeconds, fn, options = {}) {
     logger.info('skipping job, previous run still in progress', { job: name });
     return { ran: false };
   }
+  const stopHeartbeat = startJobLeaseHeartbeat(name, ttlSeconds);
   try {
     return { ran: true, result: await fn() };
   } finally {
+    stopHeartbeat();
     await releaseJobLease(name);
   }
 }
@@ -127,6 +198,8 @@ const ROLLOUT_LEASE_SECONDS = 120;
 
 module.exports = {
   acquireJobLease,
+  renewJobLease,
+  startJobLeaseHeartbeat,
   releaseJobLease,
   withJobLease,
   productRolloutLeaseName,

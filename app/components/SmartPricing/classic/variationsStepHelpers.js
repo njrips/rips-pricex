@@ -2,6 +2,14 @@ import { isOfferExperimentType } from './offerSelection';
 
 const LETTERS = 'ABCDEFGH';
 
+/**
+ * Control opens holding everything.
+ *
+ * A pre-filled 50/50 is a decision the merchant never made but would ship with,
+ * and the safe reading of "I have not set this yet" is that no shopper sees a
+ * test price. Starting at 100/0 makes handing traffic to a challenger a
+ * deliberate act; Split equally puts the even split back in one click.
+ */
 export function createDefaultVariations() {
   return [
     {
@@ -10,7 +18,7 @@ export function createDefaultVariations() {
       role: 'Control',
       name: 'Control',
       description: 'Current price',
-      traffic: 50,
+      traffic: 100,
     },
     {
       // Letters are reserved for challengers; Control uses a baseline symbol in the UI.
@@ -19,7 +27,7 @@ export function createDefaultVariations() {
       role: 'Variation A',
       name: 'Variation A',
       description: '',
-      traffic: 50,
+      traffic: 0,
     },
   ];
 }
@@ -39,16 +47,33 @@ export function nextChallengerLetter(variations = []) {
   return LETTERS[challengerCount] || String(challengerCount + 1);
 }
 
-export function normalizeTraffic(variations, index, nextTraffic) {
-  const clamped = Math.max(0, Math.min(100, Number(nextTraffic) || 0));
-  const others = variations.filter((_, i) => i !== index);
-  const remaining = Math.max(0, 100 - clamped);
-  const otherSum = others.reduce((sum, row) => sum + (Number(row.traffic) || 0), 0) || 1;
-  return variations.map((row, i) => {
-    if (i === index) return { ...row, traffic: clamped };
-    const share = ((Number(row.traffic) || 0) / otherSum) * remaining;
-    return { ...row, traffic: Math.round(share) };
-  });
+function rowTraffic(row) {
+  const value = Number(row?.traffic);
+  return Number.isFinite(value) && value > 0 ? value : 0;
+}
+
+/** What is left for one row once every other row has taken its share. */
+export function variationTrafficHeadroom(variations, index) {
+  const rows = Array.isArray(variations) ? variations : [];
+  const others = rows.reduce((sum, row, i) => (i === index ? sum : sum + rowTraffic(row)), 0);
+  return Math.max(0, 100 - others);
+}
+
+/**
+ * Sets one row's share and leaves every other row alone.
+ *
+ * This used to rescale the other rows to keep the total at 100, which meant
+ * nudging Control silently rewrote every challenger — a merchant who had just
+ * typed 20 into Variation B watched it become 18 for reasons the screen never
+ * explained. Editing one number now changes one number. The total is instead
+ * held at or below 100 by capping each row at what the others leave free, so
+ * the only state the merchant has to resolve is an under-allocated split.
+ */
+export function setVariationTraffic(variations, index, nextTraffic) {
+  const rows = Array.isArray(variations) ? variations : [];
+  const requested = Math.max(0, Math.min(100, Math.round(Number(nextTraffic) || 0)));
+  const capped = Math.min(requested, variationTrafficHeadroom(rows, index));
+  return rows.map((row, i) => (i === index ? { ...row, traffic: capped } : row));
 }
 
 export function splitEvenly(variations) {
@@ -63,7 +88,81 @@ export function splitEvenly(variations) {
 }
 
 export function trafficTotal(variations) {
-  return variations.reduce((sum, row) => sum + (Number(row.traffic) || 0), 0);
+  return (Array.isArray(variations) ? variations : []).reduce(
+    (sum, row) => sum + rowTraffic(row),
+    0
+  );
+}
+
+/** Positive while traffic is still unassigned, negative if a draft is over. */
+export function trafficRemaining(variations) {
+  return 100 - trafficTotal(variations);
+}
+
+/**
+ * Where the thumb sits along the track, as a percentage of the track.
+ *
+ * The track is painted with a gradient that has to line up with the thumb, and
+ * the thumb's position is a fraction of the range rather than of 100. On a
+ * slider running 5–100 that difference is the whole low end: at 5 the thumb is
+ * hard left while the paint claimed 5%, so the fill sat ahead of the thumb
+ * everywhere below the midpoint.
+ */
+export function sliderFillPercent(value, min = 0, max = 100) {
+  const span = Number(max) - Number(min);
+  if (!Number.isFinite(span) || span <= 0) return 0;
+  const offset = (Number(value) || 0) - Number(min);
+  return Math.max(0, Math.min(100, (offset / span) * 100));
+}
+
+/**
+ * Whether the split is finished, and if not, what the merchant has to do.
+ *
+ * Returned rather than thrown at save time so Continue can be disabled with the
+ * reason on screen, instead of letting the merchant press it and answering with
+ * a toast after the fact.
+ */
+export function getVariationsStepContinueState({ variations = [] } = {}) {
+  const rows = Array.isArray(variations) ? variations : [];
+  if (rows.length < 2) {
+    return {
+      disabled: true,
+      reason: 'too_few_arms',
+      hint: 'An experiment needs a control and at least one variation.',
+    };
+  }
+
+  const remaining = trafficRemaining(rows);
+  if (remaining > 0) {
+    return {
+      disabled: true,
+      reason: 'under_allocated',
+      hint: `${remaining}% of traffic is unassigned. Give it to a variation, or use Split equally.`,
+    };
+  }
+  // Not reachable from the controls, which cap each row at the free remainder,
+  // but a draft saved before that cap existed can still restore over 100.
+  if (remaining < 0) {
+    return {
+      disabled: true,
+      reason: 'over_allocated',
+      hint: `The split adds up to ${trafficTotal(rows)}%. Take ${Math.abs(remaining)}% back off a variation.`,
+    };
+  }
+
+  const starved = rows.filter(row => rowTraffic(row) <= 0);
+  if (starved.length) {
+    const only = starved.length === 1 ? starved[0] : null;
+    return {
+      disabled: true,
+      reason: 'zero_traffic_arm',
+      hint: only
+        ? `${only.name || only.role || 'One variation'} would get no traffic. Give it a share, or remove it.`
+        : 'Every variation needs a share of traffic. Give each one a percentage, or remove it.',
+    };
+  }
+
+  return { disabled: false, reason: '', hint: '' };
 }
 
 export function variationsFromPlanArms(arms = [], experimentType = 'price_test') {

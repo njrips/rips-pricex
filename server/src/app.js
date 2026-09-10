@@ -96,21 +96,23 @@ try {
 let smartPricingRoutes = null;
 try {
   smartPricingRoutes = require('./routes/smartPricingRoutes');
-  app.use('/api/smart-pricing', requireShopifySession, (req, res, next) => {
-    // Read endpoints allowed without entitlement; mutations gated below
-    const openGet =
-      req.method === 'GET' &&
-      (req.path === '/status' ||
-        req.path === '/inbox/plans' ||
-        req.path === '/inbox/summary' ||
-        req.path === '/checkout-readiness' ||
-        req.path === '/guardrails' ||
-        req.path.startsWith('/tests/'));
-    if (openGet) return next();
-    if (req.method === 'GET') return next();
-    return requireEntitlement('create')(req, res, next);
-  });
-  app.use('/api/smart-pricing', requireShopifySession, smartPricingRoutes);
+  app.use(
+    '/api/smart-pricing',
+    requireShopifySession,
+    (req, res, next) => {
+      // Every read is open to any installed shop; only writes need a plan. An
+      // unpaid shop can still see what the app found, which is what makes the
+      // upgrade prompt mean anything.
+      //
+      // This used to carry a per-path allowlist as well, directly above a
+      // blanket `return next()` for GET that made the list unreachable. The
+      // list is gone rather than the blanket, because open reads are the
+      // behaviour the app has shipped and the client relies on.
+      if (req.method === 'GET') return next();
+      return requireEntitlement('create')(req, res, next);
+    },
+    smartPricingRoutes
+  );
   logger.info('Smart Pricing routes mounted');
 } catch (err) {
   logger.error('Failed to mount smartPricingRoutes — using inbox fallback', {

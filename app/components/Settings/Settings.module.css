@@ -104,7 +104,7 @@
 
 [data-theme='dark'] .settingsPage :global(.Polaris-Badge) {
   background: var(--surface-glass);
-  border: 1px solid var(--text-tertiary);
+  border: 1px solid var(--surface-muted);
   color: var(--text-primary);
   box-shadow:
     0 0 0 1px var(--surface-glass-subtle) inset,
@@ -769,7 +769,7 @@
 }
 
 .settingsMetricCellNeutral {
-  border-color: var(--text-tertiary);
+  border-color: var(--surface-muted);
 }
 
 .settingsMetricCellInteractive {
@@ -1540,7 +1540,7 @@
   gap: 0.75rem 1rem;
   padding-top: 0.65rem;
   margin-top: 0.55rem;
-  border-top: 1px solid var(--text-tertiary);
+  border-top: 1px solid var(--surface-muted);
 }
 
 .technicalHealthChecks {
@@ -1666,7 +1666,7 @@
 
 .technicalHealthChecksBody {
   padding: 0.75rem 0.85rem 0.85rem;
-  border-top: 1px solid var(--text-tertiary);
+  border-top: 1px solid var(--surface-muted);
 }
 
 .technicalHealthStatGrid {
@@ -1683,7 +1683,7 @@
   padding: 0.5rem 0.6rem;
   border-radius: 10px;
   background: rgba(255, 255, 255, 0.7);
-  border: 1px solid var(--text-tertiary);
+  border: 1px solid var(--surface-muted);
 }
 
 [data-theme='dark'] .technicalHealthStat {
@@ -1735,7 +1735,7 @@
 .technicalHealthItem {
   padding: 0.65rem 0.75rem;
   border-radius: 10px;
-  border: 1px solid var(--text-tertiary);
+  border: 1px solid var(--surface-muted);
   background: rgba(255, 255, 255, 0.55);
 }
 
@@ -2680,7 +2680,7 @@
 }
 
 .settingsPanelCard {
-  --settings-card-header-border: var(--text-tertiary);
+  --settings-card-header-border: var(--surface-muted);
   min-width: 0;
   height: 100%;
   border-radius: 16px;
@@ -2732,7 +2732,7 @@
   box-shadow:
     inset 0 1px 0 rgba(var(--accent-primary-rgb), 0.08),
     0 2px 12px rgba(0, 0, 0, 0.22);
-  --settings-card-header-border: var(--text-tertiary);
+  --settings-card-header-border: var(--surface-muted);
 }
 
 .settingsPanelCard:focus-within {

@@ -17,6 +17,17 @@ const {
   normalizeCollectionGid,
 } = require('../services/smartPricing/smartPricingCatalogUtils');
 
+/**
+ * Today's date in UTC, as SQL.
+ *
+ * The tracker stamps `day` using `new Date().toISOString().slice(0, 10)`, which
+ * is always a UTC calendar date. `CURRENT_DATE` is the date in the database
+ * session's timezone, and nothing sets that, so unless it happens to be UTC the
+ * two disagree for part of every day and the 30/60-day windows cut below land a
+ * day out from the rows they are cutting. Both ends now agree by construction.
+ */
+const UTC_TODAY = "(NOW() AT TIME ZONE 'UTC')::date";
+
 function normalizeShopDomain(value) {
   return String(value || '')
     .trim()
@@ -33,22 +44,22 @@ async function fetchCatalogProductViewMetrics(shopDomain, { daysBack = 60 } = {}
     `WITH views AS (
        SELECT
          product_id,
-         SUM(CASE WHEN day >= CURRENT_DATE - INTERVAL '30 days' THEN views ELSE 0 END)::bigint AS views_30d,
-         SUM(CASE WHEN day >= CURRENT_DATE - INTERVAL '60 days' THEN views ELSE 0 END)::bigint AS views_60d,
+         SUM(CASE WHEN day >= ${UTC_TODAY} - INTERVAL '30 days' THEN views ELSE 0 END)::bigint AS views_30d,
+         SUM(CASE WHEN day >= ${UTC_TODAY} - INTERVAL '60 days' THEN views ELSE 0 END)::bigint AS views_60d,
          MAX(day) AS last_view_at
        FROM catalog_product_view_daily
        WHERE shop_domain = $1
-         AND day >= CURRENT_DATE - ($2::int * INTERVAL '1 day')
+         AND day >= ${UTC_TODAY} - ($2::int * INTERVAL '1 day')
        GROUP BY product_id
      ),
      visitors AS (
        SELECT
          product_id,
-         COUNT(*) FILTER (WHERE day >= CURRENT_DATE - INTERVAL '30 days')::bigint AS visitors_30d,
-         COUNT(*) FILTER (WHERE day >= CURRENT_DATE - INTERVAL '60 days')::bigint AS visitors_60d
+         COUNT(*) FILTER (WHERE day >= ${UTC_TODAY} - INTERVAL '30 days')::bigint AS visitors_30d,
+         COUNT(*) FILTER (WHERE day >= ${UTC_TODAY} - INTERVAL '60 days')::bigint AS visitors_60d
        FROM catalog_product_view_sessions
        WHERE shop_domain = $1
-         AND day >= CURRENT_DATE - ($2::int * INTERVAL '1 day')
+         AND day >= ${UTC_TODAY} - ($2::int * INTERVAL '1 day')
        GROUP BY product_id
      )
      SELECT v.product_id, v.views_30d, v.views_60d, v.last_view_at,
@@ -103,12 +114,12 @@ async function fetchCatalogCollectionViewMetrics(
   const result = await query(
     `SELECT
        collection_id,
-       SUM(CASE WHEN day >= CURRENT_DATE - INTERVAL '30 days' THEN views ELSE 0 END)::bigint AS views_30d,
-       SUM(CASE WHEN day >= CURRENT_DATE - INTERVAL '60 days' THEN views ELSE 0 END)::bigint AS views_60d,
+       SUM(CASE WHEN day >= ${UTC_TODAY} - INTERVAL '30 days' THEN views ELSE 0 END)::bigint AS views_30d,
+       SUM(CASE WHEN day >= ${UTC_TODAY} - INTERVAL '60 days' THEN views ELSE 0 END)::bigint AS views_60d,
        MAX(day) AS last_view_at
      FROM catalog_collection_view_daily
      WHERE shop_domain = $1
-       AND day >= CURRENT_DATE - ($2::int * INTERVAL '1 day')${collectionFilter}
+       AND day >= ${UTC_TODAY} - ($2::int * INTERVAL '1 day')${collectionFilter}
      GROUP BY collection_id`,
     params
   );

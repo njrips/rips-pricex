@@ -58,6 +58,7 @@ const REQUIRED_VARS = [
   'RIPX_COMPARE_AT_SEL',
   'RIPX_AMOUNT_TEXT_RE',
   'RIPX_CART_UI_SELECTOR',
+  'RIPX_CURRENCY_MINOR_UNITS',
 ];
 
 /**
@@ -71,6 +72,8 @@ const REQUIRED_FUNCTIONS = [
   'getListingPriceSurfaceKeys',
   'getConfiguredShopPriceSurfaceMappings',
   'getConfiguredTestPriceSurfaceMappings',
+  'ripxPriceSurfacePagePath',
+  'ripxUrlMappingMatchesPage',
   'resolveConfiguredPriceSurfaceSelectors',
   'appendConfiguredRegistrySelectors',
   'appendConfiguredRegistrySelectorsForSurfaces',
@@ -80,6 +83,7 @@ const REQUIRED_FUNCTIONS = [
   'normalizeListingProductIdCandidate',
   'collectListingProductIdCandidates',
   'parsePriceFromDisplay',
+  'ripxCurrencyDecimals',
   'isRipxCompareAtPriceNode',
   'containsRipxCompareAtNode',
   'findRipxAmountDescendant',
@@ -107,6 +111,9 @@ const REQUIRED_FUNCTIONS = [
  * @param {string[]} names functions to lift out of the script
  * @param {object} [options]
  * @param {object[]} [options.shopMappings] CONFIG.priceSurfaceRegistry.shopMappings
+ * @param {object[]} [options.activeTests] CONFIG.activeTests. Name
+ *   `getActiveTestById` and `getExcludedProductIdsForTest` in `names` to lift
+ *   the real implementations over the stand-ins below.
  * @returns {Record<string, Function> & { paintEvents: object[], diagnostics: object[] }}
  */
 export function loadStorefrontFunctions(names, options = {}) {
@@ -178,7 +185,12 @@ export function loadStorefrontFunctions(names, options = {}) {
   );
 
   const api = factory(
-    { priceSurfaceRegistry: { shopMappings: options.shopMappings || [] } },
+    {
+      priceSurfaceRegistry: { shopMappings: options.shopMappings || [] },
+      // Read by the real `getActiveTestById` when a test asks for it by name,
+      // which is how exclusion handling becomes reachable.
+      activeTests: options.activeTests || [],
+    },
     paintEvents,
     diagnostics
   );

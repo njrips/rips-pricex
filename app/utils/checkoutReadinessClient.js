@@ -78,6 +78,31 @@ export function priceSurfaceSummary(readiness) {
 }
 
 /**
+ * True only when we positively know the shop has mapped no price selectors.
+ *
+ * A zero count on its own does not mean that. When the lookup itself fails the
+ * server still answers `configured_shop: 0`, and telling a merchant who has
+ * mapped their theme that they have mapped nothing would send them to fix
+ * something that is not broken. The two cases are distinguishable by status:
+ * 'blocked' is only ever reached with no configured rows, while a failed lookup
+ * comes back as 'needs_attention'. Requiring both agrees with either reading.
+ *
+ * @param {Record<string, unknown> | null | undefined} readiness
+ * @returns {boolean}
+ */
+export function priceSurfacesUnmapped(readiness) {
+  const surface =
+    readiness?.price_surface && typeof readiness.price_surface === 'object'
+      ? /** @type {Record<string, unknown>} */ (readiness.price_surface)
+      : null;
+  if (!surface) return false;
+  const status = String(surface.status || '')
+    .trim()
+    .toLowerCase();
+  return status === 'blocked' && priceSurfaceSummary(readiness).configured === 0;
+}
+
+/**
  * @param {Record<string, unknown> | null | undefined} readiness
  * @returns {boolean}
  */
@@ -158,8 +183,10 @@ export function describeSmartPricingLaunchReadiness(readiness) {
 }
 
 /**
- * Theme embed enablement is not reported by checkout-readiness yet.
- * Prefer Neutral/Unknown in UI — never invent OK from deep-link presence alone.
+ * Checkout-readiness reports this from the live theme's settings_data.json.
+ * 'disabled' is a real answer there, not a missing one: Shopify writes the embed
+ * block only once it has been enabled, so an absent block means never enabled.
+ * Only a failed lookup is 'unknown' — never invent OK from deep-link presence.
  * @param {Record<string, unknown> | null | undefined} readiness
  * @returns {'enabled' | 'disabled' | 'unknown'}
  */
@@ -188,4 +215,23 @@ export function themeEmbedStatus(readiness) {
   if (token === 'enabled' || token === 'true') return 'enabled';
   if (token === 'disabled' || token === 'false') return 'disabled';
   return 'unknown';
+}
+
+/**
+ * The live theme the embed status was read from, so Setup can name the theme it
+ * is reporting on rather than the one a deep link happens to target.
+ * @param {Record<string, unknown> | null | undefined} readiness
+ * @returns {string | null}
+ */
+export function themeEmbedThemeName(readiness) {
+  const raw =
+    readiness?.theme_embed ??
+    (readiness?.summary && typeof readiness.summary === 'object'
+      ? /** @type {Record<string, unknown>} */ (readiness.summary).theme_embed
+      : null);
+  if (!raw || typeof raw !== 'object') return null;
+  const name = String(
+    /** @type {{ theme_name?: string }} */ (raw).theme_name || ''
+  ).trim();
+  return name || null;
 }

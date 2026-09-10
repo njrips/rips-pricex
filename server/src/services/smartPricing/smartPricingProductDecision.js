@@ -40,6 +40,10 @@ const SORT_RANK = Object.freeze({
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 function num(value) {
+  // `Number(null)` is 0 and 0 is finite, so an absent measurement used to come
+  // back through here as a real zero — a lift or delta we could not compute was
+  // reported to the merchant as "no change". Empty string coerces the same way.
+  if (value === null || value === undefined || value === '') return null;
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
 }
@@ -197,6 +201,11 @@ function resolveProductRolloutDecision({
   readiness,
   /** Set when an automatic apply completed in the same request that is now reporting. */
   autoApplied = false,
+  /**
+   * Set when that apply wrote only some of the variants. The test row is read
+   * before the auto-apply runs, so this request cannot see the record it left.
+   */
+  autoPublishIncomplete = false,
   now = new Date(),
 } = {}) {
   const significance = asObject(analytics?.significance);
@@ -225,6 +234,37 @@ function resolveProductRolloutDecision({
     ready_since: tracked.ready_since || null,
     notified_at: tracked.notified_at || null,
   };
+
+  // Shopify can refuse individual variants — a deleted SKU, a permission gap, a
+  // rate limit — while accepting the rest. That leaves the catalogue split
+  // across two prices with no traffic split left to measure them, so it has to
+  // read as unfinished work rather than as an apply that landed.
+  const autoApplyRecord = asObject(asObject(test?.goal).auto_apply);
+  const publishIncomplete =
+    autoPublishIncomplete === true ||
+    (autoApplyRecord.published === false && (num(autoApplyRecord.error_count) || 0) > 0);
+  if (publishIncomplete) {
+    const failed = num(autoApplyRecord.error_count);
+    const written = num(autoApplyRecord.updated_count);
+    return {
+      ...shared,
+      state: STATE.BLOCKED,
+      reason: 'apply_incomplete',
+      action: 'apply',
+      label: 'Apply did not finish',
+      detail:
+        failed !== null && written !== null
+          ? `The winning price reached ${written} variant${written === 1 ? '' : 's'} but Shopify refused ${failed}. Traffic was left unsplit, so apply again to finish the catalog.`
+          : 'The winning price only reached some variants. Traffic was left unsplit, so apply again to finish the catalog.',
+      // The whole point is to let the merchant finish what the automatic run
+      // could not, so this must stay actionable.
+      can_apply: true,
+      can_finish: false,
+      sort_rank: SORT_RANK[STATE.BLOCKED],
+      winner: null,
+      auto: { permitted: autoPermitted, eligible: false, reason: 'apply_incomplete', apply_at: null },
+    };
+  }
 
   const decided =
     String(test?.personalization_mode || '').toLowerCase() === 'personalized' ||

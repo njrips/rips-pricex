@@ -32,6 +32,14 @@ import ClassicSettingsTab from './details/ClassicSettingsTab';
 import ClassicProductDetailPanel from './details/ClassicProductDetailPanel';
 import ClassicAudienceMetricsEditModal from './details/ClassicAudienceMetricsEditModal';
 import {
+  describeBlockedProduct,
+  planResume,
+  resumeConflictBody,
+  resumeConflictConfirmLabel,
+  resumeConflictTitle,
+  resumeOutcomeMessage,
+} from './resumeConflicts';
+import {
   applyAudienceUiToPlans,
   audienceUiFromSummaries,
   canEditClassicAudienceMetrics,
@@ -85,6 +93,8 @@ export default function ClassicExperimentOverview() {
   const [moreOpen, setMoreOpen] = useState(false);
   const [winnerModalOpen, setWinnerModalOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  /** Products another live test has taken while this experiment was paused. */
+  const [resumeConflicts, setResumeConflicts] = useState(null);
   const [editOpen, setEditOpen] = useState(false);
   const [editFocus, setEditFocus] = useState('audience');
   const [editSeed, setEditSeed] = useState(null);
@@ -406,31 +416,97 @@ export default function ClassicExperimentOverview() {
     }
   };
 
+  /**
+   * Start the given products' tests and report what happened.
+   *
+   * `allSettled`, not `all`: an experiment is one test per product, and a
+   * product another test has taken since this one paused is refused with a 409.
+   * Failing the whole resume on one product's conflict would leave the rest
+   * paused for no reason.
+   */
+  const startTests = async testIds => {
+    const results = await Promise.allSettled(
+      testIds.map(id =>
+        apiPost(`/tests/${encodeURIComponent(id)}/start`, {
+          force: true,
+          forceReason: 'classic_resume_after_pause',
+        })
+      )
+    );
+    const failed = results.filter(row => row.status === 'rejected');
+    return { started: results.length - failed.length, failed };
+  };
+
+  const finishResume = async ({ started, skipped }) => {
+    if (started > 0) {
+      await replaceExperimentPlansLocal(
+        stampPlans(
+          experimentPlans,
+          {
+            kind: 'resumed',
+            title: 'Experiment resumed',
+            detail: 'Traffic assignment started again',
+          },
+          { status: 'running' }
+        )
+      );
+    }
+    const message = resumeOutcomeMessage({ started, skipped });
+    if (message) showSuccess(message);
+    refresh({
+      quiet: true,
+      preferLocalIds: (experiment?.plans || []).map(row => row.id).filter(Boolean),
+    });
+  };
+
   const handleResume = async () => {
     if (!linkedTestIds.length || busyAction) return;
     setBusyAction('resume');
     setMoreOpen(false);
     try {
-      await Promise.all(
-        linkedTestIds.map(id =>
-          apiPost(`/tests/${encodeURIComponent(id)}/start`, {
-            force: true,
-            forceReason: 'classic_resume_after_pause',
-          })
-        )
-      );
-      await replaceExperimentPlansLocal(
-        stampPlans(experimentPlans, {
-          kind: 'resumed',
-          title: 'Experiment resumed',
-          detail: 'Traffic assignment started again',
-        }, { status: 'running' })
-      );
-      showSuccess('Experiment resumed.');
-      refresh({
-        quiet: true,
-        preferLocalIds: (experiment?.plans || []).map(row => row.id).filter(Boolean),
-      });
+      // Ask before starting anything. While this experiment sat paused its
+      // products were free, and the create wizard would have offered them --
+      // so some of them may now belong to a test that is live. Two tests
+      // pricing one product is two answers to what it costs.
+      const preflight = await apiPost('/smart-pricing/tests/resume-preflight', {
+        test_ids: linkedTestIds,
+      })
+        .then(res => res?.data || res || {})
+        .catch(() => null);
+      const plan = planResume(preflight, linkedTestIds);
+
+      if (plan.action !== 'resume_all') {
+        setResumeConflicts(plan);
+        return;
+      }
+
+      const { started, failed } = await startTests(plan.start);
+      if (!started) {
+        showError(failed[0]?.reason, 'Could not resume experiment.');
+        return;
+      }
+      await finishResume({ started, skipped: failed.length });
+    } catch (err) {
+      showError(err, 'Could not resume experiment.');
+    } finally {
+      setBusyAction('');
+    }
+  };
+
+  /** Resume everything the preflight cleared, leaving the held products paused. */
+  const handleResumeWithoutConflicts = async () => {
+    const clear = resumeConflicts?.start || [];
+    const skipped = (resumeConflicts?.blocked || []).length;
+    setResumeConflicts(null);
+    if (!clear.length) return;
+    setBusyAction('resume');
+    try {
+      const { started, failed } = await startTests(clear);
+      if (!started) {
+        showError(failed[0]?.reason, 'Could not resume experiment.');
+        return;
+      }
+      await finishResume({ started, skipped: skipped + failed.length });
     } catch (err) {
       showError(err, 'Could not resume experiment.');
     } finally {
@@ -521,6 +597,10 @@ export default function ClassicExperimentOverview() {
       navigate(ROUTES.appSmartPricing(shopDomain));
     } catch (err) {
       showError(err, 'Could not delete experiment.');
+    } finally {
+      // Clearing this on success relied on `navigate` unmounting the page. When
+      // it does not, every action on the header stays disabled with a spinner
+      // on Delete and no way back but a reload.
       setBusyAction('');
     }
   };
@@ -1001,6 +1081,38 @@ export default function ClassicExperimentOverview() {
       >
         <Modal.Section>
           <p>{buildClassicExperimentDeleteConfirmMessage(experiment)}</p>
+        </Modal.Section>
+      </Modal>
+      <Modal
+        open={Boolean(resumeConflicts)}
+        onClose={() => {
+          if (!busyAction) setResumeConflicts(null);
+        }}
+        title={resumeConflictTitle(resumeConflicts || {})}
+        primaryAction={
+          resumeConflicts?.start?.length
+            ? {
+                content: resumeConflictConfirmLabel(resumeConflicts),
+                disabled: Boolean(busyAction),
+                onAction: handleResumeWithoutConflicts,
+              }
+            : undefined
+        }
+        secondaryActions={[
+          {
+            content: resumeConflicts?.start?.length ? 'Cancel' : 'Close',
+            disabled: Boolean(busyAction),
+            onAction: () => setResumeConflicts(null),
+          },
+        ]}
+      >
+        <Modal.Section>
+          <p>{resumeConflictBody(resumeConflicts || {})}</p>
+          <ul className={styles.errorList}>
+            {(resumeConflicts?.blocked || []).map(row => (
+              <li key={row.test_id}>{describeBlockedProduct(row)}</li>
+            ))}
+          </ul>
         </Modal.Section>
       </Modal>
     </PageShell>

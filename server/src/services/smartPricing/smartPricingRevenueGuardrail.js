@@ -1,5 +1,5 @@
 /**
- * Per-experiment revenue drop limit. Always on.
+ * Per-experiment revenue drop limit, armed unless the experiment switched it off.
  *
  * The experiment's own threshold decides the limit. The shop default used to
  * cap it — the tighter of the two won — but that default is no longer a setting
@@ -40,10 +40,25 @@ function resolveEffectiveMaxRevenueDropPercent(shopGuardrails = {}, plan = {}) {
   return parseRevenueDropThreshold(row.threshold, shopDefault);
 }
 
+/**
+ * Whether this experiment armed its revenue guardrail.
+ *
+ * Only an explicit off counts. Experiments created before the guardrail became
+ * switchable carry no flag, and reading a missing flag as off would disarm
+ * every one of them.
+ */
+function isRevenueGuardrailEnabled(plan = {}) {
+  const row = audienceGuardrailRows(plan).find(item => String(item?.id || '') === 'revenue');
+  if (row && row.on === false) return false;
+  const goalRails = plan.goal && typeof plan.goal === 'object' ? plan.goal.guardrails : null;
+  if (goalRails && typeof goalRails === 'object' && goalRails.enabled === false) return false;
+  return true;
+}
+
 function buildRevenueDropGuardrailConfig(shopGuardrails = {}, plan = {}) {
   const maxDrop = resolveEffectiveMaxRevenueDropPercent(shopGuardrails, plan);
   return {
-    enabled: true,
+    enabled: isRevenueGuardrailEnabled(plan),
     auto_stop: true,
     metric: 'revenue_per_visitor',
     max_revenue_drop_percent: maxDrop,
@@ -93,7 +108,13 @@ function evaluateRevenueDrop({
     return {
       ready: false,
       breached: false,
-      reason: 'insufficient_control_sample',
+      // Two different situations, and calling both "insufficient sample" sent
+      // support looking for missing traffic on products that had plenty. With
+      // control earning nothing per visitor there is no drop to measure
+      // against: revenue never goes below zero, so no challenger can be down
+      // on it. The guardrail is idle here by arithmetic, not for want of data.
+      reason:
+        controlVisitors >= floor ? 'control_has_no_revenue_yet' : 'insufficient_control_sample',
       threshold_percent: threshold,
       control_rpv: Number.isFinite(controlRpv) ? controlRpv : null,
       control_visitors: controlVisitors,
@@ -147,6 +168,7 @@ module.exports = {
   clampMaxRevenueDropPercent,
   parseRevenueDropThreshold,
   resolveEffectiveMaxRevenueDropPercent,
+  isRevenueGuardrailEnabled,
   buildRevenueDropGuardrailConfig,
   evaluateRevenueDrop,
 };

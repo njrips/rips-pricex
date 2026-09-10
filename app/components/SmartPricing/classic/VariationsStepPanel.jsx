@@ -1,67 +1,205 @@
+import { useState } from 'react';
 import { Button, TextField } from '@shopify/polaris';
 import SettingsInfoLink from '../../Settings/SettingsInfoLink';
 import { ButtonIconPlus, IconControlBaseline, IconScales } from './classicIcons';
 import styles from './SmartPricingClassic.module.css';
 import {
   buildNextVariation,
-  normalizeTraffic,
+  getVariationsStepContinueState,
+  setVariationTraffic,
+  sliderFillPercent,
   splitEvenly,
+  trafficRemaining,
   trafficTotal,
+  variationTrafficHeadroom,
 } from './variationsStepHelpers';
 import { isOfferExperimentType } from './offerSelection';
 
 export {
   createDefaultVariations,
+  getVariationsStepContinueState,
   nextChallengerLetter,
-  normalizeTraffic,
+  setVariationTraffic,
   splitEvenly,
+  trafficRemaining,
   trafficTotal,
 } from './variationsStepHelpers';
+
+/** Below this the experiment cannot gather a sample in any sensible window. */
+const MIN_ALLOCATION_PERCENT = 5;
+
+/** Digits only, and never more than three, so a field cannot hold "1000". */
+function percentDigits(raw) {
+  return String(raw ?? '')
+    .replace(/\D/g, '')
+    .slice(0, 3);
+}
+
+/**
+ * A percent field that can be typed into or stepped, and cannot leave its range.
+ *
+ * Clamping on every keystroke makes a field unusable: typing "50" into a row
+ * capped at 40 gets rewritten to 4 after the first character, and the second
+ * keystroke then reads as 45. So typing goes into a draft of raw digits and is
+ * only reconciled with the cap when the edit finishes.
+ *
+ * Stepping is the opposite case. Up/Down, PageUp/PageDown, Home/End and the
+ * spinner buttons each produce a finished number, so they apply immediately.
+ * Polaris funnels all of them through `onSpinnerChange` when it is given one,
+ * having already clamped against `min`/`max`; without that prop they would
+ * arrive as `onChange` and sit in the draft until blur, which would leave the
+ * slider ignoring the arrow keys.
+ */
+function PercentField({ label, value, min = 0, max = 100, disabled = false, onCommit }) {
+  const [draft, setDraft] = useState(null);
+
+  const clampPercent = next => Math.max(min, Math.min(max, Math.round(Number(next) || 0)));
+
+  const commit = () => {
+    if (draft === null) return;
+    const parsed = draft === '' ? min : Number(draft);
+    setDraft(null);
+    onCommit(clampPercent(parsed));
+  };
+
+  const step = next => {
+    setDraft(null);
+    onCommit(clampPercent(next));
+  };
+
+  return (
+    <span
+      className={styles.percentField}
+      // Nothing here is interactive; the input inside is. The wrapper only
+      // watches an event on its way out, so it carries no semantics of its own.
+      role="presentation"
+      // Polaris owns the input's onKeyDown to drive its own stepping and has no
+      // rest-spread, so a handler passed to TextField is silently dropped.
+      // Enter has to be caught on the way out instead.
+      onKeyDown={event => {
+        if (event.key !== 'Enter') return;
+        event.preventDefault();
+        commit();
+      }}
+    >
+      <TextField
+        label={label}
+        labelHidden
+        // Renders as a plain text input -- "integer" is not a real input type --
+        // so there is no native spinner to double up on Polaris's own, and no
+        // wheel-over-a-focused-field silently changing the split.
+        type="integer"
+        min={min}
+        max={max}
+        step={1}
+        largeStep={10}
+        inputMode="numeric"
+        autoComplete="off"
+        suffix="%"
+        align="right"
+        disabled={disabled}
+        value={draft ?? String(value)}
+        // Digits only, so a pasted "-5" or "1e3" cannot reach the draft.
+        onChange={next => setDraft(percentDigits(next))}
+        onSpinnerChange={step}
+        onBlur={commit}
+      />
+    </span>
+  );
+}
 
 export default function VariationsStepPanel({
   variations,
   onChange,
   experimentType = 'price_test',
+  trafficAllocation = 50,
+  onTrafficAllocationChange,
 }) {
   const total = trafficTotal(variations);
-  const allPositive = variations.every(row => Number(row?.traffic) > 0);
-  const ok = total === 100 && allPositive;
+  const remaining = trafficRemaining(variations);
+  const gate = getVariationsStepContinueState({ variations });
   const isOffer = isOfferExperimentType(experimentType);
+  const allocation = Math.max(
+    MIN_ALLOCATION_PERCENT,
+    Math.min(100, Number(trafficAllocation) || MIN_ALLOCATION_PERCENT)
+  );
+
+  const setAllocation = next => {
+    if (typeof onTrafficAllocationChange !== 'function') return;
+    onTrafficAllocationChange(
+      Math.max(MIN_ALLOCATION_PERCENT, Math.min(100, Math.round(Number(next) || 0)))
+    );
+  };
 
   const updateRow = (index, patch) => {
     onChange(variations.map((row, i) => (i === index ? { ...row, ...patch } : row)));
   };
 
   const onTraffic = (index, value) => {
-    onChange(normalizeTraffic(variations, index, value));
+    onChange(setVariationTraffic(variations, index, value));
   };
 
+  // Appended at 0% rather than re-split: silently taking traffic off arms the
+  // merchant has already set is the behaviour this step moved away from.
   const addVariation = () => {
     if (variations.length >= 5) return;
-    onChange(splitEvenly([...variations, buildNextVariation(variations)]));
+    onChange([...variations, buildNextVariation(variations)]);
   };
 
   return (
     <div>
+      <div className={styles.field}>
+        <label className={styles.label} htmlFor="classic-variations-allocation">
+          Traffic allocation
+          <SettingsInfoLink hash="traffic-split" label="Traffic split" />
+        </label>
+        <div className={styles.allocationRow}>
+          <input
+            className={styles.slider}
+            id="classic-variations-allocation"
+            type="range"
+            min={MIN_ALLOCATION_PERCENT}
+            max={100}
+            value={allocation}
+            style={{
+              '--slider-fill': `${sliderFillPercent(allocation, MIN_ALLOCATION_PERCENT, 100)}%`,
+            }}
+            onChange={event => setAllocation(event.target.value)}
+            aria-label="Traffic allocation"
+          />
+          <PercentField
+            label="Traffic allocation percent"
+            value={allocation}
+            min={MIN_ALLOCATION_PERCENT}
+            onCommit={setAllocation}
+          />
+        </div>
+        <p className={styles.help}>
+          {allocation}% of matching visitors enter the experiment. The rest keep your current
+          prices and are not measured. The split below then divides those {allocation}%.
+        </p>
+      </div>
+
       <div className={styles.trafficBanner}>
         <span className={styles.trafficBannerLeft}>
           <span className={styles.trafficBannerIcon} aria-hidden>
             <IconScales size={16} />
           </span>
-          <span className={styles.trafficBannerText}>
-            Traffic allocated
-            <SettingsInfoLink hash="traffic-split" label="Traffic split" />
+          <span className={styles.trafficBannerText}>Traffic split</span>
+          <span className={gate.disabled ? styles.trafficBad : styles.trafficOk}>{total}%</span>
+          <span className={styles.trafficBannerMuted}>
+            {remaining === 0 ? '/ 100%' : `/ 100% · ${Math.abs(remaining)}% ${remaining > 0 ? 'left' : 'over'}`}
           </span>
-          <span className={ok ? styles.trafficOk : styles.trafficBad}>{total}%</span>
-          <span className={styles.trafficBannerMuted}>/ 100%</span>
         </span>
-        <Button onClick={() => onChange(splitEvenly(variations))}>Split evenly</Button>
+        <Button onClick={() => onChange(splitEvenly(variations))}>Split equally</Button>
       </div>
-      {!allPositive ? (
+
+      {gate.disabled ? (
         <p className={styles.error} role="alert">
-          Every variation needs more than 0% traffic before you continue.
+          {gate.hint}
         </p>
       ) : null}
+
       {isOffer ? (
         <p className={styles.help}>
           Traffic only on this step. Set the percent or amount-off offer for each variation on
@@ -71,6 +209,13 @@ export default function VariationsStepPanel({
 
       {variations.map((row, index) => {
         const isControl = index === 0 || row.id === 'control';
+        const rowMax = variationTrafficHeadroom(variations, index);
+        const rowName = row.name || row.role || (isControl ? 'Control' : `Variation ${row.letter}`);
+        // Headroom is this row's own share plus whatever is unassigned, so zero
+        // means the row holds nothing and there is nothing to give it. The
+        // control is genuinely unusable then, and saying so is better than
+        // leaving one that silently ignores every drag.
+        const stuck = rowMax <= 0;
         return (
           <div key={row.id} className={styles.variationBlock}>
             <div className={styles.variationHead}>
@@ -91,7 +236,7 @@ export default function VariationsStepPanel({
                   <Button
                     variant="plain"
                     tone="critical"
-                    onClick={() => onChange(splitEvenly(variations.filter((_, i) => i !== index)))}
+                    onClick={() => onChange(variations.filter((_, i) => i !== index))}
                   >
                     Remove
                   </Button>
@@ -124,18 +269,44 @@ export default function VariationsStepPanel({
               <div className={styles.sliderCol}>
                 <div className={styles.sliderMeta}>
                   <span className={styles.trafficLabel}>Traffic</span>
-                  <span className={styles.pct}>{row.traffic}%</span>
+                  <PercentField
+                    label={`${rowName} traffic percent`}
+                    value={row.traffic}
+                    max={rowMax}
+                    disabled={stuck}
+                    onCommit={next => onTraffic(index, next)}
+                  />
                 </div>
                 <input
                   className={styles.slider}
                   type="range"
                   min={0}
+                  // Every track runs the full 0–100 so that two rows side by
+                  // side mean the same thing. Ending the track at the row's
+                  // headroom instead made the default row a 0-to-0 slider: a
+                  // control that could not be dragged anywhere at all.
                   max={100}
                   value={row.traffic}
-                  style={{ '--slider-fill': `${row.traffic}%` }}
+                  disabled={stuck}
+                  style={{
+                    '--slider-fill': `${sliderFillPercent(row.traffic, 0, 100)}%`,
+                    // Fades the part of the track the other rows have taken, so
+                    // a thumb that stops early has a visible reason. A stuck row
+                    // keeps its full rail: fading all of it, on a control that
+                    // is already dimmed by :disabled, left nothing on screen but
+                    // a bare thumb. The disabled state and the line underneath
+                    // carry that meaning better than an erased track.
+                    '--slider-cap': stuck ? '100%' : `${rowMax}%`,
+                  }}
                   onChange={e => onTraffic(index, e.target.value)}
-                  aria-label={`${row.name || row.letter} traffic`}
+                  aria-label={`${rowName} traffic`}
+                  aria-valuemax={rowMax}
                 />
+                {stuck ? (
+                  <p className={styles.help}>
+                    All traffic is assigned. Lower another variation to free some up.
+                  </p>
+                ) : null}
               </div>
             </div>
           </div>

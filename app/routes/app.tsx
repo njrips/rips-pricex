@@ -13,11 +13,12 @@ import { setShopContext } from "../services/api";
 import { internalServiceHeaders } from "../utils/expressInternalApi.server";
 import ClassicRouteLoading from "../components/shared/ClassicRouteLoading";
 import { buildPricingPlansUrl } from "../utils/pricingPlansUrl";
+import { withCurrentEmbeddedSearch } from "../utils/shopifyEmbeddedSearch";
 import "../styles/classic-theme.css";
 
 function SupportLinkHandler() {
   const navigate = useNavigate();
-  const { pathname } = useLocation();
+  const { pathname, search } = useLocation();
 
   useEffect(() => {
     const shopify = window.shopify as
@@ -25,19 +26,22 @@ function SupportLinkHandler() {
       | undefined;
     if (!shopify?.support?.registerHandler) return undefined;
     void shopify.support.registerHandler(() => {
+      // Help is tabbed, so the ticket form only exists while the Support tab is
+      // open. Scroll to it when it is on the page, and otherwise ask for that
+      // tab by name — from Help's other tab as much as from another page.
       if (pathname === "/app/help" || pathname === "/help") {
-        document.getElementById("help-new-ticket")?.scrollIntoView({
-          block: "start",
-          behavior: "smooth",
-        });
-        return;
+        const form = document.getElementById("help-new-ticket");
+        if (form) {
+          form.scrollIntoView({ block: "start", behavior: "smooth" });
+          return;
+        }
       }
-      navigate("/app/help");
+      navigate(withCurrentEmbeddedSearch(search, "/app/help", { tab: "tickets" }));
     });
     return () => {
       void shopify.support?.registerHandler?.(null);
     };
-  }, [navigate, pathname]);
+  }, [navigate, pathname, search]);
 
   return null;
 }

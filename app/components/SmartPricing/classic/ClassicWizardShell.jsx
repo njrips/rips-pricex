@@ -30,6 +30,12 @@ export default function ClassicWizardShell({
   onGoToStep,
   children,
   continueBusy = false,
+  /**
+   * Sits between the back link and the stepper, for something that applies to
+   * the whole run rather than the step on screen. Inside the card it would read
+   * as a note about the current step and scroll away with it.
+   */
+  notice = null,
 }) {
   const steps = getClassicCreateSteps(experimentType);
   const step = steps[stepIndex] || steps[0] || CLASSIC_CREATE_STEPS[0];
@@ -52,6 +58,8 @@ export default function ClassicWizardShell({
           Step {stepIndex + 1} of {steps.length}
         </span>
       </div>
+
+      {notice ? <div className={styles.wizardNotice}>{notice}</div> : null}
 
       {/* A group rather than a list: completed steps are real buttons, and a
           list may only contain listitems, so the list role forced a
@@ -149,9 +157,14 @@ export default function ClassicWizardShell({
               {saveDraftLabel}
             </Button>
           ) : null}
-          <span className={isLaunch ? undefined : styles.iconTrailingBtn}>
+          {/* Launching was the same primary button as the four Continues
+              before it, so committing an experiment to live shopper traffic
+              looked exactly like advancing a step. The last click gets its own
+              weight; the arrow buttons keep their trailing icon. */}
+          <span className={isLaunch ? styles.launchBtn : styles.iconTrailingBtn}>
             <Button
               variant="primary"
+              size={isLaunch ? 'large' : undefined}
               icon={isLaunch ? ButtonIconRocket : ButtonIconArrowRight}
               onClick={onContinue}
               disabled={continueDisabled || continueBusy}

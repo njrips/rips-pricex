@@ -30,6 +30,7 @@ import styles from './SmartPricingClassic.module.css';
  *   tabs?: AdminTab[] | null,
  *   activeTab?: string | null,
  *   onTabChange?: ((id: string) => void) | null,
+ *   tabsLabel?: string,
  *   footerPrimary?: FooterAction | null,
  *   footerSecondary?: FooterAction | null,
  *   children?: import('react').ReactNode
@@ -45,6 +46,7 @@ export default function ClassicAdminShell({
   tabs = null,
   activeTab = null,
   onTabChange = null,
+  tabsLabel = 'Settings sections',
   footerPrimary = null,
   footerSecondary = null,
   children,
@@ -74,7 +76,7 @@ export default function ClassicAdminShell({
           <div
             className={`${styles.filterPillTrack} ${styles.adminTabTrack}`}
             role="tablist"
-            aria-label="Settings sections"
+            aria-label={tabsLabel}
           >
             {tabs.map(tab => {
               const active = tab.id === activeTab;

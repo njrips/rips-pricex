@@ -95,11 +95,43 @@ describe('smartPricingRevenueGuardrail', () => {
     assert.equal(verdict.observed_drop_percent, 5);
   });
 
-  it('builds an always-on launch config', () => {
+  it('arms the launch config for a plan that did not opt out', () => {
     const config = buildRevenueDropGuardrailConfig({ max_revenue_drop_percent: 12 }, {});
     assert.equal(config.enabled, true);
     assert.equal(config.auto_stop, true);
     assert.equal(config.max_revenue_drop_percent, 12);
     assert.equal(config.metric, 'revenue_per_visitor');
+  });
+
+  // enabled:false is what makes models/test.js store guardrail_config as NULL,
+  // which is how a launched test carries "no guardrail".
+  it('disarms the launch config when the audience row is switched off', () => {
+    const config = buildRevenueDropGuardrailConfig(
+      { max_revenue_drop_percent: 12 },
+      {
+        metadata: {
+          audience_ui: { guardrails: [{ id: 'revenue', threshold: '-14%', on: false }] },
+        },
+      }
+    );
+    assert.equal(config.enabled, false);
+    // The threshold still rides along, so re-arming does not lose the number.
+    assert.equal(config.max_revenue_drop_percent, 14);
+  });
+
+  it('disarms the launch config from the plan goal too', () => {
+    const config = buildRevenueDropGuardrailConfig(
+      {},
+      { goal: { guardrails: { enabled: false } } }
+    );
+    assert.equal(config.enabled, false);
+  });
+
+  it('keeps auto_stop true when disarmed, so winners still apply', () => {
+    const config = buildRevenueDropGuardrailConfig(
+      {},
+      { goal: { guardrails: { enabled: false } } }
+    );
+    assert.equal(config.auto_stop, true);
   });
 });

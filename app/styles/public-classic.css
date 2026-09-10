@@ -2705,6 +2705,80 @@ html:has(.rpx-public) body {
   margin-bottom: 0;
 }
 
+/* Long guide sections lead with a summary and a facts strip, then fold the full
+   prose away. Short ones keep the plain card above: a single paragraph is
+   already its own summary. */
+.px-docs-articles .px-docs-article p.px-docs-summary {
+  margin: 0 0 14px;
+  color: var(--px-ink);
+  font-size: 15px;
+  line-height: 24px;
+}
+
+.px-docs-facts {
+  display: grid;
+  gap: 8px 20px;
+  margin: 0 0 14px;
+  padding: 14px 16px;
+  border-radius: var(--px-radius-sm, 10px);
+  background: var(--px-cream-deep);
+}
+
+@media (min-width: 620px) {
+  .px-docs-facts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.px-docs-fact dt {
+  margin: 0 0 2px;
+  color: var(--px-ink-soft);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.px-docs-fact dd {
+  margin: 0;
+  color: var(--px-ink);
+  font-size: 14px;
+  line-height: 20px;
+}
+
+/* Inline rather than full width: the article card is wide, and a space-between
+   row would strand the +/- badge a card-width away from the label it toggles. */
+.px-docs-more {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--px-brand);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.px-docs-more:hover span:first-child {
+  text-decoration: underline;
+}
+
+.px-docs-more .px-faq-toggle {
+  width: 24px;
+  height: 24px;
+  font-size: 16px;
+}
+
+.px-docs-detail {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--px-line);
+}
+
 @media (max-width: 900px) {
   .px-docs-nav {
     grid-template-columns: 1fr;

@@ -56,7 +56,7 @@ export const CLASSIC_CREATE_STEPS = [
     subtitle: 'Traffic split',
     title: 'Build your variations',
     description:
-      'Each variation applies its price change to every selected product. Traffic must total 100%.',
+      'Choose how much traffic enters the experiment, then split it across your variations. Each variation applies its price change to every selected product.',
   },
   {
     id: 'products',

@@ -296,6 +296,8 @@ function loadDeps(overrides = {}) {
       require('../priceTestWinnerPublishService').publishWinnerPricesToShopify(...args),
     acquireJobLease: (...args) => require('../../utils/jobLease').acquireJobLease(...args),
     releaseJobLease: (...args) => require('../../utils/jobLease').releaseJobLease(...args),
+    startJobLeaseHeartbeat: (...args) =>
+      require('../../utils/jobLease').startJobLeaseHeartbeat(...args),
     productRolloutLeaseName: (...args) =>
       require('../../utils/jobLease').productRolloutLeaseName(...args),
     rolloutLeaseSeconds: require('../../utils/jobLease').ROLLOUT_LEASE_SECONDS,
@@ -368,6 +370,12 @@ async function evaluateSmartPricingAutoWinner(input = {}, depOverrides = {}) {
     inFlight.delete(key);
     return { skipped: true, reason: 'rollout_in_progress', test_id: testId };
   }
+  // The lease TTL is sized for a crash, not for the work: publishing a winner
+  // walks the whole targeted catalogue against Shopify's rate limit and can run
+  // past it. Renewing keeps this the only writer until it is finished.
+  const stopHeartbeat = deps.startJobLeaseHeartbeat
+    ? deps.startJobLeaseHeartbeat(lease, deps.rolloutLeaseSeconds)
+    : () => {};
 
   try {
     if (!test) {
@@ -610,6 +618,7 @@ async function evaluateSmartPricingAutoWinner(input = {}, depOverrides = {}) {
       published_to_shopify: false,
     };
   } finally {
+    stopHeartbeat();
     inFlight.delete(key);
     await deps.releaseJobLease(lease);
   }

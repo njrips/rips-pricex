@@ -76,6 +76,11 @@ export function resolveProductActionAvailability({
     canFinish,
     canRevert: Boolean(hasAppliedBaseline && !alreadyReverted),
     canRerun: Boolean(!sharedTest && !hasFollowUpQueued && (decided || paused || canFinish)),
+    // Applying a winner leaves this test serving that price for ever, which
+    // keeps the product out of every future test. Offer the release only while
+    // it is actually still serving -- once it is let go there is nothing left
+    // to release, and a control decision never held the product at all.
+    canRelease: Boolean(!running && (mode === 'personalized' || mode === 'rollout')),
     sharedBlock,
     reasons: {
       stop: sharedBlock || (!running ? 'Product is not running.' : null),
@@ -88,6 +93,9 @@ export function resolveProductActionAvailability({
       finish: canFinish ? null : 'A control decision is not ready yet.',
       revert: revertReason,
       rerun: sharedBlock || (hasFollowUpQueued ? 'A follow-up round is already queued.' : null),
+      release: running
+        ? 'Stop this test before releasing the product.'
+        : 'This product is not being priced by this test.',
     },
   };
 }

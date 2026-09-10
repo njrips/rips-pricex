@@ -3472,6 +3472,30 @@
   /**
    * Track conversion event (purchase/order)
    */
+  /**
+   * The proof that this arm came from the engine, in track-request shape.
+   *
+   * The server refuses an event whose proof is present but does not verify, so
+   * sending it is what separates a reported conversion from one anybody could
+   * have typed. Returns an empty object when the assignment carries no proof,
+   * because a shop with no signing secret configured still has to be able to
+   * report conversions.
+   */
+  async function getTrackAssignmentProofFields(testId) {
+    try {
+      var variant = await getVariant(testId);
+      var proof = getAssignmentProofFromVariant(variant);
+      if (!proof) return {};
+      return {
+        assignment_sig: proof.sig,
+        assignment_ts: proof.ts,
+        assignment_user: proof.user,
+      };
+    } catch (e) {
+      return {};
+    }
+  }
+
   async function trackConversion(testId, variantId, value = 0, metadata = {}) {
     if (PREVIEW_MODE || !hasValidConfig) {
       return;
@@ -3485,21 +3509,27 @@
     }
 
     try {
+      const proof = await getTrackAssignmentProofFields(testId);
       await fetchWithTimeout(
         CONFIG.apiUrl + '/track',
         {
           method: 'POST',
           keepalive: true,
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            test_id: testId,
-            variant_id: variantId,
-            user_id: userId,
-            shop_domain: shopDomain,
-            event_type: 'conversion',
-            event_value: value,
-            metadata: meta,
-          }),
+          body: JSON.stringify(
+            Object.assign(
+              {
+                test_id: testId,
+                variant_id: variantId,
+                user_id: userId,
+                shop_domain: shopDomain,
+                event_type: 'conversion',
+                event_value: value,
+                metadata: meta,
+              },
+              proof
+            )
+          ),
         },
         6000
       );
@@ -3533,22 +3563,28 @@
     if (!vid) return;
 
     try {
+      const proof = await getTrackAssignmentProofFields(testId);
       await fetchWithTimeout(
         CONFIG.apiUrl + '/track',
         {
           method: 'POST',
           keepalive: true,
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            test_id: testId,
-            variant_id: vid,
-            user_id: userId,
-            shop_domain: shopDomain,
-            event_type: 'custom',
-            event_name: String(eventName).trim(),
-            event_value: typeof value === 'number' ? value : 0,
-            metadata: metadata && typeof metadata === 'object' ? metadata : {},
-          }),
+          body: JSON.stringify(
+            Object.assign(
+              {
+                test_id: testId,
+                variant_id: vid,
+                user_id: userId,
+                shop_domain: shopDomain,
+                event_type: 'custom',
+                event_name: String(eventName).trim(),
+                event_value: typeof value === 'number' ? value : 0,
+                metadata: metadata && typeof metadata === 'object' ? metadata : {},
+              },
+              proof
+            )
+          ),
         },
         6000
       );
@@ -8539,7 +8575,39 @@
   }
 
   /**
-   * Parse numeric price from displayed string or element (e.g. "$29.99", "€29,99", "1.234,56").
+   * How many digits the shop's currency puts after the decimal separator.
+   *
+   * Only needed to settle one ambiguity below: a lone separator with three
+   * digits behind it. That is a thousands group in almost every currency
+   * ("$1,250") but the decimal point in the three-decimal ones ("KD 1.234").
+   */
+  function ripxCurrencyDecimals() {
+    try {
+      var code = String(getShopCurrency() || 'USD')
+        .trim()
+        .toUpperCase();
+      var digits = RIPX_CURRENCY_MINOR_UNITS[code];
+      return typeof digits === 'number' ? digits : 2;
+    } catch (e) {
+      return 2;
+    }
+  }
+
+  /**
+   * Parse a unit price out of displayed money text.
+   *
+   * Handles "$29.99", "€29,99", "1.234,56", "$1,250", "¥1500" and wrappers that
+   * hold a struck-through price and a sale price as one string.
+   *
+   * Which character is the decimal separator is decided from the shape of the
+   * number, never from how large it is. This used to end with "if there is no
+   * separator and the value is 100 or more, divide by 100", on the assumption
+   * that such a number had to be a count of cents. Nothing passes cents to this
+   * — every caller hands it a DOM node holding formatted money — so all it did
+   * was turn a price the theme rendered without decimals into a hundredth of
+   * itself: "$150" read as 1.50, and every amount- or percent-mode price was
+   * then computed from that. Shopify's own "hide decimals" money format
+   * produces exactly that text.
    */
   function parsePriceFromDisplay(val) {
     if (val == null) return null;
@@ -8547,23 +8615,38 @@
     if (typeof s !== 'string') return null;
     s = s.trim().replace(/\s/g, '');
     if (!s) return null;
-    // "Regularprice$600.00" / stacked sale+compare — prefer last $… group when $ is present.
-    if (s.indexOf('$') !== -1) {
-      var dollarGroups = s.match(/\$[\d,]+(?:\.\d{2})?/g);
-      if (dollarGroups && dollarGroups.length) {
-        s = dollarGroups[dollarGroups.length - 1].replace(/\s/g, '');
+
+    // Themes render the compare-at price before the sale price, so when both
+    // land in one wrapper the last amount is the one being charged. Picking it
+    // by digits rather than by "$" means non-dollar shops get the same
+    // treatment; before, a stacked "€600,00€500,00" parsed as 600.005.
+    var amounts = s.match(/\d[\d.,]*/g);
+    if (!amounts || !amounts.length) return null;
+    var token = amounts[amounts.length - 1].replace(/[.,]+$/, '');
+    if (!token) return null;
+
+    var dots = (token.match(/\./g) || []).length;
+    var commas = (token.match(/,/g) || []).length;
+    var decimalSep = '';
+    if (dots && commas) {
+      // Both kinds present, so the later one is the decimal separator and the
+      // other groups thousands: "1.234,56" and "1,234.56".
+      decimalSep = token.lastIndexOf(',') > token.lastIndexOf('.') ? ',' : '.';
+    } else if (dots === 1 || commas === 1) {
+      var only = dots ? '.' : ',';
+      var tail = token.slice(token.indexOf(only) + 1);
+      if (tail.length === ripxCurrencyDecimals() || tail.length < 3) {
+        decimalSep = only;
       }
     }
-    var lastComma = s.lastIndexOf(',');
-    var lastDot = s.lastIndexOf('.');
-    var normalized =
-      lastComma > lastDot && lastComma >= 0
-        ? s.replace(/\./g, '').replace(',', '.')
-        : s.replace(/,/g, '');
-    var num = parseFloat(normalized.replace(/[^0-9.-]/g, ''), 10);
-    if (isNaN(num)) return null;
-    if (s.indexOf('.') === -1 && s.indexOf(',') === -1 && num >= 100) num = num / 100;
-    return num;
+    // Repeated single separator ("1.234.567") groups thousands, and no
+    // separator at all needs no decision.
+
+    var cut = decimalSep ? token.lastIndexOf(decimalSep) : -1;
+    var whole = (cut >= 0 ? token.slice(0, cut) : token).replace(/[.,]/g, '');
+    var fraction = cut >= 0 ? token.slice(cut + 1).replace(/[.,]/g, '') : '';
+    var num = parseFloat(fraction ? whole + '.' + fraction : whole);
+    return isNaN(num) || !isFinite(num) ? null : num;
   }
 
   function getStableCatalogPriceForElement(el) {
@@ -8742,6 +8825,41 @@
     return list.length > 0;
   }
 
+  /**
+   * The comparable part of a page URL: its path, lowercased, without query,
+   * fragment, trailing slash or locale prefix.
+   *
+   * Mirrors priceSurfacePagePath in app/utils/priceSurfaceRegistry.js and
+   * server/src/utils/priceSurfaceRegistry.js. Query strings are dropped because
+   * merchants paste from the address bar, which routinely carries campaign
+   * parameters that say nothing about which page it is. The locale prefix goes
+   * too, so a URL pasted from the default language still matches /de/... .
+   */
+  function ripxPriceSurfacePagePath(value) {
+    var raw = String(value == null ? '' : value).trim();
+    if (!raw) return '';
+    var path = raw;
+    var schemeMatch = /^https?:\/\/[^/]*(\/.*)?$/i.exec(raw);
+    if (schemeMatch) {
+      path = schemeMatch[1] || '/';
+    } else if (/^[a-z][a-z0-9+.-]*:/i.test(raw) || raw.indexOf('//') === 0) {
+      return '';
+    }
+    path = path.split('#')[0].split('?')[0];
+    if (!path) return '';
+    if (path.charAt(0) !== '/') path = '/' + path;
+    path = stripStorefrontLocalePrefix(path.toLowerCase());
+    if (path.length > 1) path = path.replace(/\/+$/, '');
+    return path || '/';
+  }
+
+  /** Whether a url-scoped mapping belongs to the page being painted. */
+  function ripxUrlMappingMatchesPage(entry) {
+    var want = ripxPriceSurfacePagePath(entry && (entry.pageUrl || entry.page_url));
+    if (!want) return false;
+    return want === ripxPriceSurfacePagePath(getEffectivePreviewPathname() || '/');
+  }
+
   function resolveConfiguredPriceSurfaceSelectors(surface, role, options) {
     var surfaceKey = String(surface || 'global').toLowerCase();
     var roleKey = String(role || 'regular').toLowerCase();
@@ -8749,6 +8867,11 @@
       options && options.test ? getConfiguredTestPriceSurfaceMappings(options.test) : [];
     var shopMaps = getConfiguredShopPriceSurfaceMappings();
     var surfacePasses = surfaceKey === 'global' ? ['global'] : [surfaceKey, 'global'];
+    // A url mapping names the page it belongs to instead of a page type, so it
+    // joins whichever surface is being resolved — but only on its own page. It
+    // goes first because a merchant who pointed at one page meant that
+    // selector there, ahead of anything inferred for the page type.
+    if (surfaceKey !== 'url') surfacePasses = ['url'].concat(surfacePasses);
     var lists = [testMaps, shopMaps];
     var out = [];
     var seen = {};
@@ -8760,7 +8883,11 @@
         sorted.forEach(function (entry) {
           if (!entry || entry.enabled === false) return;
           if (String(entry.surface || '').toLowerCase() !== passSurface) return;
+          // The role still has to match. A url mapping is pinned to the regular
+          // price, so without this it would also be handed back when the
+          // painter asks for compare-at selectors and strike the wrong node.
           if (String(entry.role || 'regular').toLowerCase() !== roleKey) return;
+          if (passSurface === 'url' && !ripxUrlMappingMatchesPage(entry)) return;
           var sel = String(entry.selector || '').trim();
           if (!sel) return;
           if (seen[sel]) return;
@@ -8806,6 +8933,38 @@
     }
     return null;
   }
+
+  /**
+   * Currencies whose minor unit is not two digits. Anything absent is two.
+   *
+   * Read only by `ripxCurrencyDecimals`, to tell a thousands group from a
+   * decimal point when the text carries just one separator.
+   */
+  var RIPX_CURRENCY_MINOR_UNITS = {
+    BHD: 3,
+    IQD: 3,
+    JOD: 3,
+    KWD: 3,
+    LYD: 3,
+    OMR: 3,
+    TND: 3,
+    BIF: 0,
+    CLP: 0,
+    DJF: 0,
+    GNF: 0,
+    ISK: 0,
+    JPY: 0,
+    KMF: 0,
+    KRW: 0,
+    PYG: 0,
+    RWF: 0,
+    UGX: 0,
+    VND: 0,
+    VUV: 0,
+    XAF: 0,
+    XOF: 0,
+    XPF: 0,
+  };
 
   /** Nodes that hold a single rendered amount, i.e. what we are allowed to rewrite. */
   var RIPX_PRICE_LEAF_SEL =
@@ -9065,6 +9224,12 @@
       roots = [document.querySelector('main') || document.body];
     }
     var variantIdForCart = variant.variantId != null ? variant.variantId : variant.id;
+    // This fallback runs when a test carries no per-product prices, so painting
+    // every amount on the page is the intent. Products the merchant excluded
+    // are the exception, and this was the one painter that never checked: the
+    // card, listing and cart painters all do.
+    var excludedProductIds = getExcludedProductIdsForTest(getActiveTestById(testId));
+    var paintedWithoutProductId = 0;
 
     roots.forEach(function (root) {
       if (!root) return;
@@ -9076,6 +9241,10 @@
         nodes.forEach(function (el) {
           if (!el) return;
           if (scope === 'listing' && inCartUi(el)) return;
+          if (isRipxPriceNodeExcluded(el, excludedProductIds)) return;
+          if (excludedProductIds.length && ripxPriceNodeHasNoProductId(el)) {
+            paintedWithoutProductId += 1;
+          }
           // A mapped selector may match the price wrapper rather than the amount,
           // so paint the leaves it contains instead of skipping it outright.
           resolveRipxPricePaintTargets(el).forEach(function (target) {
@@ -9102,6 +9271,18 @@
         });
       } catch (e) {}
     });
+
+    // The exclusions cannot be enforced on markup that never says which product
+    // a price belongs to. Worth recording, because from the merchant's side the
+    // symptom is an excluded product showing a test price for no visible reason.
+    if (paintedWithoutProductId > 0) {
+      persistRipxLiveDiagnostics('price_exclusion_unenforceable', {
+        testId: testId,
+        scope: scope || null,
+        nodes: paintedWithoutProductId,
+        excluded_product_count: excludedProductIds.length,
+      });
+    }
   }
 
   /** Themes hydrate cards/cart after first paint — schedule a few passes without stacking duplicate deltas. */
@@ -9327,6 +9508,46 @@
         '[data-product-id], [data-product], .product-card-wrapper, .product-card, product-card, .card-wrapper, .grid__item, .product-item, .collection-list__product, li'
       ) || node.parentElement
     );
+  }
+
+  /**
+   * True when a price node sits inside a product the merchant left out.
+   *
+   * Any candidate id found on the card counts, rather than the single best
+   * guess `getProductIdForListingCard` settles on. Guessing wrong here would
+   * repaint a product that was deliberately excluded from the test, so an
+   * uncertain match is treated as excluded: not painting a price is recoverable,
+   * charging one the merchant ruled out is not.
+   */
+  function isRipxPriceNodeExcluded(node, excludedIds) {
+    if (!node || !excludedIds || !excludedIds.length) return false;
+    var roots = [];
+    try {
+      // `closest` returns the nearest ancestor matching any part of a selector
+      // list, so a closer `.grid__item` can win over a tagged wrapper further
+      // up. Ask for the tagged one on its own as well.
+      if (node.closest) {
+        var tagged = node.closest('[data-product-id], [data-product]');
+        if (tagged) roots.push(tagged);
+      }
+    } catch (e) {}
+    var card = findProductCardRootForPriceNode(node);
+    if (card && roots.indexOf(card) === -1) roots.push(card);
+    for (var r = 0; r < roots.length; r += 1) {
+      var candidates = collectListingProductIdCandidates(roots[r]) || [];
+      for (var i = 0; i < candidates.length; i += 1) {
+        if (excludedIds.indexOf(candidates[i]) !== -1) return true;
+      }
+    }
+    return false;
+  }
+
+  /** True when nothing on the page identifies which product a price belongs to. */
+  function ripxPriceNodeHasNoProductId(node) {
+    if (!node) return true;
+    var card = findProductCardRootForPriceNode(node);
+    if (!card) return true;
+    return (collectListingProductIdCandidates(card) || []).length === 0;
   }
 
   function applyMappedPriceSelectorsByInferredProduct(testId, variant, targetIds, reason) {

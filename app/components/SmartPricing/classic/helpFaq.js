@@ -1,7 +1,7 @@
 export const HELP_FAQ_ITEMS = [
   {
     q: 'Checkout is not ready / Launch is blocked',
-    a: 'Open Setup and work the checklist in order: enable the theme app embed, ensure cart transform, ensure the checkout discount function, then map PDP price selectors under Settings → Price surfaces. Re-check readiness on Setup. Offer tests need the checkout discount; price tests also need cart transform and mapped selectors.',
+    a: 'Open Setup and work the checklist in order: enable the theme app embed, install the checkout functions (one button covers both cart transform and the checkout discount), then map PDP price selectors under Settings → Price surfaces. Re-check readiness on Setup. Offer tests need the checkout discount; price tests also need cart transform and mapped selectors. Setup reads the embed from your live theme, so a step already done shows as enabled rather than asking you to confirm it.',
   },
   {
     q: 'Shoppers do not see the offer under the product price',
@@ -17,7 +17,15 @@ export const HELP_FAQ_ITEMS = [
   },
   {
     q: 'How does AI price Suggest work?',
-    a: 'On Products, AI suggested mode fills higher test-variation prices inside your min–max band, then clamps them to shop max price change and a cost-aware min-margin floor. Control stays at the catalog price. Open the info icon next to AI Price Suggestions for the full calculation.',
+    a: 'On Products, AI suggested mode fills higher test-variation prices inside your min–max band, then clamps them to shop max price change and a cost-aware min-margin floor. Control stays at the catalog price. Variations are spread across the full band rather than bunched together, because prices a point or two apart cannot be told apart at real store traffic. Every cell stays editable before launch. Open the info icon next to AI Price Suggestions for the full calculation.',
+  },
+  {
+    q: 'What does Suggest send to the AI?',
+    a: 'Per product you selected: its title, current price, margin percent, units sold in the last 30 days, its opportunity score, and Priceify’s own read on how hard it can be pushed. Plus your variation names, the min–max band you typed, the test metric, and two numbers from Settings — max price change and minimum margin. Nothing about a shopper is sent: no customer details, orders, or visitor data. Your shop domain and your Shopify product ids are not sent either, and nothing is stored or reused, so each click asks fresh. The reply is re-checked against your own catalog prices and limits before it becomes a price, so a suggestion cannot exceed your guardrails even if the model ignores them.',
+  },
+  {
+    q: 'The prices filled in but the banner says they are not from AI',
+    a: 'Suggest always fills the table, and says where the numbers came from. An even spread across your band is used instead of the model when the band is set in dollars (one flat cash uplift cannot be expressed as one percentage across products at different prices), when AI is unavailable or switched off, when the reply comes back unusable, and for any product past the first 40 in one request. If only some prices fell back, the banner says how many. Prices from the even spread respect the same guardrails and are just as launchable — you can edit any of them, or click Re-suggest to try again.',
   },
   {
     q: 'I edited audience or metrics on a live test',
@@ -110,6 +118,43 @@ export function attentionTicketToPrompt(tickets, selectedId) {
 export function shouldAutoOpenAttention({ ticketId, view } = {}) {
   if (String(ticketId || '').trim()) return false;
   return String(view || '').trim().toLowerCase() !== 'all';
+}
+
+/**
+ * Help is two jobs, so it is two tabs: reading an answer and talking to us.
+ * Anything needing the merchant still shows on both, above the tab content.
+ */
+export const HELP_TABS = [
+  { id: 'answers', label: 'Answers' },
+  { id: 'tickets', label: 'Support tickets' },
+];
+
+/**
+ * Which half of Help to show.
+ *
+ * Reading a ticket is not something you opt into by picking a tab — the loader
+ * sends you straight to a reply support is waiting on. So an open ticket wins
+ * over whatever `tab` says, and the two can never disagree on screen.
+ */
+export function resolveHelpTab(tabParam, { hasSelectedTicket = false } = {}) {
+  if (hasSelectedTicket) return 'tickets';
+  return String(tabParam || '').trim().toLowerCase() === 'tickets' ? 'tickets' : 'answers';
+}
+
+/** Tickets the merchant has to answer, counted for the tab label. */
+export function countTicketsAwaitingMerchant(tickets) {
+  const list = Array.isArray(tickets) ? tickets : [];
+  return list.filter(
+    (ticket) => String(ticket?.status || '').toLowerCase() === 'waiting_merchant',
+  ).length;
+}
+
+/** Case-insensitive match of a query against a question and its answer. */
+export function filterHelpFaq(items, query) {
+  const list = Array.isArray(items) ? items : [];
+  const needle = String(query || '').trim().toLowerCase();
+  if (!needle) return list;
+  return list.filter((item) => `${item?.q || ''} ${item?.a || ''}`.toLowerCase().includes(needle));
 }
 
 export function merchantTicketLookupError(status, fallback = 'Ticket not found') {

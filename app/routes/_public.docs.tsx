@@ -9,7 +9,7 @@ export const meta: MetaFunction = () =>
   publicMeta({
     title: "Guides",
     description:
-      "How Priceify guardrails, confidence, sample size, and sequential testing work. The guide behind Settings info icons.",
+      "How Priceify confidence, sample size, price limits, and sequential testing work. The guide behind Settings info icons.",
     path: "/docs",
   });
 

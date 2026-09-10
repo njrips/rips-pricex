@@ -32,11 +32,53 @@
   --accent-primary-rgb: 48, 48, 48;
   --accent-secondary-rgb: 26, 26, 26;
   --accent-primary: rgb(var(--accent-primary-rgb));
+  --accent-secondary: rgb(var(--accent-secondary-rgb));
+  --accent-primary-hover: var(--p-color-bg-fill-brand-hover, var(--rpx-admin-fill-brand-hover));
+  --accent-primary-active-rgb: var(--accent-secondary-rgb);
+  /* Sibling of --futuristic-cyan, which TargetingSection.module.css already
+     aliases to the accent. Defined here, not there, because Settings.module.css
+     reads it too and must not depend on that module being bundled alongside. */
+  --futuristic-teal: var(--accent-primary);
   --text-link: var(--p-color-text, var(--rpx-admin-text));
   --bg-primary: var(--p-color-bg, var(--rpx-admin-bg));
   --bg-secondary: var(--p-color-bg-surface, var(--rpx-admin-surface));
   --border-primary: var(--p-color-border, var(--rpx-admin-border));
   --text-primary: var(--p-color-text, var(--rpx-admin-text));
+
+  /* The Admin reskin aliased the previous theme's token names onto Polaris
+     (see the :root block in TargetingSection.module.css) but stopped short of
+     the names below, and two of the aliases it did write point at names in
+     here. Left undefined, every declaration reading one of them is invalid at
+     computed-value time and is dropped: borders resolve to none, backgrounds
+     to transparent, and `color` falls back to inheriting, so subdued copy
+     renders at full body weight. Completing the alias list is what makes
+     Settings.module.css and TargetingSection.module.css render as designed. */
+
+  /* Subdued body copy — hints, captions, column headers. Only ever a color. */
+  --text-secondary: var(--p-color-text-secondary, var(--rpx-admin-text-secondary));
+  --text-tertiary: var(--p-color-text-secondary, var(--rpx-admin-text-secondary));
+  --text-link-hover: var(--p-color-bg-fill-brand-hover, var(--rpx-admin-fill-brand-hover));
+  --text-link-active: var(--p-color-bg-fill-brand-hover, var(--rpx-admin-fill-brand-hover));
+
+  /* Neutral hairline / faint fill. Translucent because one token backs
+     hairline borders, soft elevation shadows and light tracks alike; an opaque
+     grey reads as a halo behind a large blur radius. */
+  --surface-muted: rgba(0, 0, 0, 0.1);
+  --surface-scrim: rgba(0, 0, 0, 0.06);
+  --border-secondary: rgba(0, 0, 0, 0.06);
+  --bg-tertiary: var(--p-color-bg-surface-secondary, var(--rpx-admin-surface-secondary));
+  --bg-hover: var(--p-color-bg-surface-hover, var(--rpx-admin-surface-secondary));
+
+  /* Panel fills. The old theme layered translucent "glass" over a dark page;
+     on the Admin skin these are just card surfaces. */
+  --surface-glass: var(--p-color-bg-surface, var(--rpx-admin-surface));
+  --surface-glass-subtle: var(--p-color-bg-surface-secondary, var(--rpx-admin-surface-secondary));
+  --surface-slate-panel: var(--p-color-bg-surface, var(--rpx-admin-surface));
+  --surface-slate-solid: var(--p-color-bg-surface, var(--rpx-admin-surface));
+  --surface-slate-soft: var(--p-color-bg-surface-secondary, var(--rpx-admin-surface-secondary));
+
+  --status-success: var(--p-color-bg-fill-success, var(--rpx-admin-fill-success));
+  --status-error: var(--p-color-text-critical, #e51c00);
 
   /* Classic token aliases → Admin / Polaris */
   --classic-cream: var(--p-color-bg, var(--rpx-admin-bg));

@@ -18,6 +18,26 @@ function round2(n) {
 }
 
 /**
+ * How many products go to the model in one request. The rest are priced by the
+ * same spread the model is asked to follow, and the summary says how many.
+ */
+const MAX_VARIANTS_PER_REQUEST = 40;
+
+/**
+ * Room for the reply this request actually needs.
+ *
+ * A fixed ceiling is either wasteful for three products or fatal for thirty:
+ * a reply cut off at the limit is truncated JSON, which parses to nothing and
+ * falls back silently. One row is roughly `{"v":12,"deltas":[10,15,20]},` --
+ * about ten tokens plus three per variation -- and the summary and braces need
+ * a little more.
+ */
+function estimateSuggestionTokens(variantCount, armCount) {
+  const perRow = 12 + Math.max(1, armCount) * 4;
+  return Math.max(300, Math.round(variantCount * perRow * 1.4) + 160);
+}
+
+/**
  * A dollar band means the merchant wants the same cash uplift on every product,
  * so it stays in currency here instead of collapsing to one catalog-average
  * percent. Returns null for percent mode or an unusable band.
@@ -43,7 +63,6 @@ function normalizeVariantRows(variants = []) {
       currency: row.currency || 'USD',
       margin_percent: Number(row.margin_percent) || null,
       units_sold_30d: Number(row.units_sold_30d) || 0,
-      revenue_30d: Number(row.revenue_30d) || 0,
       opportunity_score: Number(row.opportunity_score) || null,
       recommended_scenario_preset: row.recommended_scenario_preset || 'recommended',
     }))
@@ -130,39 +149,6 @@ function deterministicPriceSuggestions({
   };
 }
 
-function resolveArmId(rawArmId, testArms = []) {
-  const raw = String(rawArmId || '').trim();
-  if (!raw) {
-    return null;
-  }
-  const exact = testArms.find(a => String(a.id) === raw);
-  if (exact) {
-    return String(exact.id);
-  }
-
-  const lower = raw.toLowerCase();
-  const byLabel = testArms.find(a => {
-    const label = String(a.label || a.name || '').toLowerCase();
-    return label === lower || label.includes(lower);
-  });
-  if (byLabel) {
-    return String(byLabel.id);
-  }
-
-  // Models often echo short letters from few-shot examples ("b", "B", "var b").
-  const letter = lower.replace(/^var[_-]?/, '').replace(/[^a-z0-9]/g, '');
-  if (letter) {
-    const byLetter = testArms.find(a => {
-      const id = String(a.id || '').toLowerCase();
-      return id === letter || id.endsWith(`_${letter}`) || id.endsWith(letter);
-    });
-    if (byLetter) {
-      return String(byLetter.id);
-    }
-  }
-  return null;
-}
-
 async function suggestPrices({
   variants = [],
   arms = [],
@@ -173,6 +159,7 @@ async function suggestPrices({
   minAmount = null,
   maxAmount = null,
   objective = 'revenue_per_visitor',
+  useAi = true,
 } = {}) {
   const rows = normalizeVariantRows(variants);
   const testArms = (Array.isArray(arms) ? arms : []).filter(
@@ -196,36 +183,51 @@ async function suggestPrices({
   // The model reasons in percent uplift, which cannot express one flat cash
   // uplift across products at different prices. Dollar bands stay exact.
   if (resolveAmountBand(unit, minAmount, maxAmount)) {
-    return fallback;
+    return { ...fallback, ai_skipped_reason: 'amount_band' };
+  }
+
+  if (useAi === false) {
+    return { ...fallback, ai_skipped_reason: 'disabled_by_request' };
   }
 
   if (!hasOpenAiKey()) {
-    return fallback;
+    return { ...fallback, ai_skipped_reason: 'unavailable' };
   }
 
   const { min, max, shopMax, requestedMin } = resolveAiPriceLiftBand(minPct, maxPct, guardrails);
   const armCatalog = testArms.map(a => ({ id: a.id, label: a.label || a.name || a.id }));
+  const sent = rows.slice(0, MAX_VARIANTS_PER_REQUEST);
+
+  /**
+   * The model answers by position, not by id.
+   *
+   * It used to echo the full Shopify variant gid and the arm id back for every
+   * product × variation, with a sentence of reasoning each. That is around 40
+   * tokens a pair, so twenty products across three variations needed more
+   * output than the reply was allowed -- the JSON came back cut in half, parsed
+   * to nothing, and every merchant past a handful of products silently got the
+   * deterministic spread while still paying for the call. Row index and a
+   * delta per variation is a tenth of that, and a number that is not a row we
+   * sent is impossible to mistake for one that is.
+   */
   const payload = await chatJson({
+    label: 'price_suggest',
     systemPrompt: `You are a pricing scientist for Shopify A/B price tests in Priceify.
 Return strict JSON only:
 {
-  "summary": "one sentence",
-  "suggestions": [
-    {
-      "variant_id": "<exact variant_id from input>",
-      "arm_id": "<exact arm id from input.arms[].id>",
-      "delta_percent": 12.5,
-      "reason": "max 90 chars"
-    }
+  "summary": "one sentence, max 200 chars",
+  "prices": [
+    { "v": 0, "deltas": [12.5, 20] }
   ]
 }
 Rules:
-- Copy variant_id and arm_id EXACTLY from the input arrays. Never invent or shorten them.
-- Provide one suggestion for every variant × arm pair.
-- Suggest positive uplift delta_percent within [${min}, ${max}].
-- For a product with multiple arms, spread the deltas across the full [${min}, ${max}] range so the variations are far enough apart to resolve a price response. Do not cluster them.
-- Prefer higher deltas for high opportunity_score / strong margin; quieter deltas for thin margin.
-- Never exceed shop max_price_change_percent=${shopMax}.`,
+- "v" is the index of a product in the input variants array. Use each index at most once.
+- "deltas" holds one percent uplift per test variation, in the same order as the input arms array. Give exactly ${armCatalog.length}.
+- Include every product in the input.
+- Every delta is a positive uplift within [${min}, ${max}]. Never exceed the shop limit max_price_change_percent=${shopMax}.
+- Spread a product's deltas across the full [${min}, ${max}] range so the variations are far enough apart to resolve a price response. Do not cluster them.
+- Prefer higher deltas for high opportunity_score or strong margin_percent; quieter deltas for thin margin.
+- Return no prose outside the JSON.`,
     userPrompt: JSON.stringify({
       objective,
       min_pct: min,
@@ -234,10 +236,9 @@ Rules:
         min_margin_percent: guardrails.min_margin_percent ?? 35,
         max_price_change_percent: guardrails.max_price_change_percent ?? 15,
       },
-      arms: armCatalog,
-      allowed_arm_ids: armCatalog.map(a => a.id),
-      variants: rows.slice(0, 40).map(r => ({
-        variant_id: r.variant_id,
+      arms: armCatalog.map(a => a.label),
+      variants: sent.map((r, index) => ({
+        v: index,
         title: r.title,
         current_price: r.current_price,
         margin_percent: r.margin_percent,
@@ -247,58 +248,61 @@ Rules:
       })),
     }),
     temperature: 0.25,
-    maxTokens: 1400,
+    maxTokens: estimateSuggestionTokens(sent.length, armCatalog.length),
   });
 
-  const items = Array.isArray(payload?.suggestions) ? payload.suggestions : [];
+  const items = Array.isArray(payload?.prices) ? payload.prices : [];
   if (!items.length) {
-    return fallback;
+    return { ...fallback, ai_attempted: true };
   }
 
-  const byVariant = new Map(rows.map(r => [r.variant_id, r]));
   const suggestions = [];
+  const usedRows = new Set();
 
   for (const item of items) {
-    const variantId = String(item?.variant_id || '').trim();
-    const armId = resolveArmId(item?.arm_id, testArms);
-    const row = byVariant.get(variantId);
-    if (!row || !armId) {
+    const index = Number(item?.v);
+    const row = Number.isInteger(index) ? sent[index] : null;
+    if (!row || usedRows.has(index)) {
       continue;
     }
+    const deltas = Array.isArray(item?.deltas) ? item.deltas : [];
+    if (!deltas.length) {
+      continue;
+    }
+    usedRows.add(index);
 
-    let delta = Number(item.delta_percent);
-    if (!Number.isFinite(delta)) {
-      continue;
-    }
-    // Classic AI mode tests uplift bands; coerce to positive within min/max.
-    delta = Math.min(max, Math.max(min, Math.abs(delta)));
-    const band = buildGuardrailBand(row.current_price, {
-      minMarginPercent: guardrails.min_margin_percent ?? 35,
-      maxChangePercent: shopMax,
-      marginPercent: resolveSuggestionMarginPercent(row, guardrails),
-    });
-    const raw = row.current_price * (1 + delta / 100);
-    const price = clampPrice(roundPrice(raw, row.currency), band.floor, band.ceiling);
-    const appliedDelta =
-      row.current_price > 0 ? ((price - row.current_price) / row.current_price) * 100 : delta;
-    suggestions.push({
-      variant_id: variantId,
-      arm_id: armId,
-      price,
-      delta_percent: round2(appliedDelta),
-      guardrail_limited: appliedDelta + 0.01 < requestedMin,
-      reason:
-        String(item.reason || '')
-          .trim()
-          .slice(0, 120) || 'AI price suggestion',
+    testArms.forEach((arm, armIndex) => {
+      let delta = Number(deltas[armIndex]);
+      if (!Number.isFinite(delta)) {
+        return;
+      }
+      // Classic AI mode tests uplift bands; coerce to positive within min/max.
+      delta = Math.min(max, Math.max(min, Math.abs(delta)));
+      const band = buildGuardrailBand(row.current_price, {
+        minMarginPercent: guardrails.min_margin_percent ?? 35,
+        maxChangePercent: shopMax,
+        marginPercent: resolveSuggestionMarginPercent(row, guardrails),
+      });
+      const raw = row.current_price * (1 + delta / 100);
+      const price = clampPrice(roundPrice(raw, row.currency), band.floor, band.ceiling);
+      const appliedDelta =
+        row.current_price > 0 ? ((price - row.current_price) / row.current_price) * 100 : delta;
+      suggestions.push({
+        variant_id: row.variant_id,
+        arm_id: String(arm.id),
+        price,
+        delta_percent: round2(appliedDelta),
+        guardrail_limited: appliedDelta + 0.01 < requestedMin,
+      });
     });
   }
 
   if (!suggestions.length) {
-    return fallback;
+    return { ...fallback, ai_attempted: true };
   }
 
   // Fill any missing variant×arm pairs with deterministic so UI is complete.
+  const fromModel = suggestions.length;
   const seen = new Set(suggestions.map(s => `${s.variant_id}::${s.arm_id}`));
   for (const fill of fallback.suggestions) {
     const key = `${fill.variant_id}::${fill.arm_id}`;
@@ -307,15 +311,43 @@ Rules:
       seen.add(key);
     }
   }
+  const filled = suggestions.length - fromModel;
 
+  const modelSummary = String(payload?.summary || '')
+    .trim()
+    .slice(0, 220);
   return {
     source: 'openai',
     suggestions,
-    summary:
-      String(payload?.summary || '')
-        .trim()
-        .slice(0, 220) || `AI suggested ${suggestions.length} test prices within ${min}–${max}%.`,
+    ai_pair_count: fromModel,
+    fallback_pair_count: filled,
+    summary: describeSuggestionSource({
+      modelSummary,
+      fromModel,
+      filled,
+      min,
+      max,
+    }),
   };
+}
+
+/**
+ * Say where the prices came from, when it is not all one place.
+ *
+ * A reply that covered half the products used to be reported as an AI
+ * suggestion outright, so a merchant reading "AI price suggestions applied"
+ * had no way to know the rest was the same spread they would have got with the
+ * model switched off.
+ */
+function describeSuggestionSource({ modelSummary, fromModel, filled, min, max }) {
+  const base = modelSummary || `AI suggested ${fromModel} test prices within ${min}–${max}%.`;
+  if (filled <= 0) {
+    return base;
+  }
+  const note = `${filled} price${filled === 1 ? '' : 's'} the model did not return ${
+    filled === 1 ? 'was' : 'were'
+  } filled with the even ${min}–${max}% spread.`;
+  return `${base} ${note}`.slice(0, 320);
 }
 
 /**

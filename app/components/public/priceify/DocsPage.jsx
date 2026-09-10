@@ -1,7 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router';
 import { DEFAULT_APP_STORE_LISTING_URL } from '../../../utils/appStoreListingUrl';
 import { PUBLIC_ROUTES } from '../../../constants/publicRoutes';
+import useKeyedState from '../../../hooks/useKeyedState';
+import { parsePublicSectionId } from './scrollToPublicHash';
 import {
   DOCS_FAQ,
   DOCS_GROUPS,
@@ -10,6 +12,22 @@ import {
   DOCS_SECTIONS,
   DOCS_UPDATED,
 } from './docsContent';
+
+/**
+ * The section id in the URL fragment, tracked so a deep link can open the
+ * section it points at. Starts empty and fills in after mount: the server has
+ * no fragment to render, so reading it during render would not match.
+ */
+function useTargetedSectionId() {
+  const [id, setId] = useState('');
+  useEffect(() => {
+    const read = () => setId(parsePublicSectionId(window.location.hash));
+    read();
+    window.addEventListener('hashchange', read);
+    return () => window.removeEventListener('hashchange', read);
+  }, []);
+  return id;
+}
 
 function InstallButton({ storeUrl, className, children }) {
   const href = storeUrl || DEFAULT_APP_STORE_LISTING_URL;
@@ -57,7 +75,70 @@ function DocsFaq() {
   );
 }
 
+/**
+ * A guide article. Long sections carry a `summary` and a `facts` strip so the
+ * page can be skimmed, with the full prose folded away behind a disclosure —
+ * `confidence` and `min-sample` run past 3,500 characters each, which nobody
+ * reads to answer "what does this setting do again?".
+ *
+ * Short sections have no summary and render as a plain card: a one-paragraph
+ * article is already its own summary, and splitting it would just add a click.
+ */
+function DocsArticle({ section, targeted }) {
+  // Keyed on `targeted` so arriving from a Settings info icon — which links to
+  // /docs#confidence expressly to read the detail — opens the section, while a
+  // later manual collapse still sticks until the hash changes again.
+  const [open, setOpen] = useKeyedState(targeted, targeted);
+  const facts = Array.isArray(section.facts) ? section.facts : [];
+
+  if (!section.summary) {
+    return (
+      <article id={section.id} className="px-card">
+        <h3>{section.title}</h3>
+        {section.paragraphs.map((paragraph) => (
+          <p key={paragraph}>{paragraph}</p>
+        ))}
+      </article>
+    );
+  }
+
+  return (
+    <article id={section.id} className="px-card px-docs-article">
+      <h3>{section.title}</h3>
+      <p className="px-docs-summary">{section.summary}</p>
+      {facts.length ? (
+        <dl className="px-docs-facts">
+          {facts.map((fact) => (
+            <div key={fact.label} className="px-docs-fact">
+              <dt>{fact.label}</dt>
+              <dd>{fact.value}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : null}
+      <button
+        type="button"
+        className="px-docs-more"
+        aria-expanded={open}
+        aria-controls={`px-docs-detail-${section.id}`}
+        onClick={() => setOpen((prev) => !prev)}
+      >
+        <span>{open ? 'Hide full explanation' : 'Read the full explanation'}</span>
+        <span className={open ? 'px-faq-toggle px-faq-toggle--on' : 'px-faq-toggle'} aria-hidden>
+          {open ? '−' : '+'}
+        </span>
+      </button>
+      <div className="px-docs-detail" id={`px-docs-detail-${section.id}`} hidden={!open}>
+        {section.paragraphs.map((paragraph) => (
+          <p key={paragraph}>{paragraph}</p>
+        ))}
+      </div>
+    </article>
+  );
+}
+
 export default function DocsPage({ storeUrl }) {
+  const targetedId = useTargetedSectionId();
   return (
     <div className="px-landing">
       <section className="px-section px-docs-hero">
@@ -91,12 +172,11 @@ export default function DocsPage({ storeUrl }) {
           </div>
           <div className="px-docs-articles">
             {DOCS_SECTIONS.filter((section) => section.group === group.id).map((section) => (
-              <article key={section.id} id={section.id} className="px-card">
-                <h3>{section.title}</h3>
-                {section.paragraphs.map((paragraph) => (
-                  <p key={paragraph}>{paragraph}</p>
-                ))}
-              </article>
+              <DocsArticle
+                key={section.id}
+                section={section}
+                targeted={targetedId === section.id}
+              />
             ))}
           </div>
         </section>

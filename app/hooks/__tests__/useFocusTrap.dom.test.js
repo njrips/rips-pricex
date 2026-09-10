@@ -32,8 +32,8 @@ afterEach(() => {
   document.body.innerHTML = '';
 });
 
-function Dialog({ active = true }) {
-  const ref = useFocusTrap(active);
+function Dialog({ active = true, onEscape }) {
+  const ref = useFocusTrap(active, onEscape);
   return h(
     'div',
     { ref, role: 'dialog', 'aria-modal': 'true' },
@@ -43,15 +43,19 @@ function Dialog({ active = true }) {
   );
 }
 
-function pressTab({ shiftKey = false } = {}) {
+function pressKey(key, { shiftKey = false } = {}) {
   const event = new window.KeyboardEvent('keydown', {
-    key: 'Tab',
+    key,
     shiftKey,
     bubbles: true,
     cancelable: true,
   });
   document.dispatchEvent(event);
   return event;
+}
+
+function pressTab(options) {
+  return pressKey('Tab', options);
 }
 
 describe('useFocusTrap', () => {
@@ -117,6 +121,39 @@ describe('useFocusTrap', () => {
     expect(document.activeElement.id).toBe('outside');
     const event = pressTab();
     expect(event.defaultPrevented).toBe(false);
+  });
+
+  // A trap with no Escape leaves keyboard and screen-reader users tabbing
+  // around the dialog looking for its close button, and a dialog nested inside
+  // another can leave the parent's Escape handler standing down with nothing
+  // taking over — no way out at all.
+  it('closes on Escape when the dialog gives it somewhere to go', () => {
+    let closed = 0;
+    mount(h(Dialog, { onEscape: () => { closed += 1; } }));
+    const event = pressKey('Escape');
+    expect(closed).toBe(1);
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it('leaves Escape alone when the dialog handles it itself', () => {
+    mount(h(Dialog));
+    const event = pressKey('Escape');
+    expect(event.defaultPrevented).toBe(false);
+  });
+
+  it('lets a nested overlay keep its own Escape', () => {
+    let closed = 0;
+    mount(h(Dialog, { onEscape: () => { closed += 1; } }));
+    const nested = document.createElement('div');
+    nested.setAttribute('role', 'dialog');
+    const nestedButton = document.createElement('button');
+    nested.appendChild(nestedButton);
+    document.body.appendChild(nested);
+
+    nestedButton.focus();
+    pressKey('Escape');
+    // Escape belongs to the innermost dialog, or one key press closes both.
+    expect(closed).toBe(0);
   });
 
   it('stands down while focus sits in a nested overlay', () => {

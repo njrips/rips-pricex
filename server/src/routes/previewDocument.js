@@ -300,7 +300,7 @@ async function servePreviewDocument(req, res) {
               ? 'Product not found'
               : 'Preview unavailable',
           message: passwordish
-            ? 'This store is password protected. Set RIPX_DEV_STOREFRONT_PASSWORD in .env (or enter it in Settings), then try Pick again.'
+            ? 'This store is password protected. Set RIPX_DEV_STOREFRONT_PASSWORD in .env (or enter it under Settings \u2192 Price surfaces), then try Pick again.'
             : notFound
               ? 'Shopify returned 404 for this product URL. Publish the product to Online Store or pick a different handle.'
               : `Could not load storefront preview (${reason}).`,

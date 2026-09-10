@@ -21,6 +21,15 @@ jest.mock('../smartPricingLaunchGuardService', () => ({
   assertCanLaunchPriceTests: jest.fn(),
 }));
 
+// Launch refuses a product another test is already pricing. The real check
+// reads the database; these suites decide the answer per test.
+jest.mock('../priceTestEnrollmentService', () => ({
+  assertProductIsFreeToPrice: jest.fn(),
+  releasePriceTestHold: jest.fn(),
+  // The real lock talks to Postgres; here it only has to run the work.
+  withPricingEnrollmentLock: jest.fn((_target, fn) => fn()),
+}));
+
 jest.mock('../smartPricingCheckoutReadinessService', () => ({
   resolveSmartPricingCheckoutReadiness: jest.fn(),
   clearSmartPricingCheckoutReadinessCache: jest.fn(),
@@ -51,6 +60,11 @@ const { createTest } = require('../../../models/test');
 const { buildPriceTestPayloadFromPlan } = require('../planToPriceTestService');
 const { getShopSmartPricingGuardrails } = require('../smartPricingGuardrailsService');
 const { assertCanLaunchPriceTests } = require('../smartPricingLaunchGuardService');
+const {
+  assertProductIsFreeToPrice,
+  releasePriceTestHold,
+  withPricingEnrollmentLock,
+} = require('../priceTestEnrollmentService');
 const { resolveSmartPricingCheckoutReadiness } = require('../smartPricingCheckoutReadinessService');
 const { ensureOfferCheckoutDiscount } = require('../offerCheckoutDiscountService');
 const { getShopSession } = require('../../../models/shopSession');
@@ -240,5 +254,156 @@ describe('smartPricingLaunchService', () => {
     expect(ensureOfferCheckoutDiscount).not.toHaveBeenCalled();
     expect(resolveSmartPricingCheckoutReadiness).not.toHaveBeenCalled();
     expect(abTestEngine.startTest).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * The create wizard withholds products another test is holding, but it reads a
+ * catalog snapshot cached for hours: launch a test and every product in it
+ * stayed freely selectable for the rest of that day. This is the check that
+ * has to be right.
+ */
+describe('a product another test is already pricing', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    buildPriceTestPayloadFromPlan.mockReturnValue({ type: 'price', variants: [] });
+    abTestEngine.validateTest.mockReturnValue({ isValid: true, errors: [] });
+    createTest.mockResolvedValue({ id: 99, status: 'draft' });
+    abTestEngine.startTest.mockResolvedValue({ id: 99, status: 'running' });
+    getShopSmartPricingGuardrails.mockResolvedValue({ max_parallel_tests: 5 });
+    assertCanLaunchPriceTests.mockResolvedValue({ running_count: 0, max_parallel: 5 });
+    getShopSession.mockResolvedValue({ access_token: 'token' });
+    resolveSmartPricingCheckoutReadiness.mockResolvedValue({ ready: true });
+    assertProductIsFreeToPrice.mockResolvedValue(null);
+    releasePriceTestHold.mockResolvedValue({ released: true });
+    withPricingEnrollmentLock.mockImplementation((_target, fn) => fn());
+  });
+
+  it('is checked against the plan the merchant is launching', async () => {
+    await launchSmartPricingPlanAsTest(
+      {
+        id: 'plan-1',
+        product_id: 'gid://shopify/Product/1',
+        variant_id: 'gid://shopify/ProductVariant/2',
+        title: 'Runner Shoe',
+      },
+      'demo.myshopify.com',
+      { autoStart: true }
+    );
+
+    expect(assertProductIsFreeToPrice).toHaveBeenCalledWith({
+      shopDomain: 'demo.myshopify.com',
+      productId: 'gid://shopify/Product/1',
+      variantId: 'gid://shopify/ProductVariant/2',
+      title: 'Runner Shoe',
+    });
+  });
+
+  it('does not start a second test over the same product', async () => {
+    const conflict = new Error('"Runner Shoe" is already being priced by "Summer pricing".');
+    conflict.isValidation = true;
+    conflict.code = 'PRODUCT_IN_ANOTHER_TEST';
+    assertProductIsFreeToPrice.mockRejectedValue(conflict);
+
+    await expect(
+      launchSmartPricingPlanAsTest({ id: 'plan-1' }, 'demo.myshopify.com', { autoStart: true })
+    ).rejects.toThrow(/already being priced/i);
+
+    expect(createTest).not.toHaveBeenCalled();
+    expect(abTestEngine.startTest).not.toHaveBeenCalled();
+  });
+
+  it('is not asked when the plan is only being saved as a draft', async () => {
+    // A draft prices nobody. The check belongs at the moment it starts.
+    await launchSmartPricingPlanAsTest({ id: 'plan-1' }, 'demo.myshopify.com', {
+      autoStart: false,
+    });
+
+    expect(assertProductIsFreeToPrice).not.toHaveBeenCalled();
+  });
+
+  it('is held from the check until the test is actually running', async () => {
+    // A draft claims nothing, so two launches that check, then create, then
+    // start would both find the product free and both start it.
+    const order = [];
+    withPricingEnrollmentLock.mockImplementation(async (_target, fn) => {
+      order.push('lock');
+      const result = await fn();
+      order.push('unlock');
+      return result;
+    });
+    assertProductIsFreeToPrice.mockImplementation(async () => {
+      order.push('check');
+    });
+    createTest.mockImplementation(async () => {
+      order.push('create');
+      return { id: 99, status: 'draft' };
+    });
+    abTestEngine.startTest.mockImplementation(async () => {
+      order.push('start');
+      return { id: 99, status: 'running' };
+    });
+
+    await launchSmartPricingPlanAsTest({ id: 'plan-1' }, 'demo.myshopify.com', {
+      autoStart: true,
+    });
+
+    expect(order).toEqual(['lock', 'check', 'create', 'start', 'unlock']);
+  });
+
+  it('checks an offer plan too, since a discount lands on the price a test is setting', async () => {
+    await launchSmartPricingPlanAsTest(
+      {
+        id: 'plan-1',
+        title: 'Tee',
+        product_id: 'gid://shopify/Product/1',
+        experiment_type: 'offer_test',
+        metadata: { experiment_type: 'offer_test', experiment_title: 'Summer' },
+        price_arms: [
+          { id: 'control', role: 'control', label: 'Control', allocation_percent: 50 },
+          {
+            id: 'a',
+            role: 'challenger',
+            label: 'A',
+            allocation_percent: 50,
+            offer: { discount_type: 'percent', discount_value: 10 },
+          },
+        ],
+      },
+      'demo.myshopify.com',
+      { autoStart: true }
+    );
+
+    expect(assertProductIsFreeToPrice).toHaveBeenCalledWith(
+      expect.objectContaining({ productId: 'gid://shopify/Product/1' })
+    );
+  });
+
+  it('hands the product back from the round that decided it before re-testing it', async () => {
+    // Applying a winner leaves round 1 serving that price for ever. Round 2 is
+    // a test of the same product, so without this the follow-up the app itself
+    // queued could never be launched.
+    await launchSmartPricingPlanAsTest(
+      { id: 'plan-2', previous_test_id: 'test-1', product_id: 'gid://shopify/Product/1' },
+      'demo.myshopify.com',
+      { autoStart: true }
+    );
+
+    expect(releasePriceTestHold).toHaveBeenCalledWith(
+      'test-1',
+      'demo.myshopify.com',
+      'follow_up_round'
+    );
+    const releaseOrder = releasePriceTestHold.mock.invocationCallOrder[0];
+    const checkOrder = assertProductIsFreeToPrice.mock.invocationCallOrder[0];
+    expect(releaseOrder).toBeLessThan(checkOrder);
+  });
+
+  it('leaves a first-round launch alone, since there is nothing to hand back', async () => {
+    await launchSmartPricingPlanAsTest({ id: 'plan-1' }, 'demo.myshopify.com', {
+      autoStart: true,
+    });
+
+    expect(releasePriceTestHold).not.toHaveBeenCalled();
   });
 });

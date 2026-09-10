@@ -20,12 +20,19 @@ describe('wizardSnapshotHasMerchantInput', () => {
   it('is true once anything has been named, picked, or priced', () => {
     expect(wizardSnapshotHasMerchantInput({ name: 'Spring pricing' })).toBe(true);
     expect(wizardSnapshotHasMerchantInput({ hypothesis: 'Higher converts' })).toBe(true);
-    expect(wizardSnapshotHasMerchantInput({ collectionId: 'gid://shopify/Collection/1' })).toBe(true);
     expect(wizardSnapshotHasMerchantInput({ selectedIds: ['v1'] })).toBe(true);
     expect(wizardSnapshotHasMerchantInput({ plans: [{ id: 'plan_1' }] })).toBe(true);
     expect(wizardSnapshotHasMerchantInput({ priceOverrides: { 'v1::b': '12.00' } })).toBe(true);
     expect(wizardSnapshotHasMerchantInput({ offerByArm: { b: { discount_value: 10 } } })).toBe(true);
     expect(wizardSnapshotHasMerchantInput({ goalByPlan: { plan_1: { goal: 'revenue' } } })).toBe(true);
+  });
+
+  it('does not count a browse filter as input', () => {
+    // Collection filtering moved into the product picker and is no longer part
+    // of the snapshot, so a stale draft carrying one is not merchant input.
+    expect(wizardSnapshotHasMerchantInput({ collectionId: 'gid://shopify/Collection/1' })).toBe(
+      false
+    );
   });
 
   it('does not count empty collections as input', () => {

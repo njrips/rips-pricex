@@ -30,12 +30,31 @@ function isRunningStatus(status) {
   return key === 'running' || key === 'active';
 }
 
+function goalGuardrails(test = {}) {
+  return test.goal && typeof test.goal === 'object' && test.goal.guardrails
+    ? test.goal.guardrails
+    : {};
+}
+
+/**
+ * Whether this test asked for the guardrail at all.
+ *
+ * `guardrail_config` is stored as NULL for a disabled guardrail, so the column
+ * cannot carry the answer -- and reading a missing column as "no guardrail"
+ * would be wrong too, since a threshold also survives on the goal. The goal's
+ * own `enabled: false` is the durable signal, and only an explicit false
+ * counts: tests launched before the guardrail was switchable have no flag and
+ * must keep the protection they launched with.
+ */
+function isGuardrailDisabled(test = {}) {
+  const config = parseGuardrailConfig(test.guardrail_config);
+  if (config.enabled === false) return true;
+  return goalGuardrails(test).enabled === false;
+}
+
 function resolveThreshold(test = {}, shopGuardrails = {}) {
   const config = parseGuardrailConfig(test.guardrail_config);
-  const goalRails =
-    test.goal && typeof test.goal === 'object' && test.goal.guardrails
-      ? test.goal.guardrails
-      : {};
+  const goalRails = goalGuardrails(test);
   const raw =
     config.max_revenue_drop_percent ??
     goalRails.max_revenue_drop_percent ??
@@ -56,6 +75,9 @@ function resolveThreshold(test = {}, shopGuardrails = {}) {
 async function enforceRevenueDropGuardrail({ shopDomain, test, analytics } = {}) {
   if (!test?.id || !shopDomain) {
     return { skipped: true, reason: 'missing_test' };
+  }
+  if (isGuardrailDisabled(test)) {
+    return { skipped: true, reason: 'guardrail_disabled', test_status: test.status };
   }
   const config = parseGuardrailConfig(test.guardrail_config);
   if (config.breached_at) {
@@ -147,5 +169,6 @@ async function enforceRevenueDropGuardrail({ shopDomain, test, analytics } = {})
 
 module.exports = {
   enforceRevenueDropGuardrail,
+  isGuardrailDisabled,
   resolveThreshold,
 };

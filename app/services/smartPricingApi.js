@@ -216,6 +216,21 @@ export async function resumeSmartPricingProduct(domain, testId) {
   return unwrapData(res);
 }
 
+/**
+ * Stop serving a decided product's price, so a new test may include it.
+ *
+ * The catalog keeps the applied price; this only ends the personalization that
+ * would otherwise hold the product for ever.
+ */
+export async function releaseSmartPricingProduct(domain, testId) {
+  const res = await apiPost(
+    `/smart-pricing/tests/${encodeURIComponent(testId)}/release-product`,
+    {},
+    domain ? { params: { domain } } : {}
+  );
+  return unwrapData(res);
+}
+
 /** Revert catalog prices to the snapshot taken at apply time. */
 export async function revertSmartPricingProductPrice(
   domain,

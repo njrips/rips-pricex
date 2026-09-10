@@ -27,6 +27,7 @@ jest.mock('../smartPricingTestAnalyticsService', () => ({
 jest.mock('../../../utils/jobLease', () => ({
   acquireJobLease: async () => true,
   releaseJobLease: async () => undefined,
+  startJobLeaseHeartbeat: () => () => undefined,
   productRolloutLeaseName: (shopDomain, testId) => `product_rollout.${shopDomain}.${testId}`,
   ROLLOUT_LEASE_SECONDS: 120,
 }));

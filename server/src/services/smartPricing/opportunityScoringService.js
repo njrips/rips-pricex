@@ -65,9 +65,6 @@ function scoreUncertainty(row = {}) {
 }
 
 function scoreSafety(row = {}) {
-  if (row.has_active_price_test) {
-    return 0;
-  }
   if (row.blocked) {
     return 0;
   }
@@ -99,9 +96,6 @@ function resolveConfidenceLevel(row = {}) {
 }
 
 function resolveRiskLevel(row = {}, opportunityScore = 0) {
-  if (row.has_active_price_test) {
-    return 'blocked';
-  }
   if (!row.margin_known && opportunityScore >= 0.55) {
     return 'medium';
   }
@@ -118,9 +112,6 @@ function resolveRiskLevel(row = {}, opportunityScore = 0) {
 function buildReasonShort(row = {}, tags = []) {
   const units30d = Number(row.units_sold_30d) || 0;
   const margin = Number(row.margin_percent);
-  if (row.has_active_price_test) {
-    return 'Already in a running price test';
-  }
   if (tags.includes('low_data')) {
     return 'Limited sales history — start with a conservative 2-price test';
   }
@@ -174,9 +165,6 @@ function buildTags(row = {}) {
   if (!row.margin_known) {
     tags.push('margin_unknown');
   }
-  if (row.has_active_price_test) {
-    tags.push('active_test');
-  }
   if (row.price_changed_recently) {
     tags.push('price_recently_changed');
   }
@@ -207,10 +195,10 @@ function scoreSkuRow(row = {}) {
     trafficScore * marginScore * revenueScore * uncertaintyScore * safetyScore * stabilityScore;
   const opportunityScore = Number(composite.toFixed(2));
 
-  const eligible =
-    !row.has_active_price_test &&
-    !tags.includes('active_test') &&
-    parseMoney(row.current_price) > 0;
+  // Whether another test already holds this product is resolved per request in
+  // `opportunityService`, not here: this score is cached for hours, and a row
+  // dropped at bake time cannot come back when the test that held it ends.
+  const eligible = parseMoney(row.current_price) > 0;
 
   const recommended =
     eligible &&
@@ -233,7 +221,6 @@ function scoreSkuRow(row = {}) {
     eligible,
     recommended_scenario_preset: scenario.scenario_preset,
     scenario_rationale: scenario.rationale,
-    blockers: row.has_active_price_test ? ['active_price_test'] : [],
   };
 }
 

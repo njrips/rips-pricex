@@ -13,13 +13,15 @@ import {
   describeAiBandClamp,
   describeCollapsedAiBand,
   getAiSuggestCopy,
+  limitSelectionToProducts,
   normalizeAiPriceBand,
   resolveMaxPriceChangeRaise,
   resolveRaiseForAttempt,
+  splitTitleParts,
 } from './productsStepReadiness';
 import {
   ButtonIconSearch,
-  ButtonIconSelect,
+  IconBoxes,
   IconCheck,
   IconCheckCircle,
   IconChevron,
@@ -83,53 +85,6 @@ function formatAmountDeltaLabel(base, test, currency = 'USD') {
   return `${delta >= 0 ? '+' : '−'}${absLabel}`;
 }
 
-function normalizeId(value) {
-  const raw = String(value || '').trim();
-  if (!raw) return '';
-  const gidMatch = raw.match(/\/(\d+)\s*$/);
-  if (gidMatch) return gidMatch[1];
-  return raw;
-}
-
-function matchesCollection(row, collectionId, collectionLabel) {
-  if (!collectionId) return true;
-  const want = normalizeId(collectionId);
-  const candidates = [
-    row.collection_id,
-    row.primary_collection_id,
-    row.collection_gid,
-    ...(Array.isArray(row.collection_ids) ? row.collection_ids : []),
-  ]
-    .map(normalizeId)
-    .filter(Boolean);
-  if (want && candidates.some(id => id === want || id.endsWith(want) || want.endsWith(id))) {
-    return true;
-  }
-  const hay = `${row.collection_title || ''} ${row.product_type || ''}`.toLowerCase();
-  return collectionLabel ? hay.includes(String(collectionLabel).toLowerCase()) : false;
-}
-
-function splitTitleParts(row) {
-  const explicitProduct = String(row.product_title || '').trim();
-  const explicitVariant = String(row.variant_title || '').trim();
-  if (explicitProduct) {
-    return {
-      productTitle: explicitProduct,
-      variantTitle:
-        explicitVariant && !/^default\s*title$/i.test(explicitVariant) ? explicitVariant : '',
-    };
-  }
-  const raw = String(row.title || row.display_name || '').trim();
-  const parts = raw.split(/\s+[—–-]\s+/);
-  if (parts.length > 1) {
-    return {
-      productTitle: parts[0].trim() || 'Product',
-      variantTitle: parts.slice(1).join(' — ').trim(),
-    };
-  }
-  return { productTitle: raw || 'Product', variantTitle: '' };
-}
-
 function productKey(row) {
   return (
     row.product_id ||
@@ -186,33 +141,30 @@ function variantLabel(row) {
   return row.sku || 'Variant';
 }
 
-function ProductListSkeleton({ count = 6 }) {
-  return (
-    <div className={styles.productGrid} aria-hidden>
-      {Array.from({ length: count }, (_, index) => (
-        <div key={`product-skeleton-${index}`} className={`${styles.productCard} ${styles.productCardSkeleton}`}>
-          <div className={`${styles.thumb} ${styles.skeletonThumb}`} />
-          <div className={styles.productMeta}>
-            <div className={styles.skeletonLine} />
-            <div className={`${styles.skeletonLine} ${styles.skeletonLineMuted}`} />
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 export default function ProductsPricingStepPanel({
   opportunities = [],
+  /**
+   * Products the catalog withheld because another price test is pricing them:
+   * `{ total, live, paused, tests }`. They are absent from `opportunities`, so
+   * without this the step could only show a shorter list and no reason.
+   */
+  withheldByOtherTests = null,
+  /**
+   * True when the shop has more products than one catalog snapshot loads, so
+   * this list is part of the catalog rather than all of it.
+   */
+  catalogTruncated = false,
+  /**
+   * Look up products the snapshot did not load, for a catalog too big to load
+   * in one go. Null when the whole catalog is already here.
+   */
+  onCatalogSearch = null,
+  catalogSearching = false,
   selectedIds = [],
   onSelectedIdsChange,
   maxSelection = 20,
   pickMode,
   onPickModeChange,
-  productSearch,
-  onProductSearchChange,
-  collectionId,
-  onCollectionChange,
   collectionOptions = [],
   variations = [],
   activeArmIndex = 0,
@@ -260,8 +212,6 @@ export default function ProductsPricingStepPanel({
   const [pricingPageSize, setPricingPageSize] = useState(PRICING_TABLE_PAGE_SIZES[0]);
   const [bulkUnit, setBulkUnit] = useState('percent');
   const [localBulkNotice, setLocalBulkNotice] = useState('');
-  const [categoryFilter, setCategoryFilter] = useState('');
-  const [groupTab, setGroupTab] = useState('collections'); // collections | categories
 
   const selectedSet = useMemo(
     () => new Set((selectedIds || []).map(id => String(id))),
@@ -283,146 +233,43 @@ export default function ProductsPricingStepPanel({
     return keys.size;
   }, [opportunities, isSelectedId]);
 
+  // Only the pricing table's category filter needs these now that the step no
+  // longer carries category pills, so it is a plain label list with no
+  // dependency on what is selected.
   const categoryOptions = useMemo(() => {
-    const map = new Map();
+    const labels = new Set();
     (opportunities || []).forEach(row => {
       const label = String(row.product_type || '').trim();
-      if (!label) return;
-      if (!map.has(label)) map.set(label, []);
-      map.get(label).push(row);
+      if (label) labels.add(label);
     });
-    return Array.from(map.entries())
-      .map(([label, rows]) => {
-        const productKeys = new Set(rows.map(productKey));
-        const selectedKeys = new Set(
-          rows.filter(row => isSelectedId(row.variant_id)).map(productKey)
-        );
-        return {
-          label,
-          value: label,
-          total: productKeys.size,
-          selected: selectedKeys.size,
-          variantIds: rows.map(r => r.variant_id).filter(Boolean),
-        };
-      })
-      .sort((a, b) => a.label.localeCompare(b.label));
-  }, [opportunities, isSelectedId]);
+    return Array.from(labels)
+      .sort((a, b) => a.localeCompare(b))
+      .map(label => ({ label, value: label }));
+  }, [opportunities]);
 
-  const collectionStats = useMemo(() => {
-    const stats = new Map();
-    (collectionOptions || []).forEach(opt => {
-      const rows = (opportunities || []).filter(row =>
-        matchesCollection(row, opt.value, opt.label)
-      );
-      const productKeys = new Set(rows.map(productKey));
-      const selectedKeys = new Set(
-        rows.filter(row => isSelectedId(row.variant_id)).map(productKey)
-      );
-      const total = Number(opt.products_count) || productKeys.size || rows.length || 0;
-      stats.set(opt.value || 'all', {
-        selected: selectedKeys.size,
-        total,
-        variantIds: rows.map(r => r.variant_id).filter(Boolean),
-      });
-    });
-    return stats;
-  }, [collectionOptions, opportunities, isSelectedId]);
-
-  const filteredRows = useMemo(() => {
-    const q = String(productSearch || '')
-      .trim()
-      .toLowerCase();
-    const activeLabel = collectionOptions.find(o => o.value === collectionId)?.label || '';
-    const base = opportunities || [];
-    let scoped = base;
-    if (collectionId) {
-      const byCollection = base.filter(row => matchesCollection(row, collectionId, activeLabel));
-      scoped = byCollection.length === 0 && base.length > 0 ? base : byCollection;
-    }
-    if (categoryFilter) {
-      scoped = scoped.filter(row => String(row.product_type || '').trim() === categoryFilter);
-    }
-    if (!q) return scoped;
-    return scoped.filter(row => {
-      const hay =
-        `${row.title || ''} ${row.sku || ''} ${row.product_title || ''} ${row.collection_title || ''} ${row.product_type || ''}`.toLowerCase();
-      return hay.includes(q);
-    });
-  }, [opportunities, productSearch, collectionId, collectionOptions, categoryFilter]);
-
-  const productCards = useMemo(() => {
-    return groupPricingRows(filteredRows).slice(0, pickMode === 'all' ? 12 : 24);
-  }, [filteredRows, pickMode]);
-
-  const visibleVariantIds = useMemo(
-    () => filteredRows.map(r => r.variant_id).filter(Boolean),
-    [filteredRows]
+  const catalogVariantIds = useMemo(
+    () => (opportunities || []).map(row => row.variant_id).filter(Boolean),
+    [opportunities]
   );
 
-  const allVisibleSelected =
-    visibleVariantIds.length > 0 && visibleVariantIds.every(id => isSelectedId(id));
-
-  const allModeChips = useMemo(() => {
-    const groups = groupPricingRows(opportunities).slice(0, 10);
-    const remaining = Math.max(0, catalogProductCount - groups.length);
-    return { groups, remaining };
-  }, [opportunities, catalogProductCount]);
-
   const mergeIds = ids => {
-    const normalized = (ids || []).map(id => String(id)).filter(Boolean);
     const existing = (selectedIds || []).map(id => String(id));
-    const next = Array.from(new Set([...existing, ...normalized])).slice(0, maxSelection);
+    const normalized = (ids || []).map(id => String(id)).filter(Boolean);
+    const next = limitSelectionToProducts(opportunities, [...existing, ...normalized], maxSelection);
     onSelectedIdsChange(next);
     return next.length;
   };
 
-  const removeIds = ids => {
-    const drop = new Set((ids || []).map(id => String(id)));
-    onSelectedIdsChange((selectedIds || []).filter(id => !drop.has(String(id))));
-  };
+  const selectWholeCatalog = () => mergeIds(catalogVariantIds);
 
-  const toggleProduct = group => {
-    const ids = group.variants.map(v => v.variant_id).filter(Boolean);
-    if (!ids.length) return;
-    // If any variant is selected, clear the whole product. Otherwise add what fits.
-    // (Previously required ALL variants selected to deselect — broke when maxSelection
-    // was smaller than a product's variant count.)
-    const anyOn = ids.some(id => isSelectedId(id));
-    if (anyOn) removeIds(ids);
-    else mergeIds(ids);
-  };
-
-  const selectAllVisible = () => mergeIds(visibleVariantIds);
-
-  const deselectVisible = () => removeIds(visibleVariantIds);
-
-  const onCollectionPill = opt => {
-    const nextId = collectionId === opt.value ? '' : opt.value;
-    onCollectionChange(nextId);
-    setCategoryFilter('');
-    const st = collectionStats.get(opt.value) || { variantIds: [] };
-    const ids = st.variantIds || [];
-    if (!ids.length) return;
-    const anySelected = ids.some(id => isSelectedId(id));
-    if (anySelected && collectionId === opt.value) {
-      removeIds(ids);
-      return;
-    }
-    mergeIds(ids);
-  };
-
-  const onCategoryPill = cat => {
-    const next = categoryFilter === cat.value ? '' : cat.value;
-    setCategoryFilter(next);
-    onCollectionChange('');
-    if (!cat.variantIds?.length) return;
-    const anySelected = cat.variantIds.some(id => isSelectedId(id));
-    if (anySelected && categoryFilter === cat.value) {
-      removeIds(cat.variantIds);
-      return;
-    }
-    mergeIds(cat.variantIds);
-  };
+  // Nothing to add once the catalog is exhausted or the cap is reached. Saying
+  // so up front beats a button that looks live and then does nothing.
+  const selectAllDisabled =
+    loading ||
+    Boolean(loadError) ||
+    !catalogVariantIds.length ||
+    selectedIds.length >= maxSelection ||
+    catalogVariantIds.every(id => isSelectedId(id));
 
   const activeArm = variations[activeArmIndex] || variations[0];
   const isControlArm = activeArmIndex === 0 || activeArm?.id === 'control';
@@ -848,6 +695,30 @@ export default function ProductsPricingStepPanel({
     pickMode === 'all'
       ? Math.min(catalogProductCount, maxSelection) || catalogProductCount
       : catalogProductCount || maxSelection;
+  // Both modes stop at the cap, and both used to do it in silence: "All
+  // products" quietly priced the first N and Select all just went grey. If the
+  // catalog is bigger than one experiment holds, the step has to say so.
+  const productsOverCap = catalogProductCount > maxSelection;
+  const productsLeftOut = productsOverCap ? catalogProductCount - maxSelection : 0;
+  const withheldCount = Number(withheldByOtherTests?.total) || 0;
+  const withheldTestNames = (withheldByOtherTests?.tests || [])
+    .slice(0, 2)
+    .map(row => row?.name)
+    .filter(Boolean)
+    .join(', ');
+  // A dollar band moves in cents, a percent band in whole points. Zero is not a
+  // band, so both floors start one step above it -- normalizeAiPriceBand
+  // rejects 0 anyway, and the spinner should not walk into a rejected value.
+  const aiBandStep = aiUnit === 'amount' ? 0.01 : 1;
+  const aiBandNumberProps = {
+    type: 'number',
+    inputMode: 'decimal',
+    min: aiBandStep,
+    step: aiBandStep,
+    // A number input under the cursor eats scroll and silently rewrites itself,
+    // and this one sits in a step the merchant scrolls through.
+    onWheel: event => event.currentTarget.blur(),
+  };
   const isOfferTest = isOfferExperimentType(experimentType);
 
   return (
@@ -914,340 +785,86 @@ export default function ProductsPricingStepPanel({
         </div>
       ) : null}
 
-      {pickMode === 'manual' ? (
-        <>
-          <div className={styles.compactSearch}>
-            <TextField
-              label="Search products"
-              value={productSearch}
-              onChange={onProductSearchChange}
-              autoComplete="off"
-              placeholder="e.g. sneakers, ELC-, apparel…"
-              helpText="Search by name, SKU or category, then tap to add."
-              disabled={loading}
-            />
-
-            {collectionOptions.filter(opt => opt.value).length || categoryOptions.length ? (
-              <>
-                <div className={styles.groupTabRow} role="tablist" aria-label="Group products by">
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={groupTab === 'collections'}
-                    className={`${styles.groupTab} ${
-                      groupTab === 'collections' ? styles.groupTabActive : ''
-                    }`}
-                    onClick={() => setGroupTab('collections')}
-                    disabled={!collectionOptions.filter(o => o.value).length}
-                  >
-                    Collections
-                  </button>
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={groupTab === 'categories'}
-                    className={`${styles.groupTab} ${
-                      groupTab === 'categories' ? styles.groupTabActive : ''
-                    }`}
-                    onClick={() => setGroupTab('categories')}
-                    disabled={!categoryOptions.length}
-                  >
-                    Categories
-                  </button>
-                </div>
-
-                {groupTab === 'collections' && collectionOptions.filter(o => o.value).length ? (
-                  <>
-                    <div className={styles.collectionsLabel}>Collections</div>
-                    <div className={styles.pillRow}>
-                      {collectionOptions
-                        .filter(opt => opt.value)
-                        .slice(0, 14)
-                        .map(opt => {
-                          const active = collectionId === opt.value;
-                          const st = collectionStats.get(opt.value) || {
-                            selected: 0,
-                            total: 0,
-                          };
-                          const hasSelection = st.selected > 0;
-                          return (
-                            <button
-                              key={opt.value}
-                              type="button"
-                              className={`${styles.collectionPill} ${
-                                active ? styles.collectionPillActive : ''
-                              } ${
-                                hasSelection && !active ? styles.collectionPillHasSelection : ''
-                              }`}
-                              onClick={() => onCollectionPill(opt)}
-                              title={
-                                hasSelection
-                                  ? 'Click again to deselect this collection'
-                                  : 'Select all products in this collection'
-                              }
-                            >
-                              <span className={styles.collectionPlus} aria-hidden>
-                                +
-                              </span>
-                              <span className={styles.collectionName}>{opt.label}</span>
-                              <span className={styles.collectionCount}>
-                                {st.selected}/{st.total || '—'}
-                              </span>
-                            </button>
-                          );
-                        })}
-                    </div>
-                  </>
-                ) : null}
-
-                {groupTab === 'categories' && categoryOptions.length ? (
-                  <>
-                    <div className={styles.collectionsLabel}>Categories</div>
-                    <div className={styles.pillRow}>
-                      {categoryOptions.slice(0, 14).map(cat => {
-                        const active = categoryFilter === cat.value;
-                        const hasSelection = cat.selected > 0;
-                        return (
-                          <button
-                            key={cat.value}
-                            type="button"
-                            className={`${styles.collectionPill} ${
-                              active ? styles.collectionPillActive : ''
-                            } ${hasSelection && !active ? styles.collectionPillHasSelection : ''}`}
-                            onClick={() => onCategoryPill(cat)}
-                            title={
-                              hasSelection
-                                ? 'Click again to deselect this category'
-                                : 'Select all products in this category'
-                            }
-                          >
-                            <span className={styles.collectionPlus} aria-hidden>
-                              +
-                            </span>
-                            <span className={styles.collectionName}>{cat.label}</span>
-                            <span className={styles.collectionCount}>
-                              {cat.selected}/{cat.total || '—'}
-                            </span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </>
-                ) : null}
-
-                <div className={styles.compactAction}>
-                  <Button
-                    icon={ButtonIconSearch}
-                    onClick={() => setPickerOpen(true)}
-                    disabled={loading}
-                  >
-                    Browse collections &amp; products
-                  </Button>
-                </div>
-                <p className={styles.help}>
-                  Tap a collection or category to select that whole group. Use Select all for the
-                  visible list, or browse for a full picker.
-                </p>
-              </>
+      {/* Both modes report their scope in the same bounded card, so switching
+          between them moves one number rather than swapping the layout out. */}
+      <div className={styles.selectionCard}>
+        <div className={styles.selectionCardMain}>
+          <span className={styles.selectionCardIcon} aria-hidden>
+            {pickMode === 'manual' ? <IconBoxes size={18} /> : <IconCheckCircle size={18} />}
+          </span>
+          <div className={styles.selectionCardText}>
+            <div className={styles.selectionCardCount} aria-live="polite">
+              {loadError
+                ? 'Catalog unavailable'
+                : loading && !catalogProductCount
+                  ? 'Loading catalog…'
+                  : pickMode === 'manual'
+                    ? `${selectedProductCount} of ${selectionTotal} products`
+                    : productsOverCap
+                      ? `First ${maxSelection} of ${catalogProductCount} products`
+                      : `All ${catalogProductCount || opportunities.length || 0} products`}
+            </div>
+            {pickMode === 'manual' ? (
+              <div className={styles.selectionBarActions}>
+                <Button variant="plain" onClick={selectWholeCatalog} disabled={selectAllDisabled}>
+                  Select all
+                </Button>
+                <Button
+                  variant="plain"
+                  onClick={() => onSelectedIdsChange([])}
+                  disabled={!selectedIds.length}
+                >
+                  Clear
+                </Button>
+              </div>
             ) : null}
           </div>
+        </div>
 
-          <div className={styles.productsHeaderRow}>
-            <div className={styles.sectionLabel} style={{ margin: 0 }}>
-              Products
-            </div>
-            <div className={styles.productsHeaderActions}>
-              <Button
-                variant="plain"
-                onClick={allVisibleSelected ? deselectVisible : selectAllVisible}
-                disabled={!visibleVariantIds.length || loading}
-              >
-                {allVisibleSelected
-                  ? `Deselect ${visibleVariantIds.length}`
-                  : `Select all ${Math.min(visibleVariantIds.length, maxSelection)}`}
-              </Button>
-            </div>
-          </div>
-          {loading && !productCards.length ? (
-            <div
-              className={styles.productGridShell}
-              aria-busy="true"
-              aria-live="polite"
-              aria-label="Loading products"
-            >
-              <ProductListSkeleton />
-            </div>
-          ) : !productCards.length ? (
-            <div className={styles.emptyProducts}>
-              <p className={styles.help} style={{ marginTop: 0 }}>
-                {loadError
-                  ? 'Products will appear here after a successful load.'
-                  : opportunities.length
-                    ? 'No products match this search. Clear the search or browse the full catalog.'
-                    : 'No catalog products loaded yet. Open the picker or refresh and try again.'}
-              </p>
-              <div className={styles.compactAction}>
-                <Button
-                  icon={ButtonIconSelect}
-                  onClick={() => setPickerOpen(true)}
-                  disabled={Boolean(loadError) || loading}
-                >
-                  Browse collections &amp; products
-                </Button>
-              </div>
-            </div>
-          ) : (
-            <div
-              className={styles.productGridShell}
-              aria-busy={loading || undefined}
-            >
-              <div className={styles.productGrid}>
-                {productCards.map(group => {
-                  const ids = group.variants.map(v => v.variant_id).filter(Boolean);
-                  const selectedCount = ids.filter(id => isSelectedId(id)).length;
-                  const selected = selectedCount > 0;
-                  const first = group.variants[0] || {};
-                  const price = first.current_price ?? first.price;
-                  const variantCount = group.variants.length;
-                  return (
-                    <button
-                      key={group.key}
-                      type="button"
-                      className={`${styles.productCard} ${selected ? styles.productCardSelected : ''}`}
-                      onClick={() => toggleProduct(group)}
-                      aria-pressed={selected}
-                    >
-                      {selected ? (
-                        <span className={`${styles.checkInline} ${styles.checkCorner}`} aria-hidden>
-                          <IconCheck size={16} />
-                        </span>
-                      ) : null}
-                      {group.image_url ? (
-                        <img className={styles.thumb} src={group.image_url} alt="" />
-                      ) : (
-                        <div className={styles.thumb} />
-                      )}
-                      <div className={styles.productMeta}>
-                        <div className={styles.productName}>{group.title}</div>
-                        <div className={styles.productSub}>
-                          {group.product_type || 'Catalog'}
-                          {' · '}
-                          {formatMoney(price, group.currency || currency)}
-                          {variantCount > 1 ? ` · ${variantCount} variants` : null}
-                        </div>
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-              <div className={styles.compactAction}>
-                <Button icon={ButtonIconSelect} onClick={() => setPickerOpen(true)}>
-                  Show all {catalogProductCount || opportunities.length} products
-                </Button>
-              </div>
-            </div>
-          )}
+        {pickMode === 'manual' ? (
+          <Button
+            variant="primary"
+            icon={ButtonIconSearch}
+            onClick={() => setPickerOpen(true)}
+            disabled={loading || Boolean(loadError)}
+          >
+            Browse products
+          </Button>
+        ) : null}
+      </div>
 
-          <div className={styles.productsFooterActions}>
-            <div className={styles.selectionBar}>
-              <span>
-                {selectedProductCount} of {selectionTotal} selected
-              </span>
-              <Button
-                variant="plain"
-                onClick={() => onSelectedIdsChange([])}
-                disabled={!selectedIds.length}
-              >
-                Clear selection
-              </Button>
-            </div>
-          </div>
-        </>
-      ) : (
-        <>
-          <div className={styles.compactSearch}>
-            <TextField
-              label="Search products"
-              value={productSearch}
-              onChange={onProductSearchChange}
-              autoComplete="off"
-              placeholder="e.g. sneakers, ELC-, apparel…"
-              helpText="Search by name, SKU or category, then tap to add."
-              disabled={loading}
-            />
-          </div>
+      {pickMode === 'manual' && !loading && !loadError && !opportunities.length ? (
+        <p className={styles.help}>No catalog products loaded yet.</p>
+      ) : null}
 
-          {loading && !catalogProductCount ? (
-            <div
-              className={styles.allProductsBox}
-              aria-busy="true"
-              aria-live="polite"
-              aria-label="Loading catalog"
-            >
-              <p className={styles.help} style={{ margin: 0 }}>
-                Loading catalog…
-              </p>
-              <ProductListSkeleton count={4} />
-            </div>
-          ) : (
-          <div className={styles.allProductsBox}>
-            <div className={styles.allProductsHeader}>
-              <span className={styles.allProductsCheck} aria-hidden>
-                <IconCheck size={14} />
-              </span>
-              <span>
-                {loadError
-                  ? 'Catalog will appear here after a successful load.'
-                  : `All ${catalogProductCount || opportunities.length || 0} products from your catalog are included.`}
-              </span>
-            </div>
-            <div className={styles.chipGrid}>
-              {allModeChips.groups.map(group => (
-                <div key={group.key} className={styles.productChip}>
-                  {group.image_url ? (
-                    <img src={group.image_url} alt="" />
-                  ) : (
-                    <span className={styles.chipThumb} />
-                  )}
-                  <span className={styles.productChipLabel}>{group.title}</span>
-                </div>
-              ))}
-              {allModeChips.remaining > 0 ? (
-                <div className={`${styles.productChip} ${styles.productChipMore}`}>
-                  +{allModeChips.remaining} more
-                </div>
-              ) : null}
-            </div>
-            <div className={styles.compactAction}>
-              <Button
-                icon={ButtonIconSelect}
-                onClick={() => setPickerOpen(true)}
-                disabled={loading || Boolean(loadError)}
-              >
-                Show all {catalogProductCount || opportunities.length} products
-              </Button>
-            </div>
-          </div>
-          )}
-          <div className={styles.selectionBar}>
-            <span>
-              {Math.min(catalogProductCount, maxSelection)} of {catalogProductCount || maxSelection}{' '}
-              selected
-            </span>
-            <button
-              type="button"
-              className={styles.clearSelectionLink}
-              onClick={() => {
-                // All-mode ignores selectedIds for pricing — exit to manual with empty set.
-                onPickModeChange?.('manual');
-                onSelectedIdsChange([]);
-              }}
-            >
-              Clear selection
-            </button>
-          </div>
-        </>
-      )}
+      {productsOverCap && !loading && !loadError ? (
+        <p className={styles.help}>
+          One experiment covers up to {maxSelection} products, so {productsLeftOut} of your{' '}
+          {catalogProductCount} are left out. Run a second experiment for the rest.
+        </p>
+      ) : null}
+
+      {/* A big catalog is loaded in part. Saying which part beats letting a
+          merchant conclude their other products cannot be tested at all. */}
+      {catalogTruncated && !loading && !loadError ? (
+        <p className={styles.help}>
+          Showing the first {catalogProductCount} products of your catalog. Search in Browse
+          products to find any of the rest.
+        </p>
+      ) : null}
+
+      {/* Products another test is pricing are not in this list at all, because
+          two tests over one product is two answers to what it costs. Saying so
+          beats letting the merchant hunt for a product that never appears. */}
+      {withheldCount > 0 && !loading && !loadError ? (
+        <p className={styles.help}>
+          {withheldCount} product{withheldCount === 1 ? '' : 's'} not shown:{' '}
+          {withheldCount === 1 ? 'it is' : 'they are'} in another price test
+          {withheldTestNames ? ` (${withheldTestNames})` : ''}. End that test to reuse{' '}
+          {withheldCount === 1 ? 'it' : 'them'} here.
+        </p>
+      ) : null}
+
 
       <hr className={styles.productsDivider} />
 
@@ -1293,9 +910,16 @@ export default function ProductsPricingStepPanel({
         })}
       </div>
       <p className={styles.help} style={{ marginTop: 0, marginBottom: 18 }}>
-        Pick which variation you&apos;re pricing. Each variation can have its own prices.
+        {isControlArm
+          ? 'Control keeps your current catalog prices — that is the baseline the other variations are measured against.'
+          : "Pick which variation you're pricing. Each variation can have its own prices."}
       </p>
 
+      {/* Control's price cells are read-only, so a pricing strategy has nothing
+          to act on there. Manual, AI and Bulk all stay hidden until a variation
+          that can actually take a new price is selected. */}
+      {!isControlArm ? (
+        <>
       <div className={styles.labelRow}>
         <div className={styles.sectionLabel}>How would you like to price them?</div>
         <SettingsInfoLink hash="ai-price" label="AI price suggestions" />
@@ -1372,6 +996,7 @@ export default function ProductsPricingStepPanel({
                 <span>{aiUnit === 'amount' ? 'min $' : 'min %'}</span>
                 <input
                   className={`${styles.input} ${styles.bulkInput} ${styles.aiBarInput}`}
+                  {...aiBandNumberProps}
                   value={aiMinPct}
                   onChange={e => onAiMinPctChange(e.target.value)}
                   disabled={aiSuggestBusy}
@@ -1387,6 +1012,7 @@ export default function ProductsPricingStepPanel({
                 <span>{aiUnit === 'amount' ? 'max $' : 'max %'}</span>
                 <input
                   className={`${styles.input} ${styles.bulkInput} ${styles.aiBarInput}`}
+                  {...aiBandNumberProps}
                   value={aiMaxPct}
                   onChange={e => onAiMaxPctChange(e.target.value)}
                   disabled={aiSuggestBusy}
@@ -1548,6 +1174,8 @@ export default function ProductsPricingStepPanel({
           ) : null}
         </>
       ) : null}
+        </>
+      ) : null}
 
       <div className={styles.tableToolbar}>
         <div className={styles.tableSearch}>
@@ -1651,6 +1279,8 @@ export default function ProductsPricingStepPanel({
       {pickerOpen ? (
         <ClassicProductPickerModal
           opportunities={opportunities}
+          onCatalogSearch={onCatalogSearch}
+          catalogSearching={catalogSearching}
           collectionOptions={collectionOptions}
           selectedIds={selectedIds}
           onSelectedIdsChange={onSelectedIdsChange}

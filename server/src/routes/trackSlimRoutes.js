@@ -16,6 +16,11 @@ const {
   SCRIPT_VERSION,
 } = require('../utils/storefrontScriptRuntime');
 const { withAssignmentProof, signAssignedVariants } = require('../utils/assignmentProof');
+const {
+  normalizeEventValue,
+  assignmentProofFailure,
+  MAX_BATCH_TEST_IDS,
+} = require('../utils/trackedEventIntegrity');
 const { listGoalMetricDefinitions } = require('../models/goalMetricDefinition');
 const { getShopPriceSurfaceMappings } = require('../services/priceSurfaceRegistryService');
 const abTestEngine = require('../services/abTestEngine');
@@ -134,7 +139,11 @@ router.get('/variants', async (req, res) => {
       testIds = String(req.query.test_ids)
         .split(',')
         .map((s) => s.trim())
-        .filter(Boolean);
+        .filter(Boolean)
+        // A shop cannot have more live tests than this, and the list arrives
+        // from an open endpoint that turns each id into DB and assignment work.
+        // Uncapped, one request could ask for thousands.
+        .slice(0, MAX_BATCH_TEST_IDS);
     } else if (req.query.test_id) {
       testIds = [String(req.query.test_id).trim()];
     }
@@ -334,6 +343,16 @@ router.post(['/', '/event', '/events'], async (req, res) => {
     if (!shop || !testId || !variantId) {
       return res.status(400).json({ error: 'shop, test_id, variant_id required' });
     }
+    const proofFailure = assignmentProofFailure(shop, body);
+    if (proofFailure) {
+      logger.warn('rejected a tracked event carrying a bad assignment proof', {
+        shop,
+        testId: String(testId),
+        eventType: String(eventType),
+        reason: proofFailure,
+      });
+      return res.status(403).json({ error: 'invalid assignment', reason: proofFailure });
+    }
     const metadata = body.metadata && typeof body.metadata === 'object' ? body.metadata : {};
     const orderId = String(metadata.order_id ?? '').trim();
     // The storefront posts one conversion per painted price node on the order
@@ -356,7 +375,7 @@ router.post(['/', '/event', '/events'], async (req, res) => {
         shop,
         String(eventType),
         body.event_name || null,
-        Number(body.event_value || body.value || 0) || 0,
+        normalizeEventValue(body.event_value ?? body.value),
         JSON.stringify(metadata),
       ]
     );

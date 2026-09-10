@@ -7,6 +7,122 @@ export function productGroupKey(row) {
   );
 }
 
+/**
+ * Split a catalog row's title into the product and the variant.
+ *
+ * The catalog labels a row "Runner Shoe — Blue / 42". Anywhere that lists
+ * products rather than variants needs the first half on its own, and needs it
+ * derived the same way, or the picker and the pricing table name the same
+ * product differently.
+ */
+export function splitTitleParts(row) {
+  const explicitProduct = String(row?.product_title || '').trim();
+  const explicitVariant = String(row?.variant_title || '').trim();
+  if (explicitProduct) {
+    return {
+      productTitle: explicitProduct,
+      variantTitle:
+        explicitVariant && !/^default\s*title$/i.test(explicitVariant) ? explicitVariant : '',
+    };
+  }
+  const raw = String(row?.title || row?.display_name || '').trim();
+  const parts = raw.split(/\s+[—–-]\s+/);
+  if (parts.length > 1) {
+    return {
+      productTitle: parts[0].trim() || 'Product',
+      variantTitle: parts.slice(1).join(' — ').trim(),
+    };
+  }
+  return { productTitle: raw || 'Product', variantTitle: '' };
+}
+
+/**
+ * Fold variant rows into the products a merchant actually picks.
+ *
+ * A price test is chosen per product: the step counts products, the cap counts
+ * products, and selecting one variant pulls its siblings in with it. The
+ * catalog arrives as one row per variant, so anything that lists or counts
+ * those rows directly reports a different number than the step does -- a
+ * catalog of 80 products with 120 variants read as "80 products" on the step
+ * and "120 products" in the picker beside it.
+ *
+ * Each group keeps its variant ids, so selection stays what it has always
+ * been: a list of variant ids.
+ */
+export function groupOpportunitiesByProduct(opportunities = []) {
+  const groups = new Map();
+  (opportunities || []).forEach(row => {
+    const key = productGroupKey(row);
+    if (!key) return;
+    const existing = groups.get(key);
+    if (existing) {
+      existing.rows.push(row);
+      if (row.variant_id) existing.variantIds.push(String(row.variant_id));
+      return;
+    }
+    groups.set(key, {
+      key,
+      // The first row carries the product's own fields; per-variant details
+      // belong to the rows.
+      row,
+      rows: [row],
+      variantIds: row.variant_id ? [String(row.variant_id)] : [],
+    });
+  });
+  return Array.from(groups.values());
+}
+
+/**
+ * What one product costs, as the picker should say it.
+ *
+ * A product whose variants are priced differently has no single price, and
+ * showing whichever variant happened to be first misstates it.
+ */
+export function productPriceRange(group) {
+  const prices = (group?.rows || [])
+    .map(row => Number(row?.current_price ?? row?.price))
+    .filter(value => Number.isFinite(value) && value > 0);
+  if (!prices.length) return { min: null, max: null };
+  return { min: Math.min(...prices), max: Math.max(...prices) };
+}
+
+/**
+ * Trims a variant selection down to at most `maxProducts` whole products.
+ *
+ * The cap counts products everywhere it is read -- the pricing table groups
+ * before slicing, and the step reports "N of M selected" in products -- but the
+ * selection itself is a list of variant ids. Slicing that list at the same
+ * number, which is what the callers used to do, counts variants instead: a
+ * catalog of three-variant products stopped at 33 of them, so "Select all"
+ * visibly failed to select all, and the 34th product came back half selected
+ * because the cut landed in the middle of its variants.
+ */
+export function limitSelectionToProducts(opportunities, ids, maxProducts = 100) {
+  const keyByVariant = new Map();
+  (opportunities || []).forEach(row => {
+    const id = String(row?.variant_id ?? '');
+    if (id) keyByVariant.set(id, productGroupKey(row));
+  });
+
+  const kept = [];
+  const seenIds = new Set();
+  const keptProducts = new Set();
+  (ids || []).forEach(raw => {
+    const id = String(raw ?? '').trim();
+    if (!id || seenIds.has(id)) return;
+    // An id the catalog does not know still counts as its own product rather
+    // than being dropped, so a stale draft never silently loses a row.
+    const key = keyByVariant.get(id) ?? `variant:${id}`;
+    if (!keptProducts.has(key)) {
+      if (keptProducts.size >= maxProducts) return;
+      keptProducts.add(key);
+    }
+    seenIds.add(id);
+    kept.push(id);
+  });
+  return kept;
+}
+
 /** Same SKU set the pricing table uses (all variants of selected products). */
 export function resolvePricingRows({
   opportunities = [],
@@ -289,6 +405,28 @@ export function describeGuardrailLimitedSuggestions(
         ? `1 of ${total} suggested prices is`
         : `${limited} of ${total} suggested prices are`;
   return `${scope} below your ${floor} minimum because that product's margin or max price change guardrail capped it first.`;
+}
+
+/**
+ * Say when the prices on the table did not come from the model.
+ *
+ * The step has one banner headed AI suggested, so a merchant reasonably reads
+ * every number in it as the model's work. Several ordinary paths never reach
+ * the model at all -- a dollar band, no API key, a reply that came back
+ * unusable -- and each used to look identical to a real suggestion.
+ */
+export function describeAiSuggestionSource({ source, skippedReason } = {}) {
+  if (source === 'openai') return '';
+  switch (skippedReason) {
+    case 'amount_band':
+      return 'A dollar band is spread evenly by Priceify rather than by AI, so every product gets the same cash uplift.';
+    case 'disabled_by_request':
+      return 'AI suggestions are turned off, so these prices use an even spread across your band.';
+    case 'unavailable':
+      return 'AI is unavailable right now, so these prices use an even spread across your band.';
+    default:
+      return 'AI did not return usable prices, so these use an even spread across your band.';
+  }
 }
 
 export function armHasAiPrices({ rows = [], armId, priceOverrides = {} } = {}) {

@@ -1,23 +1,22 @@
 /** Every Admin info-icon hash must exist on /docs. */
 export const ADMIN_DOCS_HASHES = [
+  'how-settings-work',
   'max-price-change',
-  'max-revenue-drop',
-  'min-margin',
-  'default-cogs',
+  'cost-floor',
   'confidence',
-  'target-lift',
   'min-sample',
   'min-conversions',
+  'goals',
+  'traffic-split',
   'sequential',
   'auto-apply',
   'rollout-queue',
-  'srm',
+  'follow-up-rounds',
   'guardrail-metrics',
-  'scenario-preset',
+  'srm',
   'ai-price',
   'offers',
-  'traffic-split',
-  'how-settings-work',
+  'price-surfaces',
 ];
 
 function ownerWindow() {

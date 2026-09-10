@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest';
 import {
   describeSmartPricingLaunchReadiness,
   isCheckoutReady,
+  priceSurfacesUnmapped,
+  themeEmbedStatus,
+  themeEmbedThemeName,
   unwrapCheckoutReadiness,
 } from '../checkoutReadinessClient';
 import { isOfferCheckoutReady } from '../../components/SmartPricing/classic/offerSelection';
@@ -55,5 +58,78 @@ describe('checkoutReadinessClient', () => {
     expect(summary.priceReady).toBe(true);
     expect(summary.anyReady).toBe(true);
     expect(summary.detail).toMatch(/checkout discount/i);
+  });
+});
+
+describe('theme app embed status', () => {
+  it('reads the status the server measured from the live theme', () => {
+    expect(themeEmbedStatus({ theme_embed: { status: 'enabled' } })).toBe('enabled');
+    expect(themeEmbedStatus({ theme_embed: { status: 'disabled' } })).toBe('disabled');
+  });
+
+  it('accepts the status nested under summary, as the fallback route sends it', () => {
+    expect(themeEmbedStatus({ summary: { theme_embed: 'unknown' } })).toBe('unknown');
+    expect(themeEmbedStatus({ summary: { theme_embed: { status: 'enabled' } } })).toBe('enabled');
+  });
+
+  it('never invents a verdict from a payload that carries none', () => {
+    // Setup shows a green "already enabled" banner off this, so a missing
+    // field must not read as enabled.
+    expect(themeEmbedStatus(null)).toBe('unknown');
+    expect(themeEmbedStatus({})).toBe('unknown');
+    expect(themeEmbedStatus({ theme_embed: { reason: 'lookup_failed' } })).toBe('unknown');
+  });
+
+  it('names the theme the answer came from, when the server reports one', () => {
+    expect(themeEmbedThemeName({ theme_embed: { status: 'enabled', theme_name: 'Dawn' } })).toBe(
+      'Dawn'
+    );
+    expect(themeEmbedThemeName({ theme_embed: { status: 'enabled' } })).toBeNull();
+    expect(themeEmbedThemeName({ summary: { theme_embed: 'unknown' } })).toBeNull();
+    expect(themeEmbedThemeName(null)).toBeNull();
+  });
+
+  describe('priceSurfacesUnmapped', () => {
+    it('reports an unmapped shop', () => {
+      expect(
+        priceSurfacesUnmapped({ price_surface: { status: 'blocked', configured_shop: 0 } })
+      ).toBe(true);
+    });
+
+    it('stays quiet once a selector is mapped', () => {
+      expect(
+        priceSurfacesUnmapped({
+          price_surface: { status: 'needs_attention', configured_shop: 3, ready: false },
+        })
+      ).toBe(false);
+      expect(
+        priceSurfacesUnmapped({ price_surface: { status: 'ready', configured_shop: 8 } })
+      ).toBe(false);
+    });
+
+    it('does not read a failed lookup as an unmapped shop', () => {
+      // When the server cannot load the mappings it answers with a zero count
+      // too. Telling a merchant who has mapped their theme that they have
+      // mapped nothing would send them to fix something that is not broken.
+      expect(
+        priceSurfacesUnmapped({
+          price_surface: {
+            status: 'needs_attention',
+            configured_shop: 0,
+            ready: false,
+            message: 'Could not load theme price selectors.',
+          },
+        })
+      ).toBe(false);
+    });
+
+    it('says nothing when readiness has not loaded', () => {
+      // The hook holds `readiness` at null while in flight and after an error,
+      // so silence is the only honest answer.
+      expect(priceSurfacesUnmapped(null)).toBe(false);
+      expect(priceSurfacesUnmapped(undefined)).toBe(false);
+      expect(priceSurfacesUnmapped({})).toBe(false);
+      expect(priceSurfacesUnmapped({ price_surface: null })).toBe(false);
+    });
   });
 });

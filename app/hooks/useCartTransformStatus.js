@@ -11,10 +11,14 @@ function unwrapBody(res) {
   return body;
 }
 
+// `checking` separates "we have not asked yet" from "we asked and it is not
+// installed". Without it a caller reading only `installed` renders a red verdict
+// for the first moment of every page load.
 const CHECKING = {
   status: 'Checking cart transform…',
   installed: false,
   verified: false,
+  checking: true,
   error: /** @type {string | null} */ (null),
 };
 
@@ -29,6 +33,7 @@ function describeStatus(data) {
       status: 'Cart transform installed for this app',
       installed: true,
       verified: true,
+      checking: false,
       error: null,
     };
   }
@@ -37,6 +42,7 @@ function describeStatus(data) {
       status: hasFunction ? 'Function found — click Ensure to install' : DEPLOY_FIRST,
       installed: false,
       verified: true,
+      checking: false,
       error: null,
     };
   }
@@ -45,6 +51,7 @@ function describeStatus(data) {
     status: hasFunction ? 'Function found — could not verify install; click Ensure' : DEPLOY_FIRST,
     installed: false,
     verified: false,
+    checking: false,
     error: null,
   };
 }
@@ -62,6 +69,7 @@ async function loadStatus(shopDomain) {
         status: 'Could not load cart transform status',
         installed: false,
         verified: false,
+        checking: false,
         error: e?.response?.data?.error || e?.message || 'Status failed',
       },
       data: null,
@@ -70,7 +78,7 @@ async function loadStatus(shopDomain) {
 }
 
 /**
- * Shared cart-transform status + ensure for Setup and Settings Installation.
+ * Shared cart-transform status + ensure for the Setup checklist.
  * @param {string} shopDomain
  * @param {{ enabled?: boolean }} [options]
  */
@@ -115,6 +123,7 @@ export default function useCartTransformStatus(shopDomain, { enabled = true } = 
             : 'Cart transform already installed',
         installed: true,
         verified: true,
+        checking: false,
       }));
       await refresh();
       return data;
@@ -133,6 +142,7 @@ export default function useCartTransformStatus(shopDomain, { enabled = true } = 
     status: state.status,
     installed: state.installed,
     verified: state.verified,
+    checking: state.checking === true,
     busy,
     error: state.error,
     refresh,

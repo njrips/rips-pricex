@@ -1,39 +1,32 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { DeleteIcon } from '@shopify/polaris-icons';
 import {
   Badge,
   Banner,
   BlockStack,
   Button,
   Checkbox,
-  Collapsible,
   InlineStack,
   Modal,
   Select,
   Text,
   TextField,
 } from '@shopify/polaris';
-import { ChevronDownIcon } from '@shopify/polaris-icons';
-import { Icon } from '@shopify/polaris';
 import { apiGet, apiPost, apiPut, unwrapData } from '../../services/api';
-import { useKeyedState } from '../../hooks/useKeyedState';
 import { TooltipWrapper } from '../shared';
+import SettingsInfoLink from '../Settings/SettingsInfoLink';
 import {
   MAX_PRICE_SURFACE_MAPPINGS,
+  PRICE_SURFACE_LABELS,
   PRICE_SURFACE_ROLES,
   PRICE_SURFACES,
-  analyzePriceSurfaceRegistryGaps,
   applyRecommendedPriceSurfaceDefaults,
   buildPriceSurfaceRegistryStatus,
   createEmptyPriceSurfaceMapping,
-  normalizePriceSurfaceMappings,
   normalizePriceSurfaceMappingsForEditor,
-  summarizePriceSurfaceRegistry,
+  priceSurfacePageUrlError,
   validatePriceSurfaceMappingsForEditor,
 } from '../../utils/priceSurfaceRegistry';
-import {
-  PRICE_SURFACE_THEME_PACKS,
-  mergeThemePackMappings,
-} from '../../utils/priceSurfaceThemePacks';
 import { isShopifyStoreDomain } from '../../utils/shopifyAdmin';
 import {
   getDevStorefrontPasswordDefault,
@@ -41,49 +34,34 @@ import {
   resolveStorefrontPasswordForPreview,
 } from '../../utils/previewUrl';
 
+// Saving shop defaults is one small PUT, so on a warm connection the spinner
+// can come and go inside a single frame and the click reads as a no-op. Hold
+// the button in its loading state long enough to be seen, then confirm with a
+// flash that clears itself.
+const MIN_SAVE_SPINNER_MS = 450;
+const SAVE_FLASH_MS = 2600;
+
 function buildSurfaceOptions() {
-  return PRICE_SURFACES.map(value => ({ label: value.toUpperCase(), value }));
+  return PRICE_SURFACES.map(value => ({
+    label: PRICE_SURFACE_LABELS[value] || value.toUpperCase(),
+    value,
+  }));
 }
 
 function buildRoleOptions() {
   return PRICE_SURFACE_ROLES.map(value => ({ label: value.replace(/_/g, ' '), value }));
 }
 
-const PRICE_SURFACE_GUIDES = [
-  {
-    surface: 'pdp',
-    label: 'Product page',
-    shortLabel: 'PDP',
-    description: 'Main product price on the detail page.',
-  },
-  {
-    surface: 'home',
-    label: 'Homepage cards',
-    shortLabel: 'Home',
-    description: 'Featured product cards and landing sections.',
-  },
-  {
-    surface: 'plp',
-    label: 'Collection grid',
-    shortLabel: 'PLP',
-    description: 'Collection and product listing cards.',
-  },
-  {
-    surface: 'cart',
-    label: 'Cart',
-    shortLabel: 'Cart',
-    description: 'Cart drawer and cart page line prices.',
-  },
-  {
-    surface: 'search',
-    label: 'Search',
-    shortLabel: 'Search',
-    description: 'Search and predictive product results.',
-  },
-];
+function isUrlRow(row) {
+  return String(row?.surface || '') === 'url';
+}
+
 
 function buildMappingKey(row) {
-  return `${row.surface}:${row.role}:${row.selector}`;
+  // The page is part of the identity of a url row: the same selector on two
+  // different landing pages is two mappings, not a duplicate.
+  const scopeKey = isUrlRow(row) ? String(row.pageUrl || '') : row.role;
+  return `${row.surface}:${scopeKey}:${row.selector}`;
 }
 
 // Returns a result instead of writing state so the initial load can run from an
@@ -101,6 +79,39 @@ async function fetchShopMappings(settingsPath) {
   }
 }
 
+const PICK_HINT = 'Open your storefront and click this price to fill the selector';
+
+/**
+ * Whether a saved row is painting, as a switch rather than a badge and a
+ * checkbox side by side. Those two said the same thing twice and cost the
+ * Actions column most of its width; one control that looks like its own state
+ * says it once.
+ */
+function PriceSurfaceRowToggle({ styles, enabled, rowNumber, onChange }) {
+  return (
+    <TooltipWrapper
+      content={
+        enabled
+          ? 'Painting on your storefront. Turn off to keep the row but stop using it.'
+          : 'Saved but ignored. Turn on to paint this price again.'
+      }
+    >
+      <button
+        type="button"
+        role="switch"
+        aria-checked={enabled}
+        aria-label={`Row ${rowNumber} ${enabled ? 'is painting' : 'is off'}`}
+        className={`${styles.priceSurfaceRowToggle} ${
+          enabled ? styles.priceSurfaceRowToggleOn : ''
+        }`}
+        onClick={() => onChange(!enabled)}
+      >
+        <span className={styles.priceSurfaceRowToggleKnob} aria-hidden />
+      </button>
+    </TooltipWrapper>
+  );
+}
+
 function PriceSurfaceMappingRows({
   rows,
   styles,
@@ -109,6 +120,7 @@ function PriceSurfaceMappingRows({
   onRemove,
   duplicateKeys,
   getPickerLaunchUrl,
+  getPickBlockedReason,
   pickTarget,
   onBeginVisualPick,
 }) {
@@ -123,7 +135,8 @@ function PriceSurfaceMappingRows({
             No selectors mapped yet
           </Text>
           <Text as="p" variant="bodySm" tone="subdued">
-            Start with a smart pick card below, or add a row and paste a CSS selector manually.
+            Add a row, choose where the price shows, then pick it on your storefront or paste a CSS
+            selector.
           </Text>
         </div>
       </div>
@@ -135,13 +148,17 @@ function PriceSurfaceMappingRows({
       <div className={styles.priceSurfaceMappingHeaderRow} aria-hidden>
         <span></span>
         <span>Surface</span>
-        <span>Role</span>
+        {/* The column holds a price role for a page-type row and the page
+            itself for a URL row, so it is named for whichever is on screen. */}
+        <span>{rows.some(isUrlRow) ? 'Role / page URL' : 'Role'}</span>
         <span>Selector</span>
         <span>Actions</span>
       </div>
       {rows.map((row, index) => {
         const duplicate = row.selector.trim() && duplicateKeys.has(buildMappingKey(row));
-        const launchUrl = getPickerLaunchUrl?.(row.surface || 'pdp') || '';
+        const urlRow = isUrlRow(row);
+        const launchUrl = getPickerLaunchUrl?.(row) || '';
+        const pickBlockedReason = launchUrl ? '' : getPickBlockedReason?.(row) || '';
         const isPicking =
           pickTarget?.scope === scope && pickTarget?.index === index && Boolean(launchUrl);
         return (
@@ -159,13 +176,25 @@ function PriceSurfaceMappingRows({
               value={row.surface}
               onChange={value => onUpdate(index, { surface: value })}
             />
-            <Select
-              label="Role"
-              labelHidden
-              options={buildRoleOptions()}
-              value={row.role}
-              onChange={value => onUpdate(index, { role: value })}
-            />
+            {urlRow ? (
+              <TextField
+                label="Page URL"
+                labelHidden
+                value={row.pageUrl || ''}
+                onChange={value => onUpdate(index, { pageUrl: value })}
+                autoComplete="off"
+                placeholder="/pages/black-friday"
+                error={row.pageUrl ? priceSurfacePageUrlError(row.pageUrl) || undefined : undefined}
+              />
+            ) : (
+              <Select
+                label="Role"
+                labelHidden
+                options={buildRoleOptions()}
+                value={row.role}
+                onChange={value => onUpdate(index, { role: value })}
+              />
+            )}
             <div className={styles.priceSurfaceSelectorField}>
               <TextField
                 label="Selector"
@@ -177,27 +206,43 @@ function PriceSurfaceMappingRows({
                 error={duplicate ? 'Duplicate selector.' : undefined}
               />
             </div>
-            <InlineStack gap="100" wrap={false} blockAlign="center">
-              <Badge size="small" tone={row.enabled !== false ? 'success' : undefined}>
-                {row.enabled !== false ? 'Active' : 'Off'}
-              </Badge>
-              <Checkbox
-                label="On"
-                labelHidden
-                checked={row.enabled !== false}
-                onChange={checked => onUpdate(index, { enabled: checked })}
+            <InlineStack gap="150" wrap={false} blockAlign="center">
+              <PriceSurfaceRowToggle
+                styles={styles}
+                enabled={row.enabled !== false}
+                rowNumber={index + 1}
+                onChange={enabled => onUpdate(index, { enabled })}
               />
-              <Button
-                size="slim"
-                variant={isPicking ? 'primary' : 'secondary'}
-                disabled={!launchUrl}
-                onClick={() => onBeginVisualPick(scope, index)}
-              >
-                {isPicking ? 'Picking' : 'Pick'}
-              </Button>
-              <Button size="slim" tone="critical" variant="plain" onClick={() => onRemove(index)}>
-                Remove
-              </Button>
+              {/* A disabled Pick has to say why. It is gated on a preview URL
+                  the row cannot always produce — a URL row with no page yet, or
+                  a product-page row before a sample product has been found —
+                  and without the reason it reads as a broken button. */}
+              <TooltipWrapper content={pickBlockedReason || PICK_HINT}>
+                <Button
+                  size="slim"
+                  variant={isPicking ? 'primary' : 'secondary'}
+                  disabled={!launchUrl}
+                  // A tooltip is only read on hover, and a disabled control is
+                  // the last thing anyone hovers. The reason goes into the
+                  // accessible name as well so it is never hover-only.
+                  accessibilityLabel={
+                    pickBlockedReason ? `Pick unavailable: ${pickBlockedReason}` : undefined
+                  }
+                  onClick={() => onBeginVisualPick(scope, index)}
+                >
+                  {isPicking ? 'Picking' : 'Pick'}
+                </Button>
+              </TooltipWrapper>
+              <TooltipWrapper content="Remove this row">
+                <Button
+                  size="slim"
+                  tone="critical"
+                  variant="tertiary"
+                  icon={DeleteIcon}
+                  accessibilityLabel={`Remove row ${index + 1}`}
+                  onClick={() => onRemove(index)}
+                />
+              </TooltipWrapper>
             </InlineStack>
           </div>
         );
@@ -208,9 +253,6 @@ function PriceSurfaceMappingRows({
 
 export default function PriceSurfaceMappingsPanel({
   styles,
-  mode = 'wizard',
-  testMappings,
-  visualEditorSelector = '',
   shopDomain = '',
   storefrontPassword = '',
   /** When set (from .env / loader), the password TextField is hidden. */
@@ -218,23 +260,26 @@ export default function PriceSurfaceMappingsPanel({
   onStorefrontPasswordChange,
   pickerLaunchUrl = '',
   getPickerLaunchUrl,
+  /** Why Pick is unavailable for a row, when it is. */
+  getPickBlockedReason,
   pickTarget = null,
   onBeginVisualPick,
   onCancelVisualPick,
   onPrepareVisualPick,
   onRegisterShopPickHandler,
-  onTestMappingsChange,
   onStatusChange,
-  expandRequestToken = 0,
   autoMapRequestToken = 0,
   productPath = '',
-  settingsHref = '',
 }) {
-  const shopOnly = mode === 'shop';
   const [shopMappings, setShopMappings] = useState([]);
+  // Declared here, above the callbacks that read it, so the rows keep one
+  // identity per edit — a fresh array each render defeats every memo below.
+  const shopRows = useMemo(
+    () => normalizePriceSurfaceMappingsForEditor(shopMappings),
+    [shopMappings]
+  );
   const [loading, setLoading] = useState(true);
   const [savingShop, setSavingShop] = useState(false);
-  const [suggesting, setSuggesting] = useState(false);
   const [autoMapping, setAutoMapping] = useState(false);
   const [autoMapOpen, setAutoMapOpen] = useState(false);
   const [autoMapResult, setAutoMapResult] = useState(null);
@@ -242,26 +287,30 @@ export default function PriceSurfaceMappingsPanel({
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [noticeTitle, setNoticeTitle] = useState('Saved');
-  // Shop-only mode and each new expand request from the parent open the panel;
-  // the merchant can collapse it again until the next request arrives.
-  const [expandedByMerchant, setExpanded] = useKeyedState(
-    `${shopOnly ? 1 : 0}|${expandRequestToken}`,
-    shopOnly || expandRequestToken > 0
-  );
-  // A visual pick needs the rows on screen for its duration.
-  const expanded = expandedByMerchant || Boolean(pickTarget);
-  const [scopeTabChoice, setActiveScopeTab] = useState(null);
   const [previewPickError, setPreviewPickError] = useState('');
   const [pickerModalUrl, setPickerModalUrl] = useState('');
+  const [saveFlash, setSaveFlash] = useState(null);
   const lastAutoMapTokenRef = useRef(0);
+  const saveFlashTokenRef = useRef(0);
+  // Keyed on a token rather than the message so saving twice with the same
+  // copy restarts the timer instead of leaving the first one to expire.
+  useEffect(() => {
+    if (!saveFlash) {
+      return undefined;
+    }
+    const timer = setTimeout(() => setSaveFlash(null), SAVE_FLASH_MS);
+    return () => clearTimeout(timer);
+  }, [saveFlash]);
   // The iframe only makes sense while the parent has a live pick target, so a
   // captured selector or a timeout over there closes it here too.
   const pickerModalOpen = Boolean(pickTarget) && Boolean(pickerModalUrl);
 
+  // Takes the whole row, not just its surface: a url row carries the page to
+  // open, so the picker cannot be told where to go from the surface alone.
   const resolvePickerLaunchUrl = useCallback(
-    surface => {
+    row => {
       if (typeof getPickerLaunchUrl === 'function') {
-        return getPickerLaunchUrl(surface) || '';
+        return getPickerLaunchUrl(row) || '';
       }
       return pickerLaunchUrl || '';
     },
@@ -360,40 +409,11 @@ export default function PriceSurfaceMappingsPanel({
       }
       if (/password/i.test(message)) {
         setPreviewPickError(message);
-        setExpanded(true);
       }
     };
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
-  }, [setExpanded]);
-
-  const updateTestMapping = (index, patch) => {
-    const next = normalizePriceSurfaceMappingsForEditor(testMappings).map((entry, idx) => {
-      if (idx !== index) {
-        return entry;
-      }
-      return applyRecommendedPriceSurfaceDefaults({ ...entry, ...patch });
-    });
-    onTestMappingsChange(next);
-  };
-
-  const addTestMapping = (overrides = {}) => {
-    const current = normalizePriceSurfaceMappingsForEditor(testMappings);
-    if (current.length >= MAX_PRICE_SURFACE_MAPPINGS) {
-      setError(`You can save up to ${MAX_PRICE_SURFACE_MAPPINGS} test mappings.`);
-      return;
-    }
-    onTestMappingsChange([...current, createEmptyPriceSurfaceMapping(overrides)]);
-    setError('');
-    setExpanded(true);
-    setActiveScopeTab('test');
-  };
-
-  const removeTestMapping = index => {
-    onTestMappingsChange(
-      normalizePriceSurfaceMappingsForEditor(testMappings).filter((_, idx) => idx !== index)
-    );
-  };
+  }, []);
 
   const updateShopMapping = (index, patch) => {
     setShopMappings(
@@ -416,8 +436,6 @@ export default function PriceSurfaceMappingsPanel({
     setShopMappings([...current, createEmptyPriceSurfaceMapping(overrides)]);
     setNotice('');
     setError('');
-    setExpanded(true);
-    setActiveScopeTab('shop');
   };
 
   const removeShopMapping = index => {
@@ -427,38 +445,71 @@ export default function PriceSurfaceMappingsPanel({
     setNotice('');
   };
 
-  const saveShopDefaults = async () => {
+  // One save path for both the Save button and Auto-map's "Apply & save", so
+  // the spinner timing and the confirmation are identical either way.
+  const persistShopMappings = async (rows, { autoMapTheme, flash, errorFallback } = {}) => {
     setSavingShop(true);
     setError('');
     setNotice('');
+    setSaveFlash(null);
+    const startedAt = Date.now();
     try {
       const response = await apiPut(priceSurfaceSettingsPath(), {
-        mappings: normalizePriceSurfaceMappingsForEditor(shopMappings),
+        mappings: rows,
+        ...(autoMapTheme ? { auto_map_theme: autoMapTheme } : {}),
       });
       const data = unwrapData(response);
-      setShopMappings(normalizePriceSurfaceMappingsForEditor(data?.mappings));
-      setNoticeTitle('Saved');
-      setNotice('Shop defaults saved. Every price test will use these selectors when bucketed.');
+      const remaining = MIN_SAVE_SPINNER_MS - (Date.now() - startedAt);
+      if (remaining > 0) {
+        await new Promise(resolve => setTimeout(resolve, remaining));
+      }
+      setShopMappings(normalizePriceSurfaceMappingsForEditor(data?.mappings || rows));
+      saveFlashTokenRef.current += 1;
+      setSaveFlash({ token: saveFlashTokenRef.current, message: flash || 'Saved' });
+      return true;
     } catch (saveError) {
-      setError(saveError?.message || 'Could not save shop price surface mappings.');
+      setError(
+        saveError?.message || errorFallback || 'Could not save shop price surface mappings.'
+      );
+      return false;
     } finally {
+      // Unconditional. Guarding this on an is-mounted ref is what left the
+      // button spinning: React 18 makes a setState after unmount a no-op, so
+      // the guard protected nothing and latched false under StrictMode.
       setSavingShop(false);
     }
+  };
+
+  const saveShopDefaults = async () => {
+    const rows = normalizePriceSurfaceMappingsForEditor(shopMappings);
+    // The server refuses a url mapping with no usable page, and would drop the
+    // row rather than store a selector that could never be found. Say so here
+    // instead of letting the row quietly disappear on save.
+    const badPage = rows.findIndex(
+      row =>
+        row.surface === 'url' &&
+        String(row.selector || '').trim() &&
+        priceSurfacePageUrlError(row.pageUrl)
+    );
+    if (badPage >= 0) {
+      setError(`Row ${badPage + 1}: ${priceSurfacePageUrlError(rows[badPage].pageUrl)}`);
+      return;
+    }
+    await persistShopMappings(rows, { flash: 'Shop price surfaces saved' });
   };
 
   const beginVisualPick = async (scope, index) => {
     if (!onBeginVisualPick) {
       return;
     }
-    const rows = scope === 'test' ? testRows : shopRows;
-    const row = rows[index];
+    const row = shopRows[index];
     const surface = row?.surface || 'pdp';
-    const launchUrl = resolvePickerLaunchUrl(surface);
+    const launchUrl = resolvePickerLaunchUrl(row);
     if (!launchUrl) {
-      if (shopOnly && (surface === 'pdp' || surface === 'global')) {
-        setError(
-          'Add a product path above (or wait for a sample product to load) before Pick PDP.'
-        );
+      if (surface === 'url') {
+        setError('Enter the page URL for this row before picking a price on it.');
+      } else if (surface === 'pdp' || surface === 'global') {
+        setError('Enter a product URL for this row before picking a price on it.');
       }
       return;
     }
@@ -468,22 +519,14 @@ export default function PriceSurfaceMappingsPanel({
         return;
       }
     }
-    onBeginVisualPick({ scope, index, surface });
+    onBeginVisualPick({ scope: 'shop', index, surface, pageUrl: row?.pageUrl || null });
     setPickerModalUrl(launchUrl);
   };
 
-  const testRows = normalizePriceSurfaceMappingsForEditor(testMappings);
-  const shopRows = normalizePriceSurfaceMappingsForEditor(shopMappings);
-
-  // Until the merchant picks a scope, prefer Shop defaults when the test has no
-  // mappings of its own but the shop does.
-  const activeScopeTab = shopOnly
-    ? 'shop'
-    : scopeTabChoice || (testRows.length === 0 && shopRows.length > 0 ? 'shop' : 'test');
 
   const duplicateKeys = useMemo(() => {
     const counts = new Map();
-    [...testRows, ...shopRows].forEach(row => {
+    shopRows.forEach(row => {
       if (!row.selector.trim()) {
         return;
       }
@@ -491,59 +534,23 @@ export default function PriceSurfaceMappingsPanel({
       counts.set(key, (counts.get(key) || 0) + 1);
     });
     return new Set([...counts.entries()].filter(([, count]) => count > 1).map(([key]) => key));
-  }, [testRows, shopRows]);
+  }, [shopRows]);
 
-  const coverageSummary = useMemo(
-    () => summarizePriceSurfaceRegistry(testRows, shopRows),
-    [testRows, shopRows]
-  );
-  const coverageGaps = useMemo(
-    () => analyzePriceSurfaceRegistryGaps(testRows, shopRows),
-    [testRows, shopRows]
-  );
+  // The registry helpers take per-test overrides ahead of shop defaults. This
+  // editor only ever edits the shop defaults, so there are no overrides to pass.
   const registryStatus = useMemo(
     () =>
-      buildPriceSurfaceRegistryStatus(testRows, shopRows, {
+      buildPriceSurfaceRegistryStatus([], shopRows, {
         picking: Boolean(pickTarget),
       }),
-    [testRows, shopRows, pickTarget]
+    [shopRows, pickTarget]
   );
   const validationWarnings = useMemo(
-    () => [
-      ...validatePriceSurfaceMappingsForEditor(testRows).map(message => `Test: ${message}`),
-      ...validatePriceSurfaceMappingsForEditor(shopRows).map(message => `Shop: ${message}`),
-    ],
-    [testRows, shopRows]
-  );
-  const surfaceGuideCards = useMemo(
-    () =>
-      PRICE_SURFACE_GUIDES.map(guide => {
-        const testCount = testRows.filter(
-          row =>
-            row.enabled !== false &&
-            row.surface === guide.surface &&
-            String(row.selector || '').trim()
-        ).length;
-        const shopCount = shopRows.filter(
-          row =>
-            row.enabled !== false &&
-            row.surface === guide.surface &&
-            String(row.selector || '').trim()
-        ).length;
-        const activeCount = activeScopeTab === 'test' ? testCount : shopCount;
-        return {
-          ...guide,
-          testCount,
-          shopCount,
-          activeCount,
-          configured: activeScopeTab === 'test' ? testCount > 0 || shopCount > 0 : shopCount > 0,
-        };
-      }),
-    [activeScopeTab, testRows, shopRows]
+    () => validatePriceSurfaceMappingsForEditor(shopRows),
+    [shopRows]
   );
 
-  const visualSelector = String(visualEditorSelector || '').trim();
-  const defaultPickerReady = Boolean(resolvePickerLaunchUrl('pdp'));
+  const defaultPickerReady = Boolean(resolvePickerLaunchUrl({ surface: 'pdp' }));
   const shopHost = String(shopDomain || '').trim();
   const localDevPasswordUi =
     isLocalDevStorefrontPasswordUiEnabled() && shopHost ? isShopifyStoreDomain(shopHost) : false;
@@ -558,26 +565,22 @@ export default function PriceSurfaceMappingsPanel({
     : envPassword || '';
   const needsStorefrontPassword =
     localDevPasswordUi && defaultPickerReady && !resolvedStorefrontPassword;
-  const hasIssues = Boolean(error || coverageGaps.length > 0 || validationWarnings.length > 0);
-  const activeRows = activeScopeTab === 'test' ? testRows : shopRows;
-  const settingsLink = String(settingsHref || '').trim();
 
   useEffect(() => {
     onStatusChange?.(registryStatus);
   }, [onStatusChange, registryStatus]);
 
-  const startQuickPick = async (scope, surface) => {
+  const startQuickPick = async surface => {
     if (needsStorefrontPassword) {
       setPreviewPickError(
         'Set RIPX_DEV_STOREFRONT_PASSWORD (and VITE_RIPX_DEV_STOREFRONT_PASSWORD) in .env for local/dev, restart the app, then pick again.'
       );
-      setExpanded(true);
       return;
     }
-    const rows = scope === 'test' ? testRows : shopRows;
+    const rows = shopRows;
     const emptyIndex = rows.findIndex(row => !String(row.selector || '').trim());
     if (emptyIndex >= 0) {
-      await beginVisualPick(scope, emptyIndex);
+      await beginVisualPick(emptyIndex);
       return;
     }
     if (rows.length >= MAX_PRICE_SURFACE_MAPPINGS) {
@@ -586,122 +589,29 @@ export default function PriceSurfaceMappingsPanel({
     }
     const created = createEmptyPriceSurfaceMapping({ surface, role: 'regular', source: 'visual' });
     const nextIndex = rows.length;
-    if (scope === 'test') {
-      onTestMappingsChange([...rows, created]);
-    } else {
-      setShopMappings([...rows, created]);
-    }
+    setShopMappings([...rows, created]);
     if (onPrepareVisualPick) {
       const ready = await onPrepareVisualPick();
       if (!ready) {
         return;
       }
     }
-    const launchUrl = resolvePickerLaunchUrl(surface);
+    const launchUrl = resolvePickerLaunchUrl(created);
     if (!launchUrl) {
-      if (shopOnly && (surface === 'pdp' || surface === 'global')) {
-        setError(
-          'Add a product path above (or wait for a sample product to load) before Pick PDP.'
-        );
+      if (surface === 'pdp' || surface === 'global') {
+        setError('Enter a product URL for this row before picking a price on it.');
       }
       return;
     }
     if (onBeginVisualPick) {
-      onBeginVisualPick({ scope, index: nextIndex, surface });
+      onBeginVisualPick({
+        scope: 'shop',
+        index: nextIndex,
+        surface,
+        pageUrl: created?.pageUrl || null,
+      });
     }
     setPickerModalUrl(launchUrl);
-    setExpanded(true);
-  };
-
-  const handleHeaderQuickPick = event => {
-    event.stopPropagation();
-    setExpanded(true);
-    const scope = shopOnly ? 'shop' : 'test';
-    setActiveScopeTab(scope);
-    startQuickPick(scope, 'pdp');
-  };
-
-  const handleHeaderExpand = event => {
-    event.stopPropagation();
-    setExpanded(true);
-  };
-
-  const applyThemePack = (scope, packKey) => {
-    const rows = scope === 'test' ? testRows : shopRows;
-    const merged = mergeThemePackMappings(rows, packKey);
-    if (scope === 'test') {
-      onTestMappingsChange(merged);
-    } else {
-      setShopMappings(merged);
-      setNoticeTitle('Suggested');
-      setNotice(
-        `Applied ${PRICE_SURFACE_THEME_PACKS[packKey].label}. Save shop defaults to persist.`
-      );
-    }
-    setError('');
-    setExpanded(true);
-  };
-
-  const suggestFromTheme = async () => {
-    setSuggesting(true);
-    setError('');
-    setNotice('');
-    try {
-      const base = priceSurfaceSettingsPath();
-      const suggestPath = base.includes('?')
-        ? `${base.split('?')[0]}/suggest?${base.split('?')[1]}`
-        : `${base}/suggest`;
-      const response = await apiPost(suggestPath, {});
-      const suggestion = unwrapData(response) || response;
-      const suggested = normalizePriceSurfaceMappings(suggestion?.mappings);
-      if (!suggested.length) {
-        setError('No theme selector suggestion available. Try Dawn or Legacy pack.');
-        return;
-      }
-      const existing = normalizePriceSurfaceMappingsForEditor(shopRows);
-      const seen = new Set();
-      const lockedSlots = new Set();
-      const next = [];
-      existing.forEach(row => {
-        const selector = String(row.selector || '').trim();
-        if (!selector) return;
-        const key = `${row.surface}:${row.role}:${selector}`;
-        if (seen.has(key)) return;
-        seen.add(key);
-        next.push(applyRecommendedPriceSurfaceDefaults(row));
-        const source = String(row.source || 'merchant');
-        if (source === 'visual' || source === 'merchant') {
-          lockedSlots.add(`${row.surface}:${row.role}`);
-        }
-      });
-      // Fill gaps from theme suggest; do not replace merchant/visual surface:role slots.
-      suggested.forEach(row => {
-        const selector = String(row.selector || '').trim();
-        if (!selector) return;
-        const slot = `${row.surface}:${row.role}`;
-        if (lockedSlots.has(slot)) return;
-        const key = `${slot}:${selector}`;
-        if (seen.has(key)) return;
-        seen.add(key);
-        next.push(applyRecommendedPriceSurfaceDefaults(row));
-      });
-      setShopMappings(
-        normalizePriceSurfaceMappingsForEditor(next).slice(0, MAX_PRICE_SURFACE_MAPPINGS)
-      );
-      const themeLabel = suggestion?.theme?.name
-        ? `Detected theme “${suggestion.theme.name}”. `
-        : '';
-      setNoticeTitle('Suggested');
-      setNotice(
-        `${themeLabel}${suggestion?.rationale || 'Suggested selectors ready.'} Review, then save shop defaults.`
-      );
-      setActiveScopeTab('shop');
-      setExpanded(true);
-    } catch (suggestError) {
-      setError(suggestError?.message || 'Could not suggest selectors from theme.');
-    } finally {
-      setSuggesting(false);
-    }
   };
 
   const runAutoMap = useCallback(async () => {
@@ -721,7 +631,7 @@ export default function PriceSurfaceMappingsPanel({
       const result = unwrapData(response) || response;
       const surfaces = Array.isArray(result?.surfaces) ? result.surfaces : [];
       if (!surfaces.length) {
-        setError('Auto-map returned no surfaces. Try visual pick or Suggest from theme.');
+        setError('Auto-map found no prices to map. Add a row and use Pick instead.');
         return;
       }
       const accepted = new Set(
@@ -732,8 +642,6 @@ export default function PriceSurfaceMappingsPanel({
       setAcceptedSlots(accepted);
       setAutoMapResult(result);
       setAutoMapOpen(true);
-      setActiveScopeTab('shop');
-      setExpanded(true);
       const themeLabel = result?.theme?.name ? `Theme “${result.theme.name}”. ` : '';
       setNoticeTitle('Auto-map ready');
       setNotice(`${themeLabel}Review matched selectors, then Apply & save. Gaps can use Pick.`);
@@ -742,7 +650,7 @@ export default function PriceSurfaceMappingsPanel({
     } finally {
       setAutoMapping(false);
     }
-  }, [priceSurfaceSettingsPath, productPath, storefrontPassword, setExpanded]);
+  }, [priceSurfaceSettingsPath, productPath, storefrontPassword]);
 
   useEffect(() => {
     const token = Number(autoMapRequestToken) || 0;
@@ -750,10 +658,8 @@ export default function PriceSurfaceMappingsPanel({
       return;
     }
     lastAutoMapTokenRef.current = token;
-    setExpanded(true);
-    setActiveScopeTab('shop');
     runAutoMap();
-  }, [autoMapRequestToken, runAutoMap, setExpanded]);
+  }, [autoMapRequestToken, runAutoMap]);
 
   const toggleAcceptedSlot = (surface, role) => {
     const key = `${surface}:${role}`;
@@ -833,428 +739,147 @@ export default function PriceSurfaceMappingsPanel({
     );
     setShopMappings(normalized);
     setAutoMapOpen(false);
-    setNoticeTitle('Applied');
-    setNotice(
-      save
-        ? 'Auto-map selectors applied. Saving shop defaults…'
-        : 'Auto-map selectors applied to the editor. Save shop defaults to persist.'
-    );
-    if (save) {
-      setSavingShop(true);
-      try {
-        const response = await apiPut(priceSurfaceSettingsPath(), {
-          mappings: normalized,
-          auto_map_theme: autoMapResult.theme
-            ? {
-                id: autoMapResult.theme.id || null,
-                name: autoMapResult.theme.name || null,
-              }
-            : undefined,
-        });
-        const data = unwrapData(response);
-        setShopMappings(normalizePriceSurfaceMappingsForEditor(data?.mappings || normalized));
-        setNoticeTitle('Saved');
-        setNotice('Shop theme price selectors saved from Auto-map.');
-      } catch (saveError) {
-        setError(saveError?.message || 'Applied locally but save failed. Try Save shop defaults.');
-      } finally {
-        setSavingShop(false);
-      }
-    }
-  };
-
-  const addVisualEditorSelector = () => {
-    if (!visualSelector) {
+    if (!save) {
+      setNoticeTitle('Applied');
+      setNotice('Auto-map selectors applied to the editor. Save to persist them.');
       return;
     }
-    addTestMapping({ surface: 'pdp', role: 'regular', selector: visualSelector, source: 'visual' });
+    await persistShopMappings(normalized, {
+      autoMapTheme: autoMapResult.theme
+        ? {
+            id: autoMapResult.theme.id || null,
+            name: autoMapResult.theme.name || null,
+          }
+        : null,
+      flash: 'Auto-mapped selectors saved',
+      errorFallback: 'Applied to the editor but the save failed. Try Save.',
+    });
   };
 
-  const panelExpanded = shopOnly ? true : expanded;
 
   return (
     <div
       id="price-surface-mapping"
       className={`${styles.priceSurfacePanel} ${styles.priceSurfacePanelCompact}`}
     >
-      {!shopOnly ? (
-        <div className={styles.priceSurfaceHeaderRow}>
-          <button
-            type="button"
-            className={`${styles.priceSurfaceHeaderToggle} ${panelExpanded ? styles.priceSurfaceHeaderToggleOpen : ''}`}
-            onClick={() => setExpanded(value => !value)}
-            aria-expanded={panelExpanded}
-          >
-            <span className={styles.priceSurfaceHeaderMain}>
-              <Text as="span" variant="bodySm" fontWeight="semibold">
-                Theme price mapping
-              </Text>
-              <Badge tone={registryStatus.tone} size="small">
-                {registryStatus.label}
-              </Badge>
-              {pickTarget ? (
-                <Badge tone="attention" size="small">
-                  Picking
-                </Badge>
-              ) : null}
-            </span>
-            <TooltipWrapper content="Map where Priceify paints test prices on PDP and listing cards. Test overrides run before shop defaults.">
-              <span className={styles.priceSurfaceHeaderHint}>{registryStatus.hint}</span>
-            </TooltipWrapper>
-            <span className={styles.priceSurfaceHeaderChevron} aria-hidden>
-              <Icon source={ChevronDownIcon} />
-            </span>
-          </button>
-          {!panelExpanded ? (
-            <div className={styles.priceSurfaceHeaderActions}>
-              {defaultPickerReady ? (
-                <Button size="slim" variant="plain" onClick={handleHeaderQuickPick}>
-                  Pick PDP
-                </Button>
-              ) : null}
-              <Button size="slim" variant="plain" onClick={handleHeaderExpand}>
-                Map
-              </Button>
-            </div>
-          ) : null}
-        </div>
-      ) : (
-        <div className={styles.priceSurfaceHeaderRow}>
-          <span className={styles.priceSurfaceHeaderMain}>
-            <Text as="span" variant="bodySm" fontWeight="semibold">
-              Shop theme price selectors
-            </Text>
-            <Badge tone={registryStatus.tone} size="small">
-              {registryStatus.label}
-            </Badge>
-            {pickTarget ? (
-              <Badge tone="attention" size="small">
-                Picking
-              </Badge>
-            ) : null}
-          </span>
-          <TooltipWrapper content="Shop defaults apply to every price test. When a visitor is bucketed, Priceify paints these selectors on the storefront.">
-            <span className={styles.priceSurfaceHeaderHint}>{registryStatus.hint}</span>
-          </TooltipWrapper>
-        </div>
-      )}
-
-      {!panelExpanded && hasIssues ? (
-        <div className={styles.priceSurfaceCollapsedStatus}>
-          {error ? (
-            <Text as="span" tone="critical">
-              {error}
-            </Text>
-          ) : null}
-          {!error && coverageGaps.length > 0 ? (
-            <Text as="span" tone="caution">
-              {coverageGaps[0].message}
-            </Text>
-          ) : null}
-        </div>
-      ) : null}
-
-      <Collapsible open={panelExpanded} transition={{ duration: '200ms', timingFunction: 'ease' }}>
-        <div className={styles.priceSurfaceBody}>
+      <div className={styles.priceSurfaceHeaderRow}>
+        <span className={styles.priceSurfaceHeaderMain}>
+          <Text as="span" variant="bodySm" fontWeight="semibold">
+            Shop theme price selectors
+          </Text>
+          <SettingsInfoLink hash="price-surfaces" label="Price surfaces" />
+          <Badge tone={registryStatus.tone} size="small">
+            {registryStatus.label}
+          </Badge>
           {pickTarget ? (
-            <div className={styles.priceSurfaceInlineStatus}>
-              <Text as="span" variant="bodySm">
-                Click a price in the preview panel below.
-              </Text>
-              {onCancelVisualPick ? (
-                <Button variant="plain" size="slim" onClick={onCancelVisualPick}>
-                  Cancel
-                </Button>
-              ) : null}
-            </div>
+            <Badge tone="attention" size="small">
+              Picking
+            </Badge>
           ) : null}
-          {!defaultPickerReady ? (
-            <Text as="p" variant="bodySm" tone="subdued">
-              Connect a shop or set a preview URL to use the visual picker.
-            </Text>
-          ) : null}
-          {showStorefrontPasswordField ? (
-            <TextField
-              label="Storefront password"
-              type="password"
-              value={storefrontPassword}
-              onChange={value => {
-                setPreviewPickError('');
-                onStorefrontPasswordChange(value);
-              }}
-              autoComplete="off"
-              helpText="Dev/tunnel only — prefer RIPX_DEV_STOREFRONT_PASSWORD in .env. Fallback: Online Store → Preferences password (not admin login), saved for this browser session."
-            />
-          ) : null}
-          {needsStorefrontPassword ? (
-            <Banner tone="warning" title="Storefront password required">
-              <p>
-                This shop is behind Shopify&apos;s storefront password. Set{' '}
-                <code>RIPX_DEV_STOREFRONT_PASSWORD</code> in <code>.env</code> (dev only), restart
-                the app, then use Pick PDP or Pick PLP again
-                {showStorefrontPasswordField ? ' — or enter it above for this session' : ''}.
-              </p>
-            </Banner>
-          ) : null}
-          {previewPickError && !needsStorefrontPassword ? (
-            <Banner tone="critical" title="Preview could not load">
-              <p>{previewPickError}</p>
-            </Banner>
-          ) : null}
-          {error ? (
-            <Banner tone="critical" title="Price surfaces">
-              <p>{error}</p>
-            </Banner>
-          ) : null}
-          {notice ? (
-            <Banner tone="success" title={noticeTitle || 'Saved'}>
-              <p>{notice}</p>
-            </Banner>
-          ) : null}
-          {validationWarnings.length > 0 ? (
-            <Text as="p" variant="bodySm" tone="caution">
-              {validationWarnings.slice(0, 2).join(' ')}
-            </Text>
-          ) : null}
-          {coverageSummary.length > 0 ? (
-            <div className={styles.priceSurfaceChipRow}>
-              {coverageSummary.slice(0, 4).map(entry => (
-                <Badge key={`${entry.surface}-${entry.role}`} size="small">
-                  {entry.surface.toUpperCase()} {entry.role.replace(/_/g, ' ')}:{' '}
-                  {entry.selectors.length}
-                </Badge>
-              ))}
-            </div>
-          ) : null}
-          {registryStatus.coverageMatrix?.length > 0 ? (
-            <div className={styles.priceSurfaceChipRow}>
-              {registryStatus.coverageMatrix
-                .filter(row => row.severity === 'high' || row.severity === 'medium')
-                .map(row => (
-                  <Badge
-                    key={`readiness-${row.surface}-${row.role}`}
-                    size="small"
-                    tone={row.configured ? 'success' : 'warning'}
-                  >
-                    {row.surface.toUpperCase()} {row.role.replace(/_/g, ' ')}
-                  </Badge>
-                ))}
-            </div>
-          ) : null}
+        </span>
+        <TooltipWrapper content="Shop defaults apply to every price test. When a visitor is bucketed, Priceify paints these selectors on the storefront.">
+          <span className={styles.priceSurfaceHeaderHint}>{registryStatus.hint}</span>
+        </TooltipWrapper>
+      </div>
 
-          <div className={styles.priceSurfaceGuidePanel}>
-            <div className={styles.priceSurfaceGuideHeader}>
-              <div>
-                <Text as="p" variant="bodySm" fontWeight="semibold">
-                  Smart selector coverage
-                </Text>
-                <Text as="p" variant="bodySm" tone="subdued">
-                  Pick only the surfaces you want Priceify to paint. Missing surfaces stay untouched.
-                </Text>
-              </div>
-              <Badge tone={activeScopeTab === 'test' ? 'info' : undefined} size="small">
-                {activeScopeTab === 'test' ? 'Editing test overrides' : 'Editing shop defaults'}
-              </Badge>
-            </div>
-            <div className={styles.priceSurfaceGuideGrid}>
-              {surfaceGuideCards.map(card => (
-                <button
-                  key={card.surface}
-                  type="button"
-                  className={`${styles.priceSurfaceGuideCard} ${
-                    card.configured ? styles.priceSurfaceGuideCardConfigured : ''
-                  }`}
-                  disabled={!defaultPickerReady}
-                  onClick={() => startQuickPick(activeScopeTab, card.surface)}
-                >
-                  <span className={styles.priceSurfaceGuideTop}>
-                    <span className={styles.priceSurfaceGuideLabel}>{card.shortLabel}</span>
-                    <Badge size="small" tone={card.configured ? 'success' : 'warning'}>
-                      {card.configured ? 'Mapped' : 'Missing'}
-                    </Badge>
-                  </span>
-                  <span className={styles.priceSurfaceGuideTitle}>{card.label}</span>
-                  <span className={styles.priceSurfaceGuideDescription}>{card.description}</span>
-                  <span className={styles.priceSurfaceGuideMeta}>
-                    Test {card.testCount} · Shop {card.shopCount}
-                  </span>
-                </button>
-              ))}
-            </div>
+      <div className={styles.priceSurfaceBody}>
+        {pickTarget ? (
+          <div className={styles.priceSurfaceInlineStatus}>
+            <Text as="span" variant="bodySm">
+              Click a price in the preview panel below.
+            </Text>
+            {onCancelVisualPick ? (
+              <Button variant="plain" size="slim" onClick={onCancelVisualPick}>
+                Cancel
+              </Button>
+            ) : null}
           </div>
+        ) : null}
+        {!defaultPickerReady ? (
+          <Text as="p" variant="bodySm" tone="subdued">
+            Connect a shop or set a preview URL to use the visual picker.
+          </Text>
+        ) : null}
+        {showStorefrontPasswordField ? (
+          <TextField
+            label="Storefront password"
+            type="password"
+            value={storefrontPassword}
+            onChange={value => {
+              setPreviewPickError('');
+              onStorefrontPasswordChange(value);
+            }}
+            autoComplete="off"
+            helpText="Dev/tunnel only — prefer RIPX_DEV_STOREFRONT_PASSWORD in .env. Fallback: Online Store → Preferences password (not admin login), saved for this browser session."
+          />
+        ) : null}
+        {needsStorefrontPassword ? (
+          <Banner tone="warning" title="Storefront password required">
+            <p>
+              This shop is behind Shopify&apos;s storefront password. Set{' '}
+              <code>RIPX_DEV_STOREFRONT_PASSWORD</code> in <code>.env</code> (dev only), restart
+              the app, then use Pick on the row again
+              {showStorefrontPasswordField ? ' — or enter it above for this session' : ''}.
+            </p>
+          </Banner>
+        ) : null}
+        {previewPickError && !needsStorefrontPassword ? (
+          <Banner tone="critical" title="Preview could not load">
+            <p>{previewPickError}</p>
+          </Banner>
+        ) : null}
+        {error ? (
+          <Banner tone="critical" title="Price surfaces">
+            <p>{error}</p>
+          </Banner>
+        ) : null}
+        {notice ? (
+          <Banner tone="success" title={noticeTitle || 'Saved'}>
+            <p>{notice}</p>
+          </Banner>
+        ) : null}
+        {validationWarnings.length > 0 ? (
+          <Text as="p" variant="bodySm" tone="caution">
+            {validationWarnings.slice(0, 2).join(' ')}
+          </Text>
+        ) : null}
+        {loading ? (
+          <Text as="p" variant="bodySm" tone="subdued">
+            Loading shop defaults…
+          </Text>
+        ) : (
+          <PriceSurfaceMappingRows
+            rows={shopRows}
+            styles={styles}
+            scope="shop"
+            onUpdate={updateShopMapping}
+            onRemove={removeShopMapping}
+            duplicateKeys={duplicateKeys}
+            getPickerLaunchUrl={resolvePickerLaunchUrl}
+            getPickBlockedReason={getPickBlockedReason}
+            pickTarget={pickTarget}
+            onBeginVisualPick={beginVisualPick}
+          />
+        )}
 
-          {!shopOnly ? (
-            <div className={styles.priceSurfaceTabRow}>
-              <button
-                type="button"
-                className={`${styles.priceSurfaceTab} ${activeScopeTab === 'test' ? styles.priceSurfaceTabActive : ''}`}
-                onClick={() => setActiveScopeTab('test')}
-              >
-                Test overrides
-              </button>
-              <button
-                type="button"
-                className={`${styles.priceSurfaceTab} ${activeScopeTab === 'shop' ? styles.priceSurfaceTabActive : ''}`}
-                onClick={() => setActiveScopeTab('shop')}
-              >
-                Shop defaults
-              </button>
-            </div>
-          ) : null}
-
-          {activeScopeTab === 'shop' ? (
-            <Text as="p" variant="bodySm" tone="subdued">
-              {shopOnly
-                ? 'These selectors apply when any price test buckets a visitor. Prefer Auto-map prices, then save shop defaults.'
-                : 'Shop defaults apply to every price test. Test overrides win when both are set.'}
-              {!shopOnly && settingsLink ? (
-                <>
-                  {' '}
-                  <a href={settingsLink} className={styles.priceSurfaceSettingsLink}>
-                    Open Theme price selectors
-                  </a>
-                </>
-              ) : null}
-            </Text>
-          ) : null}
-
-          {activeScopeTab === 'test' && !shopOnly ? (
-            <PriceSurfaceMappingRows
-              rows={activeRows}
-              styles={styles}
-              scope="test"
-              onUpdate={updateTestMapping}
-              onRemove={removeTestMapping}
-              duplicateKeys={duplicateKeys}
-              getPickerLaunchUrl={resolvePickerLaunchUrl}
-              pickTarget={pickTarget}
-              onBeginVisualPick={beginVisualPick}
-            />
-          ) : loading ? (
-            <Text as="p" variant="bodySm" tone="subdued">
-              Loading shop defaults…
-            </Text>
-          ) : (
-            <PriceSurfaceMappingRows
-              rows={activeRows}
-              styles={styles}
-              scope="shop"
-              onUpdate={updateShopMapping}
-              onRemove={removeShopMapping}
-              duplicateKeys={duplicateKeys}
-              getPickerLaunchUrl={resolvePickerLaunchUrl}
-              pickTarget={pickTarget}
-              onBeginVisualPick={beginVisualPick}
-            />
-          )}
-
-          <InlineStack gap="150" wrap>
-            {activeScopeTab === 'test' ? (
-              <>
-                <Button size="slim" onClick={() => addTestMapping()}>
-                  Add row
-                </Button>
-                <Button
-                  size="slim"
-                  variant="plain"
-                  disabled={!defaultPickerReady}
-                  onClick={() => startQuickPick('test', 'pdp')}
-                >
-                  Pick PDP
-                </Button>
-                <Button
-                  size="slim"
-                  variant="plain"
-                  disabled={!defaultPickerReady}
-                  onClick={() => startQuickPick('test', 'plp')}
-                >
-                  Pick PLP
-                </Button>
-                <Button
-                  size="slim"
-                  variant="plain"
-                  disabled={!defaultPickerReady}
-                  onClick={() => startQuickPick('test', 'cart')}
-                >
-                  Pick cart
-                </Button>
-                <Button
-                  size="slim"
-                  variant="plain"
-                  disabled={!defaultPickerReady}
-                  onClick={() => startQuickPick('test', 'search')}
-                >
-                  Pick search
-                </Button>
-                {visualSelector ? (
-                  <Button size="slim" variant="plain" onClick={addVisualEditorSelector}>
-                    Use visual selector
-                  </Button>
-                ) : null}
-              </>
-            ) : (
-              <>
-                <Button size="slim" onClick={() => addShopMapping()} disabled={loading}>
-                  Add row
-                </Button>
-                <Button
-                  size="slim"
-                  variant="primary"
-                  loading={autoMapping}
-                  disabled={loading}
-                  onClick={runAutoMap}
-                >
-                  Auto-map prices
-                </Button>
-                <Button
-                  size="slim"
-                  variant="plain"
-                  loading={suggesting}
-                  disabled={loading}
-                  onClick={suggestFromTheme}
-                >
-                  Suggest from theme
-                </Button>
-                <Button size="slim" variant="plain" onClick={() => applyThemePack('shop', 'dawn')}>
-                  Dawn pack
-                </Button>
-                <Button
-                  size="slim"
-                  variant="plain"
-                  onClick={() => applyThemePack('shop', 'horizon')}
-                >
-                  Horizon pack
-                </Button>
-                <Button
-                  size="slim"
-                  variant="plain"
-                  onClick={() => applyThemePack('shop', 'legacy')}
-                >
-                  Legacy pack
-                </Button>
-                {defaultPickerReady ? (
-                  <Button
-                    size="slim"
-                    variant="plain"
-                    disabled={loading}
-                    onClick={() => startQuickPick('shop', 'pdp')}
-                  >
-                    Pick PDP
-                  </Button>
-                ) : null}
-                <Button
-                  size="slim"
-                  loading={savingShop}
-                  onClick={saveShopDefaults}
-                  disabled={loading}
-                >
-                  Save shop defaults
-                </Button>
-              </>
-            )}
-          </InlineStack>
-        </div>
-      </Collapsible>
+        <InlineStack gap="150" wrap>
+          <Button size="slim" onClick={() => addShopMapping()} disabled={loading || savingShop}>
+            Add row
+          </Button>
+          <Button
+            size="slim"
+            variant="primary"
+            loading={autoMapping}
+            disabled={loading || savingShop}
+            onClick={runAutoMap}
+          >
+            Auto-map prices
+          </Button>
+          <Button size="slim" loading={savingShop} onClick={saveShopDefaults} disabled={loading}>
+            {savingShop ? 'Saving…' : 'Save'}
+          </Button>
+        </InlineStack>
+      </div>
       <Modal
         open={autoMapOpen}
         onClose={() => setAutoMapOpen(false)}
@@ -1323,8 +948,9 @@ export default function PriceSurfaceMappingsPanel({
                     <InlineStack gap="200" blockAlign="center">
                       <Badge tone={tone}>{String(row.status || 'missing').toUpperCase()}</Badge>
                       <Text as="span" variant="bodyMd" fontWeight="semibold">
-                        {String(row.surface || '').toUpperCase()} ·{' '}
-                        {String(row.role || '').replace(/_/g, ' ')}
+                        {PRICE_SURFACE_LABELS[row.surface] ||
+                          String(row.surface || '').toUpperCase()}{' '}
+                        · {String(row.role || '').replace(/_/g, ' ')}
                       </Text>
                     </InlineStack>
                     {row.status === 'matched' ? (
@@ -1338,7 +964,7 @@ export default function PriceSurfaceMappingsPanel({
                         size="slim"
                         onClick={() => {
                           setAutoMapOpen(false);
-                          startQuickPick('shop', row.surface || 'pdp');
+                          startQuickPick(row.surface || 'pdp');
                         }}
                       >
                         Pick instead
@@ -1421,6 +1047,28 @@ export default function PriceSurfaceMappingsPanel({
           ) : null}
         </div>
       </Modal>
+      {saveFlash ? (
+        <div className={styles.priceSurfaceSaveFlash} role="status" aria-live="polite">
+          <span
+            key={saveFlash.token}
+            className={styles.priceSurfaceSaveFlashToast}
+            data-price-surface-save-flash
+          >
+            <svg
+              className={styles.priceSurfaceSaveFlashIcon}
+              viewBox="0 0 20 20"
+              aria-hidden="true"
+              focusable="false"
+            >
+              <path
+                d="M7.6 13.2 4.4 10l-1.2 1.2 4.4 4.4 9-9L15.4 5.4Z"
+                fill="currentColor"
+              />
+            </svg>
+            {saveFlash.message}
+          </span>
+        </div>
+      ) : null}
     </div>
   );
 }

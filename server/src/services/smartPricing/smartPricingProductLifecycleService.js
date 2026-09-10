@@ -21,6 +21,12 @@ const {
 } = require('../../models/smartPricingProductEventStore');
 const { syncSmartPricingInboxForTest } = require('./smartPricingInboxStopSyncService');
 const { isSmartPricingTest, isPriceLikeTestType } = require('./smartPricingTestIdentity');
+const {
+  assertProductIsFreeToPrice,
+  withPricingEnrollmentLock,
+  releasePriceTestHold,
+  heldVariantIds,
+} = require('./priceTestEnrollmentService');
 const { buildSmartPricingTestAnalytics } = require('./smartPricingTestAnalyticsService');
 const { getShopSmartPricingGuardrails } = require('./smartPricingGuardrailsService');
 const {
@@ -117,6 +123,84 @@ async function stopSmartPricingProduct({ testId, shopDomain, reason = 'merchant_
 }
 
 /**
+ * Clears a latched revenue-guardrail breach so resuming re-arms it.
+ *
+ * A breach is sticky by design: `enforceRevenueDropGuardrail` returns
+ * `already_breached` and stops reading revenue at all, which is right while the
+ * product is stopped. But resume restarts the traffic split on the very prices
+ * the guardrail rejected, and with the latch still set nothing would be
+ * watching the second time. Clearing it honours the merchant's override and
+ * puts the protection back: if the variation is still losing money it pauses
+ * the product again. The previous breach is kept for the product history.
+ */
+async function rearmRevenueGuardrailForResume(testId, shopDomain, test) {
+  const raw = test?.guardrail_config;
+  let config = {};
+  if (typeof raw === 'string') {
+    try {
+      const parsed = JSON.parse(raw);
+      config = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    } catch {
+      config = {};
+    }
+  } else if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    config = raw;
+  }
+  if (!config.breached_at) return;
+
+  const { updateTest } = require('../../models/test');
+  await updateTest(testId, shopDomain, {
+    guardrail_config: {
+      ...config,
+      breached_at: null,
+      observed_drop_percent: null,
+      variant_id: null,
+      variant_name: null,
+      action: null,
+      last_breach_at: config.breached_at,
+      last_breach_drop_percent: config.observed_drop_percent ?? null,
+    },
+  });
+}
+
+/**
+ * Stop serving a decided product's price, freeing it for another test.
+ *
+ * Applying a winner writes the price into the Shopify catalog and then also
+ * personalizes traffic onto it, and nothing ever turned that personalization
+ * off again. The catalog keeps the price either way, so the personalization is
+ * only belt over braces -- but while it is set the test still counts as pricing
+ * the product, and no new test may include it. This is the merchant's way of
+ * saying the product is done.
+ */
+async function releaseSmartPricingProduct({ testId, shopDomain } = {}) {
+  const test = await getTestById(testId, shopDomain);
+  await assertSmartPricingProductTest(test, shopDomain);
+
+  const status = String(test.status || '').toLowerCase();
+  if (status === 'running' || status === 'active') {
+    throw new Error('Stop this test before releasing the product.');
+  }
+
+  const released = await releasePriceTestHold(testId, shopDomain, 'merchant_release');
+  if (!released?.released) {
+    // Nothing was serving, so the product is already free. Say so rather than
+    // failing: the merchant asked for an outcome, and it is already true.
+    return { test, released: false, already_free: true };
+  }
+
+  await syncSmartPricingInboxForTest(shopDomain, testId, {
+    reason: 'merchant_release_product',
+  }).catch(() => null);
+
+  return {
+    test: await getTestById(testId, shopDomain),
+    released: true,
+    previous_mode: released.previous_mode,
+  };
+}
+
+/**
  * Resume one previously paused/stopped product test.
  */
 async function resumeSmartPricingProduct({ testId, shopDomain } = {}) {
@@ -135,8 +219,27 @@ async function resumeSmartPricingProduct({ testId, shopDomain } = {}) {
     throw new Error('This product has already been decided. Start a re-run instead.');
   }
 
+  await rearmRevenueGuardrailForResume(testId, shopDomain, test);
+
+  // While this test sat paused, its product was free for another test to take,
+  // and the wizard's product list would have offered it. Resuming without
+  // asking would put two tests on one variant, each pricing a share of the
+  // same shoppers and each counting the same orders as its own. The check and
+  // the start are held together so two resumes cannot both pass it.
   const { startTest } = require('../abTestEngine');
-  const started = await startTest(testId, shopDomain);
+  const started = await withPricingEnrollmentLock(
+    { shopDomain, productId: test.target_id, variantId: [...heldVariantIds(test)][0] || null },
+    async () => {
+      await assertProductIsFreeToPrice({
+        shopDomain,
+        productId: test.target_id,
+        variantId: [...heldVariantIds(test)][0] || null,
+        title: test.name,
+        ignoreTestIds: [testId],
+      });
+      return startTest(testId, shopDomain);
+    }
+  );
   await syncSmartPricingInboxForTest(shopDomain, testId, {
     reason: 'merchant_resume_product',
   }).catch(() => null);
@@ -902,6 +1005,7 @@ async function buildSmartPricingProductReport(shopDomain, planId) {
 module.exports = {
   stopSmartPricingProduct,
   resumeSmartPricingProduct,
+  releaseSmartPricingProduct,
   revertSmartPricingProductPrice,
   recordWinnerApplied,
   extractBaselineFromPublish,

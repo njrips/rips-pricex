@@ -7,7 +7,25 @@ export const PRICE_SURFACES = [
   'recommendation',
   'quickview',
   'global',
+  // A named page rather than a page type. Every other surface is inferred from
+  // the path, which leaves a custom landing or bundle page unreachable — it
+  // classifies as 'home' along with every other /pages/ URL. A 'url' mapping
+  // carries its page in `pageUrl` and applies only there.
+  'url',
 ];
+
+/** Labels for the Surface dropdown, where the bare enum reads as jargon. */
+export const PRICE_SURFACE_LABELS = {
+  pdp: 'Product page',
+  plp: 'Collection page',
+  cart: 'Cart',
+  search: 'Search results',
+  home: 'Home page',
+  recommendation: 'Recommendations',
+  quickview: 'Quick view',
+  global: 'Any page',
+  url: 'Specific URL',
+};
 
 export const PRICE_SURFACE_ROLES = [
   'regular',
@@ -42,6 +60,8 @@ const MATCH_STRATEGY_BY_SURFACE = {
   recommendation: 'within_product_card',
   quickview: 'page_product',
   global: 'global_unique',
+  // The merchant named one page, so the selector is expected to be unique on it.
+  url: 'global_unique',
 };
 
 const PRODUCT_BINDING_BY_SURFACE = {
@@ -53,6 +73,7 @@ const PRODUCT_BINDING_BY_SURFACE = {
   recommendation: 'card_ancestor',
   quickview: 'page_product',
   global: 'data_product_id',
+  url: 'page_product',
 };
 
 const PRICE_SELECTOR_HINTS = ['price', 'money', 'compare', 'was-price', 'sale', 'amount', 'cost'];
@@ -69,6 +90,93 @@ function normalizePriceSurfaceRole(value, fallback = 'regular') {
     .trim()
     .toLowerCase();
   return PRICE_SURFACE_ROLES.includes(key) ? key : fallback;
+}
+
+const MAX_PAGE_URL_LENGTH = 2000;
+
+/**
+ * The page a URL-scoped mapping belongs to, kept as the merchant gave it.
+ *
+ * Only http(s) and site-relative paths survive: the value is handed to the
+ * preview proxy for visual picking, so a `javascript:` or `data:` URL must not
+ * get through even though nothing renders it as a link.
+ *
+ * Mirrors `normalizePriceSurfacePageUrl` in server/src/utils/priceSurfaceRegistry.js.
+ * @param {unknown} value
+ * @returns {string | null}
+ */
+export function normalizePriceSurfacePageUrl(value) {
+  const raw = String(value == null ? '' : value).trim();
+  if (!raw || raw.length > MAX_PAGE_URL_LENGTH) return null;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) {
+    return /^https?:\/\//i.test(raw) ? raw : null;
+  }
+  if (raw.startsWith('//')) return null;
+  return raw;
+}
+
+/**
+ * Why a page URL will not do, in words a merchant can act on, or '' if it will.
+ * @param {unknown} value
+ * @returns {string}
+ */
+export function priceSurfacePageUrlError(value) {
+  const raw = String(value == null ? '' : value).trim();
+  if (!raw) return 'Add the URL of the page this price is on.';
+  if (raw.length > MAX_PAGE_URL_LENGTH) return 'That URL is too long.';
+  if (!normalizePriceSurfacePageUrl(raw) || !priceSurfacePagePath(raw)) {
+    return 'Enter a page path like /pages/sale, or a full https:// URL.';
+  }
+  return '';
+}
+
+/**
+ * The comparable part of a page URL: its path, lowercased, without query,
+ * fragment or trailing slash. Query strings are dropped because merchants paste
+ * from the address bar, which routinely carries campaign parameters that say
+ * nothing about which page it is.
+ *
+ * Mirrors `priceSurfacePagePath` in server/src/utils/priceSurfaceRegistry.js and
+ * `ripxPriceSurfacePagePath` in storefront/storefront-script.js.
+ * @param {unknown} value
+ * @returns {string}
+ */
+/**
+ * What the visual picker should open for a URL-scoped row: the entered path
+ * plus its query, always against the shop's own domain.
+ *
+ * The query is kept even though matching ignores it, because a page can need it
+ * to render the way the merchant sees it. The origin is dropped so a custom
+ * domain still previews through the shop domain, which is the only host the
+ * preview proxy can unlock a password on.
+ *
+ * @param {unknown} value
+ * @returns {string}
+ */
+export function priceSurfacePickerPath(value) {
+  const path = priceSurfacePagePath(value);
+  if (!path) return '';
+  const raw = String(value == null ? '' : value).trim();
+  const query = raw.split('#')[0].split('?')[1];
+  return query ? `${path}?${query}` : path;
+}
+
+export function priceSurfacePagePath(value) {
+  const raw = String(value == null ? '' : value).trim();
+  if (!raw) return '';
+  let path = raw;
+  const schemeMatch = /^https?:\/\/[^/]*(\/.*)?$/i.exec(raw);
+  if (schemeMatch) {
+    path = schemeMatch[1] || '/';
+  } else if (/^[a-z][a-z0-9+.-]*:/i.test(raw) || raw.startsWith('//')) {
+    return '';
+  }
+  path = path.split('#')[0].split('?')[0];
+  if (!path) return '';
+  if (!path.startsWith('/')) path = `/${path}`;
+  path = path.toLowerCase();
+  if (path.length > 1) path = path.replace(/\/+$/, '');
+  return path || '/';
 }
 
 export function normalizePriceSurfaceMapping(raw, index = 0, options = {}) {
@@ -88,7 +196,20 @@ export function normalizePriceSurfaceMapping(raw, index = 0, options = {}) {
     .trim()
     .toLowerCase();
   const surface = normalizePriceSurface(raw.surface);
-  const role = normalizePriceSurfaceRole(raw.role);
+  // Unlike the server's copy, this keeps the URL exactly as typed rather than
+  // rejecting it: the editor re-normalizes on every keystroke, and sanitizing
+  // here wiped the field out from under the merchant mid-edit. What is typed is
+  // reported by priceSurfacePageUrlError and refused again by the server, which
+  // is the authority on what gets stored.
+  const rawPageUrl = String(raw.pageUrl ?? raw.page_url ?? '')
+    .trim()
+    .slice(0, MAX_PAGE_URL_LENGTH);
+  const pageUrl = rawPageUrl || null;
+  if (surface === 'url' && !pageUrl && !allowEmptySelector) {
+    return null;
+  }
+  // A page is not a kind of price, so a url mapping has no role of its own.
+  const role = surface === 'url' ? 'regular' : normalizePriceSurfaceRole(raw.role);
   const matchStrategyRaw = String(raw.matchStrategy || raw.match_strategy || '')
     .trim()
     .toLowerCase();
@@ -100,6 +221,7 @@ export function normalizePriceSurfaceMapping(raw, index = 0, options = {}) {
     id: String(raw.id || `mapping-${index + 1}`).trim() || `mapping-${index + 1}`,
     surface,
     role,
+    pageUrl: surface === 'url' ? pageUrl : null,
     selector,
     containerSelector: containerSelector || null,
     matchStrategy: matchStrategyRaw || MATCH_STRATEGY_BY_SURFACE[surface] || 'global_unique',
@@ -341,7 +463,9 @@ export function analyzePriceSurfaceRegistryGaps(testMappings, shopMappings) {
     surface: target.surface,
     role: target.role,
     severity: target.severity,
-    message: `No ${target.surface.toUpperCase()} ${target.role.replace(/_/g, ' ')} selector is configured.`,
+    // Named the way the Surface dropdown names it, so the gap and the row a
+    // merchant would add to close it read as the same thing.
+    message: `No ${PRICE_SURFACE_LABELS[target.surface] || target.surface.toUpperCase()} ${target.role.replace(/_/g, ' ')} selector is configured.`,
   }));
 }
 
@@ -420,6 +544,12 @@ export function validatePriceSurfaceMappingsForEditor(rows) {
       );
     } else {
       seen.set(key, index);
+    }
+    if (row.surface === 'url') {
+      const pageError = priceSurfacePageUrlError(row.pageUrl);
+      if (pageError) {
+        warnings.push(`Row ${index + 1}: ${pageError}`);
+      }
     }
     const selectorLower = selector.toLowerCase();
     const looksLikePrice = PRICE_SELECTOR_HINTS.some(hint => selectorLower.includes(hint));

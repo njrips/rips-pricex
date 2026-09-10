@@ -144,6 +144,7 @@ describe('classicExperimentHelpers', () => {
     expect(enriched.statistical_design.confidence_level).toBe(90);
     expect(enriched.goal.guardrails).toEqual({
       auto_stop: true,
+      enabled: true,
       max_revenue_drop_percent: 10,
     });
   });

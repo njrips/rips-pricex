@@ -169,6 +169,10 @@ function twoSampleAlwaysValid(control, challenger, options = {}) {
   return {
     family,
     nEff,
+    // Both means, so a caller can express `delta` as a percentage of the arm it
+    // was measured against without recomputing it on a different metric.
+    controlMean: mean1,
+    challengerMean: mean2,
     delta,
     logLambda,
     lambda: Number.isFinite(logLambda) ? Math.exp(logLambda) : 1,
@@ -252,6 +256,17 @@ function applyAlwaysValidDecision(significance, variants = [], options = {}) {
   );
   const bestPair = pairs.slice().sort((a, b) => a.result.pValue - b.result.pValue)[0];
   const winnerPair = crossed[0] || null;
+  // Lift has to be quoted on the metric that made the call. `base` carries the
+  // fixed-horizon conversion-rate lift, and passing that through unchanged put
+  // a conversion figure next to a decision reached on revenue per visitor: a
+  // merchant reading "+5% lift" on an RPV test was shown a number that had no
+  // part in choosing the winner. The fixed-horizon value is kept below.
+  const liftPair = winnerPair || bestPair || null;
+  const liftBase = liftPair ? liftPair.result.controlMean : 0;
+  const familyLift =
+    liftPair && Number.isFinite(liftBase) && liftBase > 0
+      ? Math.round((liftPair.result.delta / liftBase) * 1000) / 10
+      : null;
   const pValue = winnerPair?.result.pValue ?? bestPair?.result.pValue ?? 1;
   const significant = Boolean(winnerPair);
   const winnerVariantId = winnerPair?.challenger?.id || null;
@@ -265,6 +280,7 @@ function applyAlwaysValidDecision(significance, variants = [], options = {}) {
       pValue: base.pValue,
       confidence: base.confidence,
       winner: base.winner,
+      lift: base.lift ?? null,
       method: base.method || null,
     },
     method: 'msprt',
@@ -276,6 +292,9 @@ function applyAlwaysValidDecision(significance, variants = [], options = {}) {
     mdePercent,
     pValue: Math.round(pValue * 10000) / 10000,
     confidence: Math.round((1 - pValue) * 10000) / 100,
+    lift: familyLift,
+    /** Which metric `lift` is a percentage of, so it can be labelled honestly. */
+    liftFamily: family,
     significant,
     controlWin,
     winner: significant ? (rows.length === 2 ? 'variantB' : 'best') : null,

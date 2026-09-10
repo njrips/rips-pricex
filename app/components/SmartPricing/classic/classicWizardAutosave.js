@@ -28,7 +28,6 @@ export function wizardSnapshotHasMerchantInput(snapshot) {
   if (!snapshot || typeof snapshot !== 'object') return false;
   if (String(snapshot.name || '').trim()) return true;
   if (String(snapshot.hypothesis || '').trim()) return true;
-  if (String(snapshot.collectionId || '').trim()) return true;
   if (hasListValue(snapshot.selectedIds)) return true;
   if (hasListValue(snapshot.plans)) return true;
   if (hasMapValue(snapshot.priceOverrides)) return true;

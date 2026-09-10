@@ -194,28 +194,44 @@ export default function ClassicSettingsTab({
           ) : null}
         </div>
 
-        {guardrails.map(row => (
-          <div className={styles.guardrailCard} key={row.id || row.label}>
-            <div className={styles.guardrailCardHead}>
-              <span className={styles.guardrailCardTitle}>
-                <IconShield size={14} />
-                {row.label || row.id}
-              </span>
-              <span className={`${styles.badge} ${styles.badgeAccent}`}>Always on</span>
+        {guardrails.map(row => {
+          // The guardrail is switchable per experiment now, so this readback
+          // reports what the experiment actually chose. It used to print
+          // "Always on" and the pause rule unconditionally, which would state
+          // the opposite of the truth for an experiment that turned it off.
+          const on = row.on !== false;
+          return (
+            <div className={styles.guardrailCard} key={row.id || row.label}>
+              <div className={styles.guardrailCardHead}>
+                <span className={styles.guardrailCardTitle}>
+                  <IconShield size={14} />
+                  {row.label || row.id}
+                </span>
+                <span
+                  className={`${styles.badge} ${on ? styles.badgeAccent : ''}`.trim()}
+                >
+                  {on ? 'On' : 'Off'}
+                </span>
+              </div>
+              {on ? (
+                <div className={styles.guardrailRule}>
+                  <span>Pauses the test if any variation drops more than</span>
+                  <span className={styles.guardrailRuleValue}>
+                    {String(row.threshold || '').replace(/^-/, '') || '—'}
+                  </span>
+                  <span>versus control.</span>
+                </div>
+              ) : (
+                <div className={styles.guardrailRule}>
+                  <span>Not pausing on revenue drop. Stop this experiment yourself if needed.</span>
+                </div>
+              )}
+              {/* row.hint is deliberately not rendered: the badge above and the
+                  sentence beside it already say both halves, and the sentence
+                  carries the number. */}
             </div>
-            <div className={styles.guardrailRule}>
-              <span>Pauses the test if any variation drops more than</span>
-              <span className={styles.guardrailRuleValue}>
-                {String(row.threshold || '').replace(/^-/, '') || '—'}
-              </span>
-              <span>versus control.</span>
-            </div>
-            {/* row.hint is deliberately not rendered. It reads "Always on.
-                Auto-pauses if any variation drops past this vs control." — the
-                badge above and the sentence beside it already say both halves,
-                and the sentence carries the number. */}
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* Renamed from "Traffic sources & exclusions", which had grown to hold

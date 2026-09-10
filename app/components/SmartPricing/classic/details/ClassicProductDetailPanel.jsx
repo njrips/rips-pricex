@@ -9,6 +9,7 @@ import {
   applySmartPricingWinner,
   finishSmartPricingProduct,
   getSmartPricingProductReport,
+  releaseSmartPricingProduct,
   resumeSmartPricingProduct,
   revertSmartPricingProductPrice,
   rerunSmartPricingProduct,
@@ -19,6 +20,7 @@ import {
   resolveProductActionAvailability,
 } from '../productActionAvailability';
 import { useKeyedState } from '../../../../hooks/useKeyedState';
+import TooltipWrapper from '../../../shared/TooltipWrapper';
 import styles from '../SmartPricingClassic.module.css';
 
 const STATE_BADGE = {
@@ -260,6 +262,19 @@ export default function ClassicProductDetailPanel({
               <Button disabled={Boolean(busy)} onClick={() => setRerunOpen(true)}>
                 Re-run at a new price
               </Button>
+            ) : null}
+            {actions.canRelease ? (
+              <TooltipWrapper content="Keeps the applied catalog price, and stops this test serving it, so the product can go into a new test.">
+                <Button
+                  loading={busy === 'release'}
+                  disabled={Boolean(busy)}
+                  onClick={() =>
+                    runAction('release', () => releaseSmartPricingProduct(shopDomain, testId))
+                  }
+                >
+                  Release product
+                </Button>
+              </TooltipWrapper>
             ) : null}
           </div>
 
