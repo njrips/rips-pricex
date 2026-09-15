@@ -189,7 +189,8 @@ async function resolveSmartPricingCheckoutReadiness(
     status: 'ready',
     configured_shop: 0,
     actionable_gap_count: 0,
-    message: 'Theme price selectors cover PDP for storefront paint.',
+    message:
+      'The product page price is mapped, which is all a price test needs. Other surfaces are optional.',
     action_path: SETTINGS_PRICE_SURFACES_TAB,
   };
   try {
@@ -201,16 +202,24 @@ async function resolveSmartPricingCheckoutReadiness(
       status: surfaceReadiness.status,
       configured_shop: surfaceReadiness.configuredShop,
       actionable_gap_count: surfaceReadiness.actionableGapCount,
+      // The unready message named the missing coverage slot in registry terms
+      // ("Theme price selector missing for pdp (regular)"), which reads as a
+      // fault rather than an instruction. Only the product page is required,
+      // so both messages now say that outright: a merchant who mapped one row
+      // and deleted the rest was left wondering what the other four had been for.
       message: surfaceReady
-        ? 'Theme price selectors cover PDP for storefront paint.'
-        : surfaceReadiness.nextAction ||
-          `Map PDP price selectors under ${SETTINGS_PRICE_SURFACES_TAB} so bucketed visitors see test prices on the product page.`,
+        ? 'The product page price is mapped, which is all a price test needs. Other surfaces are optional.'
+        : `Map the product page price under ${SETTINGS_PRICE_SURFACES_TAB} so bucketed visitors see test prices. It is the only surface a price test requires.`,
       action_path: SETTINGS_PRICE_SURFACES_TAB,
     };
   } catch (_surfaceError) {
     priceSurface = {
       ready: false,
-      status: 'needs_attention',
+      // Not `needs_attention`: that is a verdict about the merchant's theme,
+      // and this is the absence of one. Reported as `needs_attention` it was
+      // indistinguishable from "nothing mapped", so a shop whose selectors are
+      // fine was shown "Product page not mapped" whenever the lookup failed.
+      status: 'unknown',
       configured_shop: 0,
       actionable_gap_count: 1,
       message: `Could not load theme price selectors. Open ${SETTINGS_PRICE_SURFACES_TAB} and map PDP selectors.`,

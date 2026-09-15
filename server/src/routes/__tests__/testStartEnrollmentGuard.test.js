@@ -17,6 +17,8 @@ const Module = require('node:module');
 const ROUTES = path.join(__dirname, '..', 'testLifecycleRoutes.js');
 
 let statusUpdates;
+let lockTargets;
+let rearmedTestIds;
 let productHold;
 let storedTest;
 
@@ -35,6 +37,11 @@ function loadRouter() {
     '../services/smartPricing/smartPricingInboxStopSyncService': {
       syncSmartPricingInboxForTest: async () => true,
     },
+    '../services/smartPricing/smartPricingProductLifecycleService': {
+      rearmRevenueGuardrailForResume: async id => {
+        rearmedTestIds.push(id);
+      },
+    },
     '../services/smartPricing/priceTestEnrollmentService': {
       assertTestIsFreeToStart: async ({ test }) => {
         // The real check knows which types can collide over a price; here the
@@ -48,8 +55,17 @@ function loadRouter() {
         err.conflict = productHold;
         throw err;
       },
-      // The real lock is a Postgres lease; here it only has to run the work.
-      withPricingEnrollmentLock: async (_target, fn) => fn(),
+      // The real lock is a Postgres lease; here it only has to run the work,
+      // and record what the route asked it to hold.
+      withPricingEnrollmentLock: async (target, fn) => {
+        lockTargets.push(target);
+        return fn();
+      },
+      // Used to name what a test claims when `target_id` is empty, so the
+      // lease covers it rather than silently running unlocked.
+      heldProductIds: test =>
+        new Set([test?.target_id, ...(test?.target_ids || [])].filter(Boolean)),
+      heldVariantIds: test => new Set([test?.variant_id].filter(Boolean)),
     },
   };
 
@@ -103,6 +119,8 @@ async function start(id = 'test-1') {
 
 beforeEach(() => {
   statusUpdates = [];
+  lockTargets = [];
+  rearmedTestIds = [];
   productHold = null;
   storedTest = {
     shop_domain: 'demo.myshopify.com',
@@ -165,5 +183,64 @@ describe('starting a test that does not exist', () => {
     storedTest = null;
     const { status } = await start();
     assert.equal(status, 404);
+  });
+});
+
+/**
+ * The revenue guardrail latches when it stops a test, and that latch is what
+ * makes it skip the test from then on. The per-product resume has always
+ * cleared it; the experiment-level Resume in the list and on the detail page
+ * comes through here, and used to flip the status without going near it.
+ */
+describe('resuming a test the guardrail had stopped', () => {
+  it('re-arms the guardrail before putting the price back on the storefront', () => {
+    // Otherwise the losing price goes back up with nothing watching it, and
+    // the auto-winner skips a latched test too -- so it also never decides.
+    return start().then(() => {
+      assert.deepEqual(rearmedTestIds, ['test-1']);
+    });
+  });
+
+  it('does not re-arm when the start was refused', async () => {
+    productHold = { test_id: 'other', test_name: 'Summer pricing', status: 'running', live: true };
+
+    await start();
+
+    assert.deepEqual(rearmedTestIds, []);
+    assert.deepEqual(statusUpdates, []);
+  });
+});
+
+/**
+ * The check reads the enrollment and returns, and only then is `running`
+ * written. Two resumes landing together both read "free" and both start, so
+ * the lease is the only thing serialising them -- and a lease with nothing to
+ * name runs the work unlocked.
+ */
+describe('the lease the start is held under', () => {
+  it('names the product the test is claiming', async () => {
+    await start();
+    assert.equal(lockTargets.length, 1);
+    assert.equal(lockTargets[0].productId, 'gid://shopify/Product/1');
+  });
+
+  it('still names something when the test carries no target_id', async () => {
+    // A test can carry its products in `target_ids` or in the per-product
+    // price config instead, and those used to produce an empty key.
+    storedTest.target_id = null;
+    storedTest.target_ids = ['gid://shopify/Product/9'];
+
+    await start();
+    assert.equal(lockTargets[0].productId, 'gid://shopify/Product/9');
+  });
+
+  it('falls back to the variant when there is no product to name', async () => {
+    storedTest.target_id = null;
+    storedTest.target_ids = [];
+    storedTest.variant_id = 'gid://shopify/ProductVariant/7';
+
+    await start();
+    assert.equal(lockTargets[0].productId, undefined);
+    assert.equal(lockTargets[0].variantId, 'gid://shopify/ProductVariant/7');
   });
 });

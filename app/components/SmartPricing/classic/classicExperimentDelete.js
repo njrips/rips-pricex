@@ -2,7 +2,7 @@ import { apiDelete } from '../../../services';
 import { readInboxPlans, writeInboxPlans } from '../smartPricingConstants';
 import { deletePersistedInboxPlan, persistInboxPlansNow } from '../smartPricingInboxPersistence';
 import { collectExperimentTestIds, getClassicExperimentResumeId } from './classicExperimentListActions';
-import { clearClassicWizardDraft } from './classicExperimentHelpers';
+import { forgetWizardDraftEverywhere } from './classicWizardDraftSync';
 
 export function getClassicExperimentDeleteTargets(experiment) {
   const plans = Array.isArray(experiment?.plans) ? experiment.plans : [];
@@ -16,7 +16,19 @@ export function buildClassicExperimentDeleteConfirmMessage(experiment) {
   const { planIds, testIds } = getClassicExperimentDeleteTargets(experiment);
   const productCount = planIds.length;
   const parts = [`Delete ${label}?`];
-  if (productCount > 1) {
+  if (experiment?.wizardDraft) {
+    // A draft has no plans to count, so counting them said nothing at all
+    // about what was being thrown away. What it does have is however far the
+    // merchant got through the wizard.
+    const picked = Number(experiment.productCount) || 0;
+    parts.push(
+      picked > 0
+        ? `This throws away the unfinished setup, including ${picked} chosen product${
+            picked === 1 ? '' : 's'
+          }.`
+        : 'This throws away the unfinished setup.'
+    );
+  } else if (productCount > 1) {
     parts.push(`This removes ${productCount} inbox plans.`);
   }
   if (testIds.length) {
@@ -37,7 +49,24 @@ export async function deleteClassicExperimentSynchronized(
   { deleteLinkedTests = true } = {}
 ) {
   const { planIds, testIds } = getClassicExperimentDeleteTargets(experiment);
+  const resumeId = getClassicExperimentResumeId(experiment);
   if (!planIds.length) {
+    // An unfinished wizard draft: no plans, no linked tests, so the draft
+    // itself is the whole of it. This used to answer "nothing to delete",
+    // which was true of the inbox and false of what the merchant was looking
+    // at, leaving a row that could not be removed.
+    if (resumeId) {
+      const forgotten = await forgetWizardDraftEverywhere(shopDomain, resumeId);
+      return {
+        ok: forgotten,
+        partial: !forgotten,
+        deletedPlanIds: [],
+        deletedTestIds: [],
+        errors: forgotten
+          ? []
+          : ["Couldn't delete this draft — check your connection and try again."],
+      };
+    }
     return {
       ok: false,
       partial: false,
@@ -55,9 +84,10 @@ export async function deleteClassicExperimentSynchronized(
   const current = readInboxPlans(shopDomain) || [];
   const remaining = current.filter(plan => !planIdSet.has(plan.id));
   writeInboxPlans(shopDomain, remaining, { persist: false });
-  // The wizard keeps its own copy in a separate store. Left behind, the
-  // experiment just deleted would come back as unfinished work on the list.
-  clearClassicWizardDraft(shopDomain, getClassicExperimentResumeId(experiment));
+  // The wizard keeps its own copy in a separate store, in the browser and on
+  // the server both. Left behind, the experiment just deleted would come back
+  // as unfinished work on the list.
+  await forgetWizardDraftEverywhere(shopDomain, resumeId);
 
   try {
     await persistInboxPlansNow(shopDomain, remaining);

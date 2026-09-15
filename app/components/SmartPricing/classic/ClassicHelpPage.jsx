@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
 import { Form, Link, useNavigation, useRevalidator, useSearchParams } from 'react-router';
 import { Badge, Banner, Button, Select, TextField } from '@shopify/polaris';
-import SettingsInfoLink from '../../Settings/SettingsInfoLink';
+import LabelWithInfo from '../../Settings/primitives/LabelWithInfo';
 import SettingsGuideBody from '../../Settings/SettingsGuideBody';
-import { searchDocsSections } from '../../public/priceify/docsContent';
+import { searchDocsNavTopics, searchDocsSections } from '../../public/priceify/docsContent';
+import { openPublicDocsHref, publicDocsHref } from '../../Settings/settingsGuideLinks';
 import ClassicAdminShell from './ClassicAdminShell';
 import {
   HELP_FAQ_ITEMS,
@@ -70,12 +71,20 @@ export default function ClassicHelpPage({
   // is typed — listing all of them unprompted would bury the questions most
   // visits are here for.
   const guideMatches = searchDocsSections(faqQuery);
+  const topicMatches = searchDocsNavTopics(faqQuery);
   // A broad word like "winner" matches most of the statistics guides. Showing
   // the closest few keeps the answer scannable; the rest arrive as the search
   // gets more specific.
   const matchingGuides = guideMatches.slice(0, 4);
+  const matchingTopics = topicMatches.slice(0, 3);
   const guidesHidden = guideMatches.length - matchingGuides.length;
-  const noAnswers = visibleFaq.length === 0 && matchingGuides.length === 0;
+  const topicsHidden = topicMatches.length - matchingTopics.length;
+  const noAnswers =
+    visibleFaq.length === 0 && matchingGuides.length === 0 && matchingTopics.length === 0;
+
+  const openGuides = (hash = '') => {
+    openPublicDocsHref(publicDocsHref(hash));
+  };
   const [category, setCategory] = useState('setup');
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
@@ -176,13 +185,17 @@ export default function ClassicHelpPage({
 
       {tab === 'answers' ? (
         <div>
-          <div className={styles.labelRow}>
-            <div className={styles.sectionLabel}>Experiment setting guides</div>
-            <SettingsInfoLink hash="how-settings-work" label="How Settings apply" />
-          </div>
-          <p className={styles.help} style={{ marginTop: 0, marginBottom: 20 }}>
+          <LabelWithInfo hash="how-settings-work" label="How Settings apply">
+            Experiment setting guides
+          </LabelWithInfo>
+          <p className={styles.help} style={{ marginTop: 0, marginBottom: 12 }}>
             Info icons in Create and Settings open the matching guide. Use the icon here for how
             shop defaults apply to a new test.
+          </p>
+          <p className={styles.help} style={{ marginTop: 0, marginBottom: 20 }}>
+            <Button variant="plain" onClick={() => openGuides()}>
+              Browse all guides on Priceify
+            </Button>
           </p>
 
           <div className={styles.sectionLabel}>Common questions</div>
@@ -210,6 +223,36 @@ export default function ClassicHelpPage({
               </details>
             ))}
           </div>
+
+          {matchingTopics.length ? (
+            <>
+              <div className={styles.sectionLabel}>Guide topics</div>
+              <p className={styles.help} style={{ marginTop: 0, marginBottom: 8 }}>
+                Jump to the same sections as the public Guides page.
+                {topicsHidden > 0
+                  ? ` Showing ${matchingTopics.length} of ${topicMatches.length} — refine the search for more.`
+                  : ''}
+              </p>
+              <div style={{ display: 'grid', gap: 8, marginBottom: 20 }}>
+                {matchingTopics.map((topic) => {
+                  const groupId = topic.href.replace(/^#/, '');
+                  return (
+                    <div key={topic.href} className={styles.adminRow}>
+                      <div className={styles.adminRowTitle}>{topic.title}</div>
+                      <p className={styles.adminRowBody} style={{ marginTop: 6 }}>
+                        {topic.body}
+                      </p>
+                      <div style={{ marginTop: 8 }}>
+                        <Button variant="plain" onClick={() => openGuides(groupId)}>
+                          Open on Priceify guides
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          ) : null}
 
           {matchingGuides.length ? (
             <>

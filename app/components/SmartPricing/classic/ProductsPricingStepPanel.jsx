@@ -4,18 +4,29 @@ import { useKeyedState } from '../../../hooks/useKeyedState';
 import ClassicProductPickerModal from './ClassicProductPickerModal';
 import OfferArmsEditor from './OfferArmsEditor';
 import { isOfferExperimentType } from './offerSelection';
+import LabelWithInfo from '../../Settings/primitives/LabelWithInfo';
 import SettingsInfoLink from '../../Settings/SettingsInfoLink';
 import TooltipWrapper from '../../shared/TooltipWrapper';
 import {
+  aiBandDirection,
   aiSuggestBlockedReason,
   armHasAiPrices,
   capAiBandToShopMax,
   describeAiBandCap,
   describeAiBandClamp,
   describeCollapsedAiBand,
+  describeZeroEdgeAiBand,
+  findUnpricedTestArms,
   getAiSuggestCopy,
-  limitSelectionToProducts,
+  describeAiBandDirectionTooltip,
+  describeAiPriceCalculationTooltip,
+  describePriceSuggestionTooltip,
+  lookupPriceOverride,
   normalizeAiPriceBand,
+  priceOverrideKey,
+  productGroupKey,
+  resolvePricingRows,
+  variantIdsMatch,
   resolveMaxPriceChangeRaise,
   resolveRaiseForAttempt,
   splitTitleParts,
@@ -27,9 +38,9 @@ import {
   IconCheckCircle,
   IconChevron,
   IconChevronRight,
-  IconControlBaseline,
   IconHandPick,
   IconPlusCircle,
+  IconInfo,
   IconWand,
 } from './classicIcons';
 import styles from './SmartPricingClassic.module.css';
@@ -86,20 +97,10 @@ function formatAmountDeltaLabel(base, test, currency = 'USD') {
   return `${delta >= 0 ? '+' : '−'}${absLabel}`;
 }
 
-function productKey(row) {
-  return (
-    row.product_id ||
-    row.product_gid ||
-    splitTitleParts(row).productTitle ||
-    row.title ||
-    row.variant_id
-  );
-}
-
 function groupPricingRows(rows) {
   const map = new Map();
   (rows || []).forEach(row => {
-    const key = productKey(row);
+    const key = productGroupKey(row);
     const { productTitle, variantTitle } = splitTitleParts(row);
     if (!map.has(key)) {
       map.set(key, {
@@ -173,6 +174,7 @@ export default function ProductsPricingStepPanel({
   priceMode,
   onPriceModeChange,
   priceOverrides = {},
+  priceSuggestionMeta = {},
   onPriceOverrideChange,
   onPriceOverridesPatch,
   bulkPercent = '10',
@@ -183,6 +185,7 @@ export default function ProductsPricingStepPanel({
   onAiSuggest,
   aiSuggestBusy = false,
   aiSuggestSummary = null,
+  aiSuggestDetail = null,
   aiSuggested = false,
   onAiBandDirty,
   aiUnit = 'percent',
@@ -213,23 +216,22 @@ export default function ProductsPricingStepPanel({
   const [pricingPageSize, setPricingPageSize] = useState(PRICING_TABLE_PAGE_SIZES[0]);
   const [bulkUnit, setBulkUnit] = useState('percent');
   const [localBulkNotice, setLocalBulkNotice] = useState('');
+  const [localSuggestBusy, setLocalSuggestBusy] = useState(false);
 
-  const selectedSet = useMemo(
-    () => new Set((selectedIds || []).map(id => String(id))),
+  const isSelectedId = useCallback(
+    id => (selectedIds || []).some(selectedId => variantIdsMatch(selectedId, id)),
     [selectedIds]
   );
 
-  const isSelectedId = useCallback(id => selectedSet.has(String(id || '')), [selectedSet]);
-
   const catalogProductCount = useMemo(() => {
-    const keys = new Set((opportunities || []).map(productKey));
+    const keys = new Set((opportunities || []).map(productGroupKey));
     return keys.size || (opportunities || []).length;
   }, [opportunities]);
 
   const selectedProductCount = useMemo(() => {
     const keys = new Set();
     (opportunities || []).forEach(row => {
-      if (isSelectedId(row.variant_id)) keys.add(productKey(row));
+      if (isSelectedId(row.variant_id)) keys.add(productGroupKey(row));
     });
     return keys.size;
   }, [opportunities, isSelectedId]);
@@ -248,32 +250,56 @@ export default function ProductsPricingStepPanel({
       .map(label => ({ label, value: label }));
   }, [opportunities]);
 
-  const catalogVariantIds = useMemo(
-    () => (opportunities || []).map(row => row.variant_id).filter(Boolean),
-    [opportunities]
-  );
-
-  const mergeIds = ids => {
-    const existing = (selectedIds || []).map(id => String(id));
-    const normalized = (ids || []).map(id => String(id)).filter(Boolean);
-    const next = limitSelectionToProducts(opportunities, [...existing, ...normalized], maxSelection);
-    onSelectedIdsChange(next);
-    return next.length;
-  };
-
-  const selectWholeCatalog = () => mergeIds(catalogVariantIds);
-
-  // Nothing to add once the catalog is exhausted or the cap is reached. Saying
-  // so up front beats a button that looks live and then does nothing.
-  const selectAllDisabled =
-    loading ||
-    Boolean(loadError) ||
-    !catalogVariantIds.length ||
-    selectedIds.length >= maxSelection ||
-    catalogVariantIds.every(id => isSelectedId(id));
-
   const activeArm = variations[activeArmIndex] || variations[0];
   const isControlArm = activeArmIndex === 0 || activeArm?.id === 'control';
+
+  /**
+   * Control has no tab. Its price is the catalog price by definition, so the
+   * tab led to a table of read-only cells and a step with its pricing controls
+   * hidden — a place to arrive at and leave again.
+   *
+   * The original index is carried through rather than re-indexed, because the
+   * wizard keys each arm's prices off the index it hands down.
+   */
+  const priceableArms = useMemo(
+    () =>
+      (variations || [])
+        .map((arm, index) => ({ arm, index }))
+        .filter(({ arm, index }) => index > 0 && arm?.id !== 'control'),
+    [variations]
+  );
+
+  /**
+   * Which variations still have no price, by arm id.
+   *
+   * The Continue hint names them, but the tab strip is where the merchant has
+   * to go, and nothing on it said which tab was still empty. Pricing one
+   * variation leaves a table that looks finished, because the table only ever
+   * shows the tab you are on.
+   */
+  const unpricedArmIds = useMemo(
+    () =>
+      new Set(
+        findUnpricedTestArms({
+          opportunities,
+          selectedIds,
+          pickMode,
+          maxSelection,
+          variations,
+          priceOverrides,
+        }).map(arm => arm.id)
+      ),
+    [opportunities, selectedIds, pickMode, maxSelection, variations, priceOverrides]
+  );
+
+  // A draft saved while control was still selectable would otherwise restore
+  // onto a tab that no longer exists, leaving the strip with nothing active.
+  useEffect(() => {
+    if (!isControlArm) return;
+    const first = priceableArms[0]?.index;
+    if (!first) return;
+    onActiveArmIndexChange?.(first);
+  }, [isControlArm, priceableArms, onActiveArmIndexChange]);
 
   // Pricing table is product-grouped: include every catalog variant for selected products
   // (so accordion can show Size S/M/L…), and for All mode limit by product count not SKU count.
@@ -285,10 +311,10 @@ export default function ProductsPricingStepPanel({
         .flatMap(group => group.variants);
     }
     const selectedProductKeys = new Set(
-      allRows.filter(row => isSelectedId(row.variant_id)).map(productKey)
+      allRows.filter(row => isSelectedId(row.variant_id)).map(productGroupKey)
     );
     if (!selectedProductKeys.size) return [];
-    return allRows.filter(row => selectedProductKeys.has(productKey(row)));
+    return allRows.filter(row => selectedProductKeys.has(productGroupKey(row)));
   }, [pickMode, opportunities, maxSelection, isSelectedId]);
 
   const pricingGroups = useMemo(() => {
@@ -335,11 +361,11 @@ export default function ProductsPricingStepPanel({
   useEffect(() => {
     if (pickMode !== 'manual') return;
     const selectedProductKeys = new Set(
-      (opportunities || []).filter(row => isSelectedId(row.variant_id)).map(productKey)
+      (opportunities || []).filter(row => isSelectedId(row.variant_id)).map(productGroupKey)
     );
     if (!selectedProductKeys.size) return;
     const siblingIds = (opportunities || [])
-      .filter(row => selectedProductKeys.has(productKey(row)))
+      .filter(row => selectedProductKeys.has(productGroupKey(row)))
       .map(row => row.variant_id)
       .filter(Boolean);
     const missing = siblingIds.filter(id => !isSelectedId(id));
@@ -409,25 +435,47 @@ export default function ProductsPricingStepPanel({
   const deltaDisplayUnit =
     priceMode === 'ai' ? aiUnit : priceMode === 'bulk' ? bulkUnit : 'percent';
   const aiBand = normalizeAiPriceBand(aiMinPct, aiMaxPct);
+  const pricingRows = useMemo(
+    () =>
+      resolvePricingRows({
+        opportunities,
+        selectedIds,
+        pickMode,
+        maxSelection,
+      }),
+    [opportunities, selectedIds, pickMode, maxSelection]
+  );
   const activeArmHasAiPrices = armHasAiPrices({
-    rows: pricingSource,
+    rows: pricingRows,
     armId: activeArm?.id,
     priceOverrides,
   });
+  const effectiveAiSuggested = aiSuggested || activeArmHasAiPrices;
+  const suggestBusy = aiSuggestBusy || localSuggestBusy;
   const aiBlockedReason = aiSuggestBlockedReason({
     loadingProducts: loading,
     shopDefaultsReady,
-    hasProducts: Boolean(pricingSource.length),
+    hasProducts: Boolean(pricingRows.length),
     hasBand: Boolean(aiBand),
   });
   const aiSuggestCopy = getAiSuggestCopy({
-    hasProducts: Boolean(pricingSource.length),
-    suggested: aiSuggested,
+    hasProducts: Boolean(pricingRows.length),
+    suggested: effectiveAiSuggested,
     hasArmPrices: activeArmHasAiPrices,
     summary: aiSuggestSummary,
-    busy: aiSuggestBusy,
+    busy: suggestBusy,
     blockedReason: aiBlockedReason,
   });
+
+  const handleAiSuggestClick = useCallback(async () => {
+    if (suggestBusy || aiBlockedReason) return;
+    setLocalSuggestBusy(true);
+    try {
+      await Promise.resolve(onAiSuggest?.({ unit: aiUnit }));
+    } finally {
+      setLocalSuggestBusy(false);
+    }
+  }, [suggestBusy, aiBlockedReason, onAiSuggest, aiUnit]);
   // Warn while the band is being typed rather than after Suggest runs, so the
   // shop guardrail never silently rewrites what the merchant asked for.
   const aiBandAveragePrice = (() => {
@@ -443,10 +491,14 @@ export default function ProductsPricingStepPanel({
   // The band fields are clamped to the shop cap as they are typed, so the usual
   // case is an attempt we blocked. capAiBandToShopMax still covers a band that
   // predates the current cap, such as a restored draft.
-  const attemptedBandValue = Math.max(
-    Number(aiBandAttempt?.min) || 0,
-    Number(aiBandAttempt?.max) || 0
-  );
+  // Whichever edge reached furthest from the current price, sign intact. Taking
+  // the larger of the two signed numbers meant a blocked cut of -30 resolved to
+  // 0, so the merchant was told nothing about the edge that had been refused.
+  const attemptedBandValue = (() => {
+    const low = Number(aiBandAttempt?.min) || 0;
+    const high = Number(aiBandAttempt?.max) || 0;
+    return Math.abs(low) > Math.abs(high) ? low : high;
+  })();
   const bandOptions = { unit: aiUnit, averagePrice: aiBandAveragePrice };
   const aiBandClampNotice = describeAiBandClamp(
     attemptedBandValue,
@@ -454,25 +506,37 @@ export default function ProductsPricingStepPanel({
     bandOptions
   );
   const aiBandCollapsedNotice = describeCollapsedAiBand(aiBandCap, { unit: aiUnit });
+  const aiBandZeroEdgeNotice = describeZeroEdgeAiBand(aiBandCap, { unit: aiUnit });
   const aiBandCapNotice =
-    [aiBandClampNotice || describeAiBandCap(aiBandCap, { unit: aiUnit }), aiBandCollapsedNotice]
+    [
+      aiBandClampNotice || describeAiBandCap(aiBandCap, { unit: aiUnit }),
+      aiBandCollapsedNotice,
+      aiBandZeroEdgeNotice,
+    ]
       .filter(Boolean)
       .join(' ') || '';
   const aiBandRaise = aiBandClampNotice
     ? resolveRaiseForAttempt(attemptedBandValue, shopMaxChangePercent, bandOptions)
     : resolveMaxPriceChangeRaise(aiBandCap, bandOptions);
+  const bandDirection = aiBandDirection(aiBandCap);
+  const aiBarTooltip = [
+    describeAiBandDirectionTooltip(bandDirection),
+    describeAiPriceCalculationTooltip({ unit: aiUnit }),
+  ]
+    .filter(Boolean)
+    .join(' ');
+  const aiSuggestTooltip = [aiSuggestDetail, aiBandCapNotice].filter(Boolean).join('\n\n');
 
   const getTestPrice = (row, armId) => {
     const id = row.variant_id;
     const base = Number(row.current_price ?? row.price) || 0;
-    const key = `${id}::${armId || 'control'}`;
-    const override = priceOverrides[key];
+    const override = lookupPriceOverride(priceOverrides, id, armId || 'control');
     if (override !== null && override !== undefined && String(override).trim() !== '') {
       const n = Number(override);
       return Number.isFinite(n) ? n : null;
     }
-    // AI mode waits for Suggest — do not pretfill the store price as a test price.
-    if (priceMode === 'ai' && !aiSuggested) return null;
+    // AI mode waits for Suggest — do not prefill the store price as a test price.
+    if (priceMode === 'ai' && !effectiveAiSuggested) return null;
     return base;
   };
 
@@ -517,18 +581,31 @@ export default function ProductsPricingStepPanel({
     );
   };
 
+  const renderPriceCalcHint = (metaKey, base) => {
+    const tooltip = describePriceSuggestionTooltip(priceSuggestionMeta[metaKey], { base });
+    if (!tooltip) return null;
+    return (
+      <TooltipWrapper content={tooltip} accessibilityLabel="How this price was calculated">
+        <button type="button" className={styles.priceCalcHint} aria-label="How this price was calculated">
+          <IconInfo size={14} />
+        </button>
+      </TooltipWrapper>
+    );
+  };
+
   const renderVariantPriceRow = (row, { label } = {}) => {
     const id = row.variant_id;
     const base = Number(row.current_price ?? row.price) || 0;
     const armId = activeArm?.id || 'control';
-    const key = `${id}::${armId}`;
-    const override = priceOverrides[key];
+    const key = priceOverrideKey(id, armId);
+    const override = lookupPriceOverride(priceOverrides, id, armId);
     const test = getTestPrice(row, armId);
     const inputValue =
       override !== null && override !== undefined && String(override).trim() !== ''
         ? formatPriceInputValue(override)
         : formatPriceInputValue(Number.isFinite(test) ? test : '');
-    const pendingAiPrice = priceMode === 'ai' && !aiSuggested && !String(override || '').trim();
+    const pendingAiPrice =
+      priceMode === 'ai' && !effectiveAiSuggested && !String(override || '').trim();
     return (
       <tr key={`${id}-${armId}-v`} className={styles.variantRow}>
         <td>
@@ -539,24 +616,27 @@ export default function ProductsPricingStepPanel({
         </td>
         <td>{formatMoney(base, row.currency || currency)}</td>
         <td className={styles.priceCell}>
-          <label className={styles.priceField}>
-            <span className={styles.pricePrefix} aria-hidden>
-              $
-            </span>
-            <input
-              className={styles.priceInput}
-              type="text"
-              inputMode="decimal"
-              value={isControlArm ? formatPriceInputValue(base) : inputValue}
-              placeholder={pendingAiPrice ? 'Suggest' : undefined}
-              onChange={e => {
-                if (isControlArm) return;
-                onPriceOverrideChange?.(key, e.target.value);
-              }}
-              disabled={isControlArm}
-              aria-label={`${label || variantLabel(row)} test price`}
-            />
-          </label>
+          <div className={styles.priceFieldRow}>
+            <label className={styles.priceField}>
+              <span className={styles.pricePrefix} aria-hidden>
+                $
+              </span>
+              <input
+                className={styles.priceInput}
+                type="text"
+                inputMode="decimal"
+                value={isControlArm ? formatPriceInputValue(base) : inputValue}
+                placeholder={pendingAiPrice ? 'Suggest' : undefined}
+                onChange={e => {
+                  if (isControlArm) return;
+                  onPriceOverrideChange?.(key, e.target.value);
+                }}
+                disabled={isControlArm}
+                aria-label={`${label || variantLabel(row)} test price`}
+              />
+            </label>
+            {!isControlArm && priceMode === 'ai' ? renderPriceCalcHint(key, base) : null}
+          </div>
         </td>
         <td>{renderDeltaCell(base, isControlArm ? base : test, row.currency || currency)}</td>
       </tr>
@@ -569,7 +649,7 @@ export default function ProductsPricingStepPanel({
     const patch = {};
     (group.variants || []).forEach(v => {
       if (!v?.variant_id) return;
-      patch[`${v.variant_id}::${armId}`] = value;
+      patch[priceOverrideKey(v.variant_id, armId)] = value;
     });
     writeOverrides(patch);
   };
@@ -581,8 +661,7 @@ export default function ProductsPricingStepPanel({
     const avgBase = bases.reduce((a, b) => a + b, 0) / (bases.length || 1);
     const armId = activeArm?.id || 'control';
     const testValues = group.variants.map(v => {
-      const k = `${v.variant_id}::${armId}`;
-      const override = priceOverrides[k];
+      const override = lookupPriceOverride(priceOverrides, v.variant_id, armId);
       if (override !== null && override !== undefined && String(override).trim() !== '') {
         return String(override);
       }
@@ -658,7 +737,7 @@ export default function ProductsPricingStepPanel({
                 placeholder={
                   mixed
                     ? 'Mixed'
-                    : priceMode === 'ai' && !aiSuggested && !parentDisplay
+                    : priceMode === 'ai' && !effectiveAiSuggested && !parentDisplay
                       ? 'Suggest'
                       : undefined
                 }
@@ -712,19 +791,26 @@ export default function ProductsPricingStepPanel({
   // test name runs to a full product title, so two of them printed inline turned
   // a footnote into a paragraph.
   const withheldSummary = `${withheldCount} product${withheldCount === 1 ? '' : 's'} not shown`;
+  // "another test", not "another price test": a running offer test holds its
+  // product just as hard, because a discount lands on top of whatever price
+  // the other test is setting. Naming the wrong kind sent merchants looking
+  // through their price tests for a product an offer test was holding.
   const withheldDetail = `${withheldSummary}: ${
     withheldCount === 1 ? 'it is' : 'they are'
-  } in another price test${
+  } in another test${
     withheldTestNames ? ` (${withheldTestNames})` : ''
   }. End that test to reuse ${withheldCount === 1 ? 'it' : 'them'} here.`;
-  // A dollar band moves in cents, a percent band in whole points. Zero is not a
-  // band, so both floors start one step above it -- normalizeAiPriceBand
-  // rejects 0 anyway, and the spinner should not walk into a rejected value.
+  // A dollar band moves in cents, a percent band in whole points.
   const aiBandStep = aiUnit === 'amount' ? 0.01 : 1;
   const aiBandNumberProps = {
     type: 'number',
-    inputMode: 'decimal',
-    min: aiBandStep,
+    inputMode: 'text',
+    // Deliberately unbounded. A floor of one step above zero made a price cut
+    // impossible to type -- the spinner would not go below it and the browser
+    // marked a hand-typed negative invalid -- so the only band the control
+    // could express was a rise. A ceiling is left off for the same reason it
+    // always was: typing a figure above the shop guardrail is how the merchant
+    // gets offered the raise, rather than being silently stopped.
     step: aiBandStep,
     // A number input under the cursor eats scroll and silently rewrites itself,
     // and this one sits in a step the merchant scrolls through.
@@ -817,9 +903,10 @@ export default function ProductsPricingStepPanel({
             </div>
             {pickMode === 'manual' ? (
               <div className={styles.selectionBarActions}>
-                <Button variant="plain" onClick={selectWholeCatalog} disabled={selectAllDisabled}>
-                  Select all
-                </Button>
+                {/* No Select all here: "All products" above is that choice,
+                    and offering it inside Pick manually gave the same job two
+                    controls that disagreed -- one capped the selection and
+                    went grey, the other switched mode. */}
                 <Button
                   variant="plain"
                   onClick={() => onSelectedIdsChange([])}
@@ -896,38 +983,37 @@ export default function ProductsPricingStepPanel({
         <>
       <div className={styles.sectionLabel}>Set prices for</div>
       <div className={styles.priceTabs} role="tablist" aria-label="Variation prices">
-        {variations.map((arm, index) => {
-          const isControl = index === 0 || arm.id === 'control';
-          return (
-            <button
-              key={arm.id}
-              type="button"
-              role="tab"
-              aria-selected={activeArmIndex === index}
-              className={`${styles.priceTab} ${
-                activeArmIndex === index ? styles.priceTabActive : ''
-              }`}
-              onClick={() => onActiveArmIndexChange(index)}
-            >
+        {priceableArms.map(({ arm, index }) => (
+          <button
+            key={arm.id}
+            type="button"
+            role="tab"
+            aria-selected={activeArmIndex === index}
+            className={`${styles.priceTab} ${
+              activeArmIndex === index ? styles.priceTabActive : ''
+            }`}
+            onClick={() => onActiveArmIndexChange(index)}
+          >
+            <span className={styles.segmentLetter} aria-label={`Variation ${arm.letter}`}>
+              {arm.letter}
+            </span>
+            {arm.name || arm.role || `Variation ${arm.letter}`}
+            {/* An unpriced variation launches at the catalog price, so it would
+                run as a second control. The dot is what points at the tab the
+                merchant has not opened yet. */}
+            {unpricedArmIds.has(arm.id) ? (
               <span
-                className={`${styles.segmentLetter} ${
-                  isControl ? styles.controlVariationMarker : ''
-                }`}
-                aria-label={
-                  isControl ? 'Control — current catalog baseline' : `Variation ${arm.letter}`
-                }
-              >
-                {isControl ? <IconControlBaseline size={12} /> : arm.letter}
-              </span>
-              {arm.name || arm.role || `Variation ${arm.letter}`}
-            </button>
-          );
-        })}
+                className={styles.priceTabDot}
+                title="No test price set yet"
+                aria-label="No test price set yet"
+              />
+            ) : null}
+          </button>
+        ))}
       </div>
       <p className={styles.help} style={{ marginTop: 0, marginBottom: 18 }}>
-        {isControlArm
-          ? 'Control keeps your current catalog prices — that is the baseline the other variations are measured against.'
-          : "Pick which variation you're pricing. Each variation can have its own prices."}
+        Control keeps your current catalog prices, so there is nothing to set for it. Pick which
+        variation you&rsquo;re pricing — each one can have its own prices.
       </p>
 
       {/* Control's price cells are read-only, so a pricing strategy has nothing
@@ -935,10 +1021,9 @@ export default function ProductsPricingStepPanel({
           that can actually take a new price is selected. */}
       {!isControlArm ? (
         <>
-      <div className={styles.labelRow}>
-        <div className={styles.sectionLabel}>How would you like to price them?</div>
-        <SettingsInfoLink hash="ai-price" label="AI price suggestions" />
-      </div>
+      <LabelWithInfo hash="ai-price" label="AI price suggestions">
+        How would you like to price them?
+      </LabelWithInfo>
       <div className={`${styles.modeRow} ${styles.modeRow3}`}>
         {[
           {
@@ -993,100 +1078,119 @@ export default function ProductsPricingStepPanel({
       </div>
 
       {priceMode === 'ai' ? (
-        <div className={styles.aiSuggestBanner}>
-          <div className={styles.aiSuggestTitle}>
-            <span className={styles.aiSuggestTitleLead}>
-              <IconWand size={16} />
-              AI Price Suggestions
-            </span>
-            <SettingsInfoLink hash="ai-price" label="AI price suggestions" />
-          </div>
-          <p className={styles.aiSuggestBody}>{aiSuggestCopy.body}</p>
-          <div className={styles.aiBar}>
-            <span className={styles.aiBarLabel}>
-              <IconWand size={16} /> Let AI suggest within
-            </span>
-            <div className={styles.aiBarControls}>
-              <label className={styles.bulkField}>
-                <span>{aiUnit === 'amount' ? 'min $' : 'min %'}</span>
-                <input
-                  className={`${styles.input} ${styles.bulkInput} ${styles.aiBarInput}`}
-                  {...aiBandNumberProps}
-                  value={aiMinPct}
-                  onChange={e => onAiMinPctChange(e.target.value)}
-                  disabled={aiSuggestBusy}
-                  aria-label={
-                    aiUnit === 'amount'
-                      ? 'AI suggestion minimum dollars'
-                      : 'AI suggestion minimum percent'
-                  }
-                />
-              </label>
-              <span className={styles.bulkBarMuted}>to</span>
-              <label className={styles.bulkField}>
-                <span>{aiUnit === 'amount' ? 'max $' : 'max %'}</span>
-                <input
-                  className={`${styles.input} ${styles.bulkInput} ${styles.aiBarInput}`}
-                  {...aiBandNumberProps}
-                  value={aiMaxPct}
-                  onChange={e => onAiMaxPctChange(e.target.value)}
-                  disabled={aiSuggestBusy}
-                  aria-label={
-                    aiUnit === 'amount'
-                      ? 'AI suggestion maximum dollars'
-                      : 'AI suggestion maximum percent'
-                  }
-                />
-              </label>
-              <div className={`${styles.segment} ${styles.segmentInline} ${styles.segmentOnPeach}`}>
-                <button
-                  type="button"
-                  className={`${styles.segmentBtn} ${
-                    aiUnit === 'percent' ? styles.segmentBtnActive : ''
-                  }`}
-                  onClick={() => {
-                    onAiUnitChange?.('percent');
-                    onAiBandDirty?.();
-                  }}
-                  disabled={aiSuggestBusy}
+        <>
+          {aiSuggestCopy.body && !suggestBusy ? (
+            aiSuggestTooltip ? (
+              <p className={styles.aiSuggestStatusLine}>
+                {aiSuggestCopy.body}
+                <TooltipWrapper
+                  content={aiSuggestTooltip}
+                  accessibilityLabel="AI suggestion details"
                 >
-                  %
-                </button>
-                <button
-                  type="button"
-                  className={`${styles.segmentBtn} ${
-                    aiUnit === 'amount' ? styles.segmentBtnActive : ''
-                  }`}
-                  onClick={() => {
-                    onAiUnitChange?.('amount');
-                    onAiBandDirty?.();
-                  }}
-                  disabled={aiSuggestBusy}
-                >
-                  $
-                </button>
-              </div>
-              <span title={aiBlockedReason || undefined}>
-                <Button
-                  variant="primary"
-                  onClick={() => onAiSuggest?.({ unit: aiUnit })}
-                  disabled={aiSuggestBusy || Boolean(aiBlockedReason)}
-                  loading={aiSuggestBusy}
-                >
-                  {aiSuggestCopy.button}
-                </Button>
-              </span>
+                  <button
+                    type="button"
+                    className={styles.infoIconLink}
+                    aria-label="AI suggestion details"
+                  >
+                    <IconInfo size={14} />
+                  </button>
+                </TooltipWrapper>
+              </p>
+            ) : (
+              <p className={styles.help} style={{ marginTop: 0, marginBottom: 10 }}>
+                {aiSuggestCopy.body}
+              </p>
+            )
+          ) : null}
+          <div className={`${styles.bulkBar} ${styles.bulkBarFigma}`}>
+            <TooltipWrapper
+              content={aiBarTooltip}
+              accessibilityLabel="How AI suggestions use this band"
+            >
+              <span className={styles.bulkBarLabel}>Band (min–max)</span>
+            </TooltipWrapper>
+            <label className={styles.bulkField}>
+              <span>{aiUnit === 'amount' ? 'min $' : 'min %'}</span>
+              <input
+                className={`${styles.input} ${styles.bulkInput}`}
+                {...aiBandNumberProps}
+                value={aiMinPct}
+                onChange={e => onAiMinPctChange(e.target.value)}
+                disabled={suggestBusy}
+                aria-label={
+                  aiUnit === 'amount'
+                    ? 'AI suggestion minimum dollars'
+                    : 'AI suggestion minimum percent'
+                }
+              />
+            </label>
+            <span className={styles.bulkBarMuted}>to</span>
+            <label className={styles.bulkField}>
+              <span>{aiUnit === 'amount' ? 'max $' : 'max %'}</span>
+              <input
+                className={`${styles.input} ${styles.bulkInput}`}
+                {...aiBandNumberProps}
+                value={aiMaxPct}
+                onChange={e => onAiMaxPctChange(e.target.value)}
+                disabled={suggestBusy}
+                aria-label={
+                  aiUnit === 'amount'
+                    ? 'AI suggestion maximum dollars'
+                    : 'AI suggestion maximum percent'
+                }
+              />
+            </label>
+            <div
+              className={`${styles.segment} ${styles.segmentInline} ${styles.bulkSegment}`}
+              role="group"
+              aria-label="AI band unit"
+            >
+              <button
+                type="button"
+                className={`${styles.segmentBtn} ${
+                  aiUnit === 'percent' ? styles.segmentBtnActive : ''
+                }`}
+                onClick={() => {
+                  onAiUnitChange?.('percent');
+                  onAiBandDirty?.();
+                }}
+                disabled={suggestBusy}
+              >
+                %
+              </button>
+              <button
+                type="button"
+                className={`${styles.segmentBtn} ${
+                  aiUnit === 'amount' ? styles.segmentBtnActive : ''
+                }`}
+                onClick={() => {
+                  onAiUnitChange?.('amount');
+                  onAiBandDirty?.();
+                }}
+                disabled={suggestBusy}
+              >
+                $
+              </button>
             </div>
+            <Button
+              variant="primary"
+              onClick={handleAiSuggestClick}
+              disabled={suggestBusy || Boolean(aiBlockedReason)}
+              loading={suggestBusy}
+              title={aiBlockedReason || undefined}
+            >
+              {aiSuggestCopy.button}
+            </Button>
           </div>
-          {aiBandCapNotice ? (
-            <p className={styles.aiSuggestBody}>
+          {aiBandCapNotice && !aiSuggestTooltip ? (
+            <p className={styles.help} style={{ marginTop: -6, marginBottom: 14 }}>
               {aiBandCapNotice}
               <SettingsInfoLink hash="max-price-change" label="Max price change" />
               {aiBandRaise && onRaiseMaxPriceChange ? (
                 <Button
                   variant="plain"
                   onClick={() => onRaiseMaxPriceChange(aiBandRaise.target)}
-                  disabled={aiSuggestBusy || raisingMaxPriceChange}
+                  disabled={suggestBusy || raisingMaxPriceChange}
                   loading={raisingMaxPriceChange}
                 >
                   {aiBandRaise.coversRequest
@@ -1096,7 +1200,21 @@ export default function ProductsPricingStepPanel({
               ) : null}
             </p>
           ) : null}
-        </div>
+          {aiBandRaise && onRaiseMaxPriceChange && aiBandCapNotice && aiSuggestTooltip ? (
+            <div className={styles.aiSuggestRaise}>
+              <Button
+                variant="plain"
+                onClick={() => onRaiseMaxPriceChange(aiBandRaise.target)}
+                disabled={suggestBusy || raisingMaxPriceChange}
+                loading={raisingMaxPriceChange}
+              >
+                {aiBandRaise.coversRequest
+                  ? `Raise max price change to ${aiBandRaise.target}%`
+                  : `Raise max price change to ${aiBandRaise.target}% (highest allowed)`}
+              </Button>
+            </div>
+          ) : null}
+        </>
       ) : null}
 
       {priceMode === 'bulk' ? (

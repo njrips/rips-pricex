@@ -9,7 +9,7 @@ export function publicMeta({ title, description, path = '/', noIndex = false }) 
   return [
     { title: fullTitle },
     description ? { name: 'description', content: description } : null,
-    { name: 'theme-color', content: '#ffffff' },
+    { name: 'theme-color', content: '#0f172a' },
     { name: 'application-name', content: 'Priceify' },
     noIndex ? { name: 'robots', content: 'noindex, nofollow' } : null,
     { property: 'og:site_name', content: 'Priceify' },

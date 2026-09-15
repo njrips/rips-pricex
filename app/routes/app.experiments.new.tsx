@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { TitleBar } from '@shopify/app-bridge-react';
 import { Banner, Button } from '@shopify/polaris';
 import { useNavigate, useOutletContext } from 'react-router';
@@ -12,6 +13,7 @@ export default function CreateExperiment() {
   const ctx = useOutletContext<AppOutletContext>();
   const upgrade = useUpgradeRedirect(ctx.upgradeUrl);
   const navigate = useNavigate();
+  const [draftTitle, setDraftTitle] = useState('');
 
   if (!ctx.entitled) {
     return (
@@ -49,12 +51,15 @@ export default function CreateExperiment() {
 
   return (
     <>
-      <TitleBar title="New experiment">
+      {/* Once the draft has a name, that name is what the merchant is looking
+          at, so the bar says it. "New experiment" is only the answer until
+          there is a better one -- on a resumed draft it was actively wrong. */}
+      <TitleBar title={draftTitle || 'New experiment'}>
         <button type="button" variant="breadcrumb" onClick={() => navigate('/app')}>
           Experiments
         </button>
       </TitleBar>
-      <ClassicCreateWizard />
+      <ClassicCreateWizard onTitleChange={setDraftTitle} />
     </>
   );
 }

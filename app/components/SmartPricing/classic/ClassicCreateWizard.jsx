@@ -42,6 +42,55 @@ import { persistInboxPlansNow } from '../smartPricingInboxPersistence';
 const CLASSIC_MAX_PRODUCT_SELECTION = 250;
 /** Long enough that typing does not write on every keystroke. */
 const WIZARD_AUTOSAVE_DELAY_MS = 600;
+
+/**
+ * What to tell the merchant when the browser kept the draft but the server
+ * did not.
+ *
+ * A refusal and an unreachable server both leave the work in this browser
+ * alone, and they need opposite advice. "Try again" is right for a network
+ * blip and wrong for a draft the server has read and declined -- most often
+ * for being too large, which retrying will never fix.
+ */
+function draftServerFailureMessage(saved) {
+  if (saved?.refused) {
+    const reason = String(saved.reason || '').trim();
+    return `${reason || 'The server would not accept this draft'}. It is still saved in this browser, but it will not reach your other devices.`;
+  }
+  return 'Saved in this browser only — we could not reach the server. Use Save draft to make it available on your other devices.';
+}
+
+/**
+ * What to say about a save the server accepted.
+ *
+ * Two outcomes are not the plain success they used to be reported as. The
+ * server may keep a newer copy of this draft, made on another device, in which
+ * case this save did not land at all. And a shop only keeps five unfinished
+ * experiments, so starting a sixth throws the oldest away -- silently, until
+ * now, which meant coming back to Drafts to find work gone and nothing to
+ * explain it.
+ */
+function draftSavedMessage(saved) {
+  if (saved?.superseded) {
+    return 'A newer version of this draft was saved on another device, so that one was kept. Reload to pick it up.';
+  }
+  const evicted = Array.isArray(saved?.evicted) ? saved.evicted : [];
+  if (evicted.length) {
+    const names = evicted
+      .map(row => String(row?.name || '').trim())
+      .filter(Boolean)
+      .join(', ');
+    const what = names || `${evicted.length} older draft${evicted.length === 1 ? '' : 's'}`;
+    return `Draft saved. You had the maximum of ${CLASSIC_WIZARD_DRAFT_LIMIT} drafts, so ${what} was discarded to make room.`;
+  }
+  // Said here and not on every Continue. Nothing the merchant entered is
+  // missing, so interrupting each step would be noise; but Save draft is them
+  // asking what was kept, and on another device this one opens a step short.
+  if (saved?.plansOmitted) {
+    return 'Draft saved. This experiment covers too many products to sync its pricing table, so opening the draft on another device will rebuild the table when you pass through the Products step. Your products, variations, prices and audience are all saved.';
+  }
+  return 'Draft saved. Keep editing here, or pick it up later from Drafts on the experiments page.';
+}
 import {
   buildClassicGoalPayload,
   buildSecondaryGoalPayload,
@@ -58,7 +107,14 @@ import { CLASSIC_CREATE_STEPS, classicCreateStepIndex } from './classicCreateSte
 import {
   buildWizardResumeSearch,
   shouldAutosaveWizardSnapshot,
+  wizardSnapshotHasMerchantInput,
 } from './classicWizardAutosave';
+import {
+  forgetWizardDraftEverywhere,
+  loadServerWizardDraft,
+  saveWizardDraftEverywhere,
+  wizardDraftSavedAt,
+} from './classicWizardDraftSync';
 import SetupStepPanel, { EXPERIMENT_TYPES } from './SetupStepPanel';
 import VariationsStepPanel, { createDefaultVariations } from './VariationsStepPanel';
 import {
@@ -70,7 +126,7 @@ import AudienceSuccessStepPanel, { createDefaultAudienceState } from './Audience
 import { ensureRevenueGuardrailRows, revenueGuardrailGoalConfig } from './revenueGuardrail';
 import ReviewLaunchStepPanel from './ReviewLaunchStepPanel';
 import {
-  clearClassicWizardDraft,
+  CLASSIC_WIZARD_DRAFT_LIMIT,
   getPlanExperimentId,
   readClassicWizardDraft,
   stampClassicExperimentMetadata,
@@ -88,9 +144,19 @@ import {
   capAiBandToShopMax,
   clampAiBandValue,
   describeAiBandCap,
+  describeAiBandRange,
+  composeAiSuggestBanner,
   describeAiSuggestionSource,
   describeGuardrailLimitedSuggestions,
   normalizeAiPriceBand,
+  applyPriceSuggestionsToOverrides,
+  buildAiBandPriceOverrides,
+  buildLocalPriceSuggestionMeta,
+  metaFromPriceSuggestions,
+  resolveBandEdge,
+  lookupPriceOverride,
+  priceOverrideKey,
+  reconcileSelectedVariantIds,
   resolvePricingRows,
 } from './productsStepReadiness';
 import {
@@ -140,8 +206,8 @@ function rebuildPlanArmsFromVariations(
   const variantId = plan?.variant_id;
   return (variations || []).map((variation, index) => {
     const isControl = index === 0 || variation.id === 'control';
-    const key = `${variantId}::${variation.id}`;
-    const raw = priceOverrides[key];
+    const armId = variation.id || (isControl ? 'control' : `arm_${index + 1}`);
+    const raw = lookupPriceOverride(priceOverrides, variantId, armId);
     const hasOverride =
       raw !== undefined &&
       raw !== null &&
@@ -211,7 +277,16 @@ async function fetchCatalog(shopDomain) {
   }
 }
 
-export default function ClassicCreateWizard() {
+/**
+ * @param {{ onTitleChange?: (title: string) => void }} props
+ *   `onTitleChange` reports what this draft should be called, so the admin
+ *   title bar can stop saying "New experiment" once the draft has a name. The
+ *   name lives in this component's state and the title bar is rendered by the
+ *   route, so it has to travel upwards; the alternative was moving App Bridge
+ *   into the wizard, which every test that renders the wizard bare would then
+ *   have to stub.
+ */
+export default function ClassicCreateWizard({ onTitleChange }) {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const shopDomain = useClassicShopDomain();
@@ -238,13 +313,34 @@ export default function ClassicCreateWizard() {
   // Tracks whether a saved draft won: shop defaults must not overwrite values the
   // merchant already chose.
   const [appliedSavedDraft, setAppliedSavedDraft] = useState(false);
+  // Restored from plans already in the inbox rather than from a draft, so
+  // there is no draft for the server to be holding a newer copy of.
+  const [resumedFromInbox, setResumedFromInbox] = useState(false);
 
   const [name, setName] = useState('');
+  // Whether the name has been settled rather than still being typed. Latched in
+  // a ref, so returning to the first step to reword the name does not put the
+  // title bar back to "New experiment" for a draft that already has one -- and a
+  // resumed draft counts from the moment its saved values land, wherever it
+  // reopens.
+  const nameSettled = useRef(false);
+  useEffect(() => {
+    if (step > 0 || appliedSavedDraft) nameSettled.current = true;
+    onTitleChange?.(nameSettled.current ? name.trim() : '');
+  }, [step, appliedSavedDraft, name, onTitleChange]);
   const [hypothesis, setHypothesis] = useState('');
   const [experimentType, setExperimentType] = useState('price_test');
   const [shopGuardrailsReady, setShopGuardrailsReady] = useState(false);
 
   const [variations, setVariations] = useState(createDefaultVariations);
+
+  /**
+   * Why a live test blocks this launch, as the server answered on entering the
+   * review step. Two tests pricing one product is two answers to what it
+   * costs, and an offer test holds its product exactly as a price test does:
+   * its discount lands on top of whatever price the other test is setting.
+   */
+  const [liveTestConflict, setLiveTestConflict] = useState('');
 
   const [opportunities, setOpportunities] = useState([]);
   /** How many products the catalog withheld because another test is pricing them. */
@@ -270,10 +366,12 @@ export default function ClassicCreateWizard() {
   /** Per-variation pricing UI (mode + bulk/AI bands). Prices themselves live in priceOverrides keyed by variant::arm. */
   const [pricingByArm, setPricingByArm] = useState({});
   const [priceOverrides, setPriceOverrides] = useState({});
+  const [priceSuggestionMeta, setPriceSuggestionMeta] = useState({});
   const [offerByArm, setOfferByArm] = useState({});
   const [aiPriceMeta, setAiPriceMeta] = useState({
     source: null,
     summary: null,
+    detail: null,
     busy: false,
   });
   const aiSuggestRequestId = useRef(0);
@@ -348,12 +446,13 @@ export default function ClassicCreateWizard() {
       const next = { ...prev };
       ids.forEach(id => {
         next[id] = {
-          priceMode: 'ai',
           bulkPercent: '10',
           bulkDirection: 'increase',
           aiMinPct: '10',
           aiMaxPct: '20',
+          aiUnit: 'percent',
           ...(next[id] || {}),
+          priceMode: 'ai',
           aiSuggested: true,
         };
       });
@@ -457,9 +556,34 @@ export default function ClassicCreateWizard() {
     ]
   );
 
-  // Autosave keeps the wizard reloadable. It writes the browser draft only —
-  // an experiment reaches the Drafts list when the merchant saves or launches
-  // it, so a half-filled create never shows up there on its own.
+  // Read inside callbacks without making the snapshot a dependency, which
+  // would cancel and refire their work on every keystroke.
+  const liveSnapshot = useRef(wizardSnapshot);
+  // What the wizard looked like once it finished restoring, so later code can
+  // tell "the merchant has been typing" from "this is still exactly what we
+  // restored". `wizardSnapshotHasMerchantInput` cannot: a resumed draft is
+  // full of input by definition, all of it the draft's own.
+  const seededSnapshot = useRef(null);
+  useEffect(() => {
+    liveSnapshot.current = wizardSnapshot;
+    if (draftHydrated && seededSnapshot.current === null) {
+      seededSnapshot.current = JSON.stringify(wizardSnapshot);
+    }
+  });
+  /** Whether nothing has changed since the wizard finished restoring. */
+  const isUntouchedSinceSeed = useCallback(
+    () =>
+      seededSnapshot.current !== null &&
+      JSON.stringify(liveSnapshot.current) === seededSnapshot.current,
+    []
+  );
+
+  // Autosave keeps the wizard reloadable. Continuing a step and Save draft both
+  // write the server copy too, so an unfinished experiment appears under Drafts
+  // from the moment it has a name and can be finished from another device. Only
+  // the keystroke-level autosave below stays local: it fires while the merchant
+  // is still typing, and a request per keystroke buys nothing that the next
+  // Continue does not already save.
   const autosaveSuspended = useRef(false);
 
   const syncResumeUrl = useCallback(
@@ -489,6 +613,22 @@ export default function ClassicCreateWizard() {
     [shopDomain]
   );
 
+  /**
+   * Save the draft to the browser and the server both.
+   *
+   * Not awaited by the step change that triggers it: the merchant should not
+   * wait on a request to move between steps, and the browser copy is already
+   * written by the time this returns, so nothing is lost if the request is
+   * still in flight when they navigate away.
+   */
+  const persistWizardDraftEverywhere = useCallback(
+    snapshot => {
+      if (autosaveSuspended.current) return Promise.resolve({ local: false, server: false });
+      return saveWizardDraftEverywhere(shopDomain, snapshot);
+    },
+    [shopDomain]
+  );
+
   // `fresh` carries state produced in the same tick as the move. wizardSnapshot
   // is memoised from the last render, so a step that builds plans and advances
   // immediately would otherwise persist a draft holding the step it moved to
@@ -498,10 +638,39 @@ export default function ClassicCreateWizard() {
     (next, fresh = null) => {
       const target = Math.max(0, Math.min(CLASSIC_CREATE_STEPS.length - 1, Number(next) || 0));
       setStep(target);
-      persistWizardDraft({ ...wizardSnapshot, ...(fresh || {}), step: target });
+      // Moving between steps is the merchant committing to what they just
+      // entered, so this is the moment the draft becomes real rather than a
+      // browser-local scratch copy.
+      void persistWizardDraftEverywhere({
+        ...wizardSnapshot,
+        ...(fresh || {}),
+        step: target,
+      }).then(saved => {
+        // Not awaited, but not discarded either. Each step tells the merchant
+        // their experiment is saved where another device can pick it up; when
+        // only the browser copy landed, this is where they get to hear it,
+        // rather than on the other device when it turns out not to be there.
+        if (!saved || saved.skipped) return;
+        if (saved.plansOmitted) {
+          // Saved, but only after leaving the pricing table behind on the
+          // server. The browser copy still has it; say so once here rather
+          // than silently diverging across devices.
+          setMessageType('warning');
+          setMessage(
+            'Saved without the pricing table on the server. It is still here in this browser; on another device, pass through Products to rebuild it.'
+          );
+          return;
+        }
+        if (saved.server) return;
+        // A warning, not an error. The browser copy is already written by the
+        // time this runs, so nothing has been lost and the step has already
+        // moved; a red banner across the top of every step said otherwise.
+        setMessageType('warning');
+        setMessage(draftServerFailureMessage(saved));
+      });
       syncResumeUrl(target);
     },
-    [setStep, persistWizardDraft, wizardSnapshot, syncResumeUrl]
+    [setStep, persistWizardDraftEverywhere, wizardSnapshot, syncResumeUrl]
   );
 
   // Edits inside a step are saved on a short delay as well: a merchant who
@@ -509,19 +678,52 @@ export default function ClassicCreateWizard() {
   useEffect(() => {
     if (!draftHydrated) return undefined;
     const timer = setTimeout(() => {
+      // A restore that has not been edited has nothing new to write, and
+      // writing anyway would stamp it as saved now -- which would make a
+      // browser copy that just lost to a newer server one outrank it.
+      if (isUntouchedSinceSeed()) return;
       if (!persistWizardDraft(wizardSnapshot)) return;
       syncResumeUrl(step);
     }, WIZARD_AUTOSAVE_DELAY_MS);
     return () => clearTimeout(timer);
-  }, [draftHydrated, wizardSnapshot, persistWizardDraft, syncResumeUrl, step]);
+  }, [
+    draftHydrated,
+    wizardSnapshot,
+    persistWizardDraft,
+    syncResumeUrl,
+    step,
+    isUntouchedSinceSeed,
+  ]);
+
+  // The delay above means the most recent keystrokes are still pending when a
+  // merchant closes the tab or clicks away, and cancelling the timer on the way
+  // out would drop them. Both exits write what is pending instead. Dependencies
+  // are all stable, so this runs its cleanup on unmount rather than per edit.
+  useEffect(() => {
+    const flush = () => {
+      if (isUntouchedSinceSeed()) return;
+      persistWizardDraft(liveSnapshot.current);
+    };
+    window.addEventListener('beforeunload', flush);
+    return () => {
+      window.removeEventListener('beforeunload', flush);
+      flush();
+    };
+  }, [persistWizardDraft, isUntouchedSinceSeed]);
 
   const applyWizardSnapshot = useCallback(
     snapshot => {
       if (!snapshot || typeof snapshot !== 'object') return;
       setAppliedSavedDraft(true);
       if (snapshot.experiment_id) setExperimentId(String(snapshot.experiment_id));
-      if (urlStep == null && Number.isFinite(Number(snapshot.step))) {
-        setStep(Number(snapshot.step));
+      // A draft too large to sync whole was stored without its pricing table,
+      // and neither Review nor Launch means anything without one. The Products
+      // step is what rebuilds it from the selections that did survive, so that
+      // is where such a draft opens, whatever step it was left on.
+      const lastStep = urlStep != null ? urlStep : Number(snapshot.step);
+      if (Number.isFinite(lastStep)) {
+        const productsStep = classicCreateStepIndex('products') ?? 2;
+        setStep(snapshot.plans_omitted ? Math.min(lastStep, productsStep) : lastStep);
       }
       if (snapshot.name !== null && snapshot.name !== undefined) setName(String(snapshot.name));
       if (snapshot.hypothesis !== null && snapshot.hypothesis !== undefined)
@@ -627,6 +829,7 @@ export default function ClassicCreateWizard() {
         );
         if (inboxPlans.length) {
           setAppliedSavedDraft(true);
+          setResumedFromInbox(true);
           const first = inboxPlans[0];
           setExperimentId(resumeId);
           setName(
@@ -682,6 +885,78 @@ export default function ClassicCreateWizard() {
     // Without ?resume= an unfinished draft stays available but must not hijack a
     // fresh create, so nothing is seeded here.
   }
+
+  /**
+   * Catch up with the server's copy of the draft being resumed.
+   *
+   * The seeding above has to finish inside one commit so the restored wizard
+   * reaches the screen whole, which rules out a request. That makes the browser
+   * copy a starting point rather than an answer: it is whatever this device
+   * last saw, which on the device the merchant stepped away from is older than
+   * what they did next somewhere else. So the server is asked either way --
+   * when neither local store knew the id, and when one did but may be behind.
+   * Latched with a ref: a miss must not re-request on every render.
+   */
+  const serverResumeTried = useRef('');
+  useEffect(() => {
+    if (!draftHydrated || !resumeId) return undefined;
+    // Not `appliedSavedDraft`: seeding from the browser copy sets that too, so
+    // testing it here would skip the lookup in exactly the case this exists
+    // for -- a browser copy that another device has since moved past.
+    if (resumedFromInbox) return undefined;
+    // Keyed by id rather than a bare flag, so following a link to a second
+    // draft without leaving the wizard still looks that one up.
+    if (serverResumeTried.current === resumeId) return undefined;
+    serverResumeTried.current = resumeId;
+    let cancelled = false;
+    loadServerWizardDraft(shopDomain, resumeId).then(match => {
+      if (cancelled || !match) return;
+      if (resumedLocalDraft) {
+        // Restored from this browser already. Only a strictly newer server
+        // copy is worth replacing it with, and only while the merchant has
+        // not started editing the one in front of them.
+        if (!isUntouchedSinceSeed()) return;
+        const serverAt = wizardDraftSavedAt(match);
+        const localAt = wizardDraftSavedAt(resumedLocalDraft);
+        if (serverAt < localAt) return;
+        // One save can stamp the same second on a full browser copy and a
+        // server copy that dropped the pricing table. Never replace the richer
+        // local copy with the poorer server one at the same timestamp.
+        if (
+          serverAt === localAt &&
+          match.plans_omitted &&
+          Array.isArray(resumedLocalDraft.plans) &&
+          resumedLocalDraft.plans.length
+        ) {
+          return;
+        }
+        const serverPlans = Array.isArray(match.plans) ? match.plans.length : 0;
+        const localPlans = Array.isArray(resumedLocalDraft.plans) ? resumedLocalDraft.plans.length : 0;
+        if (serverAt === localAt && serverPlans < localPlans) return;
+      } else if (wizardSnapshotHasMerchantInput(liveSnapshot.current)) {
+        // The wizard is on screen and editable while this request is out, so
+        // by the time it lands the merchant may have started typing. Their
+        // work wins: restoring over it would wipe what they can watch
+        // themselves entering, which is worse than not restoring at all.
+        return;
+      }
+      applyWizardSnapshot(match);
+      // The restored copy is the new baseline, or the next keystroke would
+      // look like no change at all.
+      seededSnapshot.current = null;
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    draftHydrated,
+    resumeId,
+    resumedLocalDraft,
+    resumedFromInbox,
+    shopDomain,
+    applyWizardSnapshot,
+    isUntouchedSinceSeed,
+  ]);
 
   const applyShopGuardrails = useCallback(({ guardrails: g, ok }) => {
     if (ok) {
@@ -747,9 +1022,14 @@ export default function ClassicCreateWizard() {
         setCatalogTruncated(Boolean(truncated));
         setProductsLoadError('');
         setSelectedIds(prev => {
-          if (prev.length > 0) return prev;
-          if (pickModeRef.current !== 'all') return prev;
-          return defaults.length ? defaults.slice(0, maxSelection) : prev;
+          let next = prev;
+          if (rows.length && prev.length > 0) {
+            const reconciled = reconcileSelectedVariantIds(prev, rows);
+            if (reconciled.length) next = reconciled;
+          } else if (!prev.length && pickModeRef.current === 'all') {
+            next = defaults.length ? defaults.slice(0, maxSelection) : prev;
+          }
+          return next;
         });
       }
       setLoadingProducts(false);
@@ -1140,18 +1420,51 @@ export default function ClassicCreateWizard() {
     const next = { ...priceOverrides };
     rows.forEach(row => {
       const base = Number(row.current_price ?? row.price) || 0;
-      const key = `${row.variant_id}::${arm.id}`;
+      const key = priceOverrideKey(row.variant_id, arm.id);
       const delta = unit === 'amount' ? amount : base * (amount / 100);
       next[key] = Math.max(0, base + sign * delta).toFixed(2);
     });
     setPriceOverrides(next);
   };
 
+  const paintLocalAiBandPrices = useCallback(
+    ({ unit = 'percent', rows, targetArms, band }) => {
+      if (!rows?.length || !targetArms?.length || !band) return false;
+      const fallbackMin = unit === 'amount' ? 1 : 10;
+      const fallbackMax = unit === 'amount' ? 5 : 20;
+      const min = band.min ?? resolveBandEdge(aiMinPct, fallbackMin);
+      const max = band.max ?? resolveBandEdge(aiMaxPct, fallbackMax);
+      const shopMaxChange = Number(shopGuardrails.max_price_change_percent);
+      const maxChangePct = Number.isFinite(shopMaxChange) && shopMaxChange > 0 ? shopMaxChange : 15;
+      const spreadOpts = { rows, targetArms, min, max, unit, maxChangePct };
+      const localPatch = buildAiBandPriceOverrides(spreadOpts);
+      if (!Object.keys(localPatch).length) return false;
+      setPriceOverrides(prev => ({ ...prev, ...localPatch }));
+      setPriceSuggestionMeta(prev => ({
+        ...prev,
+        ...buildLocalPriceSuggestionMeta(spreadOpts, 'local'),
+      }));
+      markArmsAiSuggested(targetArms.map(arm => arm.id));
+      return true;
+    },
+    [
+      aiMinPct,
+      aiMaxPct,
+      shopGuardrails.max_price_change_percent,
+      markArmsAiSuggested,
+    ]
+  );
+
   const applyLocalAiBandFallback = useCallback(
-    ({ unit = 'percent' } = {}) => {
+    ({ unit = 'percent', targetArmsOverride = null } = {}) => {
       const testArms = variations.filter((row, i) => i > 0 && row.id !== 'control');
       const aiArms = testArms.filter(arm => (pricingByArm[arm.id]?.priceMode || '') === 'ai');
-      const targetArms = aiArms.length ? aiArms : testArms;
+      const targetArms =
+        Array.isArray(targetArmsOverride) && targetArmsOverride.length
+          ? targetArmsOverride
+          : aiArms.length
+            ? aiArms
+            : testArms;
       const rows = resolvePricingRows({
         opportunities,
         selectedIds,
@@ -1179,44 +1492,27 @@ export default function ClassicCreateWizard() {
           unit,
           averagePrice: avg,
         }) || rawBand;
-      const min = band?.min ?? Math.abs(Number(aiMinPct) || (unit === 'amount' ? 1 : 10));
-      const max = band?.max ?? Math.abs(Number(aiMaxPct) || (unit === 'amount' ? 5 : 20));
-      const armCount = targetArms.length;
-      const shopMaxChange = Number(shopGuardrails.max_price_change_percent);
-      const maxChangePct = Number.isFinite(shopMaxChange) && shopMaxChange > 0 ? shopMaxChange : 15;
-      setPriceOverrides(prev => {
-        const next = { ...prev };
-        rows.forEach(row => {
-          const base = Number(row.current_price ?? row.price) || 0;
-          const ceiling = base * (1 + maxChangePct / 100);
-          targetArms.forEach((arm, armIndex) => {
-            // Match the server: span the band so variations stay far enough
-            // apart to resolve a price response.
-            const position = armCount > 1 ? armIndex / (armCount - 1) : 0.5;
-            const span = min + (max - min) * position;
-            const raw = unit === 'amount' ? base + span : base * (1 + span / 100);
-            // The band was capped against the catalog average, so a flat dollar
-            // uplift can still breach max price change on a cheaper product.
-            const price = Math.min(raw, ceiling);
-            next[`${row.variant_id}::${arm.id}`] = Math.max(0, price).toFixed(2);
-          });
-        });
-        return next;
+      const fallbackMin = unit === 'amount' ? 1 : 10;
+      const fallbackMax = unit === 'amount' ? 5 : 20;
+      const min = band?.min ?? resolveBandEdge(aiMinPct, fallbackMin);
+      const max = band?.max ?? resolveBandEdge(aiMaxPct, fallbackMax);
+      const painted = paintLocalAiBandPrices({ unit, rows, targetArms, band });
+      const fallbackLine = painted
+        ? `Local ${describeAiBandRange(min, max, unit)} band fallback (AI unavailable).`
+        : 'Could not build local prices — check product prices and try again.';
+      const { status, detail } = composeAiSuggestBanner({
+        source: 'deterministic',
+        bandNotice: describeAiBandCap(band, { unit }),
+        fallbackLine,
+        unit,
       });
       setAiPriceMeta({
         source: 'deterministic',
-        summary: [
-          describeAiBandCap(band, { unit }),
-          unit === 'amount'
-            ? `Local $${min}–$${max} band fallback (AI unavailable).`
-            : `Local ${min}%–${max}% band fallback (AI unavailable).`,
-        ]
-          .filter(Boolean)
-          .join(' '),
+        summary: status,
+        detail,
         busy: false,
       });
-      markArmsAiSuggested(targetArms.map(arm => arm.id));
-      return true;
+      return painted;
     },
     [
       aiMinPct,
@@ -1228,7 +1524,7 @@ export default function ClassicCreateWizard() {
       pickMode,
       maxSelection,
       shopGuardrails.max_price_change_percent,
-      markArmsAiSuggested,
+      paintLocalAiBandPrices,
     ]
   );
 
@@ -1240,15 +1536,26 @@ export default function ClassicCreateWizard() {
         pickMode,
         maxSelection,
       });
+      const activeArm = variations[activeArmIndex];
+      const activeIsTestArm =
+        activeArm && activeArmIndex > 0 && activeArm.id && activeArm.id !== 'control';
       const testArms = variations.filter((row, i) => i > 0 && row.id !== 'control');
       const aiArms = testArms.filter(arm => (pricingByArm[arm.id]?.priceMode || '') === 'ai');
-      const targetArms = aiArms.length ? aiArms : testArms;
+      // The AI band UI is on the active tab. Pricing another arm leaves this
+      // table on "Suggest" even though Suggest ran — same rule as Bulk adjust.
+      const targetArms =
+        activeIsTestArm && priceMode === 'ai'
+          ? [activeArm]
+          : aiArms.length
+            ? aiArms
+            : testArms;
       if (!rows.length || !targetArms.length) {
         setAiPriceMeta({
           source: null,
           summary: !rows.length
             ? 'Select products first, then re-suggest prices.'
             : 'Add a test variation before requesting AI prices.',
+          detail: null,
           busy: false,
         });
         return;
@@ -1257,6 +1564,7 @@ export default function ClassicCreateWizard() {
         setAiPriceMeta({
           source: null,
           summary: 'Still loading shop experiment defaults. Try again in a moment.',
+          detail: null,
           busy: false,
         });
         return;
@@ -1269,7 +1577,9 @@ export default function ClassicCreateWizard() {
       if (!rawBand) {
         setAiPriceMeta({
           source: null,
-          summary: 'Enter a min and max greater than 0, then click Suggest.',
+          summary:
+            'Enter a min and max, then click Suggest. Use a negative to test a lower price.',
+          detail: null,
           busy: false,
         });
         return;
@@ -1292,11 +1602,16 @@ export default function ClassicCreateWizard() {
       const maxPct = amountMode ? null : band.max;
 
       const requestId = ++aiSuggestRequestId.current;
-      setAiPriceMeta(prev => ({
-        ...prev,
+      const fallbackMin = unit === 'amount' ? 1 : 10;
+      const fallbackMax = unit === 'amount' ? 5 : 20;
+      const min = band.min ?? resolveBandEdge(aiMinPct, fallbackMin);
+      const max = band.max ?? resolveBandEdge(aiMaxPct, fallbackMax);
+      setAiPriceMeta({
+        source: null,
+        summary: 'Suggesting prices…',
+        detail: null,
         busy: true,
-        summary: prev.summary || 'Suggesting prices…',
-      }));
+      });
       let settled = false;
       try {
         const result = await suggestSmartPricingPrices(shopDomain, {
@@ -1307,8 +1622,14 @@ export default function ClassicCreateWizard() {
             currency: row.currency || 'USD',
             margin_percent: row.margin_percent,
             units_sold_30d: row.units_sold_30d,
+            revenue_30d: row.revenue_30d,
+            daily_visitors: row.daily_visitors,
+            visitors_30d: row.visitors_30d,
+            product_type: row.product_type,
             opportunity_score: row.opportunity_score,
             recommended_scenario_preset: row.recommended_scenario_preset,
+            ai_reason: row.ai_reason,
+            scenario_rationale: row.scenario_rationale,
           })),
           arms: targetArms.map(arm => ({
             id: arm.id,
@@ -1329,16 +1650,31 @@ export default function ClassicCreateWizard() {
           : Array.isArray(result?.data?.suggestions)
             ? result.data.suggestions
             : [];
-        setPriceOverrides(prev => {
-          const next = { ...prev };
-          suggestions.forEach(item => {
-            if (!item?.variant_id || !item?.arm_id) return;
-            if (!Number.isFinite(Number(item.price))) return;
-            next[`${item.variant_id}::${item.arm_id}`] = Number(item.price).toFixed(2);
-          });
-          return next;
-        });
+        if (!suggestions.length) {
+          if (applyLocalAiBandFallback({ unit, targetArmsOverride: targetArms })) {
+            const { status, detail } = composeAiSuggestBanner({
+              source: 'deterministic',
+              bandNotice: describeAiBandCap(band, { unit }),
+              fallbackLine: `Local ${describeAiBandRange(min, max, unit)} band fallback (AI unavailable).`,
+              unit,
+            });
+            setAiPriceMeta({
+              source: 'deterministic',
+              summary: status,
+              detail,
+              busy: false,
+            });
+            settled = true;
+            return;
+          }
+        }
+        setPriceOverrides(prev => applyPriceSuggestionsToOverrides(prev, suggestions));
         const source = result?.source || result?.data?.source || 'deterministic';
+        const pricingSource = source === 'openai' ? 'openai' : 'deterministic';
+        setPriceSuggestionMeta(prev => ({
+          ...prev,
+          ...metaFromPriceSuggestions(suggestions, pricingSource),
+        }));
         const baseSummary =
           result?.summary ||
           result?.data?.summary ||
@@ -1355,24 +1691,58 @@ export default function ClassicCreateWizard() {
           band,
           { unit }
         );
+        const { status, detail } = composeAiSuggestBanner({
+          source,
+          skippedReason: result?.ai_skipped_reason || result?.data?.ai_skipped_reason,
+          bandNotice,
+          baseSummary,
+          sourceNotice,
+          limitedNotice,
+          unit,
+        });
         setAiPriceMeta({
           source,
-          summary: [bandNotice, baseSummary, sourceNotice, limitedNotice]
-            .filter(Boolean)
-            .join(' '),
+          summary: status,
+          detail,
           busy: false,
         });
-        if (suggestions.length) {
-          markArmsAiSuggested(
-            suggestions
-              .map(item => item?.arm_id)
-              .filter(Boolean)
-          );
-        }
+        markArmsAiSuggested(
+          suggestions.length
+            ? [...new Set(suggestions.map(item => item?.arm_id).filter(Boolean))]
+            : targetArms.map(arm => arm.id)
+        );
         settled = true;
-      } catch {
+      } catch (error) {
         if (requestId !== aiSuggestRequestId.current) return;
-        applyLocalAiBandFallback({ unit });
+        const apiMessage =
+          error?.message ||
+          'Could not suggest prices right now. Check your connection and try again.';
+        if (applyLocalAiBandFallback({ unit, targetArmsOverride: targetArms })) {
+          const { status, detail } = composeAiSuggestBanner({
+            source: 'deterministic',
+            bandNotice: describeAiBandCap(band, { unit }),
+            fallbackLine: `Local ${describeAiBandRange(min, max, unit)} band fallback (AI unavailable).`,
+            errorMessage: apiMessage,
+            unit,
+          });
+          setAiPriceMeta({
+            source: 'deterministic',
+            summary: status,
+            detail,
+            busy: false,
+          });
+        } else {
+          const { status, detail } = composeAiSuggestBanner({
+            errorMessage: apiMessage,
+            unit,
+          });
+          setAiPriceMeta({
+            source: null,
+            summary: status || apiMessage,
+            detail,
+            busy: false,
+          });
+        }
         settled = true;
       } finally {
         // Safety net: never leave the Re-suggest button stuck in Suggesting…
@@ -1395,7 +1765,9 @@ export default function ClassicCreateWizard() {
       shopGuardrails,
       shopGuardrailsReady,
       applyLocalAiBandFallback,
+      paintLocalAiBandPrices,
       pricingByArm,
+      priceMode,
       markArmsAiSuggested,
     ]
   );
@@ -1417,10 +1789,13 @@ export default function ClassicCreateWizard() {
         const restore = {};
         const attemptedMin = Number(aiBandAttempt.min);
         const attemptedMax = Number(aiBandAttempt.max);
-        if (Number.isFinite(attemptedMin) && attemptedMin > 0) {
+        // Non-zero rather than positive: a blocked edge can now be a price cut,
+        // and requiring a positive value meant raising the guardrail put back
+        // only the half of the band that happened to be a rise.
+        if (Number.isFinite(attemptedMin) && attemptedMin !== 0) {
           restore.aiMinPct = String(attemptedMin);
         }
-        if (Number.isFinite(attemptedMax) && attemptedMax > 0) {
+        if (Number.isFinite(attemptedMax) && attemptedMax !== 0) {
           restore.aiMaxPct = String(attemptedMax);
         }
         if (Object.keys(restore).length) {
@@ -1486,18 +1861,21 @@ export default function ClassicCreateWizard() {
       // Carry the merchant's intent across units instead of reusing the raw
       // number: on a $50 catalog, 10% means $5, not $10.
       const convert = value2 => {
-        const n = Math.abs(Number(value2));
-        if (!Number.isFinite(n) || n <= 0 || avg <= 0) return null;
-        const converted = nextUnit === 'amount' ? (avg * n) / 100 : (n / avg) * 100;
-        return String(Math.round(converted * 100) / 100);
+        const n = Number(value2);
+        if (!Number.isFinite(n) || n === 0 || avg <= 0) return null;
+        const sign = n < 0 ? -1 : 1;
+        const magnitude = Math.abs(n);
+        const converted =
+          nextUnit === 'amount' ? (avg * magnitude) / 100 : (magnitude / avg) * 100;
+        return String(Math.round(sign * converted * 100) / 100);
       };
       const nextMin = convert(aiMinPct);
       const nextMax = convert(aiMaxPct);
       patchAiBand({
         aiUnit: nextUnit,
         aiSuggested: false,
-        ...(nextMin ? { aiMinPct: nextMin } : {}),
-        ...(nextMax ? { aiMaxPct: nextMax } : {}),
+        ...(nextMin != null ? { aiMinPct: nextMin } : {}),
+        ...(nextMax != null ? { aiMaxPct: nextMax } : {}),
       });
     },
     [aiUnit, aiMinPct, aiMaxPct, aiBandAveragePrice, patchAiBand]
@@ -1525,7 +1903,12 @@ export default function ClassicCreateWizard() {
     }
     setSavingDraft(true);
     try {
-      writeClassicWizardDraft(shopDomain, wizardSnapshot);
+      // Both copies, and awaited: pressing Save draft is a request for a saved
+      // draft, so the message underneath has to report what actually landed.
+      // This used to write the browser only and then say "Draft saved", which
+      // is why a merchant who cleared their browser, or looked on another
+      // device, found nothing.
+      const saved = await persistWizardDraftEverywhere(wizardSnapshot);
       let inboxPlans = plans;
       if (!inboxPlans.length && (selectedIds.length || pickMode === 'all') && step >= 2) {
         try {
@@ -1544,24 +1927,31 @@ export default function ClassicCreateWizard() {
         writeInboxPlans(shopDomain, merged);
         await persistInboxPlansNow(shopDomain, merged).catch(() => null);
         setPlans(enriched);
-        // Resuming prefers the browser draft over the inbox, so the draft has
+        // Resuming prefers the wizard draft over the inbox, so the draft has
         // to learn about these plans now. Left to the debounced autosave, a
         // refresh in the next moment would restore the copy saved above, which
         // was taken before the plans were built.
-        persistWizardDraft({ ...wizardSnapshot, plans: enriched, step });
+        await persistWizardDraftEverywhere({ ...wizardSnapshot, plans: enriched, step });
       }
       // Saving keeps the merchant on the step they were editing. The URL now
       // names the draft, so a refresh comes straight back here.
       syncResumeUrl(step);
-      setMessageType('success');
-      // Drafts on the experiments page lists plans, so an experiment only
-      // appears there once products have been chosen. Saying otherwise would
-      // send the merchant looking for a row that is not there yet.
-      setMessage(
-        inboxPlans.length
-          ? 'Draft saved. Keep editing here, or pick it up later from Drafts on the experiments page.'
-          : 'Draft saved in this browser. Keep editing here — choose products to also list it under Drafts.'
-      );
+      // A draft with no products still gets a row under Drafts, so the message
+      // no longer has to send the merchant off to choose products before it
+      // will appear. What it does still have to distinguish is whether the
+      // server took it: if only the browser did, the draft is real but tied to
+      // this one browser, and that is worth saying plainly rather than
+      // discovering later on another device.
+      if (!saved.server) {
+        setMessageType('error');
+        setMessage(draftServerFailureMessage(saved));
+      } else {
+        // Superseded and eviction are both things the merchant has to act on,
+        // so they do not get the success colour.
+        const unexpected = saved.superseded || (saved.evicted || []).length > 0;
+        setMessageType(unexpected ? 'warning' : 'success');
+        setMessage(draftSavedMessage(saved));
+      }
     } catch (err) {
       setMessageType('error');
       setMessage(err.message || 'Could not save draft.');
@@ -1657,7 +2047,6 @@ export default function ClassicCreateWizard() {
       const enriched = enrichPlansForLaunch();
       setPlans(enriched);
       goToStep(4, { plans: enriched });
-      batchPreviewSmartPricingLaunch(shopDomain, enriched).catch(() => {});
       return;
     }
     if (step === 4) {
@@ -1721,7 +2110,10 @@ export default function ClassicCreateWizard() {
         // Stop autosave before clearing, or a debounced write still in flight
         // would put the draft straight back after the experiment went live.
         autosaveSuspended.current = true;
-        clearClassicWizardDraft(shopDomain, experimentId);
+        // Both copies: the launched experiment is the record now, and a
+        // surviving server draft would sit under Drafts alongside the live test
+        // it turned into.
+        await forgetWizardDraftEverywhere(shopDomain, experimentId);
         setMessageType('success');
         setMessage(`Launched ${result.launched} test${result.launched === 1 ? '' : 's'}.`);
         navigate(ROUTES.appSmartPricing(shopDomain));
@@ -1774,6 +2166,52 @@ export default function ClassicCreateWizard() {
   );
 
   /**
+   * Ask the server whether a live test already holds any of these products,
+   * every time the review step opens.
+   *
+   * The products step withholds anything another test is holding, but it read
+   * the catalog when that step opened. A resumed draft chose its products days
+   * ago, and a batch built this morning can be overtaken by a test started
+   * since. Launch refuses either way; this turns a failed launch into a reason
+   * on the page next to a button that will not fire.
+   *
+   * Keyed on the products, not the plan objects, which are rebuilt on most
+   * edits.
+   */
+  const launchPlansKey = useMemo(
+    () =>
+      plans
+        .map(plan => String(plan?.variant_id || plan?.product_id || ''))
+        .filter(Boolean)
+        .join('|'),
+    [plans]
+  );
+  const launchPlansRef = useRef(plans);
+  useEffect(() => {
+    launchPlansRef.current = plans;
+  });
+  useEffect(() => {
+    if (step !== 4 || !launchPlansKey) return undefined;
+    let cancelled = false;
+    batchPreviewSmartPricingLaunch(shopDomain, launchPlansRef.current)
+      .then(preview => {
+        if (cancelled) return;
+        // One product is enough to stop the launch, and naming the test
+        // holding it is what the merchant has to act on.
+        const first = (preview?.live_conflicts || [])[0];
+        setLiveTestConflict(first?.message || '');
+      })
+      .catch(() => {
+        // Launch re-checks against the same table and refuses for real. Left
+        // blocked on a failed preflight, a merchant could not launch at all.
+        if (!cancelled) setLiveTestConflict('');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [step, launchPlansKey, shopDomain]);
+
+  /**
    * Why Launch cannot run, in the order the launch handler checks.
    *
    * The handler has always had six gates; the button reflected one of them. So
@@ -1817,6 +2255,11 @@ export default function ClassicCreateWizard() {
         code: 'products',
         reason: 'No products to launch. Go back to Products and select at least one.',
       };
+    }
+    // Answered by the server on entering this step. Launch refuses it anyway,
+    // so pressing the button could only produce the same sentence as an error.
+    if (liveTestConflict) {
+      return { disabled: true, code: 'conflict', reason: liveTestConflict };
     }
     return { disabled: false, code: '', reason: '' };
   })();
@@ -2028,14 +2471,31 @@ export default function ClassicCreateWizard() {
                 priceMode: mode,
                 ...(mode === 'ai' ? { aiSuggested: false } : {}),
               });
+              if (mode !== 'ai') setPriceSuggestionMeta({});
             }}
             priceOverrides={priceOverrides}
-            onPriceOverrideChange={(key, value) =>
-              setPriceOverrides(prev => ({ ...prev, [key]: value }))
-            }
-            onPriceOverridesPatch={patch =>
-              setPriceOverrides(prev => ({ ...prev, ...(patch || {}) }))
-            }
+            priceSuggestionMeta={priceSuggestionMeta}
+            onPriceOverrideChange={(key, value) => {
+              setPriceOverrides(prev => ({ ...prev, [key]: value }));
+              setPriceSuggestionMeta(prev => {
+                if (!prev[key]) return prev;
+                const next = { ...prev };
+                delete next[key];
+                return next;
+              });
+            }}
+            onPriceOverridesPatch={patch => {
+              setPriceOverrides(prev => ({ ...prev, ...(patch || {}) }));
+              if (patch && typeof patch === 'object') {
+                setPriceSuggestionMeta(prev => {
+                  const next = { ...prev };
+                  Object.keys(patch).forEach(k => {
+                    delete next[k];
+                  });
+                  return next;
+                });
+              }
+            }}
             bulkPercent={bulkPercent}
             onBulkPercentChange={setBulkPercent}
             bulkDirection={bulkDirection}
@@ -2044,6 +2504,7 @@ export default function ClassicCreateWizard() {
             onAiSuggest={applyAiBand}
             aiSuggestBusy={aiPriceMeta.busy}
             aiSuggestSummary={aiPriceMeta.summary}
+            aiSuggestDetail={aiPriceMeta.detail}
             aiSuggested={activePricing.aiSuggested === true}
             onAiBandDirty={() => patchActivePricing({ aiSuggested: false })}
             aiUnit={aiUnit}
@@ -2113,7 +2574,7 @@ export default function ClassicCreateWizard() {
             // thing twice, in two tones.
             launchBlockedReason={
               launchGate.disabled &&
-              ['variations', 'audience', 'products'].includes(launchGate.code)
+              ['variations', 'audience', 'products', 'conflict'].includes(launchGate.code)
                 ? launchGate.reason
                 : ''
             }

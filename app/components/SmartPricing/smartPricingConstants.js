@@ -1,30 +1,7 @@
-/** Merchant-facing wizard phases — 2 steps (save redirects to inbox). */
-export const WIZARD_PHASES = [
-  { id: 'products', label: 'Pick products', description: 'AI pre-selects top picks' },
-  { id: 'plans', label: 'Review prices', description: 'Choose Safe, Balanced, or Bold' },
-];
-
 export const SCENARIO_PRESETS = [
   { id: 'conservative', label: 'Safe', hint: '2 prices · ±5%' },
   { id: 'recommended', label: 'Balanced', hint: '3 prices · ±8%', recommended: true },
   { id: 'aggressive', label: 'Bold', hint: '4 prices · ±12%' },
-];
-
-export const PRODUCT_FILTERS = [
-  { id: 'all', label: 'All products' },
-  { id: 'ai_pick', label: 'AI picks' },
-  { id: 'high_margin', label: 'High margin' },
-  { id: 'high_traffic', label: 'High traffic' },
-  { id: 'low_data', label: 'Needs more data' },
-  { id: 'estimated_traffic', label: 'Estimated traffic' },
-  { id: 'measured_traffic', label: 'Measured traffic' },
-];
-
-export const PLAN_TABS = [
-  { id: 'design', label: 'Prices & revenue' },
-  { id: 'stats', label: 'Test length' },
-  { id: 'safety', label: 'Safety checks' },
-  { id: 'batch', label: 'All products' },
 ];
 
 export function formatCurrency(amount, currency = 'USD') {
@@ -35,11 +12,6 @@ export function formatCurrency(amount, currency = 'USD') {
   } catch {
     return `$${n.toFixed(2)}`;
   }
-}
-
-export function formatPriceArmsSummary(plan) {
-  const arms = Array.isArray(plan?.price_arms) ? plan.price_arms : [];
-  return arms.map(arm => formatCurrency(arm.price, plan.currency)).join(' · ');
 }
 
 export function inboxStorageKey(domain) {

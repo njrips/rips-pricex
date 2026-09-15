@@ -114,7 +114,15 @@ function matchVariantToArm(arm, testVariants = [], analyticsVariants = [], optio
     return matchOfferVariantToArm(arm, index, testVariants, analyticsVariants);
   }
 
+  // Identity first, price only as a fallback. Matching on price alone meant
+  // two arms within two cents of each other resolved to the same variation,
+  // so the table showed one arm's visitors, conversion rate and profit under
+  // the other arm's price -- and that table is what the merchant reads before
+  // choosing which price to publish. The offer path has always tried the id
+  // first; there was no reason for this one to differ.
+  const armId = String(arm?.id || '').trim();
   const testVariant =
+    (armId ? testVariants.find(variant => String(variant?.id) === armId) : null) ||
     testVariants.find(variant => {
       const price = variantFixedPrice(variant);
       return Number.isFinite(price) && Math.abs(price - targetPrice) < 0.02;

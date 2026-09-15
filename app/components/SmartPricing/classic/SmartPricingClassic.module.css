@@ -1061,12 +1061,6 @@ button.stepItem {
   line-height: 20px;
 }
 
-.labelRow .stepSectionTitle {
-  flex: 1 1 auto;
-  min-width: 0;
-  margin-bottom: 0;
-}
-
 /* Guardrail on/off. Same shape as the price-surface row switch so one control
    means the same thing in both places. */
 .guardrailSwitch {
@@ -1739,7 +1733,6 @@ button.stepItem {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
   width: 100%;
   color: var(--classic-orange-deep, #1a1a1a);
@@ -1748,23 +1741,23 @@ button.stepItem {
   line-height: 20px;
 }
 
-.panelHeadingGroup {
+/* Title text and its guide icon, always adjacent. Every pattern that pairs a
+   heading with an info icon should use one of these classes so the icon never
+   lands on the far edge of a wide row again. */
+.titleWithInfo,
+.panelHeadingGroup,
+.adminRowHeadMain,
+.labelRow,
+.aiSuggestTitleLead {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   min-width: 0;
+  max-width: 100%;
 }
 
 .panelHeadingGroup .panelTitle {
   margin: 0;
-}
-
-.aiSuggestTitleLead {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  flex: 1 1 auto;
-  min-width: 0;
 }
 
 .aiSuggestTitleLead svg {
@@ -1780,32 +1773,84 @@ button.stepItem {
   line-height: 1.45;
 }
 
-.labelRow {
+.aiSuggestStatusLine {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 10px;
+  color: var(--classic-muted);
+  font-size: 13px;
+  font-weight: var(--classic-fw-regular);
+  line-height: 1.45;
+}
+
+.aiSuggestRaise {
+  margin-top: 2px;
+}
+
+.priceFieldRow {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+  gap: 4px;
+}
+
+.priceCalcHint {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--classic-muted);
+  cursor: help;
+}
+
+.priceCalcHint:hover,
+.priceCalcHint:focus-visible {
+  color: var(--classic-orange);
+}
+
+.labelRow,
+.titleWithInfo {
   margin-bottom: 8px;
 }
 
+.titleWithInfo .label,
+.titleWithInfo .sectionLabel,
+.titleWithInfo .stepSectionTitle,
 .labelRow .label,
-.labelRow .sectionLabel {
-  flex: 1 1 auto;
-  min-width: 0;
+.labelRow .sectionLabel,
+.labelRow .stepSectionTitle {
   margin-bottom: 0;
 }
 
-/* Polaris wraps a tooltip activator in an unstyled span, so the info icon's
-   wrapper becomes the flex item in place of the button and the button's own
-   flex-shrink stops applying. Every row here is a label plus that one icon,
-   so holding the span to its content keeps the icon hard against the edge. */
-.labelRow > span {
+/* Polaris wraps a tooltip activator in an unstyled span. Pin the wrapper to
+   its icon so a titleWithInfo row never stretches it across the row. */
+.titleWithInfo > span,
+.labelRow > span,
+.infoIconWrap {
   display: inline-flex;
   flex: 0 0 auto;
+  align-items: center;
+  vertical-align: middle;
 }
 
-/* Keeps the text, the info icon and the action on one centred row. The icon is
-   a 28px inline-flex button, which sits off the baseline of plain text. */
+/* When the icon is embedded inside the label copy rather than in a
+   titleWithInfo row — review facts, settings detail rows. */
+.label:has(.infoIconLink),
+.kvLabel:has(.infoIconLink),
+.stepSectionTitle:has(.infoIconLink),
+.sectionLabel:has(.infoIconLink),
+.panelTitle:has(.infoIconLink) {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* Keeps the text, the info icon and the action on one centred row. */
 .noticeLine {
   display: flex;
   flex-wrap: wrap;
@@ -1820,8 +1865,8 @@ button.stepItem {
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
   margin: 0;
   padding: 0;
   border: 0;
@@ -2519,6 +2564,16 @@ button.stepItem {
   margin-top: 0;
 }
 
+/* Why this product is being suggested. Wraps, unlike the metadata line above
+   it, because a truncated reason is no reason at all. */
+.productWhy {
+  color: var(--classic-ink);
+  font-size: var(--classic-fs-help);
+  font-weight: var(--classic-fw-regular);
+  line-height: 1.35;
+  margin-top: 2px;
+}
+
 .selectionBar {
   display: flex;
   align-items: center;
@@ -3099,31 +3154,6 @@ button.stepItem {
   display: flex;
   flex-direction: column;
   gap: 24px; /* Figma Review Main content gap */
-}
-
-.callout {
-  display: flex;
-  gap: 12px; /* Figma ETA callout */
-  align-items: flex-start;
-  padding: 17px;
-  border-radius: 6px;
-  background: var(--classic-callout-bg, #fff1e3);
-  border: 1px solid var(--classic-callout-border, rgba(255, 184, 0, 0.45));
-  margin-bottom: 0;
-  font-size: var(--classic-fs-label);
-  font-weight: var(--classic-fw-regular);
-  color: var(--classic-body);
-  line-height: 1.45;
-}
-
-.calloutIcon {
-  display: inline-flex;
-  align-items: flex-start;
-  flex-shrink: 0;
-  width: 16px;
-  height: 18px;
-  padding-top: 2px;
-  color: var(--classic-orange);
 }
 
 .reviewSection {
@@ -3938,18 +3968,28 @@ button.stepItem {
   background: var(--classic-wash);
 }
 
-/* Nested inside .aiSuggestBanner — one peach card, light control strip */
+/* Nested inside .aiSuggestBanner — label on one row, controls on the next.
+   Everything in one flex-wrap row used to scatter the min/max boxes, the unit
+   toggle, and Suggest across the full panel width. */
 .aiBar {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px 12px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
   margin: 2px 0 0;
   padding: 10px 12px;
   border-radius: 10px;
   background: var(--classic-segment-on, rgba(255, 255, 255, 0.55));
   border: 1px solid rgba(48, 48, 48, 0.12);
   box-sizing: border-box;
+}
+
+.aiBarLead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  min-width: 0;
 }
 
 .aiBarLabel {
@@ -3969,13 +4009,26 @@ button.stepItem {
   flex-shrink: 0;
 }
 
+.aiBarDirection {
+  font-size: 12px;
+  font-weight: var(--classic-fw-regular);
+  line-height: 16px;
+  color: var(--classic-muted);
+}
+
 .aiBarControls {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 8px 10px;
-  flex: 1 1 220px;
+  width: 100%;
   min-width: 0;
+}
+
+.aiBarAction {
+  display: inline-flex;
+  flex: 0 0 auto;
+  margin-left: auto;
 }
 
 .aiBar .bulkField {
@@ -4028,44 +4081,15 @@ button.stepItem {
   line-height: 1;
 }
 
-.aiBar .segment {
+.aiBar .segment,
+.aiBar .bulkSegment {
   margin-bottom: 0;
   flex-shrink: 0;
 }
 
-.aiBar .segmentOnPeach {
-  background: var(--classic-wash, #f7f7f7);
-  border-color: var(--classic-line, #e3e3e3);
-}
-
-.aiBar .segmentOnPeach .segmentBtn:not(.segmentBtnActive) {
-  background: var(--classic-card, #ffffff);
-  color: var(--classic-muted);
-}
-
-.aiBar .segmentBtn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 28px;
-  min-width: 32px;
-  padding: 4px 10px;
-}
-
-.aiBarAction,
-.aiBar .primaryBtn {
-  margin-left: auto;
+.aiBarAction :global(.Polaris-Button) {
   min-height: 32px;
-  padding: 6px 12px;
-  font-size: 13px;
-  font-weight: var(--classic-fw-medium);
   box-shadow: none;
-  flex-shrink: 0;
-}
-
-.aiBarAction:disabled,
-.aiBar .primaryBtn:disabled {
-  opacity: 0.55;
 }
 
 .iconClose {
@@ -4106,48 +4130,6 @@ button.stepItem {
 .segmentBtnActive .segmentLetter {
   background: rgba(255, 255, 255, 0.25);
   color: #fff;
-}
-
-.calloutStrong {
-  font-weight: var(--classic-fw-medium); /* Figma Medium, not Bold */
-  color: var(--classic-ink);
-}
-
-.calloutBody {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.calloutMeta {
-  color: var(--classic-muted);
-  font-size: 14px; /* Figma ETA subline */
-  font-weight: var(--classic-fw-regular);
-  line-height: 20px;
-}
-
-.calloutRow {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 12px;
-  align-items: center;
-  justify-content: space-between;
-  padding-top: 8px;
-}
-
-.calloutRowText {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.calloutRowActions {
-  display: inline-flex;
-  gap: 12px;
-  align-items: center;
-  flex-shrink: 0;
 }
 
 .priceTabs {
@@ -4192,6 +4174,17 @@ button.stepItem {
   font-weight: var(--classic-fw-medium);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.1);
   border-color: transparent;
+}
+
+/* Marks a variation tab whose prices are still unset. Colour alone would not
+   carry it, so the tab also has a title and an accessible label. */
+.priceTabDot {
+  width: 6px;
+  height: 6px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: var(--classic-warn, #b98900);
+  flex: 0 0 auto;
 }
 
 .priceTabActive .segmentLetter {
@@ -5026,8 +5019,6 @@ button.stepItem {
   --classic-pricing-input: var(--bg-primary, #111827);
   --classic-pricing-border: var(--border-primary, rgba(148, 163, 184, 0.35));
   --classic-panel-tint: rgba(255, 255, 255, 0.04);
-  --classic-callout-bg: rgba(var(--accent-primary-rgb, 6, 182, 212), 0.12);
-  --classic-callout-border: rgba(var(--accent-primary-rgb, 6, 182, 212), 0.35);
   --classic-segment-on: rgba(255, 255, 255, 0.08);
   --classic-disabled-field: var(--bg-tertiary, #334155);
   --classic-disabled-text: var(--text-tertiary, #94a3b8);
@@ -5202,12 +5193,6 @@ button.stepItem {
 :global([data-theme='dark']) .priceTabActive {
   background: var(--classic-card);
   color: var(--classic-ink);
-}
-
-:global([data-theme='dark']) .callout {
-  background: var(--classic-callout-bg);
-  border-color: var(--classic-callout-border);
-  color: var(--classic-body);
 }
 
 :global([data-theme='dark']) .advanced {
@@ -5397,8 +5382,6 @@ button.stepItem {
   --classic-pricing-input: #1a1a1a;
   --classic-pricing-border: rgba(227, 227, 227, 0.16);
   --classic-panel-tint: rgba(227, 227, 227, 0.06);
-  --classic-callout-bg: rgba(255, 184, 0, 0.14);
-  --classic-callout-border: rgba(255, 184, 0, 0.4);
   --classic-segment-on: rgba(227, 227, 227, 0.08);
   --classic-disabled-field: #474747;
   --classic-disabled-text: #8a8a8a;
@@ -6291,8 +6274,6 @@ button.stepItem {
 /* The icon is a hover affordance, not a control competing with the step's
    buttons, so it only gains weight once it is pointed at. */
 .adminRowHeadMain .infoIconLink {
-  width: 24px;
-  height: 24px;
   opacity: 0.55;
 }
 
@@ -6344,6 +6325,23 @@ button.stepItem {
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
+}
+
+/* A disclosure folded into a step rather than standing on its own at the foot
+   of the page. Its own 16px inset sits inside the card's, which would push the
+   contents a full 32px off the card edge, and the panel tint underneath is
+   already separation enough without a second filled surface. */
+.adminRow .advanced {
+  margin-top: 2px;
+  background: transparent;
+}
+
+.adminRow .advancedSummary {
+  padding: 8px 12px;
+}
+
+.adminRow .advancedBody {
+  padding: 12px;
 }
 
 .adminBadge {
@@ -6421,9 +6419,14 @@ button.stepItem {
   word-break: break-word;
   padding: 12px;
   border-radius: 6px;
-  background: var(--classic-wash);
+  /* White, so the snippet reads as a field to copy out rather than another
+     shade of the tinted card and dashed disclosure it now sits two levels
+     inside. The card token rather than a literal #fff: it is white on every
+     light theme and stays legible on the dark ones, where a hardcoded white
+     box would carry this muted grey text. */
+  background: var(--classic-card);
   border: 1px solid var(--classic-line);
-  color: var(--classic-muted);
+  color: var(--classic-ink);
   font-size: var(--classic-fs-help);
   line-height: 1.45;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;

@@ -14,17 +14,16 @@ vi.mock('../../smartPricingInboxPersistence', () => ({
   persistInboxPlansNow: vi.fn(),
 }));
 
-// The browser draft store needs localStorage; this file runs without a DOM, so
-// the one function delete calls is stubbed at the seam instead.
-vi.mock('../classicExperimentHelpers', async importOriginal => ({
-  ...(await importOriginal()),
-  clearClassicWizardDraft: vi.fn(),
+// Draft cleanup writes localStorage and calls the server; this file runs
+// without a DOM, so it is stubbed at the seam instead.
+vi.mock('../classicWizardDraftSync', () => ({
+  forgetWizardDraftEverywhere: vi.fn(async () => true),
 }));
 
 import { apiDelete } from '../../../../services';
 import { readInboxPlans, writeInboxPlans } from '../../smartPricingConstants';
 import { deletePersistedInboxPlan, persistInboxPlansNow } from '../../smartPricingInboxPersistence';
-import { clearClassicWizardDraft } from '../classicExperimentHelpers';
+import { forgetWizardDraftEverywhere } from '../classicWizardDraftSync';
 import {
   buildClassicExperimentDeleteConfirmMessage,
   deleteClassicExperimentSynchronized,
@@ -47,9 +46,10 @@ describe('classicExperimentDelete', () => {
     persistInboxPlansNow.mockResolvedValue({ revision: 'rev-2' });
     apiDelete.mockResolvedValue({});
     writeInboxPlans.mockImplementation((_domain, plans) => plans);
+    forgetWizardDraftEverywhere.mockResolvedValue(true);
   });
 
-  it('also forgets the browser draft, so the experiment stays deleted', async () => {
+  it('also forgets the saved draft, so the experiment stays deleted', async () => {
     const withId = {
       ...experiment,
       plans: [{ id: 'p1', metadata: { experiment_id: 'exp_1' } }],
@@ -57,7 +57,39 @@ describe('classicExperimentDelete', () => {
 
     await deleteClassicExperimentSynchronized('demo.myshopify.com', withId);
 
-    expect(clearClassicWizardDraft).toHaveBeenCalledWith('demo.myshopify.com', 'exp_1');
+    expect(forgetWizardDraftEverywhere).toHaveBeenCalledWith('demo.myshopify.com', 'exp_1');
+  });
+
+  it('deletes an unfinished draft that never got as far as products', async () => {
+    // A draft row on the experiments list has no plans behind it, so the inbox
+    // has nothing to remove and the draft itself is the whole experiment. This
+    // used to answer "nothing to delete" and leave a row that would not go.
+    const result = await deleteClassicExperimentSynchronized('shop.myshopify.com', {
+      id: 'exp_draft',
+      title: 'Spring pricing',
+      plans: [],
+    });
+
+    expect(forgetWizardDraftEverywhere).toHaveBeenCalledWith('shop.myshopify.com', 'exp_draft');
+    expect(result.ok).toBe(true);
+    expect(writeInboxPlans).not.toHaveBeenCalled();
+    expect(apiDelete).not.toHaveBeenCalled();
+  });
+
+  it('says the draft is still there when the delete could not reach the server', async () => {
+    // The draft survives in both copies, so the honest answer is that nothing
+    // was deleted and the merchant should try again -- not that it went half
+    // way and will tidy itself up later.
+    forgetWizardDraftEverywhere.mockResolvedValue(false);
+
+    const result = await deleteClassicExperimentSynchronized('shop.myshopify.com', {
+      id: 'exp_draft',
+      plans: [],
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.partial).toBe(true);
+    expect(result.errors[0]).toContain('try again');
   });
 
   it('collects plan and linked test ids', () => {

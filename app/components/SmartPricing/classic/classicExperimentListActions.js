@@ -68,13 +68,85 @@ export function getClassicExperimentLaunchReadiness(experiment) {
   return { ready: missing.size === 0, missing: [...missing] };
 }
 
-export function collectExperimentTestIds(plans = []) {
+/**
+ * A product whose price has already been decided and written to Shopify.
+ *
+ * An experiment covers several products and they finish at different times.
+ * Once a winner is applied to one of them, the merchant has committed to that
+ * price: re-splitting its traffic would undo the decision, and relabelling it
+ * paused or completed erases the record that the price was ever published.
+ * The per-product flow refuses to resume one of these; the experiment-level
+ * actions have to leave them alone for the same reason.
+ */
+export function isSettledClassicPlan(plan) {
+  const status = String(plan?.status || '')
+    .trim()
+    .toLowerCase();
+  if (status === 'applied') return true;
+  const mode = String(plan?.personalization_mode || plan?.metadata?.personalization_mode || '')
+    .trim()
+    .toLowerCase();
+  return mode === 'personalized' || mode === 'rollout';
+}
+
+/**
+ * The tests an experiment-level action should act on.
+ *
+ * @param {object[]} plans
+ * @param {{ skipSettled?: boolean }} [options] omit products whose price is
+ *   already decided and published.
+ */
+export function collectExperimentTestIds(plans = [], { skipSettled = false } = {}) {
   const ids = new Set();
   (Array.isArray(plans) ? plans : []).forEach(plan => {
+    if (skipSettled && isSettledClassicPlan(plan)) return;
     const id = String(plan?.test_id || plan?.metadata?.test_id || '').trim();
     if (id) ids.add(id);
   });
   return [...ids];
+}
+
+/**
+ * Which of a batch of per-product requests actually succeeded.
+ *
+ * An experiment is one test per product, so Pause and Stop fire several
+ * requests. Run under `Promise.all` one refusal rejected the whole batch: the
+ * error was shown, the local plans were never updated, and products that had
+ * genuinely stopped still read as Running -- so the merchant saw a failure
+ * message over a row that was now half stopped, with no way to tell which
+ * half. `allSettled` preserves order, which is what lets the outcome be
+ * matched back to the product it belongs to.
+ *
+ * @param {string[]} ids in the order they were requested
+ * @param {PromiseSettledResult<unknown>[]} results
+ */
+export function splitSettledByIds(ids = [], results = []) {
+  const succeeded = [];
+  const failed = [];
+  (Array.isArray(ids) ? ids : []).forEach((id, index) => {
+    const row = Array.isArray(results) ? results[index] : null;
+    if (row && row.status === 'fulfilled') succeeded.push(id);
+    else failed.push({ id, reason: row?.reason });
+  });
+  return { succeeded, failed };
+}
+
+/**
+ * What to say when only some of an experiment's products accepted the action.
+ *
+ * "Experiment paused." over a row where one product is still live is a plain
+ * untruth, and the merchant has no way to see which one. Returns '' when
+ * nothing succeeded, because then the caller has a real error to show instead.
+ *
+ * @param {{ verb?: 'paused'|'stopped', done?: number, failed?: number }} outcome
+ */
+export function classicBatchOutcomeMessage({ verb = 'paused', done = 0, failed = 0 } = {}) {
+  if (done <= 0) return '';
+  const past = verb === 'stopped' ? 'Stopped' : 'Paused';
+  if (failed <= 0) return `Experiment ${verb}.`;
+  const products = `${done} product${done === 1 ? '' : 's'}`;
+  const rest = failed === 1 ? 'one is' : `${failed} are`;
+  return `${past} ${products}, but ${rest} still running. Try again for those.`;
 }
 
 export function isClassicExperimentEnded(status) {
@@ -107,7 +179,9 @@ export function resolveClassicExperimentMenuActions(experiment, { checkoutReady 
   const isPaused = !archived && (status === 'paused' || status === 'stopped');
   const isEnded = !archived && isClassicExperimentEnded(status);
 
-  const actions = [{ id: 'view', label: 'View details' }];
+  // An unfinished wizard draft has no plan behind it, so there is no detail
+  // page to open and offering one led to a menu item that did nothing.
+  const actions = plans.length ? [{ id: 'view', label: 'View details' }] : [];
 
   if (isDraft && !launch.ready) {
     actions.push({ id: 'continue', label: 'Continue setup' });
@@ -123,6 +197,13 @@ export function resolveClassicExperimentMenuActions(experiment, { checkoutReady 
     actions.push({ id: 'resume', label: 'Resume' });
   }
 
+  // Pause is a breather; Stop is the decision that the experiment is over. A
+  // paused experiment gets it too, because otherwise there is no way to finish
+  // one without either resuming it first or hiding it with Archive.
+  if ((isRunning || isPaused) && testIds.length) {
+    actions.push({ id: 'stop', label: 'Stop' });
+  }
+
   if (isPaused || isEnded) {
     actions.push({ id: 'archive', label: 'Archive' });
   }
@@ -130,7 +211,7 @@ export function resolveClassicExperimentMenuActions(experiment, { checkoutReady 
   if (archived) {
     actions.push({ id: 'restore', label: 'Restore' });
     actions.push({ id: 'delete', label: 'Delete', destructive: true });
-  } else {
+  } else if (canDeleteClassicExperimentNow({ status, hasLinkedTests: testIds.length > 0 })) {
     actions.push({
       id: 'delete',
       label: isDraft && !testIds.length ? 'Delete draft' : 'Delete',
@@ -139,6 +220,52 @@ export function resolveClassicExperimentMenuActions(experiment, { checkoutReady 
   }
 
   return actions;
+}
+
+/**
+ * Whether Delete belongs in this experiment's menu at all.
+ *
+ * A running experiment is pricing shoppers right now and collecting the orders
+ * that will decide it. Delete used to be offered anyway, and stopped the live
+ * tests silently on the way out -- so one click on a destructive menu item
+ * both ended a running price test and threw the results away.
+ *
+ * Pausing first is the same two steps with the stop made explicit, and a
+ * paused experiment offers Archive as well, which is usually what someone
+ * reaching for Delete actually wanted. A draft has nothing live to stop, so it
+ * keeps Delete straight away.
+ *
+ * Shared with the experiment detail page, which has its own menu. The two
+ * drifted apart once already.
+ */
+/**
+ * The plan status a merchant's Stop leaves behind.
+ *
+ * Deliberately not `stopped`. The engine writes `stopped` on the test for
+ * every way a test leaves the traffic -- Pause, Stop, and an automatic
+ * guardrail stop all call `stopTest` -- and a plan left `stopped` is one the
+ * product flow still offers to resume. Finishing an experiment has to land
+ * somewhere that means finished, so it reads as ended: no Resume, and Archive
+ * and Delete offered instead.
+ */
+export const CLASSIC_STOPPED_PLAN_STATUS = 'completed';
+
+export function canDeleteClassicExperimentNow({
+  status = '',
+  archived = false,
+  hasLinkedTests = true,
+} = {}) {
+  // Withholding Delete only makes sense when there is something to stop first.
+  // An experiment marked running with no linked test cannot be paused, stopped
+  // or archived, so refusing Delete as well left the merchant a row with no
+  // action on it at all.
+  if (!hasLinkedTests) return true;
+  if (archived) return true;
+  return (
+    String(status || '')
+      .trim()
+      .toLowerCase() !== 'running'
+  );
 }
 
 export function getClassicExperimentResumeId(experiment) {
@@ -215,6 +342,8 @@ export function listTabAfterClassicAction(action, experiment, currentTab = 'all'
   if (key === 'pause') return 'paused';
   if (key === 'resume' || key === 'launch') return 'running';
   if (key === 'archive') return 'archived';
+  // Stopping finishes the experiment, so it leaves the live tabs entirely.
+  if (key === 'stop') return 'completed';
   if (key === 'restore') {
     const plans = (Array.isArray(experiment?.plans) ? experiment.plans : []).map(plan => ({
       ...plan,

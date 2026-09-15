@@ -11,6 +11,10 @@ import "@shopify/polaris/build/esm/styles.css";
 import { authenticate } from "../shopify.server";
 import { setShopContext } from "../services/api";
 import { internalServiceHeaders } from "../utils/expressInternalApi.server";
+import {
+  fetchSubscriptionEntitlement,
+  pushEntitlementToExpress,
+} from "../utils/appSubscriptionEntitlement.server";
 import ClassicRouteLoading from "../components/shared/ClassicRouteLoading";
 import { buildPricingPlansUrl } from "../utils/pricingPlansUrl";
 import { withCurrentEmbeddedSearch } from "../utils/shopifyEmbeddedSearch";
@@ -51,15 +55,11 @@ function syncShopIntoExpressApi({
   shop,
   accessToken,
   scope,
-  entitled,
-  planHandle,
 }: {
   apiBase: string;
   shop: string;
   accessToken: string;
   scope: string;
-  entitled: boolean;
-  planHandle: string | null;
 }) {
   const headers: Record<string, string> = internalServiceHeaders(
     shop,
@@ -81,31 +81,79 @@ function syncShopIntoExpressApi({
       err instanceof Error ? err.message : err,
     );
   });
+}
 
-  if (!entitled) return;
-
-  void fetch(`${apiBase}/api/billing/sync-entitlement`, {
-    method: "POST",
+/**
+ * What this shop is entitled to, asked of Shopify and of our own cache at the
+ * same time.
+ *
+ * Shopify is the authority and the cache is the fallback, because only one of
+ * them can be wrong in the direction that matters: our copy goes stale the
+ * moment a merchant subscribes or cancels, and it was previously the only
+ * thing consulted.
+ *
+ * The two run concurrently rather than in sequence so the worst case is the
+ * slower timeout instead of the sum of both. Neither is allowed to fail the
+ * loader: a first paint without entitlement beats a hung Admin iframe.
+ */
+async function resolveEntitlement({
+  apiBase,
+  shop,
+  admin,
+  planHandleFromQuery,
+}: {
+  apiBase: string;
+  shop: string;
+  admin: Parameters<typeof fetchSubscriptionEntitlement>[0];
+  planHandleFromQuery: string;
+}): Promise<{ entitled: boolean; planHandle: string | null; source: string }> {
+  const cachedRequest = fetch(`${apiBase}/api/billing/status`, {
     headers: internalServiceHeaders(shop),
-    body: JSON.stringify({
-      entitled: true,
-      status: "ACTIVE",
-      planHandle: planHandle || "smart_pricing",
-    }),
-    signal: AbortSignal.timeout(8000),
-  }).catch((err) => {
-    console.warn(
-      "[ripspricex] sync-entitlement error",
-      err instanceof Error ? err.message : err,
-    );
-  });
+    signal: AbortSignal.timeout(1500),
+  })
+    .then(async res =>
+      res.ok
+        ? ((await res.json()) as { entitled?: boolean; planHandle?: string | null })
+        : null,
+    )
+    .catch(() => null);
+
+  const [cached, live] = await Promise.all([
+    cachedRequest,
+    fetchSubscriptionEntitlement(admin),
+  ]);
+
+  if (live) {
+    // Only write when Shopify disagrees with our copy, so a steady state does
+    // not post on every page load.
+    if (Boolean(cached?.entitled) !== live.entitled) {
+      void pushEntitlementToExpress(shop, live).catch(err => {
+        console.warn(
+          "[ripspricex] sync-entitlement error",
+          err instanceof Error ? err.message : err,
+        );
+      });
+    }
+    return {
+      entitled: live.entitled,
+      planHandle: planHandleFromQuery || live.planHandle || null,
+      source: "shopify",
+    };
+  }
+
+  return {
+    entitled: Boolean(cached?.entitled),
+    planHandle: planHandleFromQuery || cached?.planHandle || null,
+    source: cached ? "cache" : "unknown",
+  };
 }
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const started = Date.now();
   // Do not call billing.check() here. A 401 invalidates the offline session and
-  // an App Pricing hang blocks the iframe on "Loading Priceify…".
-  const { session } = await authenticate.admin(request);
+  // an App Pricing hang blocks the iframe on "Loading Priceify…". The
+  // activeSubscriptions query in resolveEntitlement has neither failure mode.
+  const { session, admin } = await authenticate.admin(request);
 
   const shop = session.shop;
   const accessToken = session.accessToken || "";
@@ -131,36 +179,21 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   let entitled = devEntitleAll;
   let planHandle: string | null = planHandleFromQuery || (devEntitleAll ? "dev_entitle_all" : null);
+  let entitlementSource = devEntitleAll ? "dev_entitle_all" : "";
 
   if (!entitled) {
-    try {
-      const statusRes = await fetch(`${apiBase}/api/billing/status`, {
-        headers: internalServiceHeaders(shop),
-        signal: AbortSignal.timeout(1500),
-      });
-      if (statusRes.ok) {
-        const status = (await statusRes.json()) as {
-          entitled?: boolean;
-          planHandle?: string | null;
-        };
-        entitled = Boolean(status.entitled);
-        if (!planHandle && status.planHandle) {
-          planHandle = String(status.planHandle);
-        }
-      }
-    } catch {
-      // First paint without entitlement is better than a hung Admin iframe.
-    }
+    const resolved = await resolveEntitlement({
+      apiBase,
+      shop,
+      admin,
+      planHandleFromQuery,
+    });
+    entitled = resolved.entitled;
+    planHandle = resolved.planHandle;
+    entitlementSource = resolved.source;
   }
 
-  syncShopIntoExpressApi({
-    apiBase,
-    shop,
-    accessToken,
-    scope,
-    entitled,
-    planHandle,
-  });
+  syncShopIntoExpressApi({ apiBase, shop, accessToken, scope });
 
   const staffEmail = String(
     (session as { email?: string | null }).email ||
@@ -176,6 +209,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     shop,
     ms: Date.now() - started,
     entitled,
+    // Worth logging: "cache" on a shop that should be paying means the
+    // activeSubscriptions query is timing out, and the merchant is seeing a
+    // stale answer rather than a wrong one.
+    entitlementSource,
   });
 
   return {

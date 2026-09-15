@@ -158,7 +158,48 @@
       } catch (_eType) {}
       return '';
     }
+    /* A picker can actually be open on this page. Mirrors the runtime script's
+       own check, which the merchant-facing consequence here is much smaller
+       than -- this only hides prices for a moment -- but the two should not
+       disagree about what pick mode means. */
+    function inPricePickerContext() {
+      try {
+        if (window.self !== window.top) return true;
+      } catch (_eFrame) {
+        /* A cross-origin parent throws on that comparison, which only happens
+           when there is a parent. */
+        return true;
+      }
+      try {
+        if (window.opener && !window.opener.closed) return true;
+      } catch (_eOpener) {}
+      try {
+        if (window.__RIPX_FORCE_PICKER__) return true;
+        return (
+          String(window.location.pathname || '')
+            .toLowerCase()
+            .indexOf('/track/preview-document') !== -1
+        );
+      } catch (_ePath) {
+        return false;
+      }
+    }
+    function priceSurfacePickModeActive() {
+      try {
+        var pickParams = new URLSearchParams(window.location.search || '');
+        if (pickParams.get('ab_price_surface_pick') !== '1') return false;
+      } catch (_ePick) {
+        return false;
+      }
+      return inPricePickerContext();
+    }
     function previewNeedsInlinePriceGuard() {
+      /* The merchant is trying to click a price to map it. Nothing is going to
+         repaint while the picker is open, so there is nothing to hide -- and
+         this guard was making the prices invisible for over a second on the
+         first picker page load, which is the one moment they have to be
+         visible. */
+      if (priceSurfacePickModeActive()) return false;
       var testType = readPreviewTestType();
       if (testType === 'shipping' || testType === 'offer' || testType === 'checkout') {
         return false;

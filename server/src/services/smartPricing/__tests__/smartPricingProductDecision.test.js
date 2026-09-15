@@ -190,15 +190,29 @@ describe('resolveProductRolloutDecision', () => {
   });
 
   it('offers no action on a product that is not in a rollout-capable state', () => {
-    ['draft', 'archived', 'paused'].forEach(status => {
+    ['draft', 'archived'].forEach(status => {
       const decision = decide({ sig: CHALLENGER_WIN, test: { status } });
       assert.equal(decision.reason, 'not_actionable', status);
       assert.equal(decision.can_apply, false, status);
       assert.equal(decision.can_finish, false, status);
     });
-    // A merchant-stopped product is exactly how winner review is reached today.
+    // Taking a product out of the traffic is how winner review is reached, by
+    // either route. `paused` was excluded while only a lapsed subscription
+    // produced it; a merchant Pause writes it now, so excluding it would take
+    // the review away from the people who paused in order to reach it. A shop
+    // that really has lost entitlement is stopped by the entitlement check on
+    // the apply route.
     assert.equal(decide({ sig: CHALLENGER_WIN, test: { status: 'stopped' } }).can_apply, true);
     assert.equal(decide({ sig: CHALLENGER_WIN, test: { status: 'completed' } }).can_apply, true);
+    assert.equal(decide({ sig: CHALLENGER_WIN, test: { status: 'paused' } }).can_apply, true);
+  });
+
+  it('does not blame a paused product on the subscription', () => {
+    // A merchant Pause and a lapsed subscription both land on `paused`, and
+    // this used to assert the second -- telling merchants who had just pressed
+    // Pause that their plan was not active.
+    const decision = decide({ sig: CHALLENGER_WIN, test: { status: 'paused' } });
+    assert.doesNotMatch(String(decision.detail || ''), /subscription/i);
   });
 
   it('reports an already applied product as done rather than ready again', () => {

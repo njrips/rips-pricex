@@ -77,19 +77,26 @@ function asObject(raw) {
 /**
  * Statuses where a rollout decision means anything.
  *
- * `stopped` counts because pausing a product is how a merchant reaches the
- * existing winner review. A draft was never launched, an archived test is gone,
- * and `paused` here means the shop lost entitlement rather than a merchant
- * choosing to stop — none of those should offer an apply button.
+ * `stopped` and `paused` both count, because taking a product out of the
+ * traffic is how a merchant reaches the existing winner review. `paused` used
+ * to be excluded on the grounds that only a lapsed subscription produced it;
+ * a merchant Pause writes it now, and excluding it would take the review away
+ * from the very people who paused in order to reach it. A shop that has
+ * actually lost entitlement is stopped by the entitlement check on the apply
+ * route, which is where that belongs. A draft was never launched and an
+ * archived test is gone, so neither offers an apply button.
  */
-const ACTIONABLE_STATUSES = new Set(['running', 'active', 'stopped', 'completed']);
+const ACTIONABLE_STATUSES = new Set(['running', 'active', 'stopped', 'completed', 'paused']);
 
 function describeStatus(status) {
   const key = String(status || '').toLowerCase();
   if (key === 'draft' || key === 'queued') return 'This product has not launched yet.';
   if (key === 'archived') return 'This product test was archived.';
   if (key === 'paused') {
-    return 'This product is paused because the store subscription is not active. Reactivate the plan to continue.';
+    // Deliberately does not name a cause. A merchant Pause and a lapsed
+    // subscription both land here, and this used to assert the second, telling
+    // merchants who had just pressed Pause that their plan was not active.
+    return 'This product test is paused. Resume it to carry on collecting results.';
   }
   return `This product test is ${key || 'not running'}, so there is nothing to roll out.`;
 }

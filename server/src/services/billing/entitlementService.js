@@ -73,10 +73,17 @@ async function markShopUninstalled(shopDomain) {
      WHERE shop_domain = $1`,
     [shopDomain]
   );
-  // Cancel policy: pause running price tests
+  // Cancel policy: take every running test off the traffic.
+  //
+  // `offer` is included. It was left out here while the background sweep that
+  // does the same job covered it, so an uninstalled shop's offer tests kept
+  // running on the storefront until that sweep next fired -- ten minutes by
+  // default. An uninstalled app has no business pricing anyone for ten
+  // seconds, let alone ten minutes, and the two lists have to agree or one of
+  // them is wrong.
   await query(
     `UPDATE tests SET status = 'paused', updated_at = NOW(), stopped_at = COALESCE(stopped_at, NOW())
-     WHERE shop_domain = $1 AND type IN ('price','pricing') AND status = 'running'`,
+     WHERE shop_domain = $1 AND type IN ('price','pricing','offer') AND status = 'running'`,
     [shopDomain]
   ).catch(() => {});
   try {

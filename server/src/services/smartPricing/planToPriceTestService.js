@@ -348,6 +348,11 @@ function buildPriceTestPayloadFromPlan(plan = {}, options = {}) {
     metadata: {
       smart_pricing_plan_id: plan.id || null,
       smart_pricing_source: 'smart_pricing',
+      // Which experiment this test belongs to. A classic experiment launches
+      // one test per variant, so without this the enrollment guard reads an
+      // experiment's own first test as another test holding the product and
+      // refuses the rest of the batch.
+      experiment_id: plan.experiment_id || plan.metadata?.experiment_id || null,
       scenario_preset: plan.scenario_preset || 'recommended',
       baseline_ppv: plan.statistical_design?.baseline_ppv ?? plan.baseline_ppv ?? null,
       current_price: plan.current_price ?? null,

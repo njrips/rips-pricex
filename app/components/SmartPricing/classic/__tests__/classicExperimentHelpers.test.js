@@ -8,9 +8,12 @@ import {
   getPlanProductTitle,
   groupPlansIntoExperiments,
   rollupExperimentStatus,
+  sortExperimentRowsByRecency,
   stampClassicExperimentMetadata,
   upsertExperimentPlansInInbox,
+  wizardDraftAsExperimentRow,
 } from '../classicExperimentHelpers';
+import { filterClassicExperimentsByTab } from '../classicExperimentListActions';
 
 describe('classicExperimentHelpers', () => {
   it('formats experiment type labels for list sublines', () => {
@@ -199,5 +202,131 @@ describe('classicExperimentHelpers', () => {
     const next = [{ id: 'new', metadata: { experiment_id: 'exp-1' } }];
     const merged = upsertExperimentPlansInInbox(existing, next, 'exp-1');
     expect(merged.map(p => p.id)).toEqual(['new', 'keep']);
+  });
+});
+
+/**
+ * An unfinished draft has no per-SKU plans, so it cannot be grouped out of the
+ * inbox like every other row and needs its own way into the table.
+ */
+describe('wizardDraftAsExperimentRow', () => {
+  it('reads as a draft experiment named after the wizard', () => {
+    const row = wizardDraftAsExperimentRow({
+      experiment_id: 'exp_1',
+      name: 'Spring pricing',
+      experimentType: 'offer_test',
+      hypothesis: 'Bundles lift AOV',
+      saved_at: '2026-02-02T00:00:00.000Z',
+    });
+
+    expect(row).toMatchObject({
+      id: 'exp_1',
+      title: 'Spring pricing',
+      status: 'draft',
+      typeLabel: 'OFFER',
+      hypothesis: 'Bundles lift AOV',
+      archived: false,
+    });
+  });
+
+  it('holds no plans, which is what marks it out downstream', () => {
+    // The row actions read plans to decide what to offer; an empty list is
+    // what gets a draft Continue setup and Delete draft and nothing else.
+    const row = wizardDraftAsExperimentRow({ experiment_id: 'exp_1', name: 'Spring pricing' });
+
+    expect(row.plans).toEqual([]);
+    expect(row.representative).toBeNull();
+  });
+
+  it('reports how many products were picked before the merchant stopped', () => {
+    const row = wizardDraftAsExperimentRow({
+      experiment_id: 'exp_1',
+      selectedIds: ['v1', 'v2', 'v3'],
+    });
+
+    expect(row.productCount).toBe(3);
+  });
+
+  it('shows no results, because a draft has never run', () => {
+    const row = wizardDraftAsExperimentRow({ experiment_id: 'exp_1' });
+
+    expect(row.visitors).toBeNull();
+    expect(row.lift).toBeNull();
+    expect(row.confidence).toBeNull();
+  });
+
+  it('names the metric it would be judged on, defaulting like a launch does', () => {
+    expect(wizardDraftAsExperimentRow({ experiment_id: 'exp_1' }).primaryMetric).toBe(
+      'Revenue per visitor'
+    );
+    expect(
+      wizardDraftAsExperimentRow({
+        experiment_id: 'exp_1',
+        audience: { primaryMetric: 'paid_conversion_rate' },
+      }).primaryMetric
+    ).toBe('paid_conversion_rate');
+  });
+
+  it('falls back to a placeholder title rather than an empty row', () => {
+    expect(wizardDraftAsExperimentRow({ experiment_id: 'exp_1', name: '   ' }).title).toBe(
+      'Untitled experiment'
+    );
+  });
+
+  it('refuses a draft with no id, which nothing could resume', () => {
+    expect(wizardDraftAsExperimentRow({ name: 'Spring pricing' })).toBeNull();
+    expect(wizardDraftAsExperimentRow(null)).toBeNull();
+  });
+});
+
+describe('sortExperimentRowsByRecency', () => {
+  it('interleaves draft rows and plan-derived rows by when each was touched', () => {
+    // Drafts carry saved_at and grouped experiments carry their plan's
+    // updated_at, so ordering by either alone would put one group in a block.
+    const rows = [
+      { id: 'plan_old', representative: { updated_at: '2026-01-01T00:00:00.000Z' } },
+      { id: 'draft_new', updatedAt: '2026-03-03T00:00:00.000Z' },
+      { id: 'plan_new', representative: { updated_at: '2026-02-02T00:00:00.000Z' } },
+      { id: 'draft_old', updatedAt: '2025-12-12T00:00:00.000Z' },
+    ];
+
+    expect(sortExperimentRowsByRecency(rows).map(r => r.id)).toEqual([
+      'draft_new',
+      'plan_new',
+      'plan_old',
+      'draft_old',
+    ]);
+  });
+
+  it('falls back to created_at for a plan never updated since', () => {
+    const rows = [
+      { id: 'a', representative: { created_at: '2026-01-01T00:00:00.000Z' } },
+      { id: 'b', representative: { created_at: '2026-02-02T00:00:00.000Z' } },
+    ];
+
+    expect(sortExperimentRowsByRecency(rows).map(r => r.id)).toEqual(['b', 'a']);
+  });
+});
+
+describe('draft rows in the list tabs', () => {
+  const draftRow = wizardDraftAsExperimentRow({
+    experiment_id: 'exp_draft',
+    name: 'Spring pricing',
+  });
+
+  it('lands under Drafts, which used to claim there were none', () => {
+    expect(filterClassicExperimentsByTab([draftRow], 'draft').map(r => r.id)).toEqual([
+      'exp_draft',
+    ]);
+  });
+
+  it('shows on All alongside real experiments', () => {
+    expect(filterClassicExperimentsByTab([draftRow], 'all').map(r => r.id)).toEqual(['exp_draft']);
+  });
+
+  it('stays out of the tabs for experiments that have run', () => {
+    expect(filterClassicExperimentsByTab([draftRow], 'running')).toEqual([]);
+    expect(filterClassicExperimentsByTab([draftRow], 'completed')).toEqual([]);
+    expect(filterClassicExperimentsByTab([draftRow], 'archived')).toEqual([]);
   });
 });

@@ -531,6 +531,11 @@ class TestModel {
       updates.push('started_at = COALESCE(started_at, NOW())');
     } else if (status === 'stopped' || status === 'completed') {
       updates.push('stopped_at = NOW()');
+    } else if (status === 'paused') {
+      // Stamped, but not overwritten on a second pause: anything measuring how
+      // long the test ran reads a null `stopped_at` as "still running", and a
+      // paused test is not. Matches how the billing sweep pauses a test.
+      updates.push('stopped_at = COALESCE(stopped_at, NOW())');
     }
 
     const sql = `
@@ -730,21 +735,6 @@ class TestModel {
     return result.rowCount > 0;
   }
 
-  /**
-   * Get test by ID only (for admin; no shop filter)
-   */
-  async getTestByIdForAdmin(testId) {
-    const sql = 'SELECT * FROM tests WHERE id = $1';
-    const result = await query(sql, [testId]);
-    if (result.rows.length === 0) {
-      return null;
-    }
-    const test = result.rows[0];
-    test.goal = safeParseJSON(test.goal, {}, 'goal', testId);
-    test.variants = normalizeVariantCode(safeParseJSON(test.variants, [], 'variants', testId));
-    test.segments = safeParseJSON(test.segments, {}, 'segments', testId);
-    return test;
-  }
 }
 
 // Export functions for convenience
@@ -753,7 +743,6 @@ const model = new TestModel();
 module.exports = {
   createTest: data => model.createTest(data),
   getTestById: (id, shop) => model.getTestById(id, shop),
-  getTestByIdForAdmin: id => model.getTestByIdForAdmin(id),
   getTestsByIds: (ids, shop) => model.getTestsByIds(ids, shop),
   getTestsByShop: (shop, status) => model.getTestsByShop(shop, status),
   getActiveTestsForStorefront: shop => model.getActiveTestsForStorefront(shop),

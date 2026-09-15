@@ -3,12 +3,26 @@ import { isOfferExperimentType } from './offerSelection';
 const LETTERS = 'ABCDEFGH';
 
 /**
- * Control opens holding everything.
+ * Floor for experiment traffic allocation.
  *
- * A pre-filled 50/50 is a decision the merchant never made but would ship with,
- * and the safe reading of "I have not set this yet" is that no shopper sees a
- * test price. Starting at 100/0 makes handing traffic to a challenger a
- * deliberate act; Split equally puts the even split back in one click.
+ * Lives here rather than in either panel because both the create wizard and the
+ * edit modal render this slider, and the floor has to be the same number in the
+ * `min` attribute and in the fill maths -- they disagreed once already, which is
+ * what painted the track past the thumb.
+ */
+export const MIN_ALLOCATION_PERCENT = 5;
+
+/**
+ * A new experiment opens on an even split between control and the first
+ * variation.
+ *
+ * This used to open at 100/0 on the reasoning that an unmade decision should
+ * send nobody to a test price. In practice the step opened blocked -- 0% on
+ * Variation A is a starved arm, so Continue was disabled with a hint about a
+ * split the merchant had not touched yet -- and the even split is what almost
+ * every test wants anyway. Only this first pair is filled in: adding a third
+ * variation still leaves it on 0 for the merchant to place, and nothing here
+ * rebalances a split once it has been edited.
  */
 export function createDefaultVariations() {
   return [
@@ -18,7 +32,7 @@ export function createDefaultVariations() {
       role: 'Control',
       name: 'Control',
       description: 'Current price',
-      traffic: 100,
+      traffic: 50,
     },
     {
       // Letters are reserved for challengers; Control uses a baseline symbol in the UI.
@@ -27,7 +41,7 @@ export function createDefaultVariations() {
       role: 'Variation A',
       name: 'Variation A',
       description: '',
-      traffic: 0,
+      traffic: 50,
     },
   ];
 }

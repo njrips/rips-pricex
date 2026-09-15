@@ -23,24 +23,26 @@ export default function SettingsInfoLink({ hash, label }) {
 
   return (
     <>
-      <TooltipWrapper content={section?.summary || null}>
-        <button
-          type="button"
-          className={styles.infoIconLink}
-          aria-label={`${name} guide`}
-          onClick={event => {
-            if (typeof event.stopImmediatePropagation === 'function') {
-              event.stopImmediatePropagation();
-            } else {
-              event.stopPropagation();
-            }
-            event.preventDefault();
-            setGuideOpen(true);
-          }}
-        >
-          <IconInfo size={16} />
-        </button>
-      </TooltipWrapper>
+      <span className={styles.infoIconWrap}>
+        <TooltipWrapper content={section?.summary || section?.title || null}>
+          <button
+            type="button"
+            className={styles.infoIconLink}
+            aria-label={`${name} guide`}
+            onClick={event => {
+              if (typeof event.stopImmediatePropagation === 'function') {
+                event.stopImmediatePropagation();
+              } else {
+                event.stopPropagation();
+              }
+              event.preventDefault();
+              setGuideOpen(true);
+            }}
+          >
+            <IconInfo size={16} />
+          </button>
+        </TooltipWrapper>
+      </span>
       {guideOpen ? (
         <Modal
           open

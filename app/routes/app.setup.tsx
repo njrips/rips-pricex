@@ -22,6 +22,28 @@ import ClassicAdminShell from '../components/SmartPricing/classic/ClassicAdminSh
 import styles from '../components/SmartPricing/classic/SmartPricingClassic.module.css';
 
 type EmbedView = 'checking' | 'enabled' | 'disabled' | 'unknown';
+type SurfaceView = 'checking' | 'mapped' | 'unmapped' | 'unknown';
+
+function surfaceBadgeTone(view: SurfaceView) {
+  if (view === 'mapped') return 'success' as const;
+  if (view === 'unmapped') return 'warning' as const;
+  // Checking and a failed lookup are both "no verdict yet", and a neutral badge
+  // is the only one that does not read as one.
+  return undefined;
+}
+
+function surfaceBadgeLabel(view: SurfaceView, configured: number) {
+  if (view === 'checking') return 'Checking…';
+  if (view === 'unknown') return 'Could not check';
+  // Not mapped has exactly one cause here — no enabled product page selector —
+  // so the badge names it. It used to read "N mapped · needs verify", which
+  // described a verification step that does not exist and left the merchant
+  // looking for a button to press. How many rows there are is not the question:
+  // one product page row is a complete mapping.
+  if (view === 'unmapped') return 'Product page not mapped';
+  if (configured > 0) return `${configured} mapping${configured === 1 ? '' : 's'}`;
+  return 'Ready';
+}
 
 function embedBadgeTone(view: EmbedView) {
   if (view === 'enabled') return 'success' as const;
@@ -48,13 +70,15 @@ function embedBadgeLabel(view: EmbedView, hasDeepLink: boolean) {
  */
 function StepTitle({ label, tip }: { label: string; tip: string }) {
   return (
-    <span className={styles.adminRowHeadMain}>
+    <span className={`${styles.titleWithInfo} ${styles.adminRowHeadMain}`}>
       <p className={styles.adminRowTitle}>{label}</p>
-      <TooltipWrapper content={tip}>
-        <button type="button" className={styles.infoIconLink} aria-label={`About ${label}`}>
-          <Icon source={InfoIcon} tone="subdued" />
-        </button>
-      </TooltipWrapper>
+      <span className={styles.infoIconWrap}>
+        <TooltipWrapper content={tip}>
+          <button type="button" className={styles.infoIconLink} aria-label={`About ${label}`}>
+            <Icon source={InfoIcon} tone="subdued" />
+          </button>
+        </TooltipWrapper>
+      </span>
     </span>
   );
 }
@@ -64,7 +88,7 @@ function idleReadiness(loading: boolean) {
   return {
     launchSummary: describeSmartPricingLaunchReadiness(null),
     hints: [] as string[],
-    surface: { ready: false, configured: 0, message: '' },
+    surface: { known: false, ready: false, configured: 0, message: '' },
     embedStatus: 'unknown' as 'enabled' | 'disabled' | 'unknown',
     embedThemeName: null as string | null,
     busy: loading,
@@ -98,7 +122,7 @@ async function loadReadiness(target: ApiTarget, { refresh = false } = {}) {
         detail: 'Could not load checkout readiness.',
       },
       hints: ['Could not load checkout readiness'],
-      surface: { ready: false, configured: 0, message: '' },
+      surface: { known: false, ready: false, configured: 0, message: '' },
       embedStatus: 'unknown' as 'enabled' | 'disabled' | 'unknown',
       embedThemeName: null as string | null,
       busy: false,
@@ -116,16 +140,17 @@ export default function SetupPage() {
   // A new shop reads a fresh "checking" state rather than showing the previous
   // shop's hints until the request lands.
   const [readiness, setReadiness] = useKeyedState(target, () => idleReadiness(Boolean(shop)));
-  const { open: openEmbed, embedUrl, themeName } = useThemeEmbedRedirect(ctx);
+  const {
+    open: openEmbed,
+    openInNewTab: openEmbedInNewTab,
+    embedUrl,
+    urls: embedUrls,
+    themeName,
+  } = useThemeEmbedRedirect(ctx);
+  const embedHttpsUrl = embedUrls?.https || '';
   const cart = useCartTransformStatus(shop);
   const discount = useCheckoutDiscountStatus(shop);
-  const {
-    hints,
-    surface,
-    embedStatus,
-    launchSummary,
-    busy: readinessBusy,
-  } = readiness;
+  const { hints, surface, embedStatus, launchSummary, busy: readinessBusy } = readiness;
   // Prefer the theme the status was actually read from; fall back to the theme
   // the deep link targets so the copy is not blank before readiness lands.
   const embedThemeName = readiness.embedThemeName || themeName;
@@ -133,11 +158,28 @@ export default function SetupPage() {
   // the merchant should act on.
   const embedView: EmbedView =
     readinessBusy && embedStatus === 'unknown' ? 'checking' : embedStatus;
+  // Same rule for the selectors. Both conditions matter: while the first
+  // request is out there is no answer to show, and if it failed there still
+  // isn't one -- neither is grounds for telling a merchant whose theme is
+  // mapped that it is not. A re-check keeps the answer it already has on
+  // screen rather than blanking back to "Checking…".
+  const surfaceView: SurfaceView = !surface.known
+    ? readinessBusy
+      ? 'checking'
+      : 'unknown'
+    : surface.ready
+      ? 'mapped'
+      : 'unmapped';
 
+  // Arriving here reads the theme afresh rather than the server's five-minute
+  // cache. Every other page can afford a slightly stale answer; this one exists
+  // to report the current state, and a merchant who just switched the embed off
+  // in the theme editor and came back to check would have been told it was
+  // still on -- with no way to tell that from the truth.
   useEffect(() => {
     if (!shop) return undefined;
     let cancelled = false;
-    loadReadiness(target).then(next => {
+    loadReadiness(target, { refresh: true }).then(next => {
       if (!cancelled) setReadiness(next);
     });
     return () => {
@@ -145,13 +187,48 @@ export default function SetupPage() {
     };
   }, [shop, target, setReadiness]);
 
-  // Every caller of this is the merchant asking to re-check, so it always
-  // bypasses the cache. Only the initial page load reads the cached answer.
+  // Every read on this page bypasses the cache, this one included: a stale
+  // verdict here is worse than a slower one.
   const refreshReadiness = useCallback(async () => {
     if (!shop) return;
     setReadiness(prev => ({ ...prev, busy: true }));
     setReadiness(await loadReadiness(target, { refresh: true }));
   }, [shop, target, setReadiness]);
+
+  // Set when the merchant is sent to the theme editor, so returning to this tab
+  // re-checks rather than showing the answer from before they left.
+  const awaitingEmbedChange = useRef(false);
+
+  /**
+   * Send the merchant to the theme editor in a second tab, keeping Setup open
+   * behind it. Falls back to the same-tab App Bridge route when a new tab could
+   * not be opened, so a blocked popup still gets them to the editor.
+   */
+  const goToThemeEditor = useCallback(() => {
+    awaitingEmbedChange.current = true;
+    if (openEmbedInNewTab()) return;
+    void openEmbed();
+  }, [openEmbed, openEmbedInNewTab]);
+
+  // Enabling the embed happens in the other tab, so this page never unmounts
+  // and never re-runs the check on its own. Coming back to it is the merchant
+  // saying "I have done it" -- that is the moment to go and look again. Gated
+  // on having actually sent them there, so idly switching tabs is not a request
+  // to re-read the theme.
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return;
+      if (!awaitingEmbedChange.current) return;
+      awaitingEmbedChange.current = false;
+      void refreshReadiness();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', onVisible);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', onVisible);
+    };
+  }, [refreshReadiness]);
 
   // The manual snippet is a fallback almost nobody needs, so it is fetched the
   // first time the disclosure is opened rather than on every Setup visit.
@@ -183,16 +260,8 @@ export default function SetupPage() {
     }
   }, [shop, target, setInstall]);
 
-  const functionsChecking = cart.checking || discount.checking;
   const functionsReady = cart.installed && discount.installed;
   const functionsBusy = cart.busy || discount.busy || readinessBusy;
-  const functionsBadge = functionsChecking
-    ? { tone: undefined, label: 'Checking…' }
-    : functionsReady
-      ? { tone: 'success' as const, label: 'Installed' }
-      : cart.installed || discount.installed
-        ? { tone: 'warning' as const, label: 'Partly installed' }
-        : { tone: 'warning' as const, label: 'Needs install' };
 
   /**
    * One button for both functions. Ensure is idempotent — each call returns the
@@ -223,9 +292,11 @@ export default function SetupPage() {
   return (
     <ClassicAdminShell
       titleBar="Setup"
-      meta="Store readiness"
-      title="Set up your shop for price and offer tests"
-      subtitle="Four checks stand between this shop and its first test. Hover any step for what it does."
+      // "Store readiness" sat above a heading that said the same thing in more
+      // words, on a page already labelled Setup in the nav. Three names for one
+      // page is two too many.
+      title="Connect Priceify to your store"
+      subtitle="Three checks stand between this shop and its first test. Hover any step for what it does."
       footerPrimary={
         overallReady
           ? {
@@ -248,11 +319,11 @@ export default function SetupPage() {
         embedUrl && embedView !== 'enabled'
           ? {
               label: 'Enable theme app embed',
-              href: embedUrl,
-              target: '_top',
-              onClick: () => {
-                void openEmbed();
-              },
+              // The https form, not the shopify:// one, so the link says where
+              // it goes and opens the editor beside the app rather than over it.
+              href: embedHttpsUrl || embedUrl,
+              target: '_blank',
+              onClick: goToThemeEditor,
             }
           : !ctx.entitled
             ? {
@@ -308,8 +379,8 @@ export default function SetupPage() {
                     {' '}
                     in your live theme <strong>{embedThemeName}</strong>
                   </>
-                ) : null}
-                {' '}— nothing to do here.
+                ) : null}{' '}
+                — nothing to do here.
               </p>
             </Banner>
           ) : (
@@ -317,16 +388,11 @@ export default function SetupPage() {
               <p className={styles.adminRowBody}>
                 {embedView === 'unknown'
                   ? 'We could not read your theme settings — confirm it in the theme editor.'
-                  : 'Open the theme editor, enable Priceify, and Save.'}
+                  : 'The theme editor opens in a new tab. Enable Priceify, Save, then come back — this page re-checks itself.'}
               </p>
               <div className={styles.adminRowActions}>
                 {embedUrl ? (
-                  <Button
-                    variant="primary"
-                    onClick={() => {
-                      void openEmbed();
-                    }}
-                  >
+                  <Button variant="primary" onClick={goToThemeEditor}>
                     Enable theme app embed
                   </Button>
                 ) : (
@@ -344,6 +410,41 @@ export default function SetupPage() {
               </div>
             </>
           )}
+
+          {/* The fallback for this step, so it folds away inside it. On its own
+              at the foot of the page it read as a fourth thing to do, and a
+              merchant whose theme cannot load the embed had to scroll past two
+              unrelated steps to find the one answer to their problem. */}
+          <details
+            className={styles.advanced}
+            onToggle={event => {
+              if ((event.currentTarget as HTMLDetailsElement).open) void loadInstallSnippet();
+            }}
+          >
+            <summary className={styles.advancedSummary}>
+              Alternative install: add the script to your theme by hand
+            </summary>
+            <div className={styles.advancedBody}>
+              <p className={styles.adminRowBody}>
+                For a theme that cannot load the embed. Paste this before <code>&lt;/head&gt;</code>{' '}
+                in <code>theme.liquid</code>; leaving the embed on as well is safe.
+              </p>
+              {install.scriptUrl ? (
+                <p className={styles.help}>
+                  Script URL: <code>{install.scriptUrl}</code>
+                </p>
+              ) : null}
+              {install.snippet ? (
+                <pre className={styles.adminCodeBlock}>{install.snippet}</pre>
+              ) : (
+                <p className={styles.help}>
+                  {install.error
+                    ? 'Could not load the snippet for this shop. Close and re-open this section to try again.'
+                    : 'Loading the snippet for this shop…'}
+                </p>
+              )}
+            </div>
+          </details>
         </div>
 
         {/* Cart transform and the checkout discount were two steps asking the
@@ -356,7 +457,9 @@ export default function SetupPage() {
               label="2. Checkout functions"
               tip="Two Shopify functions, both installed for you. The cart transform is what charges a test price at checkout for price tests. The automatic discount is what applies money off for offer tests. Checking installs whichever is missing and leaves the other alone."
             />
-            <Badge tone={functionsBadge.tone}>{functionsBadge.label}</Badge>
+            {/* No badge on the heading: the two rows below already carry a
+                verdict each, and a third one summarising them said "Partly
+                installed" next to a row that says exactly which part. */}
           </div>
           <div className={styles.adminStatusLines}>
             {/* Each function's detailed status is its own row's hover text, so
@@ -365,24 +468,21 @@ export default function SetupPage() {
               <TooltipWrapper content={cart.status}>
                 <span className={styles.adminStatusLineLabel}>Cart transform (price tests)</span>
               </TooltipWrapper>
+              {/* "Installed" and "Attached" described how each function got
+                  there, which left a merchant comparing two different words for
+                  the same good news. Both now report whether they are on. */}
               <Badge tone={cart.checking ? undefined : cart.installed ? 'success' : 'warning'}>
-                {cart.checking ? 'Checking…' : cart.installed ? 'Installed' : 'Needs install'}
+                {cart.checking ? 'Checking…' : cart.installed ? 'Enabled' : 'Needs install'}
               </Badge>
             </div>
             <div className={styles.adminStatusLine}>
               <TooltipWrapper content={discount.status}>
-                <span className={styles.adminStatusLineLabel}>
-                  Checkout discount (offer tests)
-                </span>
+                <span className={styles.adminStatusLineLabel}>Checkout discount (offer tests)</span>
               </TooltipWrapper>
               <Badge
                 tone={discount.checking ? undefined : discount.installed ? 'success' : 'warning'}
               >
-                {discount.checking
-                  ? 'Checking…'
-                  : discount.installed
-                    ? 'Attached'
-                    : 'Needs install'}
+                {discount.checking ? 'Checking…' : discount.installed ? 'Enabled' : 'Needs install'}
               </Badge>
             </div>
           </div>
@@ -413,19 +513,11 @@ export default function SetupPage() {
               label="3. Theme price selectors"
               tip="Where the storefront script finds a price to repaint, on the product page and on listings. Bucketed visitors only see test prices on surfaces mapped here. Offer tests apply at checkout and do not need these."
             />
-            <Badge tone={surface.ready ? 'success' : 'warning'}>
-              {surface.ready
-                ? surface.configured > 0
-                  ? `${surface.configured} mapping${surface.configured === 1 ? '' : 's'}`
-                  : 'Ready'
-                : surface.configured > 0
-                  ? `${surface.configured} mapped · needs verify`
-                  : 'Not mapped'}
+            <Badge tone={surfaceBadgeTone(surfaceView)}>
+              {surfaceBadgeLabel(surfaceView, surface.configured)}
             </Badge>
           </div>
-          {surface.message ? (
-            <p className={styles.adminRowBody}>{surface.message}</p>
-          ) : null}
+          {surface.message ? <p className={styles.adminRowBody}>{surface.message}</p> : null}
           <div className={styles.adminRowActions}>
             <Button
               variant="primary"
@@ -438,60 +530,7 @@ export default function SetupPage() {
             </Button>
           </div>
         </div>
-
-        <div className={styles.adminRow}>
-          <div className={styles.adminRowHead}>
-            <StepTitle
-              label="4. Plan entitlement"
-              tip="Create and Launch unlock once this shop has an active Smart Pricing plan. Subscriptions are billed by Shopify and managed under Settings → Plan."
-            />
-            <Badge tone={ctx.entitled ? 'success' : 'warning'}>
-              {ctx.entitled ? 'Entitled' : 'Locked'}
-            </Badge>
-          </div>
-          <div className={styles.adminRowActions}>
-            <Button variant="primary" onClick={() => navigate('/app/settings?tab=plan')}>
-              {ctx.entitled ? 'Manage plan' : 'Open Plan'}
-            </Button>
-          </div>
-        </div>
       </div>
-
-      {/* The theme app embed is the supported install and covers every shop, so
-          the manual tag stays folded away. It is here rather than in Settings
-          because it is the fallback for step 1 failing, and a merchant looking
-          for it is already on this page. */}
-      <details
-        className={styles.advanced}
-        style={{ marginTop: 20 }}
-        onToggle={event => {
-          if ((event.currentTarget as HTMLDetailsElement).open) void loadInstallSnippet();
-        }}
-      >
-        <summary className={styles.advancedSummary}>
-          Alternative install: add the script to your theme by hand
-        </summary>
-        <div className={styles.advancedBody}>
-          <p className={styles.adminRowBody}>
-            For a theme that cannot load the embed. Paste this before <code>&lt;/head&gt;</code> in{' '}
-            <code>theme.liquid</code>; leaving the embed on as well is safe.
-          </p>
-          {install.scriptUrl ? (
-            <p className={styles.help}>
-              Script URL: <code>{install.scriptUrl}</code>
-            </p>
-          ) : null}
-          {install.snippet ? (
-            <pre className={styles.adminCodeBlock}>{install.snippet}</pre>
-          ) : (
-            <p className={styles.help}>
-              {install.error
-                ? 'Could not load the snippet for this shop. Close and re-open this section to try again.'
-                : 'Loading the snippet for this shop…'}
-            </p>
-          )}
-        </div>
-      </details>
 
       {hints.length ? (
         <div style={{ marginTop: 20 }}>

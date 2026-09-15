@@ -1,9 +1,13 @@
 // @vitest-environment jsdom
 /**
- * A product another price test is pricing is not offered here at all -- two
- * tests over one product is two answers to what it costs. The catalog used to
- * drop them in silence, which left a merchant scrolling for a product that was
+ * A product another test is pricing is not offered here at all -- two tests
+ * over one product is two answers to what it costs. The catalog used to drop
+ * them in silence, which left a merchant scrolling for a product that was
  * never going to appear.
+ *
+ * "Another test" rather than "another price test": an offer test holds its
+ * product just as hard, because its discount lands on top of whatever price
+ * the other test is setting.
  *
  * Only the count is on the step. The rest -- which tests hold them and what
  * frees them -- is a tooltip, because a per-product test name is a whole
@@ -103,10 +107,10 @@ describe('products held by another test', () => {
     expect(container.textContent).toContain('4 products not shown');
     // The long part is not printed on the step.
     expect(container.textContent).not.toContain('Summer pricing');
-    expect(container.textContent).not.toContain('in another price test');
+    expect(container.textContent).not.toContain('in another test');
 
     const hint = withheldHint();
-    expect(hint.getAttribute('aria-label')).toContain('in another price test');
+    expect(hint.getAttribute('aria-label')).toContain('in another test');
     expect(hint.getAttribute('aria-label')).toContain('Summer pricing');
   });
 
@@ -125,7 +129,7 @@ describe('products held by another test', () => {
         withheldHint().dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
         await vi.advanceTimersByTimeAsync(1000);
       });
-      expect(document.body.textContent).toContain('in another price test');
+      expect(document.body.textContent).toContain('in another test');
       expect(document.body.textContent).toContain('Summer pricing');
     } finally {
       vi.useRealTimers();
@@ -138,7 +142,7 @@ describe('products held by another test', () => {
     });
 
     expect(container.textContent).toContain('1 product not shown');
-    expect(withheldHint().getAttribute('aria-label')).toContain('it is in another price test');
+    expect(withheldHint().getAttribute('aria-label')).toContain('it is in another test');
   });
 
   it('says what frees them up', async () => {

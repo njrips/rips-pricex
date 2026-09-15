@@ -9,18 +9,23 @@ import { readInboxPlans, setInboxPersistHandler, writeInboxPlans } from '../smar
 import { filterPlansByQuery } from '../smartPricingUiHelpers';
 import { hydrateInboxFromServer, schedulePersistInboxPlans } from '../smartPricingInboxPersistence';
 import {
-  clearClassicWizardDraft,
   formatClassicStatusLabel,
   getPlanExperimentId,
   getPlanProductTitle,
   groupPlansIntoExperiments,
-  readClassicWizardDrafts,
+  sortExperimentRowsByRecency,
+  wizardDraftAsExperimentRow,
 } from './classicExperimentHelpers';
-import { selectUnlistedWizardDrafts } from './classicWizardAutosave';
-import ClassicUnfinishedDrafts from './ClassicUnfinishedDrafts';
+import { selectUnlistedWizardDrafts, wizardDraftStepLabel } from './classicWizardAutosave';
+import { loadWizardDrafts } from './classicWizardDraftSync';
 import { formatOfferRule, isOfferExperimentType } from './offerSelection';
 import ClassicExperimentRowActions from './ClassicExperimentRowActions';
-import { filterClassicExperimentsByTab, listTabAfterClassicAction } from './classicExperimentListActions';
+import {
+  buildClassicWizardResumePath,
+  filterClassicExperimentsByTab,
+  listTabAfterClassicAction,
+} from './classicExperimentListActions';
+import { classicCreateStepId } from './classicCreateSteps';
 import { useSmartPricingCheckoutReadiness } from '../../../hooks/useSmartPricingCheckoutReadiness';
 import {
   ButtonIconPlus,
@@ -61,7 +66,14 @@ function statusVisual(experiment) {
   return { tone: undefined, text: 'Draft' };
 }
 
-function emptyFilterCopy(filter) {
+function emptyFilterCopy(filter, { reachedDraftServer = true } = {}) {
+  // Drafts are the one tab whose contents can be somewhere this page failed to
+  // reach. On a device with no local copy -- the second device, which is the
+  // whole point of saving them server-side -- a network blip would otherwise
+  // render as a confident "you have none" over work that is simply not loaded.
+  if (filter === 'draft' && !reachedDraftServer) {
+    return "Couldn't reach the server. Showing drafts saved in this browser.";
+  }
   if (filter === 'running') return 'No running experiments.';
   if (filter === 'draft') return 'No draft experiments.';
   if (filter === 'paused') return 'No paused experiments.';
@@ -89,14 +101,36 @@ async function loadExperimentPlans(shopDomain, hydrateOptions) {
   }
 }
 
+/**
+ * Plans and unfinished drafts, read together.
+ *
+ * The two have to be taken in the same pass: a draft is only shown when the
+ * inbox has no plans under its experiment id, so reading them at different
+ * moments can show an experiment twice, once as a draft and once as itself.
+ */
+async function loadExperimentsAndDrafts(shopDomain, hydrateOptions) {
+  const [plansResult, draftsResult] = await Promise.all([
+    loadExperimentPlans(shopDomain, hydrateOptions),
+    loadWizardDrafts(shopDomain),
+  ]);
+  return {
+    ...plansResult,
+    drafts: draftsResult.drafts,
+    reachedDraftServer: draftsResult.reachedServer,
+  };
+}
+
 function formatMetricLabel(metric) {
   const raw = String(metric || '').trim();
   // An unspecified goal launches on revenue per visitor, so that is what a
   // blank metric has to say here.
   if (!raw) return 'Revenue per visitor';
-  if (raw === 'paid_conversion_rate') return 'Paid conversion rate';
-  if (raw === 'profit_per_visitor') return 'Profit per visitor';
-  return raw.replace(/_/g, ' ');
+  // Sentence case rather than a lookup of the metrics we happen to know: an
+  // unfinished draft carries whatever key the wizard stored, and the ones not
+  // on that list used to print lowercase, reading as a raw database value in a
+  // column where every other row is prose.
+  const words = raw.replace(/_/g, ' ');
+  return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
 export default function ClassicExperimentsList() {
@@ -110,6 +144,7 @@ export default function ClassicExperimentsList() {
   );
   const [plans, setPlans] = useState([]);
   const [localDrafts, setLocalDrafts] = useState([]);
+  const [reachedDraftServer, setReachedDraftServer] = useState(true);
   const [search, setSearch] = useState('');
   // Starts busy for each shop; the first load below never has to flip it on.
   const [loading, setLoading] = useKeyedState(shopDomain, true);
@@ -134,14 +169,13 @@ export default function ClassicExperimentsList() {
   const applyLoad = useCallback(
     result => {
       setPlans(result.plans);
-      // Browser-only drafts are read alongside the plans so the two views of
-      // "what is unfinished" are always taken at the same moment.
-      setLocalDrafts(readClassicWizardDrafts(shopDomain));
+      setLocalDrafts(result.drafts || []);
+      setReachedDraftServer(result.reachedDraftServer !== false);
       if (result.message) setMessage(result.message);
       setLoading(false);
       setGridBusy('');
     },
-    [shopDomain, setLoading]
+    [setLoading]
   );
 
   // Refreshes triggered by row actions show the spinner again unless the caller
@@ -154,7 +188,7 @@ export default function ClassicExperimentsList() {
       if (!quiet) setLoading(true);
       const requestId = loadRequestRef.current + 1;
       loadRequestRef.current = requestId;
-      const result = await loadExperimentPlans(shopDomain, hydrateOptions);
+      const result = await loadExperimentsAndDrafts(shopDomain, hydrateOptions);
       // Drop a hydrate that lost the race to a newer load or a shop switch,
       // otherwise the list can show a different shop's experiments.
       if (requestId !== loadRequestRef.current) return;
@@ -166,28 +200,28 @@ export default function ClassicExperimentsList() {
   useEffect(() => {
     const requestId = loadRequestRef.current + 1;
     loadRequestRef.current = requestId;
-    loadExperimentPlans(shopDomain, {}).then(result => {
+    loadExperimentsAndDrafts(shopDomain, {}).then(result => {
       if (requestId === loadRequestRef.current) applyLoad(result);
     });
   }, [shopDomain, applyLoad]);
 
   const experiments = useMemo(() => {
     const queried = filterPlansByQuery(plans, search);
-    return filterClassicExperimentsByTab(groupPlansIntoExperiments(queried), filter);
-  }, [plans, filter, search]);
-
-  const unfinishedDrafts = useMemo(
-    () => selectUnlistedWizardDrafts(localDrafts, plans.map(getPlanExperimentId)),
-    [localDrafts, plans]
-  );
-
-  const discardDraft = useCallback(
-    draft => {
-      clearClassicWizardDraft(shopDomain, draft?.experiment_id);
-      setLocalDrafts(readClassicWizardDrafts(shopDomain));
-    },
-    [shopDomain]
-  );
+    const fromPlans = groupPlansIntoExperiments(queried);
+    // A draft whose plans are already in the inbox is that experiment, not a
+    // second row beside it.
+    const needle = search.trim().toLowerCase();
+    const draftRows = selectUnlistedWizardDrafts(localDrafts, plans.map(getPlanExperimentId))
+      .map(wizardDraftAsExperimentRow)
+      .filter(Boolean)
+      // Drafts hold no plans, so the plan-level search cannot reach them; a
+      // draft is searchable by the only text it has.
+      .filter(row => !needle || row.title.toLowerCase().includes(needle));
+    return filterClassicExperimentsByTab(
+      sortExperimentRowsByRecency([...draftRows, ...fromPlans]),
+      filter
+    );
+  }, [plans, localDrafts, filter, search]);
 
   const stats = useMemo(() => {
     const allExperiments = groupPlansIntoExperiments(plans.filter(p => !p.archived));
@@ -218,6 +252,18 @@ export default function ClassicExperimentsList() {
   };
 
   const openExperiment = experiment => {
+    // An unfinished draft has no detail page to open -- there is no plan behind
+    // it yet -- so its title reopens the wizard where it was left. Clicking it
+    // used to do nothing at all.
+    if (experiment.wizardDraft) {
+      navigate(
+        buildClassicWizardResumePath(
+          experiment.id,
+          classicCreateStepId(experiment.wizardDraft.step) || undefined
+        )
+      );
+      return;
+    }
     const plan = experiment.representative;
     if (!plan?.id) return;
     // Always open experiment details. Drafts can resume from Overview → Continue editing.
@@ -316,11 +362,11 @@ export default function ClassicExperimentsList() {
           </div>
         </div>
 
-        <ClassicUnfinishedDrafts
-          drafts={unfinishedDrafts}
-          onResume={path => navigate(path)}
-          onDiscard={discardDraft}
-        />
+        {/* Unfinished drafts used to sit in a banner here, above the tabs,
+            because they had no inbox plans to be grouped into a row. They are
+            rows now, so "my drafts" is one place instead of two -- and the
+            Drafts tab no longer says a merchant has none while a banner right
+            above it lists three. */}
 
         <div className={styles.filterRow}>
           <div className={styles.filterPillTrack} role="tablist" aria-label="Filter experiments">
@@ -375,7 +421,9 @@ export default function ClassicExperimentsList() {
                 <tr>
                   <td colSpan={7}>
                     <div className={styles.listEmptyState}>
-                      <p className={styles.subtitle}>{emptyFilterCopy(filter)}</p>
+                      <p className={styles.subtitle}>
+                        {emptyFilterCopy(filter, { reachedDraftServer })}
+                      </p>
                       {filter === 'all' || filter === 'draft' ? (
                         <Button
                           variant="primary"
@@ -401,7 +449,12 @@ export default function ClassicExperimentsList() {
                       <tr className={styles.expRow}>
                         <td>
                           <div className={styles.expTitleRow}>
-                            {experiment.productCount > 1 ? (
+                            {/* Keyed off the plans the row can actually show,
+                                not its product count. An unfinished draft
+                                counts the variants picked in the wizard but has
+                                no plans built yet, so counting those offered a
+                                chevron that expanded to nothing. */}
+                            {experiment.plans.length > 1 ? (
                               <button
                                 type="button"
                                 className={styles.expExpandBtn}
@@ -423,7 +476,15 @@ export default function ClassicExperimentsList() {
                                 {experiment.title || 'Untitled experiment'}
                               </button>
                               <div className={styles.productSub}>
-                                {experiment.typeLabel || 'PRICE'} · {experiment.owner}
+                                {experiment.typeLabel || 'PRICE'} ·{' '}
+                                {/* For an unfinished draft, how far it got is
+                                    the useful thing to say and the owner is
+                                    always the merchant reading it. This is what
+                                    the drafts banner used to carry. */}
+                                {experiment.wizardDraft
+                                  ? wizardDraftStepLabel(experiment.wizardDraft) ||
+                                    'Not started'
+                                  : experiment.owner}
                               </div>
                             </div>
                           </div>

@@ -228,7 +228,12 @@ async function resumeSmartPricingProduct({ testId, shopDomain } = {}) {
   // the start are held together so two resumes cannot both pass it.
   const { startTest } = require('../abTestEngine');
   const started = await withPricingEnrollmentLock(
-    { shopDomain, productId: test.target_id, variantId: [...heldVariantIds(test)][0] || null },
+    {
+      shopDomain,
+      test,
+      productId: test.target_id,
+      variantId: [...heldVariantIds(test)][0] || null,
+    },
     async () => {
       await assertProductIsFreeToPrice({
         shopDomain,
@@ -1005,6 +1010,7 @@ async function buildSmartPricingProductReport(shopDomain, planId) {
 module.exports = {
   stopSmartPricingProduct,
   resumeSmartPricingProduct,
+  rearmRevenueGuardrailForResume,
   releaseSmartPricingProduct,
   revertSmartPricingProductPrice,
   recordWinnerApplied,

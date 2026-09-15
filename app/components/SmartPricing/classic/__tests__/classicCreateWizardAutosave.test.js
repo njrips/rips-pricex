@@ -42,6 +42,10 @@ vi.mock('../../../../services', () => ({
   apiPost: vi.fn(async () => ({})),
 }));
 
+// The server copy of a draft. Held here so a test can watch what the wizard
+// sent, or make the request fail to check what it says when it could not.
+const serverDrafts = new Map();
+
 vi.mock('../../../../services/smartPricingApi', () => ({
   createSmartPricingBatch: vi.fn(async () => ({})),
   getSmartPricingGuardrails: vi.fn(async () => ({ guardrails: {} })),
@@ -50,6 +54,15 @@ vi.mock('../../../../services/smartPricingApi', () => ({
   suggestSmartPricingGoals: vi.fn(async () => ({})),
   suggestSmartPricingPrices: vi.fn(async () => ({})),
   batchPreviewSmartPricingLaunch: vi.fn(async () => ({})),
+  getSmartPricingWizardDrafts: vi.fn(async () => ({ drafts: [...serverDrafts.values()] })),
+  saveSmartPricingWizardDraft: vi.fn(async (_domain, draft) => {
+    serverDrafts.set(String(draft?.experiment_id || ''), draft);
+    return { draft, drafts: [...serverDrafts.values()] };
+  }),
+  deleteSmartPricingWizardDraft: vi.fn(async (_domain, experimentId) => {
+    serverDrafts.delete(String(experimentId || ''));
+    return { drafts: [...serverDrafts.values()] };
+  }),
 }));
 
 // The panels are presentational. This stub keeps the name field real so the
@@ -94,6 +107,7 @@ let getSmartPricingGuardrails;
 beforeEach(async () => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   localStorage.clear();
+  serverDrafts.clear();
   ({ getSmartPricingGuardrails } = await import('../../../../services/smartPricingApi'));
   getSmartPricingGuardrails.mockReset();
   getSmartPricingGuardrails.mockResolvedValue({ guardrails: {} });
@@ -116,7 +130,7 @@ function LocationProbe() {
   return h('span', { 'data-testid': 'url' }, `${pathname}${search}`);
 }
 
-async function renderWizard(url) {
+async function renderWizard(url, props = {}) {
   await act(async () => {
     root.render(
       h(
@@ -130,7 +144,7 @@ async function renderWizard(url) {
             null,
             h(Route, {
               path: '/app/experiments/new',
-              element: h('div', null, h(LocationProbe), h(ClassicCreateWizard)),
+              element: h('div', null, h(LocationProbe), h(ClassicCreateWizard, props)),
             })
           )
         )
@@ -186,6 +200,60 @@ async function settleAutosave() {
     await new Promise(resolve => setTimeout(resolve, 900));
   });
 }
+
+/**
+ * The admin title bar is rendered by the route, above this component, so the
+ * wizard reports what the draft should be called and the route decides what to
+ * do with it. It said "New experiment" for the whole flow, including on a draft
+ * the merchant had named and come back to days later.
+ */
+describe('ClassicCreateWizard draft title', () => {
+  /** What the wizard last told the route to call this draft. */
+  function reported(onTitleChange) {
+    return onTitleChange.mock.calls.at(-1)?.[0] ?? null;
+  }
+
+  it('reports nothing while the name is still being typed', async () => {
+    const onTitleChange = vi.fn();
+    await renderWizard('/app/experiments/new', { onTitleChange });
+    await type('name', 'Spring pricing');
+    // Still on the naming step: the bar keeps its own title rather than
+    // twitching once per keystroke in the admin chrome.
+    expect(reported(onTitleChange)).toBe('');
+  });
+
+  it('reports the name once the merchant continues past the first step', async () => {
+    const onTitleChange = vi.fn();
+    await renderWizard('/app/experiments/new', { onTitleChange });
+    await type('name', 'Spring pricing');
+    await click('continue');
+    expect(read('step')).toBe('1');
+    expect(reported(onTitleChange)).toBe('Spring pricing');
+  });
+
+  it('keeps reporting a name after going back to the first step to reword it', async () => {
+    const onTitleChange = vi.fn();
+    await renderWizard('/app/experiments/new', { onTitleChange });
+    await type('name', 'Spring pricing');
+    await click('continue');
+    await click('back');
+    expect(read('step')).toBe('0');
+    await type('name', 'Spring pricing v2');
+    expect(reported(onTitleChange)).toBe('Spring pricing v2');
+  });
+
+  it('reports a trimmed name, and nothing at all for a blank one', async () => {
+    const onTitleChange = vi.fn();
+    await renderWizard('/app/experiments/new', { onTitleChange });
+    await type('name', '  Spring pricing  ');
+    await click('continue');
+    expect(reported(onTitleChange)).toBe('Spring pricing');
+    await click('back');
+    await type('name', '   ');
+    // Nothing to show, so the route falls back to its own title.
+    expect(reported(onTitleChange)).toBe('');
+  });
+});
 
 describe('ClassicCreateWizard autosave', () => {
   it('saves the step and its data when the merchant continues', async () => {
@@ -328,6 +396,207 @@ describe('ClassicCreateWizard save draft', () => {
 
     expect(container.textContent).toContain('Add an experiment name');
     expect(readClassicWizardDraft(SHOP)).toBeNull();
+  });
+});
+
+/**
+ * A draft used to live only in this browser until products were chosen, so
+ * clearing site data threw the work away and Save draft could report success
+ * for something no other device would ever see.
+ */
+describe('ClassicCreateWizard server-side drafts', () => {
+  let saveSmartPricingWizardDraft;
+
+  beforeEach(async () => {
+    ({ saveSmartPricingWizardDraft } = await import('../../../../services/smartPricingApi'));
+    // This file does not clear mocks globally, and one test below makes the
+    // save reject, so both the call history and the implementation have to be
+    // put back or the next test reads the previous one's.
+    saveSmartPricingWizardDraft.mockReset();
+    saveSmartPricingWizardDraft.mockImplementation(async (_domain, draft) => {
+      serverDrafts.set(String(draft?.experiment_id || ''), draft);
+      return { draft, drafts: [...serverDrafts.values()] };
+    });
+  });
+
+  it('saves to the server when the merchant continues past a step', async () => {
+    await renderWizard('/app/experiments/new');
+    await type('name', 'Spring pricing');
+    await click('continue');
+
+    expect(saveSmartPricingWizardDraft).toHaveBeenCalled();
+    const sent = saveSmartPricingWizardDraft.mock.calls.at(-1)[1];
+    expect(sent.name).toBe('Spring pricing');
+    // The step it moved to, not the one it left: that is where a resume opens.
+    expect(sent.step).toBe(1);
+  });
+
+  it('saves to the server when the merchant presses Save draft', async () => {
+    await renderWizard('/app/experiments/new');
+    await type('name', 'Spring pricing');
+    await click('save-draft');
+
+    expect(saveSmartPricingWizardDraft).toHaveBeenCalled();
+    expect(saveSmartPricingWizardDraft.mock.calls.at(-1)[1].name).toBe('Spring pricing');
+    expect(container.textContent).toContain('Draft saved');
+  });
+
+  it('does not claim a save landed when the server kept a newer copy', async () => {
+    // Made on another device. The request succeeded, so this used to read as
+    // a plain "Draft saved" and the merchant carried on believing their edit
+    // was the one stored.
+    saveSmartPricingWizardDraft.mockResolvedValueOnce({ superseded: true, evicted: [] });
+
+    await renderWizard('/app/experiments/new');
+    await type('name', 'Spring pricing');
+    await click('save-draft');
+
+    expect(container.textContent).toContain('newer version of this draft');
+    expect(container.textContent).not.toContain('Draft saved.');
+  });
+
+  it('says which draft was discarded when the shop was already at the limit', async () => {
+    saveSmartPricingWizardDraft.mockResolvedValueOnce({
+      superseded: false,
+      evicted: [{ experiment_id: 'exp_old', name: 'Winter pricing' }],
+    });
+
+    await renderWizard('/app/experiments/new');
+    await type('name', 'Spring pricing');
+    await click('save-draft');
+
+    expect(container.textContent).toContain('Winter pricing');
+    expect(container.textContent).toContain('discarded');
+  });
+
+  it('saves a named draft with no products chosen yet', async () => {
+    // The whole point: an experiment reaches Drafts on its name alone, rather
+    // than only once it has per-product plans to store in the inbox.
+    await renderWizard('/app/experiments/new');
+    await type('name', 'Spring pricing');
+    await click('save-draft');
+
+    const sent = saveSmartPricingWizardDraft.mock.calls.at(-1)[1];
+    expect(sent.selectedIds).toEqual([]);
+    expect(sent.plans).toEqual([]);
+    expect(sent.experiment_id).toBeTruthy();
+  });
+
+  it('leaves the server alone when the wizard is only opened', async () => {
+    await renderWizard('/app/experiments/new');
+    await settleAutosave();
+
+    expect(saveSmartPricingWizardDraft).not.toHaveBeenCalled();
+  });
+
+  it('says so when only the browser copy could be written', async () => {
+    saveSmartPricingWizardDraft.mockRejectedValueOnce(new Error('offline'));
+    await renderWizard('/app/experiments/new');
+    await type('name', 'Spring pricing');
+    await click('save-draft');
+
+    // Reported as a failure, because the merchant asked for a saved draft and
+    // got one tied to this browser. Claiming plain success here is what sent
+    // them looking for a row that was not there.
+    expect(container.textContent).toContain('Saved in this browser only');
+    // The work is still safe locally, which is why this is a warning and not a
+    // lost edit.
+    expect(readClassicWizardDraft(SHOP).name).toBe('Spring pricing');
+  });
+
+  it('keeps what the merchant typed while a cross-device lookup was still out', async () => {
+    // Resuming a draft this browser has never seen means a request, and the
+    // wizard is on screen and editable the whole time it is in flight.
+    // Restoring over what the merchant is watching themselves type would be
+    // worse than not restoring at all.
+    const { getSmartPricingWizardDrafts } = await import('../../../../services/smartPricingApi');
+    let release;
+    getSmartPricingWizardDrafts.mockReturnValue(
+      new Promise(resolve => {
+        release = () =>
+          resolve({ drafts: [{ experiment_id: 'exp_1', name: 'From the laptop', step: 0 }] });
+      })
+    );
+
+    await renderWizard('/app/experiments/new?resume=exp_1');
+    await type('name', 'Typed here instead');
+    await act(async () => {
+      release();
+    });
+
+    expect(read('name')).toBe('Typed here instead');
+    getSmartPricingWizardDrafts.mockResolvedValue({ drafts: [] });
+  });
+
+  it('keeps the browser copy when the server rejects the draft', async () => {
+    saveSmartPricingWizardDraft.mockRejectedValue(new Error('too large'));
+    await renderWizard('/app/experiments/new');
+    await type('name', 'Spring pricing');
+    await click('continue');
+
+    expect(read('step')).toBe('1');
+    expect(readClassicWizardDraft(SHOP).step).toBe(1);
+  });
+
+  it('says so when a step saved to the browser but not the server', async () => {
+    // Every step claims the experiment is saved where another device can pick
+    // it up. When that half fails the merchant has to hear it here, or they
+    // finish the wizard believing it is safe and find nothing on the device
+    // they go to continue it on.
+    saveSmartPricingWizardDraft.mockRejectedValue(new Error('offline'));
+    await renderWizard('/app/experiments/new');
+    await type('name', 'Spring pricing');
+    await click('continue');
+
+    expect(container.textContent).toContain('Saved in this browser only');
+  });
+
+  it('says nothing about the server when the step saved cleanly', async () => {
+    await renderWizard('/app/experiments/new');
+    await type('name', 'Spring pricing');
+    await click('continue');
+
+    expect(container.textContent).not.toContain('Saved in this browser only');
+  });
+});
+
+/**
+ * A resume is not an edit.
+ *
+ * Restoring a draft used to restamp it as saved just now, which quietly made
+ * the copy in this browser the newest one anywhere -- including newer than the
+ * copy on the device the merchant had actually moved on to.
+ */
+describe('ClassicCreateWizard restoring without editing', () => {
+  const RESUME = '/app/experiments/new?resume=exp_1';
+  const OLD = '2026-02-01T00:00:00.000Z';
+
+  /** Straight into storage, because the writer stamps `saved_at` as now. */
+  async function seedDraft() {
+    const { classicWizardDraftKey } = await import('../classicExperimentHelpers');
+    localStorage.setItem(
+      classicWizardDraftKey(SHOP),
+      JSON.stringify([{ experiment_id: 'exp_1', name: 'Saved earlier', step: 0, saved_at: OLD }])
+    );
+  }
+
+  it('does not write the draft back when nothing has been touched', async () => {
+    await seedDraft();
+    await renderWizard(RESUME);
+    await remountAt(RESUME);
+
+    expect(readClassicWizardDraft(SHOP, 'exp_1').saved_at).toBe(OLD);
+  });
+
+  it('writes what the merchant typed even though they never pressed Continue', async () => {
+    // The save is on a delay, and leaving the wizard used to cancel whatever
+    // was still pending rather than writing it.
+    await seedDraft();
+    await renderWizard(RESUME);
+    await type('name', 'Renamed on this device');
+    await remountAt(RESUME);
+
+    expect(readClassicWizardDraft(SHOP, 'exp_1').name).toBe('Renamed on this device');
   });
 });
 

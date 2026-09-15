@@ -7,6 +7,7 @@ import {
   limitSelectionToProducts,
   productGroupKey,
   productPriceRange,
+  productSuggestionReason,
   splitTitleParts,
 } from './productsStepReadiness';
 import styles from './SmartPricingClassic.module.css';
@@ -449,6 +450,14 @@ export default function ClassicProductPickerModal({
                         {variantCount > 1 ? `${variantCount} variants` : row.sku || '—'} ·{' '}
                         {row.product_type || row.collection_title || 'Catalog'}
                       </div>
+                      {/* Why this one is suggested. Up to three products arrive
+                          pre-selected, and until this line existed there was
+                          nothing on the page to say which they were or why, so
+                          a merchant either trusted the ticks or cleared them
+                          all. */}
+                      {productSuggestionReason(row) ? (
+                        <div className={styles.productWhy}>{productSuggestionReason(row)}</div>
+                      ) : null}
                     </div>
                     <span className={styles.productRowPrice}>{formatProductPrice(group)}</span>
                   </label>

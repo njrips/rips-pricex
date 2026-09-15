@@ -18,7 +18,7 @@ import {
   resolveCountryLists,
 } from './countrySelection';
 import ClassicGoalPickerModal from './ClassicGoalPickerModal';
-import SettingsInfoLink from '../../Settings/SettingsInfoLink';
+import LabelWithInfo from '../../Settings/primitives/LabelWithInfo';
 import { IconCheck, IconShield } from './classicIcons';
 import {
   ensureRevenueGuardrailRows,
@@ -28,12 +28,18 @@ import {
   parseRevenueDropThreshold,
 } from './revenueGuardrail';
 import { formatPracticalDurationRange } from './estimateSignificanceDuration';
+import { MIN_ALLOCATION_PERCENT, sliderFillPercent } from './variationsStepHelpers';
 import styles from './SmartPricingClassic.module.css';
 
 export function createDefaultAudienceState() {
   return {
     segment: 'all_visitors',
-    trafficAllocation: 50,
+    // Every matching visitor enters the experiment unless the merchant dials it
+    // back. Holding half the traffic out by default doubled how long every test
+    // took to reach significance, and bought nothing for it: the visitors kept
+    // out are not measured, so they are not a safety margin, just a slower
+    // answer. The guardrails are what limit the downside.
+    trafficAllocation: 100,
     primaryMetric: 'revenue_per_visitor',
     primaryCustomGoal: null,
     secondaryMetrics: [],
@@ -236,10 +242,16 @@ export default function AudienceSuccessStepPanel({
           className={styles.slider}
           id="classic-audience-traffic"
           type="range"
-          min={5}
+          min={MIN_ALLOCATION_PERCENT}
           max={100}
           value={trafficAllocation}
-          style={{ '--slider-fill': `${trafficAllocation}%` }}
+          // The fill is a fraction of the track, not of 100. This track starts
+          // at 5, so painting the raw percent put the fill ahead of the thumb
+          // by up to a tenth of the width -- a stub of near-black sticking out
+          // past the handle at every value below the top.
+          style={{
+            '--slider-fill': `${sliderFillPercent(trafficAllocation, MIN_ALLOCATION_PERCENT, 100)}%`,
+          }}
           onChange={e => patch({ trafficAllocation: Number(e.target.value) })}
           aria-label="Traffic allocation"
           disabled={disabled}
@@ -522,10 +534,14 @@ export default function AudienceSuccessStepPanel({
       {/* Last on the step: a safety net for the experiment above it, which only
           makes sense once the audience and the metrics are settled. */}
       <div className={styles.stepSection}>
-      <div className={styles.labelRow} id="classic-revenue-guardrail">
-        <div className={styles.stepSectionTitle}>Revenue guardrail</div>
-        <SettingsInfoLink hash="guardrail-metrics" label="Revenue guardrail" />
-      </div>
+      <LabelWithInfo
+        id="classic-revenue-guardrail"
+        titleClassName={styles.stepSectionTitle}
+        hash="guardrail-metrics"
+        label="Revenue guardrail"
+      >
+        Revenue guardrail
+      </LabelWithInfo>
       <div className={styles.guardrailCard}>
         <div className={styles.guardrailCardHead}>
           <span className={styles.guardrailCardTitle}>

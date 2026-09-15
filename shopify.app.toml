@@ -37,6 +37,12 @@ api_version = "2025-10"
   topics = ["app/scopes_update"]
   uri = "/webhooks/app/scopes_update"
 
+  # Without this the app only learns about a plan when the merchant next opens
+  # it, and a merchant who cancels stops opening it.
+  [[webhooks.subscriptions]]
+  topics = ["app_subscriptions/update"]
+  uri = "/webhooks/app/subscriptions_update"
+
 [app_proxy]
 url = "https://pricefy.echologyx.com/api/proxy"
 subpath = "ripspricex"

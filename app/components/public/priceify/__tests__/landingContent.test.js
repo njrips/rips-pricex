@@ -2,23 +2,19 @@ import { describe, it } from 'vitest';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {
-  EXPERIMENT_INTRO,
-  EXPERIMENT_POINTS,
   FAQ_ITEMS,
-    FEATURE_CARDS,
-  HERO_SETUP_MOCK,
-    FOOTER_BLURB,
-    FOOTER_COLUMNS,
-    FOOTER_TAGLINE,
-    HOW_IT_WORKS_STEPS,
-  PROBLEM_CARDS,
-    LANDING_SECTION_ORDER,
+  FEATURES_SECTION,
+  FOOTER_BRAND_TAGLINE,
+  FOOTER_COPYRIGHT,
+  FOOTER_LINK_SECTIONS,
+  FOOTER_NEWSLETTER,
+  GET_STARTED_SECTION,
+  HERO,
+  LANDING_ASSETS,
+  LANDING_SECTION_ORDER,
+  PLATFORM_SECTION,
+  PRICING_SECTION,
   PUBLIC_COPY_FORBIDDEN,
-  RESULTS_BOARD,
-  USE_CASES,
-  WALKTHROUGH_EYEBROW,
-  WALKTHROUGH_MOCKS,
-  WALKTHROUGH_STEPS,
   buildFaqJsonLd,
 } from '../landingContent.js';
 import { PUBLIC_HEADER_NAV, PUBLIC_ROUTES } from '../../../../constants/publicRoutes.js';
@@ -30,131 +26,92 @@ import {
   publicSectionHref,
 } from '../scrollToPublicHash.js';
 
-describe('Priceify FAQ copy', () => {
-  it('uses the seven Figma questions', () => {
+describe('Priceify landing copy (Figma brochure)', () => {
+  it('matches hero, nav, sections, and FAQ from the updated design', () => {
+    assert.equal(HERO.badge, 'A/B PRICE TESTING FOR SHOPIFY');
+    assert.match(HERO.title, /Growth Experiment/);
+    assert.equal(HERO.primaryCta, 'Add to Shopify');
+    assert.equal(FAQ_ITEMS.length, 6);
+    assert.match(FAQ_ITEMS[0].q, /slow down/);
+    assert.match(FAQ_ITEMS[2].a, /theme app embed/);
     assert.deepEqual(
-      FAQ_ITEMS.map((item) => item.q),
-      [
-        'Is Priceify really free?',
-        'Do I need coding experience?',
-        'Can I choose which products to test?',
-        'Can I control how much traffic sees each price?',
-        'What metrics can I measure?',
-        'Can I stop an experiment?',
-        'Does Priceify work with my Shopify store?',
-      ]
+      PUBLIC_HEADER_NAV.map(item => item.label),
+      ['Features', 'How it works', 'Pricing', 'Guides', 'FAQ']
     );
-    assert.match(FAQ_ITEMS[0].a, /free to install/);
-    assert.match(FAQ_ITEMS[0].a, /no paid tier/);
-    assert.match(FAQ_ITEMS[1].a, /theme app embed/);
-    assert.match(FAQ_ITEMS[6].a, /Shopify-native/);
-  });
-
-  it('keeps the finalized section titles and drops old marketing claims', () => {
-    assert.deepEqual(
-      HOW_IT_WORKS_STEPS.map((step) => step.title),
-      ['Choose your products', 'Create price variations', 'Split your traffic', 'Measure the results']
-    );
-    assert.deepEqual(
-      FEATURE_CARDS.map((card) => card.title),
-      ['Data-driven decisions', 'Controlled experimentation', 'Meaningful metrics', 'Free to use']
-    );
-    assert.deepEqual(
-      EXPERIMENT_POINTS.map((point) => point.title),
-      ['Control vs. variation', 'Traffic allocation', 'Performance comparison', 'Revenue guardrail']
-    );
-    assert.match(PROBLEM_CARDS[0].body, /everyone at once/);
-    assert.match(PROBLEM_CARDS[1].body, /not what you assume they will/);
-    assert.match(PROBLEM_CARDS[2].body, /industry benchmarks/);
-    assert.match(FEATURE_CARDS[0].body, /rather than relying on assumptions/);
-    assert.match(FEATURE_CARDS[1].body, /Keep your existing price/);
-    assert.match(FEATURE_CARDS[2].body, /surface-level click data/);
-    assert.match(FEATURE_CARDS[3].body, /Shopify App Store/);
-    assert.match(HOW_IT_WORKS_STEPS[1].body, /alternative prices to test/);
-    assert.match(HOW_IT_WORKS_STEPS[2].body, /during the experiment/);
-    assert.match(WALKTHROUGH_STEPS[1].body, /which products are included/);
-    assert.match(WALKTHROUGH_STEPS[2].body, /how each price point behaved/);
-    assert.match(USE_CASES[0].body, /permanent for your entire store/);
-    assert.match(USE_CASES[1].body, /specific products and audience/);
-    assert.match(USE_CASES[2].body, /new product or variant/);
-    assert.match(USE_CASES[3].body, /meaningful business impact/);
-    assert.deepEqual(
-      USE_CASES.map((card) => card.title),
-      [
-        'Test a price increase',
-        'Find a stronger price point',
-        'Validate a new product price',
-        'Optimize high-value products',
-      ]
-    );
-    assert.deepEqual(
-      PUBLIC_HEADER_NAV.map((item) => item.label),
-      ['How it works', 'Features', 'FAQ', 'Guides']
-    );
-    assert.equal(WALKTHROUGH_EYEBROW, 'Build your experiment');
-    assert.match(WALKTHROUGH_STEPS[0].body, /timeframe/);
-    assert.match(FOOTER_BLURB, /Pricing experimentation for Shopify merchants/);
-    assert.equal(FOOTER_TAGLINE, 'Built for Shopify merchants.');
-    assert.deepEqual(
-      FOOTER_COLUMNS.map((column) => column.heading),
-      ['Product', 'Legal', 'Support']
-    );
-    assert.deepEqual(
-      FOOTER_COLUMNS.map((column) => column.links.map((link) => link.label)),
-      [
-        ['How it works', 'Features', 'FAQ', 'Guides'],
-        ['Privacy Policy', 'Terms of Service'],
-        ['Contact', 'Staff login', 'Install on Shopify'],
-      ]
-    );
-    assert.equal(PUBLIC_ROUTES.docs, '/docs');
-    assert.equal(PUBLIC_ROUTES.docsSettings, '/docs/settings');
-    assert.equal(PUBLIC_ROUTES.staff, '/staff/login');
-    assert.equal(
-      FOOTER_COLUMNS.find((column) => column.heading === 'Support')?.links.find((link) => link.label === 'Staff login')
-        ?.to,
-      '/staff/login'
-    );
-    assert.equal(PUBLIC_ROUTES.login, '/auth/login');
-    const shellSrc = fs.readFileSync(new URL('../PriceifyShell.jsx', import.meta.url), 'utf8');
-    assert.match(shellSrc, /reloadDocument=\{staffPath/);
-    assert.doesNotMatch(shellSrc, />\s*Log in\s*</);
     assert.deepEqual(LANDING_SECTION_ORDER, [
       'hero',
-      'problem',
-      'how-it-works',
-      'walkthrough',
-      'benefits',
-      'experiment-safely',
-      'results',
-      'use-cases',
+      'logo-cloud',
+      'price-test-demo',
+      'platform',
+      'features',
+      'pricing',
       'faq',
-      'cta',
+      'get-started',
+      'final-cta',
     ]);
-    assert.equal(RESULTS_BOARD.variation.lift, '+61%');
-    assert.equal(RESULTS_BOARD.variation.conv, '4.4%');
-    assert.equal(RESULTS_BOARD.variation.rev, '$3.04');
-    assert.match(RESULTS_BOARD.insight, /\$69\.00 price point/);
-    assert.equal(WALKTHROUGH_MOCKS.hypothesis.next, 'Next: Add Products');
-    assert.equal(WALKTHROUGH_MOCKS.hypothesis.name, 'Summer Collection Price Test');
-    assert.equal(WALKTHROUGH_MOCKS.variations.product, 'Wool Blend Hoodie');
-    assert.equal(HERO_SETUP_MOCK.title, 'Summer Hoodie Price Test');
-    assert.equal(HERO_SETUP_MOCK.status, 'Running');
-    assert.equal(HERO_SETUP_MOCK.meta, 'Started Aug 12 · 1,020 visitors · 7 days left');
-    assert.deepEqual(HERO_SETUP_MOCK.nav, ['Experiments', 'Analytics', 'Settings']);
-    assert.equal(HERO_SETUP_MOCK.control.price, '$59.00');
-    assert.equal(HERO_SETUP_MOCK.control.share, '50%');
-    assert.equal(HERO_SETUP_MOCK.variation.price, '$69.00');
-    assert.equal(HERO_SETUP_MOCK.progress, '62%');
-    assert.match(EXPERIMENT_INTRO, /With controlled traffic/);
-    assert.match(EXPERIMENT_POINTS[0].body, /real customers/);
+    assert.equal(GET_STARTED_SECTION.cards.length, 3);
+    assert.equal(GET_STARTED_SECTION.cards[1].title, 'Discover Resources');
+    assert.equal(FEATURES_SECTION.items.length, 6);
+    assert.equal(PRICING_SECTION.tiers.length, 3);
+    assert.equal(PRICING_SECTION.tiers[1].badge, 'MOST POPULAR');
+    assert.equal(PRICING_SECTION.tiers[2].features[0], 'Everything in Growth');
+    assert.equal(PRICING_SECTION.seeAllPlansLabel, 'See All Plans');
+    assert.deepEqual(
+      PLATFORM_SECTION.steps.map(step => step.title),
+      ['Choose products', 'Split traffic', 'Create price variations', 'Measure the results']
+    );
+    assert.equal(FOOTER_BRAND_TAGLINE, 'Experiment Your Way to Better Pricing.');
+    assert.equal(FOOTER_NEWSLETTER.title, 'Join our newsletter');
+    assert.equal(FOOTER_COPYRIGHT, 'Copyright © Priceify. All rights reserved.');
+    assert.deepEqual(
+      FOOTER_LINK_SECTIONS.map(section => section.heading),
+      ['Product', 'Integrations', 'Resources', 'Company']
+    );
+    assert.deepEqual(
+      FOOTER_LINK_SECTIONS.find(section => section.heading === 'Resources').links.map(
+        link => link.label,
+      ),
+      ['FAQ', 'Blog'],
+    );
+    assert.deepEqual(
+      FOOTER_LINK_SECTIONS.find(section => section.heading === 'Company').links.map(
+        link => link.label,
+      ),
+      ['About Us', 'Contact Us', 'Privacy Policy', 'Terms and Conditions', 'Cookies Policy'],
+    );
+    assert.equal(PUBLIC_ROUTES.staff, '/staff/login');
+    const shellSrc = fs.readFileSync(new URL('../PriceifyShell.jsx', import.meta.url), 'utf8');
+    assert.match(shellSrc, /PriceifyFooter/);
+    assert.match(shellSrc, /Login/);
+    assert.match(shellSrc, /PUBLIC_ROUTES\.staff/);
+    const landingSrc = fs.readFileSync(new URL('../LandingPage.jsx', import.meta.url), 'utf8');
+    assert.match(landingSrc, /LANDING_ASSETS\.heroDashboard/);
+    assert.match(landingSrc, /px-get-started-card/);
+    assert.match(landingSrc, /px-get-started-inner/);
+    assert.match(landingSrc, /px-final-cta--brochure/);
+    assert.match(landingSrc, /FeatureBoard/);
+    assert.match(landingSrc, /px-section--pricing-brochure/);
+    for (const item of FEATURES_SECTION.items) {
+      assert.ok(item.iconSrc, item.title);
+      assert.ok(fs.existsSync(new URL(`../../../../../public${item.iconSrc}`, import.meta.url).pathname));
+    }
+    assert.equal(LANDING_ASSETS.logoMarquee, '/priceify/landing/logo-marquee.png');
+    const faviconSrc = fs.readFileSync(
+      new URL('../../../../../public/priceify/favicon.svg', import.meta.url),
+      'utf8',
+    );
+    assert.doesNotMatch(faviconSrc, /<svg[^>]*>[\s\S]*<svg/);
+    const rootSrc = fs.readFileSync(new URL('../../../../root.tsx', import.meta.url), 'utf8');
+    assert.match(rootSrc, /FAVICON_VERSION/);
+    assert.match(rootSrc, /apple-touch-icon/);
+
     const publicCopy = [
-      ...FAQ_ITEMS.map((item) => `${item.q} ${item.a}`),
-      ...FEATURE_CARDS.map((card) => `${card.title} ${card.body}`),
-      ...HOW_IT_WORKS_STEPS.map((step) => `${step.title} ${step.body}`),
-      ...PROBLEM_CARDS.map((card) => `${card.title} ${card.body}`),
-      ...EXPERIMENT_POINTS.map((point) => `${point.title} ${point.body}`),
-      ...USE_CASES.map((card) => `${card.title} ${card.body}`),
+      HERO.title,
+      HERO.lead,
+      ...FAQ_ITEMS.map(item => `${item.q} ${item.a}`),
+      ...FEATURES_SECTION.items.map(item => `${item.title} ${item.body}`),
+      ...PLATFORM_SECTION.steps.map(step => `${step.title} ${step.body}`),
+      ...PRICING_SECTION.tiers.map(tier => `${tier.name} ${tier.blurb}`),
     ].join('\n');
     assert.equal(PUBLIC_COPY_FORBIDDEN.test(publicCopy), false);
   });
@@ -162,16 +119,16 @@ describe('Priceify FAQ copy', () => {
   it('exposes FAQPage JSON-LD for crawlers', () => {
     const data = buildFaqJsonLd();
     assert.equal(data['@type'], 'FAQPage');
-    assert.equal(data.mainEntity.length, 7);
+    assert.equal(data.mainEntity.length, 6);
     assert.equal(data.mainEntity[0]['@type'], 'Question');
-    assert.equal(data.mainEntity[0].acceptedAnswer['@type'], 'Answer');
-    assert.match(data.mainEntity[0].acceptedAnswer.text, /free to install/);
+    assert.match(data.mainEntity[0].acceptedAnswer.text, /guardrail/);
   });
 });
 
 describe('publicSectionHref', () => {
   it('parses Figma nav hashes and stays on-page on home', () => {
     assert.equal(parsePublicSectionId('/#how-it-works'), 'how-it-works');
+    assert.equal(parsePublicSectionId('/#pricing'), 'pricing');
     assert.equal(parsePublicSectionId('#faq'), 'faq');
     assert.equal(parsePublicSectionId(''), '');
     assert.equal(publicSectionHref('faq', '/'), '#faq');

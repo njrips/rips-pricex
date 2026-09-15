@@ -1,262 +1,49 @@
 import { useState } from 'react';
-import { DEFAULT_APP_STORE_LISTING_URL } from '../../../utils/appStoreListingUrl';
-import PriceifyIcon from './PriceifyIcon';
-import PriceifyLogo from './PriceifyLogo';
-import PublicSectionLink from './PublicSectionLink';
+import { Link } from 'react-router';
+import { PUBLIC_ROUTES } from '../../../constants/publicRoutes';
 import {
-  EXPERIMENT_INTRO,
-  EXPERIMENT_MOCK,
-  HERO_SETUP_MOCK,
-  EXPERIMENT_POINTS,
-  FAQ_ITEMS,
-  FEATURE_CARDS,
-  HOW_IT_WORKS_STEPS,
-  PROBLEM_CARDS,
-  RESULTS_BOARD,
-  RESULTS_POINTS,
-  USE_CASES,
-  WALKTHROUGH_EYEBROW,
-  WALKTHROUGH_MOCKS,
-  WALKTHROUGH_STEPS,
   buildFaqJsonLd,
+  FAQ_ITEMS,
+  FAQ_SECTION,
+  FEATURES_SECTION,
+  FINAL_CTA,
+  GET_STARTED_SECTION,
+  HERO,
+  LANDING_ASSETS,
+  LOGO_CLOUD,
+  PLATFORM_SECTION,
+  PRICE_TEST_DEMO,
+  PRICING_SECTION,
 } from './landingContent';
+import LogoMarquee from './LogoMarquee';
+import { LANDING_BILLING, quoteTierPrice } from './landingPricing';
+import {
+  BrochureFaqAccordion,
+  HeroCtas,
+  InstallButton,
+  SectionIntro,
+} from './brochurePublicUi';
 
-function InstallButton({ storeUrl, className, children }) {
-  const href = storeUrl || DEFAULT_APP_STORE_LISTING_URL;
+function FeatureBoard({ items }) {
+  const rows = [items.slice(0, 3), items.slice(3, 6)];
   return (
-    <a className={className} href={href} target="_top" rel="noopener noreferrer">
-      {children}
-    </a>
-  );
-}
-
-function Eyebrow({ children, tone = 'pill' }) {
-  return <p className={tone === 'plain' ? 'px-eyebrow px-eyebrow--plain' : 'px-eyebrow'}>{children}</p>;
-}
-
-function HeroCompareCard({ card, accent = false }) {
-  return (
-    <div className={accent ? 'px-hero-card px-hero-card--on' : 'px-hero-card'}>
-      <div className="px-hero-card-head">
-        <p className={accent ? 'px-hero-card-label px-hero-card-label--on' : 'px-hero-card-label'}>
-          {card.label}
-        </p>
-        <span className={accent ? 'px-hero-share px-hero-share--on' : 'px-hero-share'}>
-          {card.share}
-        </span>
-      </div>
-      <p className="px-hero-card-price">{card.price}</p>
-      <dl className="px-hero-card-stats">
-        {card.stats.map((stat) => (
-          <div key={stat.label}>
-            <dt>{stat.label}</dt>
-            <dd className={stat.lift ? 'px-hero-lift' : undefined}>
-              {stat.lift ? `↑ ${stat.value}` : stat.value}
-            </dd>
-          </div>
-        ))}
-      </dl>
-    </div>
-  );
-}
-
-function HeroSetupMock() {
-  return (
-    <MiniApp url={HERO_SETUP_MOCK.url} wide>
-      <p className="px-hero-crumb">{HERO_SETUP_MOCK.crumb}</p>
-      <div className="px-app-head">
-        <p className="px-app-title">{HERO_SETUP_MOCK.title}</p>
-        <span className="px-running">
-          <span className="px-running-dot" />
-          {HERO_SETUP_MOCK.status}
-        </span>
-      </div>
-      <p className="px-hero-meta">{HERO_SETUP_MOCK.meta}</p>
-      <div className="px-hero-stats">
-        <HeroCompareCard card={HERO_SETUP_MOCK.control} />
-        <HeroCompareCard card={HERO_SETUP_MOCK.variation} accent />
-      </div>
-      <div className="px-exp-progress px-hero-progress">
-        <span>Experiment progress</span>
-        <strong>{HERO_SETUP_MOCK.progress}</strong>
-        <span className="px-exp-progress-track">
-          <span className="px-exp-progress-bar" style={{ width: HERO_SETUP_MOCK.progress }} />
-        </span>
-      </div>
-    </MiniApp>
-  );
-}
-
-function HeroBadge() {
-  return (
-    <p className="px-badge">
-      <img className="px-badge-mark" src="/priceify/logo-mark.svg" alt="" width={22} height={22} />
-      Free Shopify App
-    </p>
-  );
-}
-
-function MiniApp({ url, children, wide = false }) {
-  return (
-    <div className={wide ? 'px-window px-window--wide px-hero-mock' : 'px-window px-walk-mock'} aria-hidden>
-      <div className="px-window-chrome">
-        <span className="px-window-dots" />
-        <p className="px-window-url">{url}</p>
-        <span className="px-window-spacer" />
-      </div>
-      <div className="px-app">
-        <aside className="px-app-side">
-          <PriceifyLogo compact decorative />
-          {HERO_SETUP_MOCK.nav.map((item, index) => (
-            <p
-              key={item}
-              className={index === 0 ? 'px-app-nav px-app-nav--active' : 'px-app-nav'}
-            >
-              <span className="px-app-dot" />
-              {item}
-            </p>
-          ))}
-        </aside>
-        <div className="px-app-body">{children}</div>
-      </div>
-    </div>
-  );
-}
-
-function WalkMock({ type }) {
-  if (type === 'hypothesis') {
-    const mock = WALKTHROUGH_MOCKS.hypothesis;
-    return (
-      <MiniApp url={mock.url}>
-        <p className="px-app-title">{mock.title}</p>
-        <div className="px-field">
-          <span>Experiment name</span>
-          <strong>{mock.name}</strong>
-        </div>
-        <div className="px-field">
-          <span>Hypothesis</span>
-          <p>{mock.hypothesis}</p>
-        </div>
-        <div className="px-field-row">
-          <div className="px-field">
-            <span>Start date</span>
-            <strong className="px-field-blank" />
-          </div>
-          <div className="px-field">
-            <span>Duration</span>
-            <strong>{mock.duration}</strong>
-          </div>
-        </div>
-        <p className="px-mock-btn">{mock.next}</p>
-      </MiniApp>
-    );
-  }
-  if (type === 'variations') {
-    const mock = WALKTHROUGH_MOCKS.variations;
-    return (
-      <MiniApp url={mock.url}>
-        <p className="px-app-title">{mock.title}</p>
-        <div className="px-product-pick">
-          <span className="px-check" aria-hidden />
-          <div>
-            <p className="px-app-title px-app-title--sm">{mock.product}</p>
-            <p className="px-micro">SKU: {mock.sku}</p>
-          </div>
-        </div>
-        <div className="px-field-row">
-          <div className="px-field">
-            <span>Control price</span>
-            <strong>{mock.control}</strong>
-          </div>
-          <div className="px-field px-field--on">
-            <span>Variation price</span>
-            <strong>{mock.variation}</strong>
-          </div>
-        </div>
-      </MiniApp>
-    );
-  }
-  const mock = WALKTHROUGH_MOCKS.results;
-  return (
-    <MiniApp url={mock.url}>
-      <p className="px-app-title">{mock.title}</p>
-      <div className="px-walk-stats">
-        <div>
-          <p className="px-micro">CONVERSION RATE</p>
-          <p className="px-stat-value">{mock.conversion.control}</p>
-          <p className="px-micro">Control</p>
-        </div>
-        <div>
-          <p className="px-micro">CONVERSION RATE</p>
-          <p className="px-stat-value px-conf">↑ {mock.conversion.variation}</p>
-          <p className="px-micro">Variation A</p>
-        </div>
-        <div>
-          <p className="px-micro">REV / VISITOR</p>
-          <p className="px-stat-value px-conf">{mock.revenue.variation}</p>
-          <p className="px-micro">Variation A</p>
-        </div>
-      </div>
-      <p className="px-micro">CONVERSION RATE COMPARISON</p>
-      <div className="px-exp-chart">
-        <p>Control vs Variation A</p>
-        <div className="px-exp-bars">
-          <span className="px-exp-bar" style={{ width: '52%' }} />
-          <span className="px-exp-bar px-exp-bar--on" style={{ width: '72%' }} />
-        </div>
-      </div>
-    </MiniApp>
-  );
-}
-
-function ExperimentMock() {
-  return (
-    <div className="px-panel px-exp-mock" aria-hidden>
-      <p className="px-exp-heading">{EXPERIMENT_MOCK.heading}</p>
-      <div className="px-exp-pills">
-        <span className="px-exp-pill">{EXPERIMENT_MOCK.controlShare}</span>
-        <span className="px-exp-pill px-exp-pill--on">{EXPERIMENT_MOCK.variationShare}</span>
-      </div>
-      <div className="px-exp-prices">
-        <div>
-          <p className="px-micro">{EXPERIMENT_MOCK.control.label}</p>
-          <p className="px-exp-price">{EXPERIMENT_MOCK.control.price}</p>
-          <div className="px-exp-stats">
-            {EXPERIMENT_MOCK.control.stats.map((stat) => (
-              <p key={stat.label}>
-                <span>{stat.label}</span>
-                <strong>{stat.value}</strong>
-              </p>
+    <div className="px-feature-board">
+      {rows.map((row, rowIndex) => (
+        <div key={row.map(item => item.title).join('-')} className="px-feature-board-row">
+          {rowIndex > 0 ? <div className="px-feature-board-rule" aria-hidden /> : null}
+          <div className="px-feature-board-cells">
+            {row.map((item, cellIndex) => (
+              <div key={item.title} className="px-feature-board-cell-wrap">
+                {cellIndex > 0 ? <div className="px-feature-board-vrule" aria-hidden /> : null}
+                <article className="px-feature-board-cell">
+                  <div className="px-feature-icon-wrap">
+                    <img src={item.iconSrc} alt="" width={40} height={40} />
+                  </div>
+                  <h3>{item.title}</h3>
+                  <p>{item.body}</p>
+                </article>
+              </div>
             ))}
-          </div>
-        </div>
-        <div>
-          <p className="px-micro px-exp-var-label">{EXPERIMENT_MOCK.variation.label}</p>
-          <p className="px-exp-price px-exp-price--on">{EXPERIMENT_MOCK.variation.price}</p>
-          <div className="px-exp-stats">
-            {EXPERIMENT_MOCK.variation.stats.map((stat) => (
-              <p key={stat.label}>
-                <span>{stat.label}</span>
-                <strong>{stat.value}</strong>
-              </p>
-            ))}
-          </div>
-        </div>
-      </div>
-      <div className="px-exp-progress">
-        <span>Experiment progress</span>
-        <strong>{EXPERIMENT_MOCK.progress}</strong>
-        <span className="px-exp-progress-track">
-          <span className="px-exp-progress-bar" style={{ width: EXPERIMENT_MOCK.progress }} />
-        </span>
-      </div>
-      <p className="px-micro">PERFORMANCE COMPARISON</p>
-      {EXPERIMENT_MOCK.charts.map((chart) => (
-        <div key={chart.label} className="px-exp-chart">
-          <p>{chart.label}</p>
-          <div className="px-exp-bars">
-            <span className="px-exp-bar" style={{ width: `${chart.control}%` }} />
-            <span className="px-exp-bar px-exp-bar--on" style={{ width: `${chart.variant}%` }} />
           </div>
         </div>
       ))}
@@ -264,256 +51,203 @@ function ExperimentMock() {
   );
 }
 
-function ResultsBoard() {
-  return (
-    <div className="px-panel px-results-board" aria-hidden>
-      <div className="px-results-head">
-        <span className="px-badge-win">{RESULTS_BOARD.winner}</span>
-      </div>
-      <div className="px-cmp-table">
-        <div className="px-cmp-head">
-          <span />
-          {RESULTS_BOARD.columns.map((column) => (
-            <span key={column}>{column}</span>
-          ))}
-        </div>
-        <div className="px-cmp-row">
-          <strong>{RESULTS_BOARD.control.name}</strong>
-          <span>{RESULTS_BOARD.control.conv}</span>
-          <span>{RESULTS_BOARD.control.rev}</span>
-          <span>{RESULTS_BOARD.control.lift}</span>
-        </div>
-        <div className="px-cmp-row px-cmp-row--win">
-          <strong>{RESULTS_BOARD.variation.name}</strong>
-          <span className="px-conf">{RESULTS_BOARD.variation.conv}</span>
-          <span className="px-conf">{RESULTS_BOARD.variation.rev}</span>
-          <span className="px-cmp-lift">{RESULTS_BOARD.variation.lift}</span>
-        </div>
-      </div>
-      <p className="px-results-insight">{RESULTS_BOARD.insight}</p>
-    </div>
-  );
-}
-
-function FaqAccordion() {
-  const [open, setOpen] = useState(0);
+function PricingPlans({ storeUrl }) {
+  const [billing, setBilling] = useState(LANDING_BILLING.annual);
+  const isAnnual = billing === LANDING_BILLING.annual;
 
   return (
-    <div className="px-faq">
-      {FAQ_ITEMS.map((item, index) => {
-        const expanded = open === index;
-        return (
-          <div key={item.q} className={expanded ? 'px-faq-item px-faq-item--open' : 'px-faq-item'}>
-            <button
-              type="button"
-              className="px-faq-q"
-              aria-expanded={expanded}
-              aria-controls={`px-faq-a-${index}`}
-              id={`px-faq-q-${index}`}
-              onClick={() => setOpen(expanded ? -1 : index)}
+    <>
+      <div className="px-billing-toggle" role="group" aria-label="Billing period">
+        <div className="px-billing-segments">
+          <button
+            type="button"
+            className={
+              !isAnnual ? 'px-billing-seg px-billing-seg--active' : 'px-billing-seg'
+            }
+            aria-pressed={!isAnnual}
+            onClick={() => setBilling(LANDING_BILLING.monthly)}
+          >
+            Monthly
+          </button>
+          <button
+            type="button"
+            className={isAnnual ? 'px-billing-seg px-billing-seg--active' : 'px-billing-seg'}
+            aria-pressed={isAnnual}
+            onClick={() => setBilling(LANDING_BILLING.annual)}
+          >
+            Annual
+          </button>
+        </div>
+        {isAnnual ? <span className="px-billing-save">{PRICING_SECTION.saveBadge}</span> : null}
+      </div>
+      <div className="px-pricing-grid">
+        {PRICING_SECTION.tiers.map(tier => {
+          const quote = quoteTierPrice(tier, billing);
+          return (
+            <article
+              key={tier.id}
+              className={tier.featured ? 'px-plan px-plan--featured' : 'px-plan'}
             >
-              <span>{item.q}</span>
-              <span className={expanded ? 'px-faq-toggle px-faq-toggle--on' : 'px-faq-toggle'} aria-hidden>
-                {expanded ? '−' : '+'}
-              </span>
-            </button>
-            <p
-              className="px-faq-a"
-              id={`px-faq-a-${index}`}
-              role="region"
-              aria-labelledby={`px-faq-q-${index}`}
-              hidden={!expanded}
-            >
-              {item.a}
-            </p>
-          </div>
-        );
-      })}
-    </div>
+              <div className="px-plan-top">
+                <div className="px-plan-head">
+                  <h3>{tier.name}</h3>
+                  {tier.badge ? <span className="px-plan-badge">{tier.badge}</span> : null}
+                </div>
+                <p className="px-plan-price">
+                  <strong>{quote.price}</strong>
+                  <span className="px-plan-period">{quote.period}</span>
+                </p>
+                <p
+                  className={
+                    tier.ordersHighlight
+                      ? 'px-plan-orders px-plan-orders--highlight'
+                      : 'px-plan-orders'
+                  }
+                >
+                  {tier.orders}
+                </p>
+                <p className="px-plan-blurb">{tier.blurb}</p>
+                <InstallButton
+                  storeUrl={storeUrl}
+                  className={
+                    tier.featured
+                      ? 'px-btn px-btn--dark px-btn--plan'
+                      : 'px-btn px-btn--plan-outline'
+                  }
+                >
+                  {tier.cta}
+                </InstallButton>
+              </div>
+              <ul className="px-plan-features">
+                {tier.features.map(line => (
+                  <li key={line}>{line}</li>
+                ))}
+              </ul>
+            </article>
+          );
+        })}
+      </div>
+      <Link to={PUBLIC_ROUTES.contact} className="px-pricing-see-all">
+        {PRICING_SECTION.seeAllPlansLabel}
+        <img src={LANDING_ASSETS.chevronRightDark} alt="" width={20} height={20} aria-hidden />
+      </Link>
+    </>
   );
 }
 
 export default function LandingPage({ storeUrl }) {
   return (
-    <div className="px-landing">
+    <div className="px-landing px-landing--v2">
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{
           __html: JSON.stringify(buildFaqJsonLd()).replace(/</g, '\\u003c'),
         }}
       />
-      <section className="px-hero">
-        <div className="px-hero-copy">
-          <HeroBadge />
-          <h1>Test your Shopify prices before changing them for everyone.</h1>
-          <p className="px-lead">
-            Run pricing experiments on your products, compare different prices with real shoppers,
-            and use data to make better pricing decisions — completely free.
+
+      <section className="px-hero px-hero--stack">
+        <div className="px-hero-inner">
+          <p className="px-badge px-badge--pill">
+            <img className="px-badge-flare" src={LANDING_ASSETS.flare} alt="" width={20} height={20} />
+            {HERO.badge}
           </p>
-          <div className="px-hero-ctas">
-            <InstallButton storeUrl={storeUrl} className="px-btn px-btn--brand px-btn--lg">
-              Install free on Shopify →
-            </InstallButton>
-            <PublicSectionLink hash="how-it-works" className="px-btn px-btn--ghost px-btn--lg">
-              See how it works
-            </PublicSectionLink>
-          </div>
-          <p className="px-fine">No coding required · Free to use</p>
+          <h1>{HERO.title}</h1>
+          <p className="px-lead px-lead--center">{HERO.lead}</p>
+          <HeroCtas storeUrl={storeUrl} />
         </div>
-        <HeroSetupMock />
-      </section>
-
-      <section className="px-section px-section--deep">
-        <div className="px-section-head">
-          <Eyebrow>THE PROBLEM</Eyebrow>
-          <h2>Stop guessing what your products should cost.</h2>
-          <p>
-            Changing a product&apos;s price for every shopper is a decision based on assumptions.
-            Priceify lets you test different prices with real shoppers first, so you can make pricing
-            decisions based on actual results.
-          </p>
-        </div>
-        <div className="px-cards">
-          {PROBLEM_CARDS.map((card, index) => (
-            <article key={card.title} className="px-card">
-              <span className="px-num-badge">{String(index + 1).padStart(2, '0')}</span>
-              <h3>{card.title}</h3>
-              <p>{card.body}</p>
-            </article>
-          ))}
+        <div className="px-hero-shot-wrap">
+          <img
+            className="px-hero-shot"
+            src={LANDING_ASSETS.heroDashboard}
+            alt="Priceify experiments dashboard showing running tests and workspace metrics"
+            width={1200}
+            height={686}
+            loading="eager"
+            decoding="async"
+          />
         </div>
       </section>
 
-      <section className="px-section" id="how-it-works">
-        <div className="px-section-head">
-          <Eyebrow>HOW IT WORKS</Eyebrow>
-          <h2>Run a pricing experiment in four simple steps.</h2>
-        </div>
-        <ol className="px-step-grid">
-          {HOW_IT_WORKS_STEPS.map((step, index) => (
-            <li key={step.title} className="px-card">
-              <span className="px-num-badge">{String(index + 1).padStart(2, '0')}</span>
-              <h3>{step.title}</h3>
-              <p>{step.body}</p>
-            </li>
-          ))}
-        </ol>
+      <section className="px-logo-cloud" aria-label={LOGO_CLOUD.title}>
+        <p className="px-logo-cloud-label">{LOGO_CLOUD.title}</p>
+        <LogoMarquee />
       </section>
 
-      <section className="px-section px-section--deep">
-        <div className="px-section-head">
-          <Eyebrow tone="plain">{WALKTHROUGH_EYEBROW}</Eyebrow>
-          <h2>Everything you need to test pricing with confidence.</h2>
-        </div>
-        <div className="px-walk">
-          {WALKTHROUGH_STEPS.map((step, index) => (
-            <article
-              key={step.title}
-              className={index % 2 === 1 ? 'px-walk-row px-walk-row--flip' : 'px-walk-row'}
-            >
-              <WalkMock type={step.mock} />
-              <div className="px-walk-copy">
-                <h3>{step.title}</h3>
-                <p>{step.body}</p>
-              </div>
-            </article>
-          ))}
+      <section className="px-section px-section--soft" id="how-it-works">
+        <SectionIntro title={PRICE_TEST_DEMO.title} lead={PRICE_TEST_DEMO.lead} />
+        <div className="px-shot-frame">
+          <img
+            className="px-shot"
+            src={LANDING_ASSETS.priceTestDemo}
+            alt="Side-by-side control and variation product cards with a winning variation banner"
+            width={1200}
+            height={757}
+            loading="lazy"
+            decoding="async"
+          />
         </div>
       </section>
 
-      <section className="px-section" id="features">
-        <div className="px-section-head">
-          <Eyebrow>WHY PRICEIFY</Eyebrow>
-          <h2>Built to help you make smarter pricing decisions.</h2>
-        </div>
-        <div className="px-stack-cards">
-          {FEATURE_CARDS.map((card) => (
-            <article key={card.title} className="px-card px-card--row">
-              <span className="px-icon-badge px-icon-badge--brand">
-                <PriceifyIcon name={card.icon} />
-              </span>
-              <div>
-                <h3>{card.title}</h3>
-                <p>{card.body}</p>
-              </div>
-            </article>
-          ))}
+      <section className="px-section" id="platform">
+        <SectionIntro title={PLATFORM_SECTION.title} lead={PLATFORM_SECTION.lead} />
+        <div className="px-shot-frame">
+          <img
+            className="px-shot"
+            src={LANDING_ASSETS.platformWalkthrough}
+            alt="Four-step overview of choosing products, splitting traffic, setting prices, and measuring results"
+            width={1200}
+            height={1063}
+            loading="lazy"
+            decoding="async"
+          />
         </div>
       </section>
 
-      <section className="px-section">
-        <div className="px-split">
-          <div>
-            <Eyebrow>EXPERIMENT SAFELY</Eyebrow>
-            <h2>Experiment without changing your entire store at once.</h2>
-            <p>{EXPERIMENT_INTRO}</p>
-            <ul className="px-point-list">
-              {EXPERIMENT_POINTS.map((point) => (
-                <li key={point.title}>
-                  <strong>{point.title}</strong>
-                  <span>{point.body}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
-          <ExperimentMock />
-        </div>
+      <section className="px-section px-section--features" id="features">
+        <SectionIntro title={FEATURES_SECTION.title} lead={FEATURES_SECTION.lead} />
+        <FeatureBoard items={FEATURES_SECTION.items} />
       </section>
 
-      <section className="px-section">
-        <div className="px-results">
-          <ResultsBoard />
-          <div className="px-results-copy">
-            <Eyebrow>RESULTS &amp; ANALYTICS</Eyebrow>
-            <h2>Turn pricing experiments into actionable insights.</h2>
-            <p>
-              Priceify helps you understand how each price variation performs so you can make your
-              next pricing decision with more confidence.
-            </p>
-            <ul className="px-point-list">
-              {RESULTS_POINTS.map((point) => (
-                <li key={point}>
-                  <span>{point}</span>
-                </li>
-              ))}
-            </ul>
+      <section className="px-section px-section--pricing-brochure" id="pricing">
+        <SectionIntro title={PRICING_SECTION.title} lead={PRICING_SECTION.lead} />
+        <PricingPlans storeUrl={storeUrl} />
+      </section>
+
+      <section className="px-section px-section--soft" id="faq">
+        <SectionIntro title={FAQ_SECTION.title} lead={FAQ_SECTION.subtitle} />
+        <BrochureFaqAccordion items={FAQ_ITEMS} />
+      </section>
+
+      <section className="px-section px-get-started px-get-started--brochure">
+        <div className="px-get-started-inner">
+          <SectionIntro title={GET_STARTED_SECTION.title} lead={GET_STARTED_SECTION.lead} />
+          <div className="px-get-started-grid">
+            {GET_STARTED_SECTION.cards.map(card => (
+              <Link key={card.title} to={card.to} className="px-get-started-card">
+                <div className="px-get-started-card-copy">
+                  <h3>{card.title}</h3>
+                  <p>{card.body}</p>
+                </div>
+                <span className="px-get-started-arrow" aria-hidden>
+                  <img src={LANDING_ASSETS.arrowForward} alt="" width={24} height={24} />
+                </span>
+              </Link>
+            ))}
           </div>
         </div>
       </section>
 
-      <section className="px-section px-section--deep" id="use-cases">
-        <div className="px-section-head">
-          <Eyebrow>USE CASES</Eyebrow>
-          <h2>What could you test with Priceify?</h2>
-        </div>
-        <div className="px-cards px-cards--2x2">
-          {USE_CASES.map((card) => (
-            <article key={card.title} className="px-card">
-              <p className="px-usecase-label">{card.label}</p>
-              <h3>{card.title}</h3>
-              <p>{card.body}</p>
-            </article>
-          ))}
-        </div>
-      </section>
-
-      <section className="px-section" id="faq">
-        <div className="px-section-head">
-          <h2>Frequently asked questions</h2>
-        </div>
-        <FaqAccordion />
-      </section>
-
-      <section className="px-cta-wrap" id="cta">
-        <div className="px-cta">
-          <h2>Ready to test your prices?</h2>
-          <p>Install Priceify and start running pricing experiments on your Shopify store for free.</p>
-          <InstallButton storeUrl={storeUrl} className="px-btn px-btn--brand px-btn--lg">
-            Install free on Shopify
-          </InstallButton>
-          <p className="px-cta-fine">
-            Start experimenting without adding another paid experimentation platform to your stack.
-          </p>
+      <section className="px-final-cta px-final-cta--brochure" id="cta">
+        <div className="px-final-cta-bg" aria-hidden />
+        <div className="px-final-cta-content">
+          <h2>
+            {FINAL_CTA.titleLine1}
+            <br />
+            {FINAL_CTA.titleLine2}
+          </h2>
+          <p className="px-lead px-lead--center">{FINAL_CTA.lead}</p>
+          <HeroCtas storeUrl={storeUrl} />
+          <p className="px-final-fine">{FINAL_CTA.fine}</p>
         </div>
       </section>
     </div>

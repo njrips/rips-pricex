@@ -15,7 +15,11 @@ import { appendActivityToPlans, createActivityEntry } from './classicActivity';
 import { planResume, resumeConflictListMessage } from './resumeConflicts';
 import {
   buildClassicWizardResumePath,
+  CLASSIC_STOPPED_PLAN_STATUS,
+  classicBatchOutcomeMessage,
   collectExperimentTestIds,
+  isSettledClassicPlan,
+  splitSettledByIds,
   getClassicExperimentResumeId,
   resolveClassicExperimentMenuActions,
 } from './classicExperimentListActions';
@@ -23,6 +27,7 @@ import {
   buildClassicExperimentDeleteConfirmMessage,
   deleteClassicExperimentSynchronized,
 } from './classicExperimentDelete';
+import { classicCreateStepId } from './classicCreateSteps';
 import styles from './SmartPricingClassic.module.css';
 
 function sleep(ms) {
@@ -133,12 +138,43 @@ export default function ClassicExperimentRowActions({
     onMessage?.({ type, text });
   };
 
-  const patchExperimentPlans = async patchFn => {
+  /**
+   * @param {(plan: object) => object} patchFn
+   * @param {object} [options]
+   * @param {boolean} [options.skipSettled] leave products whose winning price
+   *   is already published untouched, so the action cannot erase the record
+   *   that it was.
+   * @param {string[]} [options.onlyTestIds] restrict the patch to the products
+   *   whose request actually succeeded.
+   */
+  const patchExperimentPlans = async (patchFn, { skipSettled = false, onlyTestIds } = {}) => {
     const current = readInboxPlans(shopDomain) || [];
-    const next = current.map(plan => (planIdSet.has(plan.id) ? patchFn(plan) : plan));
+    const next = current.map(plan => {
+      if (!planIdSet.has(plan.id)) return plan;
+      if (skipSettled && isSettledClassicPlan(plan)) return plan;
+      if (onlyTestIds) {
+        const planTestId = String(plan?.test_id || plan?.metadata?.test_id || '').trim();
+        if (!onlyTestIds.includes(planTestId)) return plan;
+      }
+      return patchFn(plan);
+    });
     writeInboxPlans(shopDomain, next, { persist: false });
     await persistInboxPlansNow(shopDomain, next).catch(() => null);
     return next;
+  };
+
+  /**
+   * Send one request per product and report which products accepted it.
+   *
+   * `allSettled`, not `all`: one refusal used to reject the whole batch, so
+   * the merchant got a failure message over a row where some products had
+   * genuinely stopped and nothing said which.
+   */
+  const postToEachTest = async (testIds, action) => {
+    const results = await Promise.allSettled(
+      testIds.map(id => apiPost(`/tests/${encodeURIComponent(id)}/${action}`, {}))
+    );
+    return splitSettledByIds(testIds, results);
   };
 
   const refreshList = async (hydrateOptions = {}) => {
@@ -189,28 +225,91 @@ export default function ClassicExperimentRowActions({
 
   const handlePause = () =>
     runBusy('pause', async () => {
-      const testIds = collectExperimentTestIds(experiment?.plans);
+      // A product whose winner is already applied is not part of what Pause
+      // acts on: its price is published and its traffic is no longer split.
+      const testIds = collectExperimentTestIds(experiment?.plans, { skipSettled: true });
       if (!testIds.length) {
         throw new Error('No linked test to pause.');
       }
-      await Promise.all(testIds.map(id => apiPost(`/tests/${encodeURIComponent(id)}/stop`, {})));
+      const { succeeded, failed } = await postToEachTest(testIds, 'pause');
+      if (!succeeded.length) {
+        throw failed[0]?.reason || new Error('Could not pause experiment.');
+      }
       const pauseEntry = createActivityEntry({
         kind: 'paused',
         title: 'Experiment paused',
         detail: 'Traffic assignment stopped',
         actor: experiment?.representative?.owner_name || experiment?.representative?.created_by_name || 'You',
       });
-      await patchExperimentPlans(plan =>
-        appendActivityToPlans([{ ...plan, status: 'paused' }], pauseEntry)[0]
+      await patchExperimentPlans(
+        plan => appendActivityToPlans([{ ...plan, status: 'paused' }], pauseEntry)[0],
+        { skipSettled: true, onlyTestIds: succeeded }
       );
       await sleep(450);
-      notify('success', 'Experiment paused.');
+      notify(
+        failed.length ? 'warning' : 'success',
+        classicBatchOutcomeMessage({
+          verb: 'paused',
+          done: succeeded.length,
+          failed: failed.length,
+        })
+      );
+      await refreshList({ preferLocalIds: planIds, quiet: true });
+    });
+
+  /**
+   * End the experiment for good.
+   *
+   * A different call from Pause, because the two mean different things to the
+   * server as well as the list. Pause keeps the product reserved so the
+   * experiment can have it back; this gives it up, marks the plan finished,
+   * and moves the experiment to Completed with Archive and Delete instead of
+   * Resume.
+   */
+  const handleStop = () =>
+    runBusy('stop', async () => {
+      const testIds = collectExperimentTestIds(experiment?.plans, { skipSettled: true });
+      if (!testIds.length) {
+        throw new Error('No linked test to stop.');
+      }
+      const { succeeded, failed } = await postToEachTest(testIds, 'stop');
+      if (!succeeded.length) {
+        throw failed[0]?.reason || new Error('Could not stop experiment.');
+      }
+      const stopEntry = createActivityEntry({
+        kind: 'stopped',
+        title: 'Experiment stopped',
+        detail: 'Ended by you — no longer collecting results',
+        actor:
+          experiment?.representative?.owner_name ||
+          experiment?.representative?.created_by_name ||
+          'You',
+      });
+      await patchExperimentPlans(
+        plan =>
+          appendActivityToPlans([{ ...plan, status: CLASSIC_STOPPED_PLAN_STATUS }], stopEntry)[0],
+        { skipSettled: true, onlyTestIds: succeeded }
+      );
+      await sleep(450);
+      notify(
+        failed.length ? 'warning' : 'success',
+        classicBatchOutcomeMessage({
+          verb: 'stopped',
+          done: succeeded.length,
+          failed: failed.length,
+        })
+      );
       await refreshList({ preferLocalIds: planIds, quiet: true });
     });
 
   const handleResume = () =>
     runBusy('resume', async () => {
-      const testIds = collectExperimentTestIds(experiment?.plans);
+      // A product whose winner is applied must not be restarted: the merchant
+      // committed to that price and it is live in the catalog, so re-splitting
+      // its traffic would undo the decision. The per-product resume refuses
+      // this outright; neither preflight catches it, because such a test is
+      // its own holder and so reads as free.
+      const testIds = collectExperimentTestIds(experiment?.plans, { skipSettled: true });
       if (!testIds.length) {
         throw new Error('No linked test to resume.');
       }
@@ -242,8 +341,9 @@ export default function ClassicExperimentRowActions({
         detail: 'Traffic assignment started again',
         actor: experiment?.representative?.owner_name || experiment?.representative?.created_by_name || 'You',
       });
-      await patchExperimentPlans(plan =>
-        appendActivityToPlans([{ ...plan, status: 'running' }], resumeEntry)[0]
+      await patchExperimentPlans(
+        plan => appendActivityToPlans([{ ...plan, status: 'running' }], resumeEntry)[0],
+        { skipSettled: true }
       );
       notify('success', 'Experiment resumed.');
       await refreshList({ preferLocalIds: planIds, quiet: true });
@@ -324,13 +424,25 @@ export default function ClassicExperimentRowActions({
         break;
       case 'continue':
         setOpen(false);
-        navigate(buildClassicWizardResumePath(getClassicExperimentResumeId(experiment)));
+        // The step matters for an unfinished draft: the wizard opens at step 1
+        // without it, so continuing a draft left on Audience walked the
+        // merchant back through everything they had already answered. Clicking
+        // the row title has always passed it.
+        navigate(
+          buildClassicWizardResumePath(
+            getClassicExperimentResumeId(experiment),
+            classicCreateStepId(experiment?.wizardDraft?.step) || undefined
+          )
+        );
         break;
       case 'launch':
         handleLaunch();
         break;
       case 'pause':
         handlePause();
+        break;
+      case 'stop':
+        handleStop();
         break;
       case 'resume':
         handleResume();

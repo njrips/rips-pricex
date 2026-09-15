@@ -67,8 +67,23 @@ function buildGuardrailBand(currentPrice, options = {}) {
   }
   const maxDelta = current * (maxChangePercent / 100);
   const floorByChange = current - maxDelta;
-  const floorByMargin = (current * (1 - marginPercent / 100)) / (1 - minMarginPercent / 100);
-  const floor = Math.max(0, Math.max(floorByChange, floorByMargin * 0.5));
+  // The lowest price that still leaves the shop's minimum margin: unit cost
+  // divided by the share of the price the merchant wants to keep.
+  const unitCost = current * (1 - marginPercent / 100);
+  const priceAtMinMargin = unitCost / (1 - minMarginPercent / 100);
+  // Capped at the current price, because a product already selling below the
+  // minimum margin is a pre-existing condition rather than something a price
+  // test should correct by forcing a rise. Such a product simply gets no room
+  // to go lower.
+  //
+  // This used to be halved instead, which made the merchant's minimum margin
+  // almost never bind: a $100 product at 40% margin under a 35% minimum could
+  // be priced at $88, a 31.8% margin, and the scenario presets did exactly
+  // that -- every preset prices one arm below the current price. It mattered
+  // less while nothing deliberately cut prices. It is load-bearing now that
+  // the AI band can.
+  const floorByMargin = Math.min(priceAtMinMargin, current);
+  const floor = Math.max(0, Math.max(floorByChange, floorByMargin));
   const ceiling = current + maxDelta;
   return {
     floor: roundPrice(floor),
@@ -182,6 +197,13 @@ function findPriceChangeViolations(currentPrice, priceArms = [], guardrails = {}
   const ceiling = roundPrice(current + maxDelta);
   const floor = roundPrice(Math.max(0, current - maxDelta));
 
+  const isControlArm = arm => arm?.role === 'control' || arm?.id === 'control';
+  // Only worth asking which arms duplicate the control when the plan says
+  // which arm the control is. Some callers build bare `{label, price}` arms,
+  // and guessing the baseline there would risk refusing a valid launch to
+  // catch a problem that may not exist.
+  const controlIsKnown = arms.some(isControlArm);
+
   const violations = [];
   arms.forEach((arm, index) => {
     const label = String(arm?.label || arm?.name || `Arm ${index + 1}`);
@@ -194,6 +216,25 @@ function findPriceChangeViolations(currentPrice, priceArms = [], guardrails = {}
       violations.push(
         `${label} at $${roundPrice(price)} is outside your ${maxChangePercent}% max price change ` +
           `(allowed $${floor}–$${ceiling}).`
+      );
+      return;
+    }
+    // A challenger at the catalog price is a second control wearing a
+    // variation's name: it takes its share of the traffic and measures
+    // nothing, and every other check here passes it because the current price
+    // is trivially inside the allowed band.
+    //
+    // The usual way in is a variation the merchant never priced -- the wizard
+    // falls back to the catalog price for any arm without an override -- so
+    // this is the last place to catch a draft built before the Products step
+    // started requiring a price on every variation.
+    //
+    // Only reached for price plans: the caller skips this whole function for
+    // offer tests, where every arm sitting at the catalog price is the point.
+    if (controlIsKnown && !isControlArm(arm) && Math.abs(price - current) < 0.005) {
+      violations.push(
+        `${label} is set to your current price of $${roundPrice(current)}, so it would test ` +
+          `nothing and split traffic with the control.`
       );
     }
   });

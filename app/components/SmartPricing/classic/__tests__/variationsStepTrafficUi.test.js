@@ -146,10 +146,13 @@ describe('variations step traffic controls', () => {
     expect(all.indexOf(allocation)).toBeLessThan(all.indexOf(splitBanner));
   });
 
-  it('opens with control on 100% and the challenger on nothing', async () => {
+  it('opens on an even split, with nothing left to resolve', async () => {
     await renderPanel();
-    expect(fieldByLabel('Control traffic').value).toBe('100');
-    expect(fieldByLabel('Variation A traffic').value).toBe('0');
+    expect(fieldByLabel('Control traffic').value).toBe('50');
+    expect(fieldByLabel('Variation A traffic').value).toBe('50');
+    // Opening at 100/0 meant arriving on a step that was already complaining
+    // about a split the merchant had not touched.
+    expect(container.querySelector('[role="alert"]')).toBeNull();
   });
 
   it('lets a percentage be typed, not only dragged', async () => {
@@ -158,7 +161,8 @@ describe('variations step traffic controls', () => {
     await typeInto(fieldByLabel('Control traffic percent'), '40');
 
     expect(onChange).toHaveBeenCalledTimes(1);
-    expect(onChange.mock.calls[0][0].map(row => row.traffic)).toEqual([40, 0]);
+    // Only the edited row moves; the challenger keeps the 50 it opened with.
+    expect(onChange.mock.calls[0][0].map(row => row.traffic)).toEqual([40, 50]);
   });
 
   it('caps a typed percentage at what is free rather than going over 100', async () => {
@@ -191,9 +195,8 @@ describe('variations step traffic controls', () => {
   });
 
   it('gives every row a full-width track so a drag is always possible', async () => {
-    // Each track used to end at the row's headroom, which made the challenger
-    // in the default split a 0-to-0 range input: a slider that could not be
-    // dragged anywhere, on the very first screen.
+    // Each track used to end at the row's headroom, so a row on 0 with nothing
+    // free became a 0-to-0 range input: a slider that could not be dragged.
     await renderPanel();
 
     const control = fieldByLabel('Control traffic');
@@ -203,7 +206,12 @@ describe('variations step traffic controls', () => {
   });
 
   it('disables a row that has nothing and no room, and says why', async () => {
-    await renderPanel();
+    await renderPanel({
+      variations: [
+        { id: 'control', letter: null, role: 'Control', name: 'Control', traffic: 100 },
+        { id: 'var_a', letter: 'A', role: 'Variation A', name: 'Variation A', traffic: 0 },
+      ],
+    });
 
     const challenger = fieldByLabel('Variation A traffic');
     expect(challenger.disabled).toBe(true);
@@ -245,7 +253,7 @@ describe('variations step traffic controls', () => {
 
     await act(async () => setNativeValue(control, '35'));
 
-    expect(onChange.mock.calls[0][0].map(row => row.traffic)).toEqual([35, 0]);
+    expect(onChange.mock.calls[0][0].map(row => row.traffic)).toEqual([35, 50]);
   });
 
   it('stops a drag at the free remainder instead of going over 100', async () => {
@@ -386,7 +394,12 @@ describe('variations step traffic controls', () => {
   });
 
   it('hands the even split back through Split equally', async () => {
-    const { onChange } = await renderPanel();
+    const { onChange } = await renderPanel({
+      variations: [
+        { id: 'control', letter: null, role: 'Control', name: 'Control', traffic: 90 },
+        { id: 'var_a', letter: 'A', role: 'Variation A', name: 'Variation A', traffic: 10 },
+      ],
+    });
     const button = [...container.querySelectorAll('button')].find(
       node => (node.textContent || '').trim() === 'Split equally'
     );
@@ -431,5 +444,36 @@ describe('variations step traffic controls', () => {
     await typeInto(fieldByLabel('Traffic allocation percent'), '1');
 
     expect(onTrafficAllocationChange).toHaveBeenCalledWith(5);
+  });
+});
+
+/**
+ * A new experiment puts every matching visitor into the test.
+ *
+ * Held at half by default, a test needed twice as long to reach significance
+ * and got nothing in return: the visitors kept out are not measured either
+ * way, so they were not a safety margin, just a slower answer. The guardrails
+ * are what limit the downside.
+ */
+describe('the traffic allocation a new experiment starts on', () => {
+  it('starts at 100% in the wizard state', async () => {
+    const { createDefaultAudienceState } = await import('../AudienceSuccessStepPanel');
+
+    expect(createDefaultAudienceState().trafficAllocation).toBe(100);
+  });
+
+  it('shows 100% on the step when no allocation is handed to it', async () => {
+    // The panel's own fallback has to agree with the wizard's, or the slider
+    // reads one figure on a step whose state holds another.
+    await renderPanel({ trafficAllocation: undefined });
+
+    expect(fieldByLabel('Traffic allocation').value).toBe('100');
+    expect(container.textContent).toContain('100% of matching visitors enter the experiment');
+  });
+
+  it('still honours an allocation the merchant has dialled back', async () => {
+    await renderPanel({ trafficAllocation: 25 });
+
+    expect(fieldByLabel('Traffic allocation').value).toBe('25');
   });
 });

@@ -65,12 +65,21 @@ async function syncSmartPricingInboxForTest(shopDomain, testId, { reason = 'test
     .trim()
     .toLowerCase();
   const merchantPaused =
-    (normalizedReason === 'merchant_stop' ||
+    (normalizedReason === 'merchant_pause' ||
+      normalizedReason === 'merchant_stop' ||
       normalizedReason === 'merchant_stop_product' ||
       normalizedReason === 'guardrail_breach') &&
     result.synced &&
     !result.winner_applied &&
-    (result.inbox_status === 'winner_ready' || result.test_status === 'stopped');
+    (result.inbox_status === 'winner_ready' ||
+      result.test_status === 'stopped' ||
+      result.test_status === 'paused');
+  // Stopping is the merchant saying the experiment is over, which is a
+  // different answer from pausing it. Left as `paused` the plan came back
+  // resumable on the next list load, undoing the stop they had just been told
+  // had happened.
+  const merchantFinished =
+    normalizedReason === 'merchant_finish' && result.synced && !result.winner_applied;
   // Keep a merchant or guardrail pause so interval syncs do not turn it into a
   // generic stopped state or advertise a rollout without reviewed evidence.
   const keepExistingPause =
@@ -88,7 +97,13 @@ async function syncSmartPricingInboxForTest(shopDomain, testId, { reason = 'test
     result.synced &&
     !result.winner_applied;
   let patchRow = result;
-  if (merchantPaused || keepExistingPause) {
+  if (merchantFinished) {
+    patchRow = {
+      ...result,
+      inbox_status: 'completed',
+      winner_ready: false,
+    };
+  } else if (merchantPaused || keepExistingPause) {
     patchRow = {
       ...result,
       inbox_status: 'paused',

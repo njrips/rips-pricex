@@ -352,8 +352,78 @@
       })
       .join('');
   }
+  /**
+   * A picker can actually be open on this page.
+   *
+   * Mirrors VISUAL_PICKER_ACTIVE below, recomputed rather than read, because
+   * early boot reaches this while those declarations are still in their
+   * temporal dead zone. Each signal is guarded on its own so that one of them
+   * being unavailable this early cannot answer for the rest.
+   */
+  function inPricePickerContext() {
+    try {
+      if (window.self !== window.top) return true;
+    } catch (_eFrame) {
+      // A cross-origin parent throws on that comparison, which only happens
+      // when there is a parent -- so this is a frame.
+      return true;
+    }
+    try {
+      if (window.opener && !window.opener.closed) return true;
+    } catch (_eOpener) {
+      /* no opener we are allowed to see */
+    }
+    try {
+      if (window.__RIPX_FORCE_PICKER__) return true;
+      var path = String((window.location && window.location.pathname) || '').toLowerCase();
+      if (path.indexOf('/track/preview-document') !== -1) return true;
+    } catch (_ePath) {
+      /* fall through */
+    }
+    try {
+      // The proxy serves the shop's page from another host, carrying the real
+      // address in `url`.
+      var nestedTarget = URL_PARAMS.get('url') || '';
+      if (!nestedTarget) return false;
+      var shopHost = String(CONFIG.shopDomain || PREVIEW_TENANT_DOMAIN || '')
+        .trim()
+        .toLowerCase();
+      var currentHost = String(window.location.hostname || '')
+        .trim()
+        .toLowerCase();
+      return !!(shopHost && currentHost && currentHost !== shopHost);
+    } catch (_eProxyPick) {
+      return false;
+    }
+  }
+
+  /**
+   * The price surface picker is open on this page.
+   *
+   * The parameter alone is not enough. It suppresses every price test on the
+   * pageview, so on its own it is an opt-out any shopper, crawler or shared
+   * link could carry -- quietly removing that visitor from the merchant's
+   * experiment with no picker in sight. It only means anything inside the
+   * contexts a picker can be open in.
+   *
+   * Read from the url on every call rather than from the PRICE_SURFACE_PICK_MODE
+   * constant below: the anti-flicker guard asks this during early boot, while
+   * that declaration is still in its temporal dead zone.
+   */
+  function priceSurfacePickModeActive() {
+    try {
+      if (getPreviewParam('ab_price_surface_pick') !== '1') return false;
+    } catch (_ePickMode) {
+      return false;
+    }
+    return inPricePickerContext();
+  }
   function isPriceAntiFlickerSurface(test) {
     if (!testTypeIsPrice(test)) return false;
+    // Nothing is going to repaint while the picker is open, so there is nothing
+    // to hide -- and hiding the body is the last thing a merchant trying to
+    // click a price needs.
+    if (priceSurfacePickModeActive()) return false;
     try {
       if (shouldRunPriceTestOnCurrentPage(test)) return true;
       var path = String((window.location && window.location.pathname) || '').toLowerCase();
@@ -10934,9 +11004,10 @@
     );
     var label = document.createElement('span');
     label.id = 'ripx-visual-picker-label';
-    label.textContent = PRICE_SURFACE_PICK_MODE
-      ? 'Click a price on this page to map it. The selector goes back to Priceify automatically.'
-      : 'Click an element to select it. The selector goes back to Priceify, or copy it below.';
+    // What to do next depends on whether there is a route home, since only
+    // then does the click finish the job on its own. Offering "or copy it
+    // below" next to a bar with no copy box was the older, looser wording.
+    label.textContent = pickerIdleLabel();
     label.setAttribute('style', 'flex:1;min-width:120px;');
     var selectorInput = document.createElement('input');
     selectorInput.type = 'text';
@@ -10953,26 +11024,41 @@
       'style',
       'background:#E85D04;color:#fff;border:none;padding:6px 12px;border-radius:4px;cursor:pointer;font-size:13px;'
     );
+    function flashCopyResult(ok) {
+      copyBtn.textContent = ok ? 'Copied!' : 'Press Ctrl/Cmd+C';
+      if (!ok) {
+        try {
+          selectorInput.removeAttribute('readonly');
+          selectorInput.focus();
+          selectorInput.select();
+        } catch (_eSelect) {}
+      }
+      setTimeout(function () {
+        copyBtn.textContent = 'Copy selector';
+      }, 2500);
+    }
     copyBtn.onclick = function () {
       var val = selectorInput.value.trim();
       if (!val) return;
+      // The clipboard api needs a secure context and, in a frame, a
+      // clipboard-write permission this one is not granted. It used to fail
+      // into an empty catch, so the button did nothing and said nothing.
+      // Selecting the text is the fallback that always works.
       try {
         if (navigator.clipboard && navigator.clipboard.writeText) {
-          navigator.clipboard.writeText(val).then(function () {
-            copyBtn.textContent = 'Copied!';
-            setTimeout(function () {
-              copyBtn.textContent = 'Copy selector';
-            }, 2000);
-          });
+          navigator.clipboard.writeText(val).then(
+            function () {
+              flashCopyResult(true);
+            },
+            function () {
+              flashCopyResult(false);
+            }
+          );
+          return;
         }
-      } catch (e) {}
+      } catch (_eClipboard) {}
+      flashCopyResult(false);
     };
-    var sendBtn = document.createElement('button');
-    sendBtn.textContent = 'Send to Priceify';
-    sendBtn.setAttribute(
-      'style',
-      'background:#059669;color:#fff;border:none;padding:6px 12px;border-radius:4px;cursor:pointer;font-size:13px;font-weight:600;'
-    );
     function inferPickerPriceSurfaceFromHref(href) {
       return getPriceSurfaceHintFromHref(href);
     }
@@ -11009,6 +11095,35 @@
       return 'regular';
     }
 
+    /**
+     * Whether this page has anywhere to send a selector back to.
+     *
+     * The settings picker runs in a modal iframe, so the route home is the
+     * parent frame; a hand-opened tab has neither and the merchant has to copy.
+     * Checked live rather than from a constant read at load, because an opener
+     * can close while the picker is still up.
+     */
+    function pickerCanPostBack() {
+      try {
+        if (window.opener && !window.opener.closed) return true;
+      } catch (_eOpenerCheck) {}
+      try {
+        return Boolean(IN_IFRAME && window.parent && window.parent !== window);
+      } catch (_eParentCheck) {
+        return false;
+      }
+    }
+
+    /** What the bar says before anything has been picked. */
+    function pickerIdleLabel() {
+      var what = PRICE_SURFACE_PICK_MODE
+        ? 'Click a price on this page to map it.'
+        : 'Click an element to select it.';
+      return pickerCanPostBack()
+        ? what + ' The selector goes back to Priceify automatically.'
+        : what + ' Then copy the selector below into Priceify.';
+    }
+
     function postVisualSelector(selector, el) {
       var payload = {
         type: 'ripx-visual-selector',
@@ -11027,24 +11142,6 @@
       } catch (_eParentPost) {}
     }
 
-    sendBtn.onclick = function () {
-      var val = selectorInput.value.trim();
-      if (!val) return;
-      postVisualSelector(val);
-      if (window.opener && !window.opener.closed) {
-        sendBtn.textContent = 'Sent!';
-        setTimeout(function () {
-          sendBtn.textContent = 'Send to Priceify';
-        }, 2000);
-      } else {
-        // Nothing to send to: this tab was not opened by the app, so copying
-        // is the only way back. Saying that beats naming a tab that is gone.
-        sendBtn.textContent = 'Copy it instead';
-        setTimeout(function () {
-          sendBtn.textContent = 'Send to Priceify';
-        }, 2500);
-      }
-    };
     var closeBtn = document.createElement('button');
     closeBtn.textContent = 'Close';
     closeBtn.setAttribute(
@@ -11064,9 +11161,16 @@
       } catch (_eClose) {}
     };
     bar.appendChild(label);
-    bar.appendChild(selectorInput);
-    bar.appendChild(copyBtn);
-    bar.appendChild(sendBtn);
+    // Clicking a price already sends it, so a Send button was only ever a
+    // second press of a button that had done its job -- and in the settings
+    // modal, where the app fills the row and closes the picker on that click,
+    // neither it nor the selector box was reachable at all. What is left is
+    // the fallback: a tab with nowhere to post back to, where reading the
+    // selector and copying it is the only way to finish.
+    if (!pickerCanPostBack()) {
+      bar.appendChild(selectorInput);
+      bar.appendChild(copyBtn);
+    }
     bar.appendChild(closeBtn);
     document.body.appendChild(overlay);
     document.body.appendChild(box);
@@ -11101,7 +11205,7 @@
     function onSelectorChosen(selector, el) {
       selectorInput.value = selector;
       postVisualSelector(selector, el);
-      if (IN_IFRAME || (window.opener && !window.opener.closed)) {
+      if (pickerCanPostBack()) {
         label.textContent = 'Selector sent to Priceify. Pick another price or close.';
         label.setAttribute('style', 'flex:1;min-width:120px;color:#34d399;');
       } else {
@@ -11255,9 +11359,7 @@
         if (!el) {
           setHighlight(null);
           if (!selectorInput.value) {
-            label.textContent = PRICE_SURFACE_PICK_MODE
-              ? 'Click a price on this page to map it. The selector goes back to Priceify automatically.'
-              : 'Click an element to select it. The selector goes back to Priceify, or copy it below.';
+            label.textContent = pickerIdleLabel();
             label.setAttribute('style', 'flex:1;min-width:120px;');
           }
           return;
@@ -13562,6 +13664,12 @@
 
   function shouldRunPriceTestOnCurrentPage(test) {
     if (!test) return false;
+    // The picker maps a selector onto the catalog price, so no test may paint
+    // over it. A test price is the wrong number to map, and the paint that put
+    // it there fights the theme's own price updates: each rewrite trips the
+    // MutationObserver watching the product root, which repaints, which trips
+    // it again. That loop is what the merchant sees as a blinking price.
+    if (testTypeIsPrice(test) && priceSurfacePickModeActive()) return false;
     if (testTypeIsPrice(test) && isConvertedPresentmentCurrency()) {
       noteConvertedCurrencySkip(test);
       return false;

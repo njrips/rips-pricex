@@ -3992,10 +3992,19 @@
 }
 
 .sectionHeaderTitleRow {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 0.4rem;
+  gap: 6px;
   flex-wrap: wrap;
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* Polaris tooltip wrapper beside a settings section title. */
+.sectionHeaderTitleRow > span {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
 }
 
 .sectionHeaderTitleRow h1,

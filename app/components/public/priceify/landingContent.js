@@ -1,311 +1,388 @@
-export const PROBLEM_CARDS = [
-  {
-    title: 'Test before you change',
-    body: 'Experiment with a portion of your traffic instead of changing prices for everyone at once.',
-  },
-  {
-    title: 'Learn from real shoppers',
-    body: 'See how customers actually respond to different price points — not what you assume they will.',
-  },
-  {
-    title: 'Make better pricing decisions',
-    body: 'Use measurable results instead of relying only on intuition or industry benchmarks.',
-  },
-];
-
-export const HOW_IT_WORKS_STEPS = [
-  {
-    title: 'Choose your products',
-    body: 'Select the products you want to include in your experiment.',
-  },
-  {
-    title: 'Create price variations',
-    body: 'Set your current price and create one or more alternative prices to test.',
-  },
-  {
-    title: 'Split your traffic',
-    body: 'Control how many shoppers see each price variation during the experiment.',
-  },
-  {
-    title: 'Measure the results',
-    body: 'Compare conversion, revenue per visitor, and other important metrics.',
-  },
-];
-
-export const WALKTHROUGH_EYEBROW = 'Build your experiment';
-
-export const WALKTHROUGH_STEPS = [
-  {
-    title: 'Start with a clear pricing hypothesis.',
-    body: 'Define what you want to test and create an experiment without complicated setup. Name your experiment, choose a timeframe, and you’re ready to add products.',
-    mock: 'hypothesis',
-  },
-  {
-    title: 'Choose what to test and who sees it.',
-    body: 'Select products, set test prices, and control how much traffic enters your experiment. You decide exactly which products are included and what prices to compare.',
-    mock: 'variations',
-  },
-  {
-    title: 'Know which price performs better.',
-    body: 'Compare variations and track metrics such as conversion rate, revenue per visitor, and experiment performance. Get a clear picture of how each price point behaved.',
-    mock: 'results',
-  },
-];
-
-export const FEATURE_CARDS = [
-  {
-    icon: 'icon-chart',
-    title: 'Data-driven decisions',
-    body: 'Use real customer behavior to evaluate pricing changes rather than relying on assumptions about what shoppers will accept.',
-  },
-  {
-    icon: 'icon-split',
-    title: 'Controlled experimentation',
-    body: 'Test new prices with selected traffic before making a broader change. Keep your existing price running for the rest of your visitors.',
-  },
-  {
-    icon: 'icon-gauge',
-    title: 'Meaningful metrics',
-    body: 'Understand how pricing affects conversion, revenue per visitor, and other important outcomes — not just surface-level click data.',
-  },
-  {
-    icon: 'icon-tag',
-    title: 'Free to use',
-    body: 'Run pricing experiments without paying for another experimentation platform. Priceify is available free on the Shopify App Store.',
-  },
-];
-
-export const EXPERIMENT_INTRO =
-  'With controlled traffic, compare your test against a control, and monitor important metrics while your experiment runs.';
-
-export const EXPERIMENT_POINTS = [
-  {
-    title: 'Control vs. variation',
-    body: 'Show your original price alongside a test price to see which performs better with real customers.',
-  },
-  {
-    title: 'Traffic allocation',
-    body: 'Choose how much of your traffic enters the experiment and in what proportion.',
-  },
-  {
-    title: 'Performance comparison',
-    body: 'See how each price point is performing in real time.',
-  },
-  {
-    title: 'Revenue guardrail',
-    body: 'A test that costs you revenue per visitor pauses itself, at a limit you set per experiment.',
-  },
-];
-
-export const RESULTS_POINTS = [
-  'Conversion rate per variation',
-  'Revenue per visitor',
-  'Total conversions and revenue',
-  'Performance lift compared to control',
-];
-
-export const HERO_SETUP_MOCK = {
-  url: 'app.priceify.io/experiments',
-  crumb: 'Experiments',
-  title: 'Summer Hoodie Price Test',
-  status: 'Running',
-  meta: 'Started Aug 12 · 1,020 visitors · 7 days left',
-  nav: ['Experiments', 'Analytics', 'Settings'],
-  progress: '62%',
-  control: {
-    label: 'Control',
-    share: '50%',
-    price: '$59.00',
-    stats: [
-      { label: 'Conv. rate', value: '3.2%' },
-      { label: 'Rev/visitor', value: '$1.89' },
-      { label: 'Visitors', value: '510' },
-    ],
-  },
-  variation: {
-    label: 'Variation A',
-    share: '50%',
-    price: '$69.00',
-    stats: [
-      { label: 'Conv. rate', value: '4.4%', lift: true },
-      { label: 'Rev/visitor', value: '$3.04', lift: true },
-      { label: 'Visitors', value: '510' },
-    ],
-  },
+/** Static paths for Figma-exported landing art (see public/priceify/landing/). */
+export const LANDING_ASSETS = {
+  heroDashboard: '/priceify/landing/hero-dashboard.png',
+  priceTestDemo: '/priceify/landing/price-test-demo.png',
+  platformWalkthrough: '/priceify/landing/platform-walkthrough.png',
+  logoMarquee: '/priceify/landing/logo-marquee.png',
+  flare: '/priceify/landing/flare.svg',
+  shopifyBag: '/priceify/landing/shopify-bag.svg',
+  chevronDown: '/priceify/landing/chevron-down.svg',
+  chevronRight: '/priceify/landing/chevron-right.svg',
+  arrowForward: '/priceify/landing/arrow-forward.svg',
+  finalCtaDots: '/priceify/landing/final-cta-dots.png',
+  featureAdsClick: '/priceify/landing/feature-ads-click.svg',
+  featureAltRoute: '/priceify/landing/feature-alt-route.svg',
+  featureAutoFix: '/priceify/landing/feature-auto-fix.svg',
+  featureTune: '/priceify/landing/feature-tune.svg',
+  featureData: '/priceify/landing/feature-data-exploration.svg',
+  featureAssistant: '/priceify/landing/feature-assistant.svg',
+  chevronRightDark: '/priceify/landing/chevron-right-dark.svg',
 };
 
-export const EXPERIMENT_MOCK = {
-  heading: 'Traffic allocation',
-  controlShare: '50% → Control',
-  variationShare: '50% → Variation A',
-  control: {
-    label: 'Control',
-    note: 'Current price',
-    price: '$59.00',
-    stats: [
-      { label: 'Conv. rate', value: '3.2%' },
-      { label: 'Rev/visitor', value: '$1.89' },
-      { label: 'Visitors', value: '510' },
-    ],
-  },
-  variation: {
-    label: 'Variation A',
-    note: 'Test price',
-    price: '$69.00',
-    stats: [
-      { label: 'Conv. rate', value: '4.4%' },
-      { label: 'Rev/visitor', value: '$3.04' },
-      { label: 'Visitors', value: '510' },
-    ],
-  },
-  progress: '62%',
-  charts: [
-    { label: 'Revenue per visitor', control: 48, variant: 78 },
-    { label: 'Conversion rate', control: 42, variant: 64 },
+export const HERO = {
+  badge: 'A/B PRICE TESTING FOR SHOPIFY',
+  title: 'Turn Your Shopify Pricing Into a Growth Experiment',
+  lead:
+    'Launch a price experiment in under 2 minutes. Guardrails auto-stop anything that hurts your store, page speed, refunds, bounce rate — before it matters.',
+  primaryCta: 'Add to Shopify',
+  secondaryCta: 'Start Free Trial',
+};
+
+export const LOGO_CLOUD = {
+  title: 'Trusted by Leading Brands',
+};
+
+export const PRICE_TEST_DEMO = {
+  title: 'Two prices. Same traffic. One clear winner.',
+  lead:
+    'Priceify splits your live shoppers between a control and a variation, then measures revenue per visitor — not just orders — so a cheaper price that sells more units cannot fool you.',
+  winTitle: 'Variation B wins — +8.1% revenue per visitor',
+  winMeta: '96% confidence after 9 days of live traffic',
+  deployCta: 'Deploy Variation B',
+};
+
+export const PLATFORM_SECTION = {
+  title: 'Your entire pricing strategy in one place',
+  lead: 'Run experiments, track performance, and find the price that drives the most revenue.',
+  steps: [
+    {
+      title: 'Choose products',
+      body: 'Select the products you want to include in your experiment.',
+    },
+    {
+      title: 'Split traffic',
+      body: 'Control how many shoppers see each price variation.',
+    },
+    {
+      title: 'Create price variations',
+      body: 'Set your current price and create one or more alternative prices.',
+    },
+    {
+      title: 'Measure the results',
+      body: 'Compare conversion, revenue, profit, and other important metrics.',
+    },
   ],
 };
 
-export const RESULTS_BOARD = {
-  winner: 'Var A Experiment winner',
-  columns: ['Conv. Rate', 'Rev/Visit', 'Lift'],
-  control: { name: 'Control', conv: '3.2%', rev: '$1.89', lift: '—' },
-  variation: { name: 'Variation A', conv: '4.4%', rev: '$3.04', lift: '+61%' },
-  insight: 'The $69.00 price point generated higher revenue per visitor than the $59.00 control.',
+export const FEATURES_SECTION = {
+  title: 'Everything a price experiment needs.',
+  lead: 'Built around price, checkout and the way Shopify stores actually run.',
+  items: [
+    {
+      icon: 'ads_click',
+      iconSrc: LANDING_ASSETS.featureAdsClick,
+      title: 'Targeted Audience Insights',
+      body: 'Target audiences by device, source, or location — or let AI assist.',
+    },
+    {
+      icon: 'alt_route',
+      iconSrc: LANDING_ASSETS.featureAltRoute,
+      title: 'Diverse Experiment Options',
+      body: 'Conduct A/B, multivariate, split URL, and offer tests.',
+    },
+    {
+      icon: 'auto_fix_normal',
+      iconSrc: LANDING_ASSETS.featureAutoFix,
+      title: 'AI-Driven Pricing Suggestions',
+      body: 'AI can suggest ideal test prices based on your margins.',
+    },
+    {
+      icon: 'tune',
+      iconSrc: LANDING_ASSETS.featureTune,
+      title: 'Instant Confidence Metrics',
+      body: 'Monitor lift %, confidence %, and experiment progress.',
+    },
+    {
+      icon: 'data_exploration',
+      iconSrc: LANDING_ASSETS.featureData,
+      title: 'Customizable Product Focus',
+      body: 'Test a single SKU, a collection, or your entire catalog.',
+    },
+    {
+      icon: 'assistant',
+      iconSrc: LANDING_ASSETS.featureAssistant,
+      title: 'RipX Virtual Assistant',
+      body: 'Receive assistance and troubleshoot experiments within the app.',
+    },
+  ],
 };
 
-export const WALKTHROUGH_MOCKS = {
-  hypothesis: {
-    url: 'app.priceify.io/experiments/new',
-    title: 'New Experiment',
-    name: 'Summer Collection Price Test',
-    hypothesis:
-      'A higher price may increase revenue per visitor without significantly reducing conversion rate.',
-    duration: '14 days',
-    next: 'Next: Add Products',
+export const PRICING_SECTION = {
+  title: 'Priced so one winning test covers the year.',
+  lead:
+    'Banded by test orders per month — you only pay for traffic that actually went through an experiment. Change or cancel from your Shopify admin.',
+  saveBadge: 'Save 20%',
+  seeAllPlansLabel: 'See All Plans',
+  tiers: [
+    {
+      id: 'starter',
+      name: 'Starter',
+      annualPrice: '$79',
+      monthlyPrice: '$99',
+      annualPeriod: '/ month ~ billed annually',
+      monthlyPeriod: '/ month',
+      price: '$79',
+      period: '/ month ~ billed annually',
+      orders: 'Up to 1,000 test orders / month',
+      blurb: 'For a first test on one product line.',
+      cta: 'Start free trial',
+      featured: false,
+      features: [
+        '1 experiment running at a time',
+        'Price and shipping-threshold tests',
+        'All 6 guardrails, auto-stop included',
+        'Real-time confidence tracking',
+        'Email support',
+      ],
+    },
+    {
+      id: 'pro',
+      name: 'Pro',
+      annualPrice: '$199',
+      monthlyPrice: '$249',
+      annualPeriod: '/ month ~ billed annually',
+      monthlyPeriod: '/ month',
+      price: '$199',
+      period: '/ month ~ billed annually',
+      orders: 'Up to 5,000 test orders / month',
+      ordersHighlight: true,
+      blurb: 'Where most Shopify stores land.',
+      cta: 'Start free trial',
+      featured: true,
+      badge: 'MOST POPULAR',
+      features: [
+        'Unlimited concurrent experiments',
+        'Every experiment type, including A/B/n',
+        'AI-suggested price ranges',
+        'Audience targeting by country and source',
+        'Slack and email guardrail alerts',
+        'Priority support with a named contact',
+      ],
+    },
+    {
+      id: 'advanced',
+      name: 'Advanced',
+      annualPrice: '$449',
+      monthlyPrice: '$562',
+      annualPeriod: '/ month ~ billed annually',
+      monthlyPeriod: '/ month',
+      price: '$449',
+      period: '/ month ~ billed annually',
+      orders: 'Up to 20,000 test orders / month',
+      blurb: 'Multi-store and higher volume.',
+      cta: 'Start free trial',
+      featured: false,
+      features: [
+        'Everything in Growth',
+        'Multiple stores on one account',
+        'Custom guardrail metrics and thresholds',
+        'API and webhook access',
+        'Onboarding call and test roadmap',
+        'Dedicated customer success manager',
+      ],
+    },
+  ],
+};
+
+export const FAQ_SECTION = {
+  title: 'Frequently Asked Questions',
+  subtitle: 'Questions merchants ask first.',
+};
+
+export const FAQ_ITEMS = [
+  {
+    q: 'Will this slow down my store?',
+    a: 'Page load time is one of the six guardrail metrics Priceify watches on every experiment. If a variation pushes load time past the threshold you set, Priceify alerts you or stops the test automatically — so a slow variation cannot quietly stay live.',
   },
-  variations: {
-    url: 'app.priceify.io/experiments/setup/products',
-    title: 'Products & Prices',
-    product: 'Wool Blend Hoodie',
-    sku: 'WBH-001',
-    control: '$59.00',
-    variation: '$69.00',
+  {
+    q: 'Will customers see different prices at the same time?',
+    a: 'Yes — that is how a price test works. Each shopper is assigned to one variation for the experiment, so they see a consistent price while they browse and checkout.',
   },
-  results: {
-    url: 'app.priceify.io/experiments/summer-test/results',
-    title: 'Results',
-    conversion: { control: '3.2%', variation: '4.4%' },
-    revenue: { control: '$1.89', variation: '$3.04' },
+  {
+    q: 'Do I need a developer to set this up?',
+    a: 'No. Install from the Shopify App Store, enable the theme app embed in Setup, and create your first experiment from the admin — no theme code edits required.',
   },
+  {
+    q: 'How long does a test need to run?',
+    a: 'It depends on traffic and how close the variations perform. Priceify shows confidence and lift as data comes in so you can decide when results are strong enough to act on.',
+  },
+  {
+    q: 'What happens if a price test hurts conversion or refunds?',
+    a: 'Guardrails watch conversion, refunds, bounce rate, page speed, and more. If a variation crosses a limit you set, Priceify can alert you or stop the test automatically.',
+  },
+  {
+    q: 'Does this work with my existing checkout / apps?',
+    a: 'Priceify runs on your Shopify catalog prices and checkout. It is built for standard Shopify stores; if you use heavy checkout customization, contact us and we will confirm fit.',
+  },
+];
+
+export const GET_STARTED_SECTION = {
+  title: 'Get started easily',
+  lead:
+    'Explore the platform, dive into insightful articles, or begin your project management journey with a tailored template.',
+  cards: [
+    {
+      title: 'Try the Priceify demo',
+      body: "Experience Priceify's powerful features firsthand",
+      to: '/docs',
+    },
+    {
+      title: 'Discover Resources',
+      body: 'Comprehensive guides and learning resources',
+      to: '/docs',
+    },
+    {
+      title: 'Priceify Guardrails',
+      body: 'Track six essential metrics for every experiment',
+      to: '/docs/settings',
+    },
+  ],
+};
+
+export const FINAL_CTA = {
+  titleLine1: 'Your current price is a guess.',
+  titleLine2: 'Fix that this week.',
+  lead:
+    'Install Priceify, pick one product, and have a real price experiment running before the end of the day — with six guardrails watching it the whole time.',
+  primaryCta: 'Add to Shopify',
+  secondaryCta: 'Start Free Trial',
+  fine: '14-day free trial · No credit card · No theme code · Uninstall in one click',
 };
 
 export const LANDING_SECTION_ORDER = [
   'hero',
-  'problem',
-  'how-it-works',
-  'walkthrough',
-  'benefits',
-  'experiment-safely',
-  'results',
-  'use-cases',
+  'logo-cloud',
+  'price-test-demo',
+  'platform',
+  'features',
+  'pricing',
   'faq',
-  'cta',
+  'get-started',
+  'final-cta',
 ];
 
-export const USE_CASES = [
-  {
-    label: 'Use case 01',
-    title: 'Test a price increase',
-    body: 'Find out whether customers respond differently to a higher price before making it permanent for your entire store.',
-  },
-  {
-    label: 'Use case 02',
-    title: 'Find a stronger price point',
-    body: 'Compare multiple prices to understand which performs better for your specific products and audience.',
-  },
-  {
-    label: 'Use case 03',
-    title: 'Validate a new product price',
-    body: 'Test a price before it becomes the default for everyone — useful when launching a new product or variant.',
-  },
-  {
-    label: 'Use case 04',
-    title: 'Optimize high-value products',
-    body: 'Experiment with products where even small pricing changes can have meaningful business impact.',
-  },
-];
+export const FOOTER_BRAND_TAGLINE = 'Experiment Your Way to Better Pricing.';
 
-export const FAQ_ITEMS = [
-  {
-    q: 'Is Priceify really free?',
-    a: 'Yes. Priceify is free to install and free to use for running pricing experiments on your Shopify store — there’s no paid tier required to get started.',
-  },
-  {
-    q: 'Do I need coding experience?',
-    a: 'No. Install from the App Store and finish setup in Shopify Admin, including enabling the theme app embed. You do not write code.',
-  },
-  {
-    q: 'Can I choose which products to test?',
-    a: 'Yes. When you create an experiment, you choose the products that enter the test.',
-  },
-  {
-    q: 'Can I control how much traffic sees each price?',
-    a: 'Yes. You set how traffic is split between your current price and each test price.',
-  },
-  {
-    q: 'What metrics can I measure?',
-    a: 'You can compare conversion, revenue per visitor, total conversions and revenue, and lift versus the control price.',
-  },
-  {
-    q: 'Can I stop an experiment?',
-    a: 'Yes. Pause or stop a test from the app at any time. Price tests apply a winning variation to that product’s catalog price automatically, and leave the catalog unchanged when control wins.',
-  },
-  {
-    q: 'Does Priceify work with my Shopify store?',
-    a: 'Yes. Priceify is a Shopify-native app and uses your existing checkout.',
-  },
-];
+/** @deprecated use FOOTER_BRAND_TAGLINE */
+export const FOOTER_BLURB = FOOTER_BRAND_TAGLINE;
 
-export const FOOTER_BLURB =
-  'Pricing experimentation for Shopify merchants. Test before you change.';
+/** @deprecated brochure footer uses FOOTER_COPYRIGHT */
+export const FOOTER_TAGLINE = FOOTER_BRAND_TAGLINE;
 
-export const FOOTER_TAGLINE = 'Built for Shopify merchants.';
+export const FOOTER_COPYRIGHT = 'Copyright © Priceify. All rights reserved.';
 
-export const FOOTER_COLUMNS = [
+export const FOOTER_NEWSLETTER = {
+  title: 'Join our newsletter',
+  placeholder: 'Enter your email',
+  button: 'Subscribe',
+  consentPrefix: 'By subscribing you agree to our',
+  privacyLabel: 'Privacy Policy',
+};
+
+export const FOOTER_SOCIAL = {
+  title: 'Follow Us',
+  items: [
+    {
+      label: 'LinkedIn',
+      href: 'https://www.linkedin.com/company/priceify',
+      icon: '/priceify/landing/social-linkedin.svg',
+      external: true,
+    },
+    {
+      label: 'Facebook',
+      href: 'https://www.facebook.com/',
+      icon: '/priceify/landing/social-facebook.svg',
+      external: true,
+    },
+    {
+      label: 'Instagram',
+      href: 'https://www.instagram.com/',
+      icon: '/priceify/landing/social-instagram.svg',
+      external: true,
+    },
+    {
+      label: 'YouTube',
+      href: 'https://www.youtube.com/',
+      icon: '/priceify/landing/social-youtube.svg',
+      external: true,
+    },
+  ],
+};
+
+export const FOOTER_LINK_SECTIONS = [
   {
     heading: 'Product',
     links: [
-      { label: 'How it works', hash: 'how-it-works' },
+      { label: 'Pricing', hash: 'pricing' },
       { label: 'Features', hash: 'features' },
+      { label: 'Book a Demo', to: '/contact' },
+    ],
+  },
+  {
+    heading: 'Integrations',
+    links: [
+      { label: 'For Shopify', install: true },
+      { label: 'For Adobe Commerce', muted: true },
+      { label: 'For WooCommerce', muted: true },
+      { label: 'For Bigcommerce', muted: true },
+    ],
+  },
+  {
+    heading: 'Resources',
+    links: [
       { label: 'FAQ', hash: 'faq' },
-      { label: 'Guides', to: '/docs' },
+      { label: 'Blog', to: '/docs' },
     ],
   },
   {
-    heading: 'Legal',
+    heading: 'Company',
     links: [
+      { label: 'About Us', to: '/contact' },
+      { label: 'Contact Us', to: '/contact' },
       { label: 'Privacy Policy', to: '/privacy' },
-      { label: 'Terms of Service', to: '/terms' },
-    ],
-  },
-  {
-    heading: 'Support',
-    links: [
-      { label: 'Contact', to: '/contact' },
-      { label: 'Staff login', to: '/staff/login' },
-      { label: 'Install on Shopify', install: true },
+      { label: 'Terms and Conditions', to: '/terms' },
+      { label: 'Cookies Policy', to: '/privacy' },
     ],
   },
 ];
 
+/** Legacy three-column layout for older references. */
+export const FOOTER_COLUMNS = FOOTER_LINK_SECTIONS.slice(0, 3).map(section => ({
+  heading: section.heading,
+  links: section.links.filter(link => !link.muted && !link.install),
+}));
+
+/** Legacy exports kept for docs/tests that still reference older section ids. */
+export const HOW_IT_WORKS_STEPS = PLATFORM_SECTION.steps;
+export const FEATURE_CARDS = FEATURES_SECTION.items.map(item => ({
+  icon: item.icon,
+  title: item.title,
+  body: item.body,
+}));
+export const PROBLEM_CARDS = [];
+export const WALKTHROUGH_STEPS = PLATFORM_SECTION.steps.map((step, index) => ({
+  title: step.title,
+  body: step.body,
+  mock: ['hypothesis', 'variations', 'results', 'results'][index] || 'results',
+}));
+export const WALKTHROUGH_EYEBROW = 'How it works';
+export const USE_CASES = [];
+export const EXPERIMENT_INTRO = PRICE_TEST_DEMO.lead;
+export const EXPERIMENT_POINTS = [];
+export const RESULTS_POINTS = [];
+export const HERO_SETUP_MOCK = { nav: [] };
+export const EXPERIMENT_MOCK = { heading: '', charts: [], control: {}, variation: {} };
+export const RESULTS_BOARD = { columns: [], control: {}, variation: {} };
+export const WALKTHROUGH_MOCKS = {};
+
 export const PUBLIC_COPY_FORBIDDEN =
-  /\bguardrails\b|Watch a 90|no theme changes|no code or theme changes|\bDocs\b|\bBlog\b/;
+  /Watch a 90|no theme changes|no code or theme changes|\bDocs\b|\bBlog\b/;
 
 export function buildFaqJsonLd(items = FAQ_ITEMS) {
   return {
     '@context': 'https://schema.org',
     '@type': 'FAQPage',
-    mainEntity: items.map((item) => ({
+    mainEntity: items.map(item => ({
       '@type': 'Question',
       name: item.q,
       acceptedAnswer: {

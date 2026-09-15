@@ -1,10 +1,29 @@
-export const DOCS_UPDATED = 'September 9, 2026';
+export const DOCS_UPDATED = 'September 15, 2026';
 
 export const DOCS_HERO = {
-  eyebrow: 'GUIDES',
+  eyebrow: 'Guides',
   title: 'How Priceify tests stay safe and statistically valid.',
   subtitle:
     'Settings holds two choices — confidence level and minimum sample size. Everything else runs on a fixed limit, and each guide below says what that limit is and where you meet it. Info icons in Admin open the matching section here.',
+};
+
+export const DOCS_FAQ_SECTION = {
+  title: 'Guides FAQ',
+  subtitle: 'Quick answers while you read the guides above.',
+};
+
+/** Slimmer closing CTA on /docs — home page keeps the full two-line pitch. */
+export const DOCS_FINAL_CTA = {
+  titleLine1: 'Ready to test a price?',
+  titleLine2: 'Install Priceify on your store.',
+  lead:
+    'Shopify Admin info icons link straight to these guides. Install free, run one experiment, and open any section when a limit needs explaining.',
+  fine: '14-day free trial · No credit card · Uninstall in one click',
+};
+
+export const DOCS_NAV_SECTION = {
+  title: 'Jump to a guide',
+  lead: 'Six topics — price safety, statistics, enforcement, AI, surfaces, and offer tests.',
 };
 
 export const DOCS_NAV_CARDS = [
@@ -151,18 +170,22 @@ export const DOCS_SECTIONS = [
       'On the Products step, Suggest fills a higher test price for every product and variation inside a min–max band you set. Control stays at the catalog price, increases only, and every suggestion is still capped by your price safety settings.',
     facts: [
       { label: 'Where', value: 'Create → Products step' },
-      { label: 'Direction', value: 'Increases only, never discounts' },
+      { label: 'Direction', value: 'Higher, lower, or AI decides' },
       { label: 'Band', value: 'Percent or dollar amount' },
       { label: 'Hard cap', value: 'Shop max price change' },
+      { label: 'Rounding', value: 'Real price points, e.g. $43.99' },
       { label: 'Editable', value: 'Any cell, before launch' },
     ],
     paragraphs: [
       'On the Products step, choose AI suggested, set a min–max band as a percent or a dollar amount, then click Suggest. Control stays at the catalog price. Every selected product × test variation gets a suggested price. You can still edit any cell before launch.',
-      'Suggest fills higher test prices only — the band is an increase from the catalog price, not a discount. A dollar band is the same cash increase on every product: $4–$8 adds $4–$8 whether the product sells for $20 or $200. Each product is still capped on its own by your price safety settings, so a flat dollar uplift never pushes a cheap product past your max price change.',
-      'When AI is available, it proposes an increase inside your min–max for each product × variation. Higher-opportunity or stronger-margin products get larger lifts; thin-margin products get quieter ones. The model sees current price, 30-day units, opportunity score, and your shop max price-change and min-margin settings — the next guide lists every field exactly. It answers by row position rather than by product id, so it cannot name a product you did not select or invent a variation that does not exist.',
-      'Each lift becomes a price: catalog × (1 + lift%), rounded to cents (whole yen for JPY). Shop max price change is a hard cap, and the band cannot be set past it: with the cap at 16%, typing 30% holds the field at 16% instead of accepting a number that could never be used. The Products step then says what you entered and offers to raise the cap to cover it in one click, up to 30%. Raising the cap puts your original number back in the band. A dollar band is capped the same way, converted at the average price of the products you selected. A second floor uses catalog margin from unit cost when known, otherwise Default COGS, so the suggestion does not collapse toward cost.',
-      'Variations are spread across the full band instead of bunched near its middle. With a 10–20% band, three variations test 10%, 15%, and 20%. Prices that sit only a point or two apart cannot be told apart at realistic store traffic, so spanning the band is what makes the result readable. A single test variation sits mid-band.',
-      'If a product\u2019s margin floor forces a price under your band minimum, Priceify says how many prices that affected instead of quietly showing a smaller increase. If AI is unavailable or skips a product × variation pair, the same even spread fills the gap, and if the request fails entirely the wizard applies that spread locally inside the same shop cap so the table is not left empty. Whenever a price on the table came from that spread rather than from the model, the banner says so and says how many — a filled-in table never claims to be AI work that it is not.',
+      'The band is signed, so it can test a lower price as well as a higher one. Enter 10 and 20 to test 10–20% dearer; enter −20 and −10 to test 10–20% cheaper. That matters because a price test asks which price earns more, and for some products the answer is a lower one: a product selling badly may simply cost more than its shoppers will pay, and offering less is the only way to find out. Enter −15 and 20 and you have allowed either, which leaves the choice to the suggestion — the AI then picks a direction per product, since that is exactly the judgement you cannot make from the outside. Max price change bounds the distance from the current price, so it caps a cut and a rise at the same figure.',
+      'A dollar band works the same way and stays a flat cash amount on every product: $4–$8 adds $4–$8 whether the product sells for $20 or $200, and −$8 to −$4 takes the same off both. Each product is still capped on its own by your price safety settings, so a flat dollar move never pushes a cheap product past your max price change.',
+      'One thing the band cannot override is your minimum margin. A cut is refused at the price where the margin would fall below it: a $100 product costing $60, with a 35% minimum margin, will not be priced under $92.31 however wide a discount you ask for — and Priceify says how many prices that affected rather than quietly showing a smaller cut. A product already selling below your minimum margin gets no room to go lower at all, since a test is not the place to correct that.',
+      'When AI is available, it decides the range each product’s test should explore inside your min–max, and Priceify spaces the variations across that range. The split matters: how much headroom a product has is a pricing judgement, and how far apart the variations need to be is a statistics one. A product with a healthy known margin gets a range reaching the far end of what you allowed; one with a thin margin, or no recorded cost at all, is kept closer to its current price. A slow seller gets a wider range rather than a gentler one, because a small price difference cannot be detected on light traffic — a cautious band on a quiet product is a test that never concludes. The model sees current price, currency, margin percent, 30-day units, opportunity score and your two price safety settings — the next guide lists every field exactly. It answers by row position rather than by product id, so it cannot name a product you did not select.',
+      'Where your band allows both directions, choosing one is part of what the model is asked to do. It is told not to assume a higher price is better, to propose a cut where the evidence points to a product being priced above what its shoppers will pay — weak sales despite a promising product — and to expect the extra orders to more than pay for the lower margin, because a cut that does not is just a smaller profit. It is also told never to propose a cut on a thin margin, or on a product whose cost the shop has not recorded: thin margin means the lost profit is most of the profit, and an unrecorded cost means nobody knows how much a cut gives away.',
+      'Each change becomes a price: catalog × (1 + change%), then rounded to a price a shop would actually set. A 12.3% rise on a $38.90 product works out at $43.68, and it is offered as $43.99. That is not decoration: shoppers react to a price ending as well as to the price, so an unfamiliar ending mixes a second change into the test and the result can no longer be put down to the price alone. Rounding only ever spends the slack you left — it stays inside your band and your price safety limits, it never moves two variations onto the same price or past each other, and where you named an exact figure rather than a range nothing moves at all. Zero-decimal currencies round to whole units, so yen lands on ¥2,000 rather than ¥1,999. Shop max price change is a hard cap, and the band cannot be set past it: with the cap at 16%, typing 30% holds the field at 16% — or −30% at −16% — instead of accepting a number that could never be used. The Products step then says what you entered and offers to raise the cap to cover it in one click, up to 30%, whichever direction was blocked. Raising the cap puts your original number back in the band. A dollar band is capped the same way, converted at the average price of the products you selected. The margin floor above uses catalog margin from unit cost when known, otherwise Default COGS.',
+      'Variations are spread across the band instead of bunched near its middle. With a 10–20% band, three variations on a $100 product test $110.99, $114.99 and $119.99; with a −20 to −10% band they test $80, $84.99 and $89.99. Prices that sit only a point or two apart cannot be told apart at realistic store traffic, so spanning the band is what makes the result readable. A single test variation sits mid-band. When AI picks a narrower range for a product, the variations span that range, and a range too narrow to tell apart is widened before it is used.',
+      'If a guardrail forces a price outside your band — the margin floor blocking a cut, or max price change trimming a rise — Priceify says how many prices that affected instead of quietly showing a smaller move. If AI is unavailable or skips a product × variation pair, the same even spread fills the gap, and if the request fails entirely the wizard applies that spread locally inside the same shop cap so the table is not left empty. Whenever a price on the table came from that spread rather than from the model, the banner says so and says how many — a filled-in table never claims to be AI work that it is not.',
     ],
   },
   {
@@ -173,17 +196,21 @@ export const DOCS_SECTIONS = [
       'Suggest sends one request per click: a few numbers about each product you selected, your two price safety limits, and a short list of rules. No customer data, no order records, no shop name, and nothing is stored or reused.',
     facts: [
       { label: 'Provider', value: 'OpenAI, JSON-only reply' },
-      { label: 'Per request', value: 'Up to 40 selected products' },
+      { label: 'Per request', value: 'Up to 60 selected products' },
       { label: 'Sent about a customer', value: 'Nothing' },
       { label: 'Time limit', value: '20 seconds, then the even spread' },
       { label: 'Stored by Priceify', value: 'Nothing — every click is fresh' },
     ],
     paragraphs: [
-      'One click on Suggest is one request. For each product you selected, it carries the product title, its current price, its margin percent, how many units it sold in the last 30 days, its opportunity score, and Priceify’s own read on how hard that product can be pushed, worked out from its margin and demand before the request is built. Alongside that go the names of your test variations, the min–max band you typed, the metric the test is optimising, and two numbers from Settings: your max price change percent and your minimum margin percent. That is the whole payload.',
+      'One click on Suggest is one request. For each product you selected, it carries the product title, its current price, the currency that price is in, its margin percent, how many units it sold in the last 30 days, whether that sales figure was actually measured, and its opportunity score. Alongside that go how many test variations you are running — a count, not their names — the min–max band you typed, the metric the test is optimising, and two numbers from Settings: your max price change percent and your minimum margin percent. That is the whole payload.',
+      'Two of those fields exist to stop the model drawing the wrong conclusion from a blank. A product with no recorded cost has no margin percent, and that is a statement rather than a gap: it means nobody has measured this product’s headroom, so the model is told to stay conservative instead of assuming the margin is fine. And zero units sold used to mean either "this product sells nothing" or "no order covering it was read" — two situations calling for opposite treatment — so the request now says which of the two it is.',
       'Nothing about a shopper is included: no customer names, emails, addresses, order records, session or visitor data. Your shop domain is not sent either, and neither are Shopify product or variant ids — products are numbered by their position in the request, and the reply refers to them by that number. Priceify does not keep the request or the reply: there is no cache on price suggestions, so clicking Suggest twice asks twice and a suggestion is never reused for another shop.',
-      'The instructions are short and specific. The model is told to return strict JSON and nothing else; to give one uplift per test variation for every product, in the order the variations were sent; to keep every uplift a positive increase inside your min–max band and never above your max price change; to spread a product’s variations across the full band rather than cluster them, because prices a point or two apart cannot be told apart at real store traffic; and to prefer larger lifts where opportunity score or margin is strong and quieter ones where margin is thin. It is asked for a one-sentence summary, which is the line you read back on the Products step.',
-      'The reply is checked before it reaches you rather than trusted. A number that is not a product in the request is discarded. An uplift outside your band is pulled back to the nearest edge. Every price is then rebuilt from your own catalogue price and re-clamped against your max price change and your margin floor, so a suggestion cannot exceed your limits even if the model ignored them. Only after that does it become a price in the table — and you can still edit any cell before launch.',
-      'The request is given 20 seconds and one retry. Past that, or if the reply is unusable, the even band spread answers instead and the banner says so. Selecting more than 40 products is allowed; the first 40 go to the model, the rest take the even spread, and the count that did is included in the same notice. AI settings themselves are operational rather than merchant-facing: which model is used, and whether a key is configured at all, is set on the server, and with no key configured Suggest still works — it just always uses the even spread.',
+      'The instructions are short and specific. The model is told to return strict JSON and nothing else; to give one range per product — a low and a high percent change, where a negative lowers the price — rather than a price per variation; to keep both ends inside your min–max band and never further from the current price than your max price change, in either direction; to leave enough distance between the two ends that the variations can be told apart at real traffic; to use a wider range where sales are light or unmeasured and a narrower one where they are heavy; to stay close to the current price where margin is thin, and where no cost has been recorded at all; and to weigh the price point, since a considered purchase carries a larger increase than an impulse one. Where your band allows both directions it is told to choose one per product, not to assume higher is better, and never to propose a cut on a thin or unrecorded margin. It is asked for a one-sentence summary, which is the line you read back on the Products step.',
+      'It is deliberately not asked to place the individual variations. That is a question about how much traffic is needed to tell two prices apart, which is arithmetic Priceify can do exactly, and asking the model for it produced a worse answer than the even spread while costing a request to get it.',
+      'The reply is checked before it reaches you rather than trusted. A number that is not a product in the request is discarded. A range reaching outside your band is pulled back inside it; one returned back to front is read the right way round; one too narrow to resolve is widened; one that is not numbers at all is dropped and the even spread fills in. A minus sign is taken at face value as a price cut, not corrected away. Every price is then rebuilt from your own catalogue price and re-clamped against your max price change and your margin floor, so a suggestion cannot exceed your limits in either direction even if the model ignored them. Only after that does it become a price in the table — and you can still edit any cell before launch.',
+      'The request is given 20 seconds and one retry. Past that, or if the reply is unusable, the even band spread answers instead and the banner says so. Selecting more than 60 products is allowed; the first 60 go to the model, the rest take the even spread, and the count that did is included in the same notice. Very large requests are refused outright rather than accepted and half-answered. AI settings themselves are operational rather than merchant-facing: which model is used, and whether a key is configured at all, is set on the server, and with no key configured Suggest still works — it just always uses the even spread.',
+      'Suggest is not the only place a model is asked something. When you open the product picker, the top 20 products by opportunity score can also be ranked by AI, which is what orders that list and what pre-ticks up to three products for you. That request carries the same kind of thing and no more: title, current price, currency, margin percent, 30-day units and whether they were measured, opportunity score, how far Priceify trusts that row, and a single true-or-false for whether the product’s price changed recently. No Shopify ids, no product tags, no revenue figures, nothing about a shopper. Each product is numbered by its position, exactly as in a price suggestion.',
+      'The difference from Suggest is that this one is remembered: a ranking is kept for 12 hours so opening the picker repeatedly does not ask repeatedly. It is stored against the products themselves rather than their position in that day’s list, so adding a product to your catalogue cannot shift one product’s recommendation onto another. Where the model gave a reason, it is printed under the product in the picker — a recommendation you cannot see the reasoning for is just a list that has quietly rearranged itself. If the ranking is unavailable for any reason, the list simply keeps its opportunity-score order and nothing is pre-ticked beyond the top three by that score.',
     ],
   },
   {
@@ -505,15 +532,48 @@ export function getDocsSection(hash = '') {
  * in Settings. Titles are matched first so the section named after the term
  * outranks one that merely mentions it.
  */
+function docsSearchWords(query = '') {
+  return String(query || '')
+    .toLowerCase()
+    .split(/[^a-z0-9%]+/)
+    .filter(Boolean);
+}
+
+/**
+ * Guide topic cards from /docs (same anchors as the public nav grid), for Help
+ * search when a merchant types a topic name rather than a specific setting.
+ */
+export function searchDocsNavTopics(query = '') {
+  const words = docsSearchWords(query);
+  if (!words.length) return [];
+  const groupById = new Map(DOCS_GROUPS.map((group) => [group.id, group]));
+  const scored = [];
+  for (const card of DOCS_NAV_CARDS) {
+    const groupId = card.href.replace(/^#/, '');
+    const group = groupById.get(groupId);
+    const title = String(card.title || '').toLowerCase();
+    const body = String(card.body || '').toLowerCase();
+    const groupTitle = String(group?.title || '').toLowerCase();
+    const eyebrow = String(group?.eyebrow || '').toLowerCase();
+    const haystack = `${title} ${body} ${groupTitle} ${eyebrow} ${groupId.replace(/-/g, ' ')}`;
+    if (!words.every((word) => haystack.includes(word))) continue;
+    const titleHit = words.every((word) => title.includes(word));
+    const groupHit = words.every((word) => groupTitle.includes(word) || eyebrow.includes(word));
+    scored.push({
+      card,
+      groupId,
+      rank: titleHit ? 0 : groupHit ? 1 : 2,
+    });
+  }
+  return scored.sort((a, b) => a.rank - b.rank).map((entry) => entry.card);
+}
+
 export function searchDocsSections(query = '') {
   // Matched word by word rather than as one string, so "sample size per
   // variation" and "per-variation sample size" both find the section. Every
   // word has to appear somewhere, which keeps a long phrase from returning
   // every section that happens to contain "price".
-  const words = String(query || '')
-    .toLowerCase()
-    .split(/[^a-z0-9%]+/)
-    .filter(Boolean);
+  const words = docsSearchWords(query);
   if (!words.length) return [];
   const scored = [];
   for (const section of DOCS_SECTIONS) {

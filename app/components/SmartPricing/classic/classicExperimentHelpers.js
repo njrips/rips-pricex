@@ -280,6 +280,56 @@ export function groupPlansIntoExperiments(plans = []) {
     });
 }
 
+/**
+ * An unfinished wizard draft, in the shape the experiments table renders.
+ *
+ * A draft has no per-SKU plans until products are chosen, so it cannot be
+ * grouped out of the inbox like every other row. It used to be shown in a
+ * separate banner above the tabs for that reason, which split "my drafts" into
+ * two places and left the Drafts tab claiming a merchant had none.
+ *
+ * `plans: []` is what marks it out downstream: the row actions offer Continue
+ * setup and Delete draft off the back of it, and nothing that needs a plan is
+ * offered at all.
+ */
+export function wizardDraftAsExperimentRow(draft) {
+  const experimentId = String(draft?.experiment_id || '').trim();
+  if (!experimentId) return null;
+  const experimentType = draft?.experimentType || 'price_test';
+  const selected = Array.isArray(draft?.selectedIds) ? draft.selectedIds : [];
+  return {
+    id: experimentId,
+    title: String(draft?.name || '').trim() || 'Untitled experiment',
+    plans: [],
+    // What the merchant has picked so far, not what has been built. Reported so
+    // a draft abandoned mid-catalogue says how far it got.
+    productCount: selected.length,
+    status: 'draft',
+    primaryMetric: draft?.audience?.primaryMetric || 'Revenue per visitor',
+    visitors: null,
+    lift: null,
+    confidence: null,
+    representative: null,
+    typeLabel: formatExperimentTypeLabel(experimentType),
+    experimentType,
+    owner: 'You',
+    hypothesis: String(draft?.hypothesis || ''),
+    archived: false,
+    /** Sorts against the plan-derived rows, which order by their last update. */
+    updatedAt: draft?.saved_at || null,
+    wizardDraft: draft,
+  };
+}
+
+/** Most recently touched first, across draft rows and plan-derived rows alike. */
+export function sortExperimentRowsByRecency(rows = []) {
+  const at = row =>
+    Date.parse(
+      row?.updatedAt || row?.representative?.updated_at || row?.representative?.created_at || 0
+    ) || 0;
+  return [...rows].sort((a, b) => at(b) - at(a));
+}
+
 export function findExperimentByPlanId(plans, planId) {
   const needle = String(planId || '').trim();
   if (!needle) return null;

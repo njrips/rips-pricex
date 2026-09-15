@@ -4,8 +4,9 @@
  */
 
 const { getTestsByShop } = require('../../models/test');
-
-const PRICE_TEST_TYPES = new Set(['price', 'pricing', 'smart-pricing', 'offer', 'offer_test']);
+// Shared with the enrollment guard, which decides the same question about the
+// same rows. These were two hand-maintained sets and they had drifted.
+const { isPricingTestType } = require('./smartPricingTestIdentity');
 
 function isPreviewOnlyTest(test) {
   const meta = test?.metadata && typeof test.metadata === 'object' ? test.metadata : {};
@@ -15,11 +16,7 @@ function isPreviewOnlyTest(test) {
 
 function isCountableRunningTest(test) {
   if (isPreviewOnlyTest(test)) return false;
-  return PRICE_TEST_TYPES.has(
-    String(test?.type || '')
-      .trim()
-      .toLowerCase()
-  );
+  return isPricingTestType(test?.type);
 }
 
 async function countRunningPriceTests(shopDomain) {

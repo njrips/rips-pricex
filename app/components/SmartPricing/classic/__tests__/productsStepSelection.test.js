@@ -175,59 +175,16 @@ describe('products step selection area', () => {
     expect(buttonsByText('Shoes')).toHaveLength(0);
   });
 
-  it('puts Select all and Clear next to each other', async () => {
+  it('leaves selecting everything to the All products mode above', async () => {
     await renderPanel({ selectedIds: ['v1'] });
 
-    const selectAll = buttonByText('Select all');
-    const clear = buttonByText('Clear');
-    expect(selectAll).toBeTruthy();
-    expect(clear).toBeTruthy();
-    // Same row, not one in a header and the other in a footer as before.
-    expect(selectAll.closest('[class*="selectionBarActions"]')).toBe(
-      clear.closest('[class*="selectionBarActions"]')
-    );
-  });
-
-  it('selects every product, not just the first cap-worth of variants', async () => {
-    // Reported as "Select all is not selecting all the products". The cap is a
-    // product cap, but it was being applied to the variant id list, so a
-    // catalog whose products each carry several variants stopped short.
-    const rows = [];
-    for (let p = 0; p < 40; p += 1) {
-      for (let v = 0; v < 3; v += 1) {
-        rows.push({
-          product_id: `p${p}`,
-          variant_id: `p${p}v${v}`,
-          title: `Product ${p}`,
-          current_price: 10,
-        });
-      }
-    }
-    const { onSelectedIdsChange } = await renderPanel({ opportunities: rows, maxSelection: 100 });
-
-    await click(buttonByText('Select all'));
-
-    const picked = onSelectedIdsChange.mock.calls.at(-1)[0];
-    expect(new Set(picked.map(id => id.split('v')[0])).size).toBe(40);
-    expect(picked).toHaveLength(120);
-  });
-
-  it('selects an ordinary catalog whole, without the old 100 cap clipping it', async () => {
-    // Reported at 118 products: Select all stopped at exactly 100. Nothing
-    // downstream needed that number -- the batch endpoint, the database and the
-    // checkout path all take more -- so the cap now sits clear of any catalog
-    // the opportunities endpoint can return.
-    const rows = Array.from({ length: 118 }, (_, p) => ({
-      product_id: `p${p}`,
-      variant_id: `p${p}v0`,
-      title: `Product ${p}`,
-      current_price: 10,
-    }));
-    const { onSelectedIdsChange } = await renderPanel({ opportunities: rows, maxSelection: 250 });
-
-    await click(buttonByText('Select all'));
-
-    expect(onSelectedIdsChange.mock.calls.at(-1)[0]).toHaveLength(118);
+    // Pick manually carried its own Select all, so the step offered the same
+    // job twice with two different outcomes: the mode card switched to every
+    // product, while the button capped the selection and then went grey.
+    // The cap itself is covered directly, on limitSelectionToProducts.
+    expect(buttonByText('Select all')).toBeUndefined();
+    expect(buttonByText('Clear')).toBeTruthy();
+    expect(container.textContent).toMatch(/All products/);
   });
 
   it('says which products a too-large catalog leaves out', async () => {
@@ -261,37 +218,16 @@ describe('products step selection area', () => {
     expect(container.textContent).not.toMatch(/left out/i);
   });
 
-  it('selects the whole catalog and clears it again', async () => {
-    const { onSelectedIdsChange } = await renderPanel();
+  it('clears the selection', async () => {
+    const { onSelectedIdsChange } = await renderPanel({ selectedIds: ['v1', 'v2'] });
 
-    await click(buttonByText('Select all'));
-    expect(onSelectedIdsChange).toHaveBeenLastCalledWith(['v1', 'v2', 'v3']);
-
-    await act(async () => root.unmount());
-    root = createRoot(container);
-    const second = await renderPanel({ selectedIds: ['v1', 'v2'] });
     await click(buttonByText('Clear'));
-    expect(second.onSelectedIdsChange).toHaveBeenLastCalledWith([]);
-  });
-
-  it('stops offering Select all once nothing is left to add', async () => {
-    const { onSelectedIdsChange } = await renderPanel({ selectedIds: ['v1', 'v2', 'v3'] });
-    expect(isDisabled(buttonByText('Select all'))).toBe(true);
-    expect(isDisabled(buttonByText('Clear'))).toBe(false);
-
-    await click(buttonByText('Select all'));
-    expect(onSelectedIdsChange).not.toHaveBeenCalled();
-  });
-
-  it('respects the selection cap', async () => {
-    await renderPanel({ selectedIds: ['v1'], maxSelection: 1 });
-    expect(isDisabled(buttonByText('Select all'))).toBe(true);
+    expect(onSelectedIdsChange).toHaveBeenLastCalledWith([]);
   });
 
   it('offers Clear only once something is selected', async () => {
     await renderPanel();
     expect(isDisabled(buttonByText('Clear'))).toBe(true);
-    expect(isDisabled(buttonByText('Select all'))).toBe(false);
   });
 
   it('says nothing loaded rather than showing an empty grid', async () => {

@@ -245,7 +245,7 @@ export default function ReviewLaunchStepPanel({
             to. */}
         <p>
           {durationSummary ||
-            `From ${audience?.trafficAllocation ?? 50}% experiment traffic and the products you selected.`}
+            `From ${audience?.trafficAllocation ?? 100}% experiment traffic and the products you selected.`}
         </p>
         {/* The arithmetic behind the estimate, and the caveats on the traffic
             it was built from. Worth reading once, not on the way to Launch. */}
@@ -353,7 +353,7 @@ export default function ReviewLaunchStepPanel({
             moved next to the split it feeds. The percentages below divide this
             number, so they only make sense underneath it. */}
         <p className={styles.help} style={{ margin: 0 }}>
-          {audience?.trafficAllocation ?? 50}% of matching visitors enter, split as:
+          {audience?.trafficAllocation ?? 100}% of matching visitors enter, split as:
         </p>
         <div className={styles.reviewRows}>
           {variations.map((arm, index) => {

@@ -139,6 +139,10 @@ async function launchSmartPricingPlanAsTest(
         productId: plan?.product_id ?? plan?.productId,
         variantId: plan?.variant_id ?? plan?.variantId,
         title: plan?.title,
+        // One experiment covers a product's variants with one test each, and
+        // they must not refuse each other. A sibling still holds its own
+        // variant, so relaunching a running experiment is still refused.
+        experimentId: plan?.experiment_id || plan?.metadata?.experiment_id || '',
       });
     }
     const created = await createTest(payload);

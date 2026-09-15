@@ -296,6 +296,9 @@ describe('a product another test is already pricing', () => {
       productId: 'gid://shopify/Product/1',
       variantId: 'gid://shopify/ProductVariant/2',
       title: 'Runner Shoe',
+      // A plan with no experiment claims no exemption, so the product-wide
+      // hold applies exactly as it always did.
+      experimentId: '',
     });
   });
 
@@ -376,6 +379,44 @@ describe('a product another test is already pricing', () => {
 
     expect(assertProductIsFreeToPrice).toHaveBeenCalledWith(
       expect.objectContaining({ productId: 'gid://shopify/Product/1' })
+    );
+  });
+
+  it('tells the check which experiment is asking, so siblings do not refuse each other', async () => {
+    // One experiment launches one test per variant, and the product step
+    // selects every variant of a chosen product. Without the experiment id
+    // the first variant's test held the whole product and the rest of the
+    // batch was refused as "already being priced" by its own experiment.
+    await launchSmartPricingPlanAsTest(
+      {
+        id: 'plan-2',
+        product_id: 'gid://shopify/Product/1',
+        variant_id: 'gid://shopify/ProductVariant/3',
+        title: 'Runner Shoe',
+        experiment_id: 'exp_autumn',
+      },
+      'demo.myshopify.com',
+      { autoStart: true }
+    );
+
+    expect(assertProductIsFreeToPrice).toHaveBeenCalledWith(
+      expect.objectContaining({ experimentId: 'exp_autumn' })
+    );
+  });
+
+  it('finds the experiment id on the plan metadata too', async () => {
+    await launchSmartPricingPlanAsTest(
+      {
+        id: 'plan-3',
+        product_id: 'gid://shopify/Product/1',
+        metadata: { experiment_id: 'exp_winter' },
+      },
+      'demo.myshopify.com',
+      { autoStart: true }
+    );
+
+    expect(assertProductIsFreeToPrice).toHaveBeenCalledWith(
+      expect.objectContaining({ experimentId: 'exp_winter' })
     );
   });
 

@@ -46,11 +46,11 @@ describe('VariationsStepPanel naming', () => {
 });
 
 describe('variation traffic split', () => {
-  it('opens with control holding all traffic', () => {
-    // A pre-filled 50/50 is a decision the merchant never made. Nothing reaches
-    // a shopper until they deliberately hand traffic to a challenger.
+  it('opens on an even split between control and the first variation', () => {
+    // Opening at 100/0 meant the step opened blocked, on a split the merchant
+    // had not touched yet: 0% on Variation A is a starved arm.
     const rows = createDefaultVariations();
-    expect(rows.map(row => row.traffic)).toEqual([100, 0]);
+    expect(rows.map(row => row.traffic)).toEqual([50, 50]);
     expect(trafficRemaining(rows)).toBe(0);
   });
 
@@ -78,10 +78,10 @@ describe('variation traffic split', () => {
 
   it('never lets an edit push the split over 100', () => {
     const rows = createDefaultVariations();
-    // Control already holds everything, so a challenger has no room until it
-    // is reduced — which is the flow the step is built around.
-    expect(variationTrafficHeadroom(rows, 1)).toBe(0);
-    expect(setVariationTraffic(rows, 1, 60).map(row => row.traffic)).toEqual([100, 0]);
+    // The even split leaves nothing free, so raising one arm needs the other
+    // reduced first -- capping rather than silently rescaling its neighbour.
+    expect(variationTrafficHeadroom(rows, 1)).toBe(50);
+    expect(setVariationTraffic(rows, 1, 80).map(row => row.traffic)).toEqual([50, 50]);
 
     const freed = setVariationTraffic(rows, 0, 40);
     expect(variationTrafficHeadroom(freed, 1)).toBe(60);
@@ -99,8 +99,17 @@ describe('variation traffic split', () => {
   });
 
   it('puts an even split back in one call', () => {
-    const rows = splitEvenly(createDefaultVariations());
+    const rows = splitEvenly([
+      { id: 'control', traffic: 90 },
+      { id: 'var_a', traffic: 10 },
+    ]);
     expect(rows.map(row => row.traffic)).toEqual([50, 50]);
+    expect(trafficRemaining(rows)).toBe(0);
+  });
+
+  it('divides three arms as evenly as 100 allows', () => {
+    const rows = splitEvenly([{ id: 'control' }, { id: 'var_a' }, { id: 'var_b' }]);
+    expect(rows.map(row => row.traffic)).toEqual([34, 33, 33]);
     expect(trafficRemaining(rows)).toBe(0);
   });
 });
@@ -130,8 +139,18 @@ describe('sliderFillPercent', () => {
 });
 
 describe('getVariationsStepContinueState', () => {
-  it('blocks the default split, where the challenger has nothing', () => {
+  it('lets the default split through, since both arms already have a share', () => {
     const gate = getVariationsStepContinueState({ variations: createDefaultVariations() });
+    expect(gate).toEqual({ disabled: false, reason: '', hint: '' });
+  });
+
+  it('still blocks an arm left on nothing', () => {
+    const gate = getVariationsStepContinueState({
+      variations: [
+        { id: 'control', name: 'Control', traffic: 100 },
+        { id: 'var_a', name: 'Variation A', traffic: 0 },
+      ],
+    });
     expect(gate.disabled).toBe(true);
     expect(gate.reason).toBe('zero_traffic_arm');
     expect(gate.hint).toMatch(/Variation A would get no traffic/i);

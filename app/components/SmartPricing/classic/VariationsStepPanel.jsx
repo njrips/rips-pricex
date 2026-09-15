@@ -1,11 +1,12 @@
 import { useState } from 'react';
 import { Button, TextField } from '@shopify/polaris';
-import SettingsInfoLink from '../../Settings/SettingsInfoLink';
+import LabelWithInfo from '../../Settings/primitives/LabelWithInfo';
 import { ButtonIconPlus, IconControlBaseline, IconScales } from './classicIcons';
 import styles from './SmartPricingClassic.module.css';
 import {
   buildNextVariation,
   getVariationsStepContinueState,
+  MIN_ALLOCATION_PERCENT,
   setVariationTraffic,
   sliderFillPercent,
   splitEvenly,
@@ -24,9 +25,6 @@ export {
   trafficRemaining,
   trafficTotal,
 } from './variationsStepHelpers';
-
-/** Below this the experiment cannot gather a sample in any sensible window. */
-const MIN_ALLOCATION_PERCENT = 5;
 
 /** Digits only, and never more than three, so a field cannot hold "1000". */
 function percentDigits(raw) {
@@ -112,7 +110,9 @@ export default function VariationsStepPanel({
   variations,
   onChange,
   experimentType = 'price_test',
-  trafficAllocation = 50,
+  // Matches the wizard's own default, so the slider cannot read 50% on a step
+  // whose state says 100%.
+  trafficAllocation = 100,
   onTrafficAllocationChange,
 }) {
   const total = trafficTotal(variations);
@@ -149,10 +149,13 @@ export default function VariationsStepPanel({
   return (
     <div>
       <div className={styles.field}>
-        <label className={styles.label} htmlFor="classic-variations-allocation">
+        <LabelWithInfo
+          htmlFor="classic-variations-allocation"
+          hash="traffic-split"
+          label="Traffic split"
+        >
           Traffic allocation
-          <SettingsInfoLink hash="traffic-split" label="Traffic split" />
-        </label>
+        </LabelWithInfo>
         <div className={styles.allocationRow}>
           <input
             className={styles.slider}

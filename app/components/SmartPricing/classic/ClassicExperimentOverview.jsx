@@ -57,7 +57,7 @@ import {
   buildClassicExperimentDeleteConfirmMessage,
   deleteClassicExperimentSynchronized,
 } from './classicExperimentDelete';
-import { buildClassicWizardResumePath, getClassicExperimentResumeId, isClassicExperimentEnded, resolveClassicDetailsTab } from './classicExperimentListActions';
+import { buildClassicWizardResumePath, canDeleteClassicExperimentNow, classicBatchOutcomeMessage, CLASSIC_STOPPED_PLAN_STATUS, getClassicExperimentResumeId, isClassicExperimentEnded, isSettledClassicPlan, resolveClassicDetailsTab, splitSettledByIds } from './classicExperimentListActions';
 import { isOfferExperimentType } from './offerSelection';
 import {
   applyReadySmartPricingProducts,
@@ -165,6 +165,18 @@ export default function ClassicExperimentOverview() {
     : testId
       ? [testId]
       : [];
+  // A product whose winning price is published is out of reach of the
+  // experiment-level Pause, Stop and Resume. Its traffic is no longer split,
+  // so there is nothing to pause; restarting it would undo a decision the
+  // merchant committed to; and marking it paused or completed would erase the
+  // record that the price was applied at all.
+  const settledTestIds = new Set(
+    (Array.isArray(experimentPlans) ? experimentPlans : [])
+      .filter(isSettledClassicPlan)
+      .map(row => String(row?.test_id || row?.metadata?.test_id || '').trim())
+      .filter(Boolean)
+  );
+  const actionableTestIds = linkedTestIds.filter(id => !settledTestIds.has(id));
   const isOfferTest = isOfferExperimentType(
     plan?.experiment_type || plan?.metadata?.experiment_type || test?.type
   );
@@ -249,16 +261,32 @@ export default function ClassicExperimentOverview() {
   };
 
   const activityActor = plan?.owner_name || plan?.created_by_name || 'You';
-  const stampPlans = (plans, entry, patch = {}) =>
+  /**
+   * @param {object} [options]
+   * @param {boolean} [options.skipSettled] leave a product whose winner is
+   *   already published as it is, rather than relabelling it paused or
+   *   completed and losing the record that a price was written to Shopify.
+   * @param {string[]} [options.onlyTestIds] restrict the stamp to the products
+   *   whose request actually succeeded, so a partly-applied action does not
+   *   relabel the ones that refused.
+   */
+  const stampPlans = (plans, entry, patch = {}, { skipSettled = false, onlyTestIds } = {}) =>
     appendActivityToPlans(
-      (Array.isArray(plans) ? plans : []).map(row => ({
-        ...row,
-        ...patch,
-        metadata: {
-          ...(row.metadata || {}),
-          ...(patch.metadata && typeof patch.metadata === 'object' ? patch.metadata : {}),
-        },
-      })),
+      (Array.isArray(plans) ? plans : []).map(row => {
+        if (skipSettled && isSettledClassicPlan(row)) return row;
+        if (onlyTestIds) {
+          const rowTestId = String(row?.test_id || row?.metadata?.test_id || '').trim();
+          if (!onlyTestIds.includes(rowTestId)) return row;
+        }
+        return {
+          ...row,
+          ...patch,
+          metadata: {
+            ...(row.metadata || {}),
+            ...(patch.metadata && typeof patch.metadata === 'object' ? patch.metadata : {}),
+          },
+        };
+      }),
       createActivityEntry({ actor: activityActor, ...entry })
     );
 
@@ -390,20 +418,33 @@ export default function ClassicExperimentOverview() {
   };
 
   const handlePause = async () => {
-    if (!linkedTestIds.length || busyAction) return;
+    if (!actionableTestIds.length || busyAction) return;
     setBusyAction('pause');
     try {
-      await Promise.all(
-        linkedTestIds.map(id => apiPost(`/tests/${encodeURIComponent(id)}/stop`, {}))
-      );
+      const { succeeded, failed } = await postToEachTest(actionableTestIds, 'pause');
+      if (!succeeded.length) {
+        showError(failed[0]?.reason, 'Could not pause experiment.');
+        return;
+      }
       await replaceExperimentPlansLocal(
-        stampPlans(experimentPlans, {
-          kind: 'paused',
-          title: 'Experiment paused',
-          detail: 'Traffic assignment stopped',
-        }, { status: 'paused' })
+        stampPlans(
+          experimentPlans,
+          {
+            kind: 'paused',
+            title: 'Experiment paused',
+            detail: 'Traffic assignment stopped',
+          },
+          { status: 'paused' },
+          { skipSettled: true, onlyTestIds: succeeded }
+        )
       );
-      showSuccess('Experiment paused.');
+      showSuccess(
+        classicBatchOutcomeMessage({
+          verb: 'paused',
+          done: succeeded.length,
+          failed: failed.length,
+        })
+      );
       await sleep(450);
       refresh({
         quiet: true,
@@ -414,6 +455,68 @@ export default function ClassicExperimentOverview() {
     } finally {
       setBusyAction('');
     }
+  };
+
+  /**
+   * End the experiment for good.
+   *
+   * A different call from Pause on the server too: Pause keeps the product
+   * reserved for this experiment, while stopping gives it up and marks the
+   * experiment finished, so it offers Archive and Delete rather than Resume.
+   */
+  const handleStop = async () => {
+    if (!actionableTestIds.length || busyAction) return;
+    setBusyAction('stop');
+    try {
+      const { succeeded, failed } = await postToEachTest(actionableTestIds, 'stop');
+      if (!succeeded.length) {
+        showError(failed[0]?.reason, 'Could not stop experiment.');
+        return;
+      }
+      await replaceExperimentPlansLocal(
+        stampPlans(
+          experimentPlans,
+          {
+            kind: 'stopped',
+            title: 'Experiment stopped',
+            detail: 'Ended by you — no longer collecting results',
+          },
+          { status: CLASSIC_STOPPED_PLAN_STATUS },
+          { skipSettled: true, onlyTestIds: succeeded }
+        )
+      );
+      showSuccess(
+        classicBatchOutcomeMessage({
+          verb: 'stopped',
+          done: succeeded.length,
+          failed: failed.length,
+        })
+      );
+      await sleep(450);
+      refresh({
+        quiet: true,
+        preferLocalIds: (experiment?.plans || []).map(row => row.id).filter(Boolean),
+      });
+    } catch (err) {
+      showError(err, 'Could not stop experiment.');
+    } finally {
+      setBusyAction('');
+    }
+  };
+
+  /**
+   * Send one request per product and report which products accepted it.
+   *
+   * `allSettled`, not `all`: an experiment is one test per product, and one
+   * refusal used to reject the whole batch -- so the merchant was shown a
+   * failure over a row where some products had genuinely stopped, with
+   * nothing saying which.
+   */
+  const postToEachTest = async (testIds, action) => {
+    const results = await Promise.allSettled(
+      testIds.map(id => apiPost(`/tests/${encodeURIComponent(id)}/${action}`, {}))
+    );
+    return splitSettledByIds(testIds, results);
   };
 
   /**
@@ -447,7 +550,8 @@ export default function ClassicExperimentOverview() {
             title: 'Experiment resumed',
             detail: 'Traffic assignment started again',
           },
-          { status: 'running' }
+          { status: 'running' },
+          { skipSettled: true }
         )
       );
     }
@@ -460,7 +564,7 @@ export default function ClassicExperimentOverview() {
   };
 
   const handleResume = async () => {
-    if (!linkedTestIds.length || busyAction) return;
+    if (!actionableTestIds.length || busyAction) return;
     setBusyAction('resume');
     setMoreOpen(false);
     try {
@@ -468,12 +572,16 @@ export default function ClassicExperimentOverview() {
       // products were free, and the create wizard would have offered them --
       // so some of them may now belong to a test that is live. Two tests
       // pricing one product is two answers to what it costs.
+      //
+      // A product whose winner is already applied is left out entirely: it is
+      // its own holder, so the preflight reads it as free, and restarting it
+      // would re-split traffic on a price the merchant has committed to.
       const preflight = await apiPost('/smart-pricing/tests/resume-preflight', {
-        test_ids: linkedTestIds,
+        test_ids: actionableTestIds,
       })
         .then(res => res?.data || res || {})
         .catch(() => null);
-      const plan = planResume(preflight, linkedTestIds);
+      const plan = planResume(preflight, actionableTestIds);
 
       if (plan.action !== 'resume_all') {
         setResumeConflicts(plan);
@@ -821,7 +929,7 @@ export default function ClassicExperimentOverview() {
                   <Button
                     icon={ButtonIconPause}
                     onClick={handlePause}
-                    disabled={Boolean(busyAction) || !linkedTestIds.length}
+                    disabled={Boolean(busyAction) || !actionableTestIds.length}
                     loading={busyAction === 'pause'}
                   >
                     Pause
@@ -831,10 +939,19 @@ export default function ClassicExperimentOverview() {
                   <Button
                     icon={ButtonIconPlay}
                     onClick={handleResume}
-                    disabled={Boolean(busyAction) || !linkedTestIds.length}
+                    disabled={Boolean(busyAction) || !actionableTestIds.length}
                     loading={busyAction === 'resume'}
                   >
                     Resume
+                  </Button>
+                ) : null}
+                {isRunning || isPaused ? (
+                  <Button
+                    onClick={handleStop}
+                    disabled={Boolean(busyAction) || !actionableTestIds.length}
+                    loading={busyAction === 'stop'}
+                  >
+                    Stop
                   </Button>
                 ) : null}
                 {isOfferTest || isArchived || !canRollOut ? null : (
@@ -887,17 +1004,23 @@ export default function ClassicExperimentOverview() {
                       {busyAction === 'archive' ? 'Archiving…' : 'Archive'}
                     </button>
                   ) : null}
-                  <button
-                    type="button"
-                    role="menuitem"
-                    className={styles.menuItemDanger}
-                    onClick={() => {
-                      setMoreOpen(false);
-                      setDeleteOpen(true);
-                    }}
-                  >
-                    Delete
-                  </button>
+                  {canDeleteClassicExperimentNow({
+                    status,
+                    archived: isArchived,
+                    hasLinkedTests: linkedTestIds.length > 0,
+                  }) ? (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className={styles.menuItemDanger}
+                      onClick={() => {
+                        setMoreOpen(false);
+                        setDeleteOpen(true);
+                      }}
+                    >
+                      Delete
+                    </button>
+                  ) : null}
                 </div>
               ) : null}
             </div>

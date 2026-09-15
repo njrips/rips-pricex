@@ -1210,13 +1210,21 @@ export function summarizeRolloutRows(rows = []) {
     if (counts[row.state] !== undefined) counts[row.state] += 1;
     if (row.decision?.can_apply || row.decision?.can_finish) actionableTestIds.push(row.testId);
   });
+  const priceWrites = list.filter(row => row.decision?.can_apply);
   return {
     total: list.length,
     counts,
     actionableTestIds,
     readyCount: counts.ready_challenger + counts.ready_control,
     // Only price writes need the stronger confirmation copy.
-    priceWriteCount: list.filter(row => row.decision?.can_apply).length,
+    priceWriteCount: priceWrites.length,
+    // How many of those rest on the estimate rather than the exact boundary.
+    // Applied one at a time the merchant is warned; applied in bulk they were
+    // not, so several directional prices could be written on one click by a
+    // merchant who had only ever seen the confident-looking confidence figure.
+    directionalPriceWriteCount: priceWrites.filter(
+      row => row.decision?.winner?.evidence_validated !== true
+    ).length,
   };
 }
 

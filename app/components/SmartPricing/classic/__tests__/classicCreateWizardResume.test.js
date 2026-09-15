@@ -51,6 +51,9 @@ vi.mock('../../../../services/smartPricingApi', () => ({
   suggestSmartPricingGoals: vi.fn(async () => ({})),
   suggestSmartPricingPrices: vi.fn(async () => ({})),
   batchPreviewSmartPricingLaunch: vi.fn(async () => ({})),
+  getSmartPricingWizardDrafts: vi.fn(async () => ({ drafts: [] })),
+  saveSmartPricingWizardDraft: vi.fn(async () => ({})),
+  deleteSmartPricingWizardDraft: vi.fn(async () => ({})),
 }));
 
 // The panels are presentational; stubbing them keeps the assertions on the
@@ -74,6 +77,7 @@ let root;
 let ClassicCreateWizard;
 let PolarisAppProvider;
 let writeClassicWizardDraft;
+let classicWizardDraftKey;
 let writeInboxPlans;
 
 beforeEach(async () => {
@@ -81,7 +85,7 @@ beforeEach(async () => {
   localStorage.clear();
   ({ AppProvider: PolarisAppProvider } = await import('@shopify/polaris'));
   ({ default: ClassicCreateWizard } = await import('../ClassicCreateWizard'));
-  ({ writeClassicWizardDraft } = await import('../classicExperimentHelpers'));
+  ({ writeClassicWizardDraft, classicWizardDraftKey } = await import('../classicExperimentHelpers'));
   ({ writeInboxPlans } = await import('../../smartPricingConstants'));
   container = document.createElement('div');
   document.body.appendChild(container);
@@ -93,26 +97,44 @@ afterEach(async () => {
   container.remove();
 });
 
-function wizardTree(url) {
+function wizardTree(url, props = {}) {
   return h(
     PolarisAppProvider,
     { i18n: {} },
     h(
       MemoryRouter,
       { initialEntries: [url] },
-      h(Routes, null, h(Route, { path: '/app/experiments/new', element: h(ClassicCreateWizard) }))
+      h(
+        Routes,
+        null,
+        h(Route, {
+          path: '/app/experiments/new',
+          element: h(ClassicCreateWizard, props),
+        })
+      )
     )
   );
 }
 
-async function renderWizard(url) {
+async function renderWizard(url, props = {}) {
   await act(async () => {
-    root.render(wizardTree(url));
+    root.render(wizardTree(url, props));
   });
 }
 
 function text(testid) {
   return container.querySelector(`[data-testid="${testid}"]`)?.textContent ?? null;
+}
+
+/**
+ * A browser copy of a chosen age.
+ *
+ * `writeClassicWizardDraft` stamps `saved_at` as now, which is the right
+ * behaviour for a real save and useless for setting up which of two copies is
+ * older, so these go straight into storage.
+ */
+function seedLocalDraft(draft) {
+  localStorage.setItem(classicWizardDraftKey(SHOP), JSON.stringify([draft]));
 }
 
 describe('ClassicCreateWizard resume', () => {
@@ -157,6 +179,57 @@ describe('ClassicCreateWizard resume', () => {
     expect(text('name')).toBe('Saved draft name');
   });
 
+  it('opens a draft saved without its pricing table on the products step', async () => {
+    // Too many products to sync whole, so the synced copy went without its
+    // plans. Review and Launch have nothing to work on until the Products
+    // step rebuilds them from the selections that did survive.
+    writeClassicWizardDraft(SHOP, {
+      experiment_id: 'exp_1',
+      name: 'Saved draft name',
+      step: 4,
+      plans: [],
+      plans_omitted: true,
+    });
+    const onTitleChange = vi.fn();
+
+    await renderWizard('/app/experiments/new?resume=exp_1', { onTitleChange });
+
+    expect(text('step')).toBe('2');
+    // Only the table was left behind; the rest of the draft still restored.
+    expect(onTitleChange.mock.calls.at(-1)?.[0]).toBe('Saved draft name');
+  });
+
+  it('sends a deep link into such a draft to the products step as well', async () => {
+    // A link from the Drafts list carries the step it was left on, so honouring
+    // the URL here would land on the same empty Review the clamp exists to
+    // avoid.
+    writeClassicWizardDraft(SHOP, {
+      experiment_id: 'exp_1',
+      name: 'Saved draft name',
+      step: 4,
+      plans: [],
+      plans_omitted: true,
+    });
+
+    await renderWizard('/app/experiments/new?resume=exp_1&step=review');
+
+    expect(text('step')).toBe('2');
+  });
+
+  it('leaves an earlier step alone when the table was omitted', async () => {
+    writeClassicWizardDraft(SHOP, {
+      experiment_id: 'exp_1',
+      name: 'Saved draft name',
+      step: 1,
+      plans: [],
+      plans_omitted: true,
+    });
+
+    await renderWizard('/app/experiments/new?resume=exp_1');
+
+    expect(text('step')).toBe('1');
+  });
+
   it('falls back to inbox plans when no local draft matches the resumed id', async () => {
     writeInboxPlans(
       SHOP,
@@ -197,6 +270,22 @@ describe('ClassicCreateWizard resume', () => {
     expect(text('step')).toBe('2');
   });
 
+  it('names a reopened draft in the title bar, even back on the first step', async () => {
+    // A draft that already has a name is not a "New experiment", whichever step
+    // it reopens on -- the name arriving is what settles it, not a step change.
+    writeClassicWizardDraft(SHOP, {
+      experiment_id: 'exp_1',
+      name: 'Saved draft name',
+      step: 0,
+    });
+    const onTitleChange = vi.fn();
+
+    await renderWizard('/app/experiments/new?resume=exp_1', { onTitleChange });
+
+    expect(text('step')).toBe('0');
+    expect(onTitleChange.mock.calls.at(-1)?.[0]).toBe('Saved draft name');
+  });
+
   it('does not seed anything into a fresh create without ?resume=', async () => {
     writeClassicWizardDraft(SHOP, {
       experiment_id: 'exp_1',
@@ -205,6 +294,152 @@ describe('ClassicCreateWizard resume', () => {
     });
 
     await renderWizard('/app/experiments/new');
+
+    expect(text('name')).toBe('');
+    expect(text('step')).toBe('0');
+  });
+});
+
+/**
+ * A draft started on another device exists only on the server, so the browser
+ * copy cannot answer the resume and the wizard has to go and ask.
+ */
+describe('ClassicCreateWizard resume from another device', () => {
+  let getSmartPricingWizardDrafts;
+
+  beforeEach(async () => {
+    ({ getSmartPricingWizardDrafts } = await import('../../../../services/smartPricingApi'));
+    getSmartPricingWizardDrafts.mockReset();
+    getSmartPricingWizardDrafts.mockResolvedValue({ drafts: [] });
+  });
+
+  it('restores the fields of a draft this browser has never seen', async () => {
+    getSmartPricingWizardDrafts.mockResolvedValue({
+      drafts: [
+        {
+          experiment_id: 'exp_1',
+          name: 'Started on the laptop',
+          hypothesis: 'Round numbers convert',
+          step: 0,
+          saved_at: '2026-02-02T00:00:00.000Z',
+        },
+      ],
+    });
+
+    await renderWizard('/app/experiments/new?resume=exp_1');
+
+    expect(text('name')).toBe('Started on the laptop');
+    expect(text('hypothesis')).toBe('Round numbers convert');
+  });
+
+  it('reopens it on the step the other device left it on', async () => {
+    getSmartPricingWizardDrafts.mockResolvedValue({
+      drafts: [{ experiment_id: 'exp_1', name: 'Started on the laptop', step: 3 }],
+    });
+
+    await renderWizard('/app/experiments/new?resume=exp_1');
+
+    expect(text('step')).toBe('3');
+  });
+
+  it('does not go looking for a fresh create', async () => {
+    await renderWizard('/app/experiments/new');
+
+    expect(getSmartPricingWizardDrafts).not.toHaveBeenCalled();
+  });
+
+  it('shows the browser copy first, without waiting for the server', async () => {
+    // The restore has to land in one commit, so the local copy is the opening
+    // answer even when a lookup is on its way.
+    writeClassicWizardDraft(SHOP, { experiment_id: 'exp_1', name: 'Saved here', step: 0 });
+    getSmartPricingWizardDrafts.mockReturnValue(new Promise(() => {}));
+
+    await renderWizard('/app/experiments/new?resume=exp_1');
+
+    expect(text('name')).toBe('Saved here');
+  });
+
+  it('asks the server even when the browser already had the draft', async () => {
+    // The browser copy is what this device last saw. On the device the
+    // merchant walked away from, that is older than what they did next
+    // somewhere else, and it used to be taken as the final answer.
+    writeClassicWizardDraft(SHOP, { experiment_id: 'exp_1', name: 'Saved here', step: 0 });
+
+    await renderWizard('/app/experiments/new?resume=exp_1');
+
+    expect(getSmartPricingWizardDrafts).toHaveBeenCalled();
+  });
+
+  it('replaces a stale browser copy with the newer one from the other device', async () => {
+    // The laptop's copy stops at step one; the phone carried it further. The
+    // laptop used to show its own copy and then save it back over the phone's.
+    seedLocalDraft({
+      experiment_id: 'exp_1',
+      name: 'Step one on the laptop',
+      step: 0,
+      saved_at: '2026-02-01T00:00:00.000Z',
+    });
+    getSmartPricingWizardDrafts.mockResolvedValue({
+      drafts: [
+        {
+          experiment_id: 'exp_1',
+          name: 'Carried on by phone',
+          step: 0,
+          saved_at: '2026-02-02T00:00:00.000Z',
+        },
+      ],
+    });
+
+    await renderWizard('/app/experiments/new?resume=exp_1');
+
+    expect(text('name')).toBe('Carried on by phone');
+  });
+
+  it('keeps the browser copy when it is the newer of the two', async () => {
+    // Everything typed offline lives only here until a save gets through, so
+    // an older server copy must not be allowed to undo it.
+    seedLocalDraft({
+      experiment_id: 'exp_1',
+      name: 'Newest, made offline here',
+      step: 0,
+      saved_at: '2026-02-05T00:00:00.000Z',
+    });
+    getSmartPricingWizardDrafts.mockResolvedValue({
+      drafts: [
+        {
+          experiment_id: 'exp_1',
+          name: 'Older server copy',
+          step: 0,
+          saved_at: '2026-02-02T00:00:00.000Z',
+        },
+      ],
+    });
+
+    await renderWizard('/app/experiments/new?resume=exp_1');
+
+    expect(text('name')).toBe('Newest, made offline here');
+  });
+
+  it('keeps the restored copy when the server has nothing under that id', async () => {
+    writeClassicWizardDraft(SHOP, { experiment_id: 'exp_1', name: 'Saved here', step: 0 });
+    getSmartPricingWizardDrafts.mockResolvedValue({ drafts: [] });
+
+    await renderWizard('/app/experiments/new?resume=exp_1');
+
+    expect(text('name')).toBe('Saved here');
+  });
+
+  it('keeps the restored copy when the lookup fails', async () => {
+    writeClassicWizardDraft(SHOP, { experiment_id: 'exp_1', name: 'Saved here', step: 0 });
+    getSmartPricingWizardDrafts.mockRejectedValue(new Error('offline'));
+
+    await renderWizard('/app/experiments/new?resume=exp_1');
+
+    expect(text('name')).toBe('Saved here');
+  });
+
+  it('leaves the wizard alone when the server has never heard of the draft', async () => {
+    await renderWizard('/app/experiments/new?resume=exp_missing');
 
     expect(text('name')).toBe('');
     expect(text('step')).toBe('0');

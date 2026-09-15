@@ -89,6 +89,89 @@ describe('smartPricingInboxStopSyncService', () => {
     ]);
   });
 
+  it('maps merchant_pause to paused, now that pausing writes its own status', async () => {
+    getTestById.mockResolvedValueOnce({
+      id: 'test-pause',
+      status: 'paused',
+      metadata: { smart_pricing_plan_id: 'SP-pause', smart_pricing_source: 'smart_pricing' },
+    });
+    syncInboxPlanEntry.mockResolvedValueOnce({
+      plan_id: 'SP-pause',
+      test_id: 'test-pause',
+      synced: true,
+      inbox_status: 'winner_ready',
+      winner_ready: true,
+      winner_applied: false,
+      test_status: 'paused',
+    });
+    patchInboxPlansFromSync.mockResolvedValueOnce({ plans: [] });
+
+    const result = await syncSmartPricingInboxForTest('demo.myshopify.com', 'test-pause', {
+      reason: 'merchant_pause',
+    });
+
+    expect(result.inbox_status).toBe('paused');
+    expect(result.winner_ready).toBe(false);
+  });
+
+  it('maps merchant_finish to completed, so a stopped experiment stays stopped', async () => {
+    // Reported as paused, the next list load read the server's answer back
+    // over the client's and offered Resume on an experiment the merchant had
+    // just ended.
+    getTestById.mockResolvedValueOnce({
+      id: 'test-finish',
+      status: 'stopped',
+      metadata: { smart_pricing_plan_id: 'SP-finish', smart_pricing_source: 'smart_pricing' },
+    });
+    syncInboxPlanEntry.mockResolvedValueOnce({
+      plan_id: 'SP-finish',
+      test_id: 'test-finish',
+      synced: true,
+      inbox_status: 'winner_ready',
+      winner_ready: true,
+      winner_applied: false,
+      test_status: 'stopped',
+    });
+    patchInboxPlansFromSync.mockResolvedValueOnce({ plans: [] });
+
+    const result = await syncSmartPricingInboxForTest('demo.myshopify.com', 'test-finish', {
+      reason: 'merchant_finish',
+    });
+
+    expect(result.inbox_status).toBe('completed');
+    expect(result.winner_ready).toBe(false);
+    expect(patchInboxPlansFromSync).toHaveBeenCalledWith('demo.myshopify.com', [
+      expect.objectContaining({ plan_id: 'SP-finish', inbox_status: 'completed' }),
+    ]);
+  });
+
+  it('finishes a paused experiment rather than keeping the pause', async () => {
+    // Stopping something already paused is the case the pause-preserving
+    // branch would otherwise win, leaving it resumable.
+    getTestById.mockResolvedValueOnce({
+      id: 'test-finish-paused',
+      status: 'stopped',
+      metadata: { smart_pricing_plan_id: 'SP-fp', smart_pricing_source: 'smart_pricing' },
+    });
+    syncInboxPlanEntry.mockResolvedValueOnce({
+      plan_id: 'SP-fp',
+      test_id: 'test-finish-paused',
+      synced: true,
+      inbox_status: 'paused',
+      winner_ready: false,
+      winner_applied: false,
+      test_status: 'stopped',
+      status: 'paused',
+    });
+    patchInboxPlansFromSync.mockResolvedValueOnce({ plans: [] });
+
+    const result = await syncSmartPricingInboxForTest('demo.myshopify.com', 'test-finish-paused', {
+      reason: 'merchant_finish',
+    });
+
+    expect(result.inbox_status).toBe('completed');
+  });
+
   it('resolves plan by test_id when metadata plan id missing', async () => {
     getTestById.mockResolvedValueOnce({
       id: 'test-2',

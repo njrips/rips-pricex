@@ -414,3 +414,29 @@ export async function deleteSmartPricingInboxPlan(domain, planId) {
   );
   return unwrapData(res);
 }
+
+/**
+ * Unfinished create-wizard experiments. Kept apart from inbox plans because a
+ * draft only named and not yet given products has no plans to store there.
+ */
+export async function getSmartPricingWizardDrafts(domain) {
+  const res = await apiGet('/smart-pricing/wizard-drafts', domain ? { domain } : {});
+  return unwrapData(res);
+}
+
+export async function saveSmartPricingWizardDraft(domain, draft) {
+  const res = await apiPut(
+    '/smart-pricing/wizard-drafts',
+    { draft },
+    domain ? { params: { domain } } : {}
+  );
+  return unwrapData(res);
+}
+
+export async function deleteSmartPricingWizardDraft(domain, experimentId) {
+  const res = await apiDelete(
+    `/smart-pricing/wizard-drafts/${encodeURIComponent(experimentId)}`,
+    domain ? { params: { domain } } : {}
+  );
+  return unwrapData(res);
+}

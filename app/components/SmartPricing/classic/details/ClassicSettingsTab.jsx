@@ -144,7 +144,7 @@ export default function ClassicSettingsTab({
           analysis row crammed method, lift and confidence into one string. */}
       <div className={styles.statCard}>
         <div className={styles.reviewHead}>
-          <div className={styles.panelHeadingGroup}>
+          <div className={`${styles.titleWithInfo} ${styles.panelHeadingGroup}`}>
             <h3 className={styles.panelTitle}>How a winner is decided</h3>
             <SettingsInfoLink hash="sequential" label="Sequential testing" />
           </div>

@@ -108,6 +108,90 @@ function detectSkuOverlap(plans = [], inboxPlans = []) {
   return conflicts;
 }
 
+/**
+ * Products a live test is already pricing, among the ones about to launch.
+ *
+ * `detectSkuOverlap` above reads the inbox, which only knows about plans this
+ * app queued. It cannot see a test that is actually running, so a batch aimed
+ * at a product another test took was waved through review and then refused at
+ * launch, one product at a time. Drafts make that ordinary rather than rare:
+ * a draft saved last week names products that were free last week.
+ *
+ * Type-agnostic on purpose. A running offer test holds its product exactly as
+ * a price test does -- its discount lands on top of whatever price the other
+ * test is setting, and both tests then count the same orders.
+ */
+async function detectLiveTestConflicts(shopDomain, plans = []) {
+  const list = Array.isArray(plans) ? plans : [];
+  if (!list.length) return [];
+  const {
+    getPriceTestEnrollment,
+    findLiveHold,
+    describeHold,
+  } = require('./priceTestEnrollmentService');
+
+  // A plan's own linked test is deliberately NOT forgiven here. Launching a
+  // plan whose test is already live would start a second test on that same
+  // variant, and launch refuses it -- so forgiving it here only made review
+  // the more permissive of the two, and the merchant met the refusal after
+  // pressing the button instead of before.
+
+  // These plans belong to one experiment, whose own tests cover one variant
+  // each. Launch exempts them from each other, so review must too or it would
+  // block a batch the server would accept.
+  const experimentId = String(
+    list.find(plan => plan?.experiment_id || plan?.metadata?.experiment_id)?.experiment_id ||
+      list.find(plan => plan?.metadata?.experiment_id)?.metadata?.experiment_id ||
+      ''
+  ).trim();
+
+  // A follow-up round re-tests a product the round that chose its winner is
+  // still serving through personalization. Launch hands the product back
+  // before starting round 2, so reporting that parent here would block a
+  // launch the server allows. A parent still `running` keeps its hold, so only
+  // a finished one is forgiven -- which is exactly what the release does.
+  const previousTestIds = new Set(
+    list
+      .map(plan => String(plan?.previous_test_id || plan?.previousTestId || '').trim())
+      .filter(Boolean)
+  );
+
+  let enrollment = null;
+  try {
+    enrollment = await getPriceTestEnrollment(shopDomain, {
+      siblingExperimentId: experimentId,
+    });
+  } catch {
+    // Review is a preflight, not the gate. The launch guard reads the same
+    // table and refuses for real, so a database hiccup here should not stop
+    // a merchant reaching a launch that would have worked.
+    return [];
+  }
+
+  const conflicts = [];
+  const seen = new Set();
+  list.forEach(plan => {
+    const productId = plan?.product_id ?? plan?.productId;
+    const variantId = plan?.variant_id ?? plan?.variantId;
+    const hold = findLiveHold(enrollment, { productId, variantId });
+    if (!hold) return;
+    if (previousTestIds.has(hold.test_id) && hold.status !== 'running') return;
+    // One line per blocking test, not per SKU: a 40-product batch caught by
+    // one catalog-wide test should not print forty copies of the same
+    // sentence.
+    if (seen.has(hold.test_id)) return;
+    seen.add(hold.test_id);
+    conflicts.push({
+      plan_id: plan?.id || null,
+      title: plan?.title || '',
+      test_id: hold.test_id,
+      test_name: hold.test_name,
+      message: describeHold(hold, { title: plan?.title || '' }),
+    });
+  });
+  return conflicts;
+}
+
 async function buildBatchPreviewLaunch({
   shopDomain,
   plans = [],
@@ -130,6 +214,7 @@ async function buildBatchPreviewLaunch({
   });
   const inbox = await listInboxPlans(shopDomain).catch(() => ({ plans: [] }));
   const overlaps = detectSkuOverlap(list, inbox.plans || []);
+  const liveConflicts = await detectLiveTestConflicts(shopDomain, list);
 
   const perPlan = list.map(plan => {
     const guard = planGuardrailsPass(plan);
@@ -166,6 +251,10 @@ async function buildBatchPreviewLaunch({
   });
 
   const blockers = [];
+  // A blocker rather than a warning: launch refuses this outright, so letting
+  // the merchant press the button only turns a clear "end that test first"
+  // into a failed launch that half-succeeded across the batch.
+  liveConflicts.forEach(row => blockers.push(row.message));
   const { isOfferPlan } = require('./planToOfferTestService');
   const offerBatch = list.some(plan => isOfferPlan(plan));
   if (offerBatch) {
@@ -212,6 +301,7 @@ async function buildBatchPreviewLaunch({
     capacity,
     readiness,
     overlaps,
+    live_conflicts: liveConflicts,
     plans: perPlan,
     suggested_timeline_days: perPlan.reduce((max, row) => {
       const d = Number(row.estimated_duration_days);
@@ -229,5 +319,6 @@ module.exports = {
   suggestGoalsForPlans,
   buildBatchPreviewLaunch,
   detectSkuOverlap,
+  detectLiveTestConflicts,
   planGuardrailsPass,
 };

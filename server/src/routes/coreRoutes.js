@@ -100,7 +100,17 @@ router.post('/shops/install', requireShopSessionOrInternal, asyncHandler(async (
   });
 }));
 
-router.post('/shops/uninstall', requireShopSessionOrInternal, asyncHandler(async (req, res) => {
+/**
+ * Shopify has uninstalled the app. Internal callers only.
+ *
+ * This pauses every running test, clears entitlement and deletes the shop's
+ * support tickets. A merchant session used to be accepted, which meant an
+ * ordinary signed-in request could do all of that while the app was still
+ * installed and paid for -- locking the shop out of its own app and stopping
+ * every live test. Only the webhook handler has any business saying this
+ * happened, and it proves itself with the internal secret.
+ */
+router.post('/shops/uninstall', requireInternalService, asyncHandler(async (req, res) => {
   await markShopUninstalled(req.shopDomain);
   await deleteShopSession(req.shopDomain).catch(() => {});
   res.json({ ok: true });

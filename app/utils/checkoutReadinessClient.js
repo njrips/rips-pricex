@@ -60,8 +60,15 @@ export function checkoutReadinessHintLines(readiness) {
 }
 
 /**
+ * `known` separates "the shop has mapped nothing" from "nobody has looked yet".
+ *
+ * Both used to come back as `ready: false, configured: 0`, so a caller had no
+ * way to tell them apart and the only honest-looking option was to print the
+ * failing verdict. Callers that render a status need the difference: while the
+ * request is still out, or after it failed, there is no verdict to show.
+ *
  * @param {Record<string, unknown> | null | undefined} readiness
- * @returns {{ ready: boolean, configured: number, message: string }}
+ * @returns {{ known: boolean, ready: boolean, configured: number, message: string }}
  */
 export function priceSurfaceSummary(readiness) {
   const surface =
@@ -70,7 +77,15 @@ export function priceSurfaceSummary(readiness) {
       : null;
   const configured = Number(surface?.configured_shop ?? surface?.configured ?? 0) || 0;
   const readyFlag = surface?.ready;
+  // The server says `unknown` when the selector lookup itself failed. There is
+  // no verdict to show then, and presenting one would tell a merchant whose
+  // theme is mapped that it is not.
+  const undecided =
+    String(surface?.status || '')
+      .trim()
+      .toLowerCase() === 'unknown';
   return {
+    known: Boolean(surface) && !undecided,
     ready: readyFlag === true || (readyFlag !== false && configured > 0),
     configured,
     message: String(surface?.message || '').trim(),

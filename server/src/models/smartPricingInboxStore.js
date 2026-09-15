@@ -559,7 +559,13 @@ async function patchInboxPlansFromSync(shopDomain, syncRows = []) {
         patch.control_retained_at = sync.control_retained_at || new Date().toISOString();
       }
     } else if (sync.winner_ready || sync.inbox_status === 'winner_ready') {
-      patch.status = plan.status === 'paused' ? 'paused' : 'winner_ready';
+      // A plan the merchant has taken out of play keeps the state they left it
+      // in. The five-minute sweep visits every plan, and a stopped experiment
+      // still holds enough data to resolve as winner-ready -- so without this
+      // it relabels itself and starts offering to roll out a winner on
+      // something the merchant ended.
+      const merchantSettled = plan.status === 'paused' || plan.status === 'completed';
+      patch.status = merchantSettled ? plan.status : 'winner_ready';
     } else if (sync.inbox_status === 'running') {
       patch.status = 'running';
     }

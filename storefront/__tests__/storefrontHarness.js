@@ -8,16 +8,20 @@
  * whole runtime. Because the functions are read from the shipped file, the tests
  * exercise the code the storefront actually runs.
  */
-import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const SCRIPT_PATH = join(dirname(fileURLToPath(import.meta.url)), '..', 'storefront-script.js');
+const SCRIPT_PATH = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "storefront-script.js",
+);
 
 let cachedSource = null;
 
 function source() {
-  if (cachedSource == null) cachedSource = readFileSync(SCRIPT_PATH, 'utf8');
+  if (cachedSource == null) cachedSource = readFileSync(SCRIPT_PATH, "utf8");
   return cachedSource;
 }
 
@@ -25,14 +29,15 @@ function source() {
 function extractFunction(src, name) {
   const signature = `function ${name}(`;
   const start = src.indexOf(signature);
-  if (start < 0) throw new Error(`storefront-script.js has no function ${name}`);
+  if (start < 0)
+    throw new Error(`storefront-script.js has no function ${name}`);
   let depth = 0;
-  let i = src.indexOf('{', start);
+  let i = src.indexOf("{", start);
   if (i < 0) throw new Error(`function ${name} has no body`);
   for (; i < src.length; i += 1) {
     const ch = src[i];
-    if (ch === '{') depth += 1;
-    else if (ch === '}') {
+    if (ch === "{") depth += 1;
+    else if (ch === "}") {
       depth -= 1;
       if (depth === 0) return src.slice(start, i + 1);
     }
@@ -42,10 +47,10 @@ function extractFunction(src, name) {
 
 /** Slice out a top-level `var|const|let NAME = <expr>;` declaration. */
 function extractVar(src, name) {
-  for (const keyword of ['var', 'const', 'let']) {
+  for (const keyword of ["var", "const", "let"]) {
     const start = src.indexOf(`${keyword} ${name} =`);
     if (start < 0) continue;
-    const end = src.indexOf(';', start);
+    const end = src.indexOf(";", start);
     if (end < 0) throw new Error(`${keyword} ${name} is unterminated`);
     return src.slice(start, end + 1);
   }
@@ -54,11 +59,11 @@ function extractVar(src, name) {
 
 /** Constants the price-mapping helpers close over. */
 const REQUIRED_VARS = [
-  'RIPX_PRICE_LEAF_SEL',
-  'RIPX_COMPARE_AT_SEL',
-  'RIPX_AMOUNT_TEXT_RE',
-  'RIPX_CART_UI_SELECTOR',
-  'RIPX_CURRENCY_MINOR_UNITS',
+  "RIPX_PRICE_LEAF_SEL",
+  "RIPX_COMPARE_AT_SEL",
+  "RIPX_AMOUNT_TEXT_RE",
+  "RIPX_CART_UI_SELECTOR",
+  "RIPX_CURRENCY_MINOR_UNITS",
 ];
 
 /**
@@ -66,45 +71,46 @@ const REQUIRED_VARS = [
  * tests only name the entry points they exercise.
  */
 const REQUIRED_FUNCTIONS = [
-  'stripStorefrontLocalePrefix',
-  'inferPriceSurfaceFromPathname',
-  'getEffectivePreviewPathname',
-  'getListingPriceSurfaceKeys',
-  'getConfiguredShopPriceSurfaceMappings',
-  'getConfiguredTestPriceSurfaceMappings',
-  'ripxPriceSurfacePagePath',
-  'ripxUrlMappingMatchesPage',
-  'resolveConfiguredPriceSurfaceSelectors',
-  'appendConfiguredRegistrySelectors',
-  'appendConfiguredRegistrySelectorsForSurfaces',
-  'hasConfiguredPriceSurfaceMappingsForSurfaces',
-  'toNumericProductId',
-  'extractNumericProductIdFromText',
-  'normalizeListingProductIdCandidate',
-  'collectListingProductIdCandidates',
-  'parsePriceFromDisplay',
-  'ripxCurrencyDecimals',
-  'isRipxCompareAtPriceNode',
-  'containsRipxCompareAtNode',
-  'findRipxAmountDescendant',
-  'isLeafPricePaintNode',
-  'resolveRipxPricePaintTargets',
-  'writeRipxPriceNode',
-  'paintPriceNode',
-  'findRipxCatalogPriceNode',
-  'getStableCatalogPriceForElement',
-  'getProductIdForListingCard',
-  'querySelectorAllWithShadowRoots',
-  'getEffectivePriceConfig',
-  'normalizeMergedPriceConfig',
-  'normalizePriceConfigKeys',
-  'normalizePriceApplicationMethod',
-  'hasModeValue',
-  'gidMatches',
-  'parseRoundTo',
-  'formatShopPrice',
-  'getShopCurrency',
-  'toProductGid',
+  "inPricePickerContext",
+  "stripStorefrontLocalePrefix",
+  "inferPriceSurfaceFromPathname",
+  "getEffectivePreviewPathname",
+  "getListingPriceSurfaceKeys",
+  "getConfiguredShopPriceSurfaceMappings",
+  "getConfiguredTestPriceSurfaceMappings",
+  "ripxPriceSurfacePagePath",
+  "ripxUrlMappingMatchesPage",
+  "resolveConfiguredPriceSurfaceSelectors",
+  "appendConfiguredRegistrySelectors",
+  "appendConfiguredRegistrySelectorsForSurfaces",
+  "hasConfiguredPriceSurfaceMappingsForSurfaces",
+  "toNumericProductId",
+  "extractNumericProductIdFromText",
+  "normalizeListingProductIdCandidate",
+  "collectListingProductIdCandidates",
+  "parsePriceFromDisplay",
+  "ripxCurrencyDecimals",
+  "isRipxCompareAtPriceNode",
+  "containsRipxCompareAtNode",
+  "findRipxAmountDescendant",
+  "isLeafPricePaintNode",
+  "resolveRipxPricePaintTargets",
+  "writeRipxPriceNode",
+  "paintPriceNode",
+  "findRipxCatalogPriceNode",
+  "getStableCatalogPriceForElement",
+  "getProductIdForListingCard",
+  "querySelectorAllWithShadowRoots",
+  "getEffectivePriceConfig",
+  "normalizeMergedPriceConfig",
+  "normalizePriceConfigKeys",
+  "normalizePriceApplicationMethod",
+  "hasModeValue",
+  "gidMatches",
+  "parseRoundTo",
+  "formatShopPrice",
+  "getShopCurrency",
+  "toProductGid",
 ];
 
 /**
@@ -114,6 +120,10 @@ const REQUIRED_FUNCTIONS = [
  * @param {object[]} [options.activeTests] CONFIG.activeTests. Name
  *   `getActiveTestById` and `getExcludedProductIdsForTest` in `names` to lift
  *   the real implementations over the stand-ins below.
+ * @param {string} [options.search] query string the page loaded with, seeded
+ *   into URL_PARAMS the way the real script reads it once at boot.
+ * @param {string} [options.stubs] extra stand-ins appended to the prelude, for
+ *   lifting a function whose collaborators are out of scope for the test.
  * @returns {Record<string, Function> & { paintEvents: object[], diagnostics: object[] }}
  */
 export function loadStorefrontFunctions(names, options = {}) {
@@ -124,7 +134,7 @@ export function loadStorefrontFunctions(names, options = {}) {
   const requested = Array.from(new Set([...REQUIRED_FUNCTIONS, ...names]));
   const wanted = [];
   const extracted = [];
-  requested.forEach(name => {
+  requested.forEach((name) => {
     try {
       extracted.push(extractFunction(source(), name));
       wanted.push(name);
@@ -132,15 +142,15 @@ export function loadStorefrontFunctions(names, options = {}) {
       missing.push(name);
     }
   });
-  const constants = REQUIRED_VARS.map(name => {
+  const constants = REQUIRED_VARS.map((name) => {
     try {
       return extractVar(source(), name);
     } catch (error) {
       missing.push(name);
-      return '';
+      return "";
     }
-  }).join('\n');
-  const bodies = `${constants}\n${extracted.join('\n')}`;
+  }).join("\n");
+  const bodies = `${constants}\n${extracted.join("\n")}`;
   const paintEvents = [];
   const diagnostics = [];
 
@@ -148,7 +158,9 @@ export function loadStorefrontFunctions(names, options = {}) {
   // cart attribute injection, assignment bookkeeping, tracing and scheduling.
   const prelude = `
     var CONFIG = __shopConfig;
-    var URL_PARAMS = new URLSearchParams();
+    // The real script reads these once at load, so a test that needs the page
+    // to have arrived with a query string has to seed them the same way.
+    var URL_PARAMS = new URLSearchParams(__search || '');
     var PREVIEW_MODE = false;
     function getLiveSearchParams() { return new URLSearchParams(window.location.search); }
     function isRipxBootstrapPathname() { return false; }
@@ -175,24 +187,31 @@ export function loadStorefrontFunctions(names, options = {}) {
     function applyRipxStateToCartForms() {}
     function schedulePaintAllProductsGlobalPrices() {}
     function applyMappedPriceSelectorsByInferredProduct() {}
+    ${options.stubs || ""}
   `;
 
   const factory = new Function(
-    '__shopConfig',
-    '__paintEvents',
-    '__diagnostics',
-    `${prelude}\n${bodies}\nreturn { ${wanted.join(', ')} };`
+    "__shopConfig",
+    "__paintEvents",
+    "__diagnostics",
+    "__search",
+    `${prelude}\n${bodies}\nreturn { ${wanted.join(", ")} };`,
   );
 
   const api = factory(
     {
       priceSurfaceRegistry: { shopMappings: options.shopMappings || [] },
+      // The shop the script believes it is running on. Code that asks whether
+      // the current page is really the shop's own -- the preview proxy serves
+      // it from elsewhere -- compares against this.
+      shopDomain: options.shopDomain || "",
       // Read by the real `getActiveTestById` when a test asks for it by name,
       // which is how exclusion handling becomes reachable.
       activeTests: options.activeTests || [],
     },
     paintEvents,
-    diagnostics
+    diagnostics,
+    options.search || "",
   );
   return Object.assign(api, { paintEvents, diagnostics, missing });
 }
@@ -211,23 +230,23 @@ export function loadStorefrontFunctions(names, options = {}) {
  * @param {number} [options.priceNum]
  * @returns {{ paintEl: Function, paintEvents: object[] }}
  */
-export function loadPdpPainter({ display = '$70.00', priceNum = 70 } = {}) {
+export function loadPdpPainter({ display = "$70.00", priceNum = 70 } = {}) {
   const shared = [
-    ...REQUIRED_VARS.map(name => extractVar(source(), name)),
+    ...REQUIRED_VARS.map((name) => extractVar(source(), name)),
     ...[
-      'isRipxCompareAtPriceNode',
-      'containsRipxCompareAtNode',
-      'findRipxAmountDescendant',
-      'isLeafPricePaintNode',
-      'resolveRipxPricePaintTargets',
-      'writeRipxPriceNode',
-    ].map(name => extractFunction(source(), name)),
-  ].join('\n');
+      "isRipxCompareAtPriceNode",
+      "containsRipxCompareAtNode",
+      "findRipxAmountDescendant",
+      "isLeafPricePaintNode",
+      "resolveRipxPricePaintTargets",
+      "writeRipxPriceNode",
+    ].map((name) => extractFunction(source(), name)),
+  ].join("\n");
   const paintEvents = [];
   const factory = new Function(
-    '__display',
-    '__priceNum',
-    '__paintEvents',
+    "__display",
+    "__priceNum",
+    "__paintEvents",
     `
     ${shared}
     function recordRipxPaintEvent(scope, textWrites, attrWrites) {
@@ -240,9 +259,9 @@ export function loadPdpPainter({ display = '$70.00', priceNum = 70 } = {}) {
     var priceNum = __priceNum;
     var testId = 'test-1';
     var variantIdForCart = 'variant-1';
-    ${extractFunction(source(), 'paintEl')}
+    ${extractFunction(source(), "paintEl")}
     return paintEl;
-    `
+    `,
   );
   return { paintEl: factory(display, priceNum, paintEvents), paintEvents };
 }
@@ -254,15 +273,19 @@ export function loadPdpPainter({ display = '$70.00', priceNum = 70 } = {}) {
  */
 export function dawnPdpPaintSelectors(productId) {
   return [
-    '.price-item--regular',
+    ".price-item--regular",
     `product-info[data-product-id="${productId}"] .price`,
     `[data-product-id="${productId}"] .price`,
-    '.price-item--sale',
+    ".price-item--sale",
   ];
 }
 
 /** A Dawn main-product price block, on sale so compare-at is present. */
-export function dawnPdpMarkup({ productId, price = '$100.00', compareAt = '$140.00' } = {}) {
+export function dawnPdpMarkup({
+  productId,
+  price = "$100.00",
+  compareAt = "$140.00",
+} = {}) {
   return `
     <product-info data-product-id="${productId}">
       <div class="product__info-container">
@@ -286,7 +309,7 @@ export function dawnPdpMarkup({ productId, price = '$100.00', compareAt = '$140.
 
 /** Point window.location at a storefront path for surface-detection tests. */
 export function setPathname(pathname) {
-  window.history.replaceState({}, '', pathname);
+  window.history.replaceState({}, "", pathname);
 }
 
 /**
@@ -294,67 +317,103 @@ export function setPathname(pathname) {
  * packs' selectors ended up live at once. Used so tests reflect real data.
  */
 export const LIVE_SHOP_MAPPINGS = Object.freeze([
-  { surface: 'plp', role: 'regular', selector: '.price', priority: 10, source: 'theme_pack' },
-  { surface: 'cart', role: 'regular', selector: '.price', priority: 9, source: 'theme_pack' },
-  { surface: 'cart', role: 'cart_line', selector: '.price', priority: 8, source: 'theme_pack' },
-  { surface: 'search', role: 'regular', selector: '.price', priority: 7, source: 'theme_pack' },
-  { surface: 'home', role: 'regular', selector: '.price', priority: 6, source: 'theme_pack' },
   {
-    surface: 'plp',
-    role: 'regular',
-    selector: '.grid-view-item .money',
+    surface: "plp",
+    role: "regular",
+    selector: ".price",
     priority: 10,
-    source: 'theme_pack',
+    source: "theme_pack",
   },
   {
-    surface: 'global',
-    role: 'regular',
-    selector: '[data-product-price] .money',
-    priority: 5,
-    source: 'theme_pack',
+    surface: "cart",
+    role: "regular",
+    selector: ".price",
+    priority: 9,
+    source: "theme_pack",
   },
   {
-    surface: 'plp',
-    role: 'regular',
-    selector: '.price-item--regular',
-    priority: 10,
-    source: 'theme_pack',
+    surface: "cart",
+    role: "cart_line",
+    selector: ".price",
+    priority: 8,
+    source: "theme_pack",
   },
   {
-    surface: 'search',
-    role: 'regular',
-    selector: '.price-item--regular',
+    surface: "search",
+    role: "regular",
+    selector: ".price",
     priority: 7,
-    source: 'theme_pack',
+    source: "theme_pack",
   },
   {
-    surface: 'home',
-    role: 'regular',
-    selector: '.price-item--regular',
+    surface: "home",
+    role: "regular",
+    selector: ".price",
+    priority: 6,
+    source: "theme_pack",
+  },
+  {
+    surface: "plp",
+    role: "regular",
+    selector: ".grid-view-item .money",
+    priority: 10,
+    source: "theme_pack",
+  },
+  {
+    surface: "global",
+    role: "regular",
+    selector: "[data-product-price] .money",
+    priority: 5,
+    source: "theme_pack",
+  },
+  {
+    surface: "plp",
+    role: "regular",
+    selector: ".price-item--regular",
+    priority: 10,
+    source: "theme_pack",
+  },
+  {
+    surface: "search",
+    role: "regular",
+    selector: ".price-item--regular",
+    priority: 7,
+    source: "theme_pack",
+  },
+  {
+    surface: "home",
+    role: "regular",
+    selector: ".price-item--regular",
     priority: 18,
-    source: 'merchant',
-  },
-  { surface: 'plp', role: 'regular', selector: 'span.price-item', priority: 0, source: 'visual' },
-  {
-    surface: 'pdp',
-    role: 'regular',
-    selector: '.price-item--regular',
-    priority: 20,
-    source: 'openai',
+    source: "merchant",
   },
   {
-    surface: 'pdp',
-    role: 'compare_at',
-    selector: 's.price-item--regular',
-    priority: 20,
-    source: 'openai',
+    surface: "plp",
+    role: "regular",
+    selector: "span.price-item",
+    priority: 0,
+    source: "visual",
   },
   {
-    surface: 'plp',
-    role: 'compare_at',
-    selector: 's.price-item--regular',
+    surface: "pdp",
+    role: "regular",
+    selector: ".price-item--regular",
     priority: 20,
-    source: 'openai',
+    source: "openai",
+  },
+  {
+    surface: "pdp",
+    role: "compare_at",
+    selector: "s.price-item--regular",
+    priority: 20,
+    source: "openai",
+  },
+  {
+    surface: "plp",
+    role: "compare_at",
+    selector: "s.price-item--regular",
+    priority: 20,
+    source: "openai",
   },
 ]);
 
@@ -363,7 +422,13 @@ export const LIVE_SHOP_MAPPINGS = Object.freeze([
  * on a collection grid. `onSale` adds the sale/compare-at pair, which is the
  * shape that exposes compare-at handling.
  */
-export function dawnCardMarkup({ productId, sectionId = 'template--21010091114685__featured_collection', onSale = false, price = '$100.00', compareAt = '$140.00' } = {}) {
+export function dawnCardMarkup({
+  productId,
+  sectionId = "template--21010091114685__featured_collection",
+  onSale = false,
+  price = "$100.00",
+  compareAt = "$140.00",
+} = {}) {
   // Mirrors Dawn snippets/price.liquid: the regular block holds the current
   // price, the sale block holds the struck compare-at followed by the current
   // price, and screen-reader labels sit between them.
@@ -399,12 +464,20 @@ export function dawnCardMarkup({ productId, sectionId = 'template--2101009111468
  * themes order it this way, and it is the layout where reading an amount off the
  * price wrapper yields the pre-sale price instead of what the shopper pays.
  */
-export function compareAtLastCardMarkup({ productId, price = '$80.00', compareAt = '$140.00' } = {}) {
+export function compareAtLastCardMarkup({
+  productId,
+  price = "$80.00",
+  compareAt = "$140.00",
+} = {}) {
   const priceBlock = `<div class="price price--on-sale">
        <span class="price-item price-item--sale">${price}</span>
        <s class="price-item price-item--regular">${compareAt}</s>
      </div>`;
-  return wrapCard(priceBlock, 'template--21010091114685__product-grid', productId);
+  return wrapCard(
+    priceBlock,
+    "template--21010091114685__product-grid",
+    productId,
+  );
 }
 
 function wrapCard(priceBlock, sectionId, productId) {

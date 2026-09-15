@@ -1,6 +1,18 @@
 import React, { useEffect } from 'react';
 
-/** Admin / Polaris-aligned toast (success / critical surfaces). */
+/**
+ * Admin / Polaris-aligned toast.
+ *
+ * `warning` exists for outcomes that are neither: an action that applied to
+ * some of an experiment's products and not others is something the merchant
+ * has to come back to, and reporting it in the success colour read as done.
+ */
+const TOAST_TONES = {
+  error: { bg: '#fee8eb', color: '#8e1f0b', border: '#fda9b5' },
+  warning: { bg: '#fff5ea', color: '#8a6116', border: '#ffd79d' },
+  success: { bg: '#cdfed4', color: '#0c5132', border: '#aee9bb' },
+};
+
 function Toast({ message, type = 'success', onClose, duration = 3000 }) {
   useEffect(() => {
     if (!message) return undefined;
@@ -9,10 +21,7 @@ function Toast({ message, type = 'success', onClose, duration = 3000 }) {
   }, [message, duration, onClose]);
 
   if (!message) return null;
-  const isError = type === 'error';
-  const bg = isError ? '#fee8eb' : '#cdfed4';
-  const color = isError ? '#8e1f0b' : '#0c5132';
-  const border = isError ? '#fda9b5' : '#aee9bb';
+  const { bg, color, border } = TOAST_TONES[type] || TOAST_TONES.success;
   return (
     <div
       role="status"

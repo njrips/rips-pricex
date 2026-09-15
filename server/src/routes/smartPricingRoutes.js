@@ -1,7 +1,7 @@
 const express = require('express');
 const { asyncHandler } = require('../middleware/asyncHandler');
 const { sendSuccess, sendValidationError, sendError } = require('../utils/response');
-const { HTTP_STATUS } = require('../constants');
+const { HTTP_STATUS, ERROR_MESSAGES } = require('../constants');
 const { getShopSession } = require('../models/shopSession');
 const { buildVariantCountOptions } = require('../services/smartPricing/statisticalDesignService');
 const { applyScenarioPreset } = require('../services/smartPricing/priceBandService');
@@ -52,6 +52,11 @@ const {
   getInboxPlanById,
   summarizeInboxPlans,
 } = require('../models/smartPricingInboxStore');
+const {
+  getShopWizardDrafts,
+  saveShopWizardDraft,
+  deleteShopWizardDraft,
+} = require('../services/smartPricing/smartPricingWizardDraftStore');
 const {
   buildSmartPricingTestPlan,
   buildDemoBatchPlans,
@@ -644,6 +649,83 @@ router.delete(
   })
 );
 
+/**
+ * Unfinished create-wizard experiments.
+ *
+ * Separate from `/inbox/plans` because a draft this early has no per-SKU plans
+ * to put there: the merchant may have named the experiment and nothing else.
+ */
+router.get(
+  '/wizard-drafts',
+  asyncHandler(async (req, res) => {
+    const drafts = await getShopWizardDrafts(req.shopDomain);
+    return sendSuccess(res, HTTP_STATUS.OK, { drafts });
+  })
+);
+
+/**
+ * The body behind a draft the store looked at and turned down.
+ *
+ * Shaped like `sendValidationError`, plus the reason as a code. The sentence is
+ * for the merchant; the code is what the wizard branches on, because it answers
+ * an oversized draft by sending it again without its pricing table, and reading
+ * that intent out of the sentence would let a copy edit here break the retry
+ * there.
+ */
+function wizardDraftRefusalBody(reason) {
+  const messages = {
+    draft_too_large: 'Draft is too large to save on the server',
+    experiment_id_required: 'draft.experiment_id is required',
+    shop_required: 'shop is required',
+  };
+  return {
+    success: false,
+    error: ERROR_MESSAGES.VALIDATION_FAILED,
+    details: [messages[reason] || 'Could not save draft'],
+    reason: reason || 'unknown',
+  };
+}
+
+router.put(
+  '/wizard-drafts',
+  asyncHandler(async (req, res) => {
+    const body = req.body && typeof req.body === 'object' ? req.body : {};
+    const draft = body.draft && typeof body.draft === 'object' ? body.draft : null;
+    if (!draft) {
+      return sendValidationError(res, ['draft is required']);
+    }
+    const result = await saveShopWizardDraft(req.shopDomain, draft);
+    if (!result.saved) {
+      // Refused, not stored. Reported as a failure so the wizard can say the
+      // browser still has the work rather than claiming a save it did not get.
+      return res.status(HTTP_STATUS.BAD_REQUEST).json(wizardDraftRefusalBody(result.reason));
+    }
+    return sendSuccess(res, HTTP_STATUS.OK, {
+      draft: result.saved,
+      drafts: result.drafts,
+      // A newer copy was kept instead of this one. The save did not land, so
+      // the wizard needs to know rather than being told it did.
+      superseded: Boolean(result.superseded),
+      // Any draft the five-draft cap pushed out to make room for this one, so
+      // the merchant hears about work being discarded instead of finding it
+      // gone later.
+      evicted: Array.isArray(result.evicted) ? result.evicted : [],
+    });
+  })
+);
+
+router.delete(
+  '/wizard-drafts/:experimentId',
+  asyncHandler(async (req, res) => {
+    const experimentId = String(req.params.experimentId || '').trim();
+    if (!experimentId) {
+      return sendValidationError(res, ['experimentId is required']);
+    }
+    const drafts = await deleteShopWizardDraft(req.shopDomain, experimentId);
+    return sendSuccess(res, HTTP_STATUS.OK, { drafts });
+  })
+);
+
 router.post(
   '/inbox/sync',
   asyncHandler(async (req, res) => {
@@ -690,6 +772,30 @@ router.post(
   })
 );
 
+/**
+ * A price suggestion has to fit in a wizard the merchant can read.
+ *
+ * The ceilings are generous against any real catalog selection and exist so a
+ * malformed or hostile body cannot turn one click into unbounded work.
+ */
+const MAX_SUGGEST_VARIANTS = 500;
+const MAX_SUGGEST_ARMS = 10;
+
+function suggestPriceRequestLimits(variants, arms) {
+  const errors = [];
+  if (variants.length > MAX_SUGGEST_VARIANTS) {
+    errors.push(
+      `variants cannot exceed ${MAX_SUGGEST_VARIANTS} products in one request (received ${variants.length})`
+    );
+  }
+  if (arms.length > MAX_SUGGEST_ARMS) {
+    errors.push(
+      `arms cannot exceed ${MAX_SUGGEST_ARMS} variations in one request (received ${arms.length})`
+    );
+  }
+  return errors;
+}
+
 router.post(
   '/plans/suggest-prices',
   asyncHandler(async (req, res) => {
@@ -701,6 +807,14 @@ router.post(
     }
     if (!arms.length) {
       return sendValidationError(res, ['arms is required']);
+    }
+    // Bounded because nothing downstream was. Every product is priced and
+    // every arm spread even when only the first 60 products reach the model,
+    // so a caller asking for tens of thousands of rows spent the whole request
+    // on work no wizard could ever show.
+    const limits = suggestPriceRequestLimits(variants, arms);
+    if (limits.length) {
+      return sendValidationError(res, limits);
     }
     const guardrails = await getShopSmartPricingGuardrails(req.shopDomain).catch(() => ({
       ...DEFAULT_GUARDRAILS,
@@ -1193,4 +1307,46 @@ router.get(
   })
 );
 
+/**
+ * Whether a Smart Pricing request may proceed without a paid plan.
+ *
+ * Reads are open to every installed shop, which is what gives the upgrade
+ * prompt something to argue about. Two kinds of write are open too, and for
+ * the same underlying reason: they are how a merchant *leaves*.
+ *
+ *   - Deleting your own draft or plan is not a paid action, and it is the only
+ *     way to clear the row. Charging for it leaves a lapsed shop looking at
+ *     drafts it can neither finish nor remove.
+ *   - Stopping, finishing or releasing a product's test takes it off the
+ *     traffic. These spend nothing and write nothing to Shopify. Gated, they
+ *     meant a shop whose plan had lapsed could not turn off tests that were
+ *     still pricing their shoppers without subscribing again -- the app
+ *     holding a live storefront hostage.
+ *
+ * Deliberately not free: launching, applying a winner, and anything else that
+ * starts new work or writes a price into the merchant's catalog.
+ *
+ * Lives here rather than inline in the mount so the rule can be read and
+ * tested next to the routes it describes.
+ */
+function isFreeSmartPricingRequest(method, path) {
+  const verb = String(method || '').toUpperCase();
+  if (verb === 'GET') return true;
+  const route = String(path || '');
+  if (verb === 'DELETE') {
+    return route.startsWith('/wizard-drafts/') || route.startsWith('/inbox/plans/');
+  }
+  if (verb === 'POST') {
+    // Wizard pricing is read-only on the catalog until launch; blocking it behind
+    // a plan left the Products table empty even though the deterministic spread
+    // is cheap and RipX never gated it.
+    if (route === '/plans/suggest-prices') return true;
+    return /^\/tests\/[^/]+\/(stop-product|finish-product|release-product)$/.test(route);
+  }
+  return false;
+}
+
 module.exports = router;
+module.exports.isFreeSmartPricingRequest = isFreeSmartPricingRequest;
+module.exports.suggestPriceRequestLimits = suggestPriceRequestLimits;
+module.exports.wizardDraftRefusalBody = wizardDraftRefusalBody;

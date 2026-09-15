@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router';
-import { PUBLIC_HEADER_NAV } from '../../../constants/publicRoutes';
+import { PUBLIC_HEADER_NAV, PUBLIC_ROUTES } from '../../../constants/publicRoutes';
 import { useKeyedState } from '../../../hooks/useKeyedState';
 import { DEFAULT_APP_STORE_LISTING_URL } from '../../../utils/appStoreListingUrl';
-import { FOOTER_BLURB, FOOTER_COLUMNS, FOOTER_TAGLINE } from './landingContent';
+import PriceifyFooter from './PriceifyFooter';
 import PriceifyLogo from './PriceifyLogo';
 import PublicSectionLink from './PublicSectionLink';
 import { scheduleScrollPublicPageTop, scheduleScrollToPublicHash } from './scrollToPublicHash';
@@ -132,8 +132,15 @@ export default function PriceifyShell({
                 )}
               </nav>
               <div className="px-header-actions">
-                <InstallLink storeUrl={storeUrl} className="px-btn px-btn--brand">
-                  Install free on Shopify
+                <Link
+                  to={PUBLIC_ROUTES.staff}
+                  className="px-nav-link px-header-login"
+                  reloadDocument
+                >
+                  Login
+                </Link>
+                <InstallLink storeUrl={storeUrl} className="px-btn px-btn--dark">
+                  Add to Shopify
                 </InstallLink>
               </div>
             </>
@@ -147,49 +154,7 @@ export default function PriceifyShell({
       >
         {children}
       </main>
-      <footer className="px-footer">
-        <div className="px-footer-inner">
-          <div className="px-footer-top">
-            <div className="px-footer-brand">
-              <PriceifyLogo />
-              <p className="px-footer-blurb">{FOOTER_BLURB}</p>
-            </div>
-            <div className="px-footer-cols">
-              {FOOTER_COLUMNS.map((column) => (
-                <div key={column.heading} className="px-footer-col">
-                  <p className="px-footer-heading">{column.heading}</p>
-                  {column.links.map((link) => {
-                    if (link.hash) {
-                      return (
-                        <PublicSectionLink key={link.label} hash={link.hash}>
-                          {link.label}
-                        </PublicSectionLink>
-                      );
-                    }
-                    if (link.install) {
-                      return (
-                        <InstallLink key={link.label} storeUrl={storeUrl}>
-                          {link.label}
-                        </InstallLink>
-                      );
-                    }
-                    const staffPath = String(link.to || '').startsWith('/staff');
-                    return (
-                      <Link key={link.label} to={link.to} reloadDocument={staffPath || undefined}>
-                        {link.label}
-                      </Link>
-                    );
-                  })}
-                </div>
-              ))}
-            </div>
-          </div>
-          <div className="px-footer-bottom">
-            <p>© {new Date().getFullYear()} Priceify. All rights reserved.</p>
-            <p>{FOOTER_TAGLINE}</p>
-          </div>
-        </div>
-      </footer>
+      <PriceifyFooter storeUrl={storeUrl} />
     </div>
   );
 }

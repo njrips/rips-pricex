@@ -9,7 +9,7 @@ export const meta: MetaFunction = () =>
   publicMeta({
     title: "Guides",
     description:
-      "How Priceify confidence, sample size, price limits, and sequential testing work. The guide behind Settings info icons.",
+      "Priceify guides: price safety limits, confidence and sample size, AI suggestions, price surfaces, offer tests, and what pauses a test. Matches the Settings info icons.",
     path: "/docs",
   });
 

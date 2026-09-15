@@ -1,17 +1,6 @@
 import { Banner, Select, TextField } from '@shopify/polaris';
-import SettingsInfoLink from '../SettingsInfoLink';
+import LabelWithInfo from '../primitives/LabelWithInfo';
 import styles from '../../SmartPricing/classic/SmartPricingClassic.module.css';
-
-function FieldLabel({ htmlFor, children, hash, label }) {
-  return (
-    <div className={styles.labelRow}>
-      <label className={styles.label} htmlFor={htmlFor}>
-        {children}
-      </label>
-      <SettingsInfoLink hash={hash} label={label || children} />
-    </div>
-  );
-}
 
 /**
  * The two settings that decide when a test may be called.
@@ -56,9 +45,9 @@ export default function SettingsStatSettingsPanel({
       {error ? <p className={styles.error}>{error}</p> : null}
 
       <div className={styles.field}>
-        <FieldLabel htmlFor="confidence-level" hash="confidence" label="Confidence level">
+        <LabelWithInfo htmlFor="confidence-level" hash="confidence" label="Confidence level">
           Confidence level
-        </FieldLabel>
+        </LabelWithInfo>
         <Select
           id="confidence-level"
           label="Confidence level"
@@ -75,9 +64,9 @@ export default function SettingsStatSettingsPanel({
       </div>
 
       <div className={styles.field}>
-        <FieldLabel htmlFor="min-sample-default" hash="min-sample" label="Minimum sample">
+        <LabelWithInfo htmlFor="min-sample-default" hash="min-sample" label="Minimum sample">
           Minimum sample size per variation
-        </FieldLabel>
+        </LabelWithInfo>
         <TextField
           id="min-sample-default"
           label="Minimum sample size per variation"

@@ -26,16 +26,7 @@ const { query } = require('../../utils/database');
 const logger = require('../../utils/logger');
 const { normalizeVariantGid, normalizeProductGid } = require('./smartPricingCatalogUtils');
 const { collectVariantIdsFromConfig } = require('./activePriceTestVariantsService');
-const { isPriceLikeTestType } = require('./smartPricingTestIdentity');
-
-/**
- * Test types that change what a shopper pays, and can therefore collide.
- *
- * Offer tests belong here with price tests. An offer discounts the product at
- * checkout, so a product carrying both is shown one test's price and charged
- * another test's discount on top of it -- and both tests then count the order.
- */
-const PRICE_TEST_TYPES = new Set(['price', 'pricing', 'smart-pricing', 'offer']);
+const { isPriceLikeTestType, isPricingTestType } = require('./smartPricingTestIdentity');
 
 /** Personalization modes that keep serving a price after the test stops. */
 const SERVING_MODES = new Set(['personalized', 'rollout']);
@@ -143,32 +134,50 @@ async function loadHoldingTests(shopDomain) {
   if (!normalized) return [];
   const { rows } = await query(
     `SELECT id, name, status, type, target_type, target_id, target_ids, variants, segments,
-            personalization_mode
+            personalization_mode, metadata
        FROM tests
       WHERE LOWER(TRIM(shop_domain)) = $1
         AND status = ANY($2::text[])`,
     [normalized, HOLDING_STATUSES]
   );
-  return (rows || []).filter(row =>
-    PRICE_TEST_TYPES.has(
-      String(row?.type || '')
-        .trim()
-        .toLowerCase()
-    )
-  );
+  return (rows || []).filter(row => isPricingTestType(row?.type));
+}
+
+/** The experiment a test was launched from, when it recorded one. */
+function experimentIdOfTest(test) {
+  const metadata = parseJsonColumn(test?.metadata, {});
+  return String(metadata?.experiment_id || '').trim();
 }
 
 /**
  * @param {string} shopDomain
- * @param {{ ignoreTestIds?: string[] }} [options] Tests to leave out, so a test
+ * @param {object} [options]
+ * @param {string[]} [options.ignoreTestIds] Tests to leave out, so a test
  *   asking "may I start?" is not told it is blocked by itself.
+ * @param {string} [options.siblingExperimentId] The experiment doing the
+ *   asking. Its own tests then hold only the variants they actually price,
+ *   rather than the whole product.
+ *
+ *   A classic experiment launches one test per variant, and the product step
+ *   deliberately selects every variant of a chosen product. Each of those
+ *   tests names the product in `target_id`, so the first one to start held the
+ *   whole product and every later variant in the same experiment was refused
+ *   as "already being priced" -- by its own experiment. Any product with more
+ *   than one variant launched its first variant and then stopped.
+ *
+ *   The narrow exemption matters: a sibling still holds the variant it prices,
+ *   so relaunching an experiment that is already running is still refused.
  */
-async function getPriceTestEnrollment(shopDomain, { ignoreTestIds = [] } = {}) {
+async function getPriceTestEnrollment(
+  shopDomain,
+  { ignoreTestIds = [], siblingExperimentId = '' } = {}
+) {
   const ignored = new Set(
     (Array.isArray(ignoreTestIds) ? ignoreTestIds : [])
       .map(id => String(id || '').trim())
       .filter(Boolean)
   );
+  const sibling = String(siblingExperimentId || '').trim();
   const tests = await loadHoldingTests(shopDomain);
   const byVariantId = new Map();
   const byProductId = new Map();
@@ -195,11 +204,16 @@ async function getPriceTestEnrollment(shopDomain, { ignoreTestIds = [] } = {}) {
     }
 
     const excluded = excludedProductIds(test);
-    heldProductIds(test).forEach(productId => {
-      if (excluded.has(productId)) return;
-      const seen = byProductId.get(productId);
-      if (!seen || (hold.live && !seen.live)) byProductId.set(productId, hold);
-    });
+    // A sibling from the same experiment keeps its variant hold but gives up
+    // its product-wide one, which is what lets the rest of the batch start.
+    const isSibling = Boolean(sibling) && experimentIdOfTest(test) === sibling;
+    if (!isSibling) {
+      heldProductIds(test).forEach(productId => {
+        if (excluded.has(productId)) return;
+        const seen = byProductId.get(productId);
+        if (!seen || (hold.live && !seen.live)) byProductId.set(productId, hold);
+      });
+    }
     heldVariantIds(test).forEach(variantId => {
       const seen = byVariantId.get(variantId);
       if (!seen || (hold.live && !seen.live)) byVariantId.set(variantId, hold);
@@ -258,8 +272,12 @@ async function assertProductIsFreeToPrice({
   variantId,
   title = '',
   ignoreTestIds = [],
+  experimentId = '',
 } = {}) {
-  const enrollment = await getPriceTestEnrollment(shopDomain, { ignoreTestIds });
+  const enrollment = await getPriceTestEnrollment(shopDomain, {
+    ignoreTestIds,
+    siblingExperimentId: experimentId,
+  });
   const hold = findLiveHold(enrollment, { productId, variantId });
   if (!hold) return null;
   const err = new Error(describeHold(hold, { title }));
@@ -311,10 +329,7 @@ function findLiveHoldForTest(enrollment, test) {
  * @throws {Error} with `isValidation` and `code = 'PRODUCT_IN_ANOTHER_TEST'`
  */
 async function assertTestIsFreeToStart({ shopDomain, test, title = '' } = {}) {
-  const type = String(test?.type || '')
-    .trim()
-    .toLowerCase();
-  if (!PRICE_TEST_TYPES.has(type)) {
+  if (!isPricingTestType(test?.type)) {
     return null;
   }
   const enrollment = await getPriceTestEnrollment(shopDomain, {
@@ -333,6 +348,53 @@ async function assertTestIsFreeToStart({ shopDomain, test, title = '' } = {}) {
 const PRICING_LOCK_SECONDS = 30;
 
 /**
+ * Stands in for "every product in the catalog".
+ *
+ * An all-products test has no finite product set to name, and a test over more
+ * products than the cap below would cost one round trip per product on the
+ * launch path.
+ */
+const CATALOG_LOCK_KEY = 'catalog';
+
+/** Past this, naming every product costs more than it protects. */
+const MAX_PRICING_LOCK_KEYS = 40;
+
+/**
+ * Every product a start has to hold before it may claim anything.
+ *
+ * One key was not enough. A test covering several products was serialised on
+ * the first of them alone, so two starts overlapping on a *later* product took
+ * different leases, neither blocked the other, both read the product as free,
+ * and both wrote `running` -- two tests pricing one product, which is the one
+ * thing this lock exists to prevent.
+ *
+ * Products, not variants, when the test names any: two tests over one product
+ * always collide at the product level, so variant keys would only add round
+ * trips. A test that names no product is held by its variants instead.
+ */
+function enrollmentLockKeys({ test, productId, variantId } = {}) {
+  if (test && isCatalogWideTest(test)) return [CATALOG_LOCK_KEY];
+  const keys = new Set();
+  if (test) {
+    heldProductIds(test).forEach(id => keys.add(id));
+    if (!keys.size) {
+      heldVariantIds(test).forEach(id => {
+        const gid = normalizeVariantGid(id);
+        if (gid) keys.add(gid);
+      });
+    }
+  }
+  if (!keys.size) {
+    const single = normalizeProductGid(productId) || normalizeVariantGid(variantId) || '';
+    if (single) keys.add(single);
+  }
+  if (keys.size > MAX_PRICING_LOCK_KEYS) return [CATALOG_LOCK_KEY];
+  // Sorted so two requests over overlapping products contend in the same
+  // order rather than each holding what the other is waiting for.
+  return [...keys].sort();
+}
+
+/**
  * Hold a product while we check it is free and then claim it.
  *
  * `assertProductIsFreeToPrice` reads the enrollment and returns, and only then
@@ -345,30 +407,51 @@ const PRICING_LOCK_SECONDS = 30;
  * If the lease store itself is unreachable the work still runs: the check below
  * is what actually protects the merchant, and a storage hiccup should not stop
  * anyone launching.
+ *
+ * Pass the `test` where there is one, so every product it claims is held.
+ * Callers that only know a product and variant -- a launch working from a plan,
+ * before any test row exists -- may pass those instead.
+ *
+ * One gap remains by choice: an all-products test holds a single catalog-wide
+ * key, which does not contend with the per-product keys an ordinary start
+ * takes. Making every start take the catalog key too would serialise the
+ * parallel per-product resumes an experiment fires, which is a real flow;
+ * all-products starts are not. The free-to-start check still refuses the
+ * overlap in every case except the moment both requests read it at once.
  */
-async function withPricingEnrollmentLock({ shopDomain, productId, variantId } = {}, fn) {
+async function withPricingEnrollmentLock({ shopDomain, productId, variantId, test } = {}, fn) {
   const shop = String(shopDomain || '')
     .trim()
     .toLowerCase();
-  const key = normalizeProductGid(productId) || normalizeVariantGid(variantId) || '';
-  if (!shop || !key) {
+  const keys = enrollmentLockKeys({ test, productId, variantId });
+  if (!shop || !keys.length) {
     return fn();
   }
   const { acquireJobLease, releaseJobLease } = require('../../utils/jobLease');
-  const name = `price_test_enroll.${shop}.${key}`;
-  const acquired = await acquireJobLease(name, PRICING_LOCK_SECONDS);
-  if (!acquired) {
-    const err = new Error(
-      'This product is already being started by another request. Give it a moment and try again.'
-    );
-    err.isValidation = true;
-    err.code = 'PRODUCT_LAUNCH_IN_PROGRESS';
-    throw err;
-  }
+  const held = [];
   try {
+    for (const key of keys) {
+      const name = `price_test_enroll.${shop}.${key}`;
+      // eslint-disable-next-line no-await-in-loop -- taken in order on purpose
+      const acquired = await acquireJobLease(name, PRICING_LOCK_SECONDS);
+      if (!acquired) {
+        const err = new Error(
+          'This product is already being started by another request. Give it a moment and try again.'
+        );
+        err.isValidation = true;
+        err.code = 'PRODUCT_LAUNCH_IN_PROGRESS';
+        throw err;
+      }
+      held.push(name);
+    }
     return await fn();
   } finally {
-    await releaseJobLease(name);
+    // Including the partly-acquired case above: whatever was taken before the
+    // refusal has to go back, or the next attempt collides with this one.
+    for (const name of held) {
+      // eslint-disable-next-line no-await-in-loop
+      await releaseJobLease(name);
+    }
   }
 }
 
@@ -397,13 +480,7 @@ async function previewResumeConflicts({ shopDomain, testIds = [] } = {}) {
   const blocked = [];
 
   (Array.isArray(tests) ? tests : []).forEach(test => {
-    if (
-      !PRICE_TEST_TYPES.has(
-        String(test?.type || '')
-          .trim()
-          .toLowerCase()
-      )
-    ) {
+    if (!isPricingTestType(test?.type)) {
       clear.push(String(test.id));
       return;
     }
@@ -491,5 +568,6 @@ module.exports = {
   heldProductIds,
   heldVariantIds,
   isCatalogWideTest,
+  enrollmentLockKeys,
   HOLDING_STATUSES,
 };

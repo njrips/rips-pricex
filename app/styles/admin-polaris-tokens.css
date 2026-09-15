@@ -111,8 +111,6 @@
   --classic-pricing-input: var(--p-color-bg-surface, var(--rpx-admin-surface));
   --classic-pricing-border: var(--p-color-border, var(--rpx-admin-border));
   --classic-panel-tint: var(--p-color-bg-surface-secondary, var(--rpx-admin-surface-secondary));
-  --classic-callout-bg: var(--p-color-bg-surface-warning, var(--rpx-admin-warning-surface));
-  --classic-callout-border: rgba(255, 184, 0, 0.45);
   --classic-segment-on: rgba(255, 255, 255, 0.7);
   --classic-disabled-field: var(--p-color-bg-surface-disabled, rgba(0, 0, 0, 0.05));
   --classic-disabled-text: #8a8a8a;

@@ -1,5 +1,5 @@
 import { Select, TextField } from '@shopify/polaris';
-import SettingsInfoLink from '../../Settings/SettingsInfoLink';
+import LabelWithInfo from '../../Settings/primitives/LabelWithInfo';
 import {
   EMPTY_OFFER_CONFIG,
   formatOfferRule,
@@ -44,10 +44,9 @@ export default function OfferArmsEditor({
 
   return (
     <div className={styles.offerArmsStack}>
-      <div className={styles.labelRow}>
-        <div className={styles.sectionLabel}>Offers for each variation</div>
-        <SettingsInfoLink hash="offers" label="Offer tests" />
-      </div>
+      <LabelWithInfo hash="offers" label="Offer tests">
+        Offers for each variation
+      </LabelWithInfo>
       <p className={styles.help}>
         Control stays at the catalog price with no discount. Each test variation applies one offer
         to every selected product. Assigned shoppers see the catalog price struck through, the

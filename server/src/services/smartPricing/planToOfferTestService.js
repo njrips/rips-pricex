@@ -160,6 +160,10 @@ function buildOfferTestPayloadFromPlan(plan = {}, options = {}) {
     metadata: {
       smart_pricing_plan_id: plan.id || null,
       smart_pricing_source: 'smart_pricing',
+      // Which experiment this test belongs to, so the enrollment guard can
+      // tell an experiment's own sibling test from another test holding the
+      // product. See planToPriceTestService for the whole story.
+      experiment_id: plan.experiment_id || plan.metadata?.experiment_id || null,
       experiment_type: 'offer_test',
       scenario_preset: plan.scenario_preset || 'recommended',
       current_price: plan.current_price ?? null,

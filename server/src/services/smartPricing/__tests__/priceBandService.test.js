@@ -128,3 +128,76 @@ describe('priceBandService', () => {
     expect(preset.price_arms.some(arm => arm.role === 'control')).toBe(true);
   });
 });
+
+/**
+ * The last line of defence for a variation nobody priced.
+ *
+ * The wizard falls back to the catalog price for any arm without an override,
+ * so an unpriced variation launches at exactly the control price -- a second
+ * control wearing a variation's name, taking its share of the traffic and
+ * measuring nothing. Every other check here passes it, because the current
+ * price is trivially inside the allowed band.
+ */
+describe('a challenger priced at the catalog price', () => {
+  const guardrails = { max_price_change_percent: 10 };
+
+  it('is rejected, and named', () => {
+    const violations = findPriceChangeViolations(
+      100,
+      [
+        { id: 'control', role: 'control', label: 'Control', price: 100 },
+        { id: 'var_a', role: 'challenger', label: 'Variation A', price: 106 },
+        { id: 'var_b', role: 'challenger', label: 'Variation B', price: 100 },
+      ],
+      guardrails
+    );
+
+    expect(violations).toHaveLength(1);
+    expect(violations[0]).toMatch(/Variation B is set to your current price of \$100/);
+    expect(violations[0]).toMatch(/split traffic with the control/);
+  });
+
+  it('leaves the control itself alone', () => {
+    expect(
+      findPriceChangeViolations(
+        100,
+        [
+          { id: 'control', role: 'control', label: 'Control', price: 100 },
+          { id: 'var_a', role: 'challenger', label: 'Variation A', price: 106 },
+        ],
+        guardrails
+      )
+    ).toEqual([]);
+  });
+
+  it('reports only the band problem when an arm is also out of range', () => {
+    // One arm, one complaint: naming both would be two ways of saying the
+    // price is wrong.
+    const violations = findPriceChangeViolations(
+      100,
+      [
+        { id: 'control', role: 'control', label: 'Control', price: 100 },
+        { id: 'var_a', role: 'challenger', label: 'Variation A', price: 140 },
+      ],
+      guardrails
+    );
+
+    expect(violations).toHaveLength(1);
+    expect(violations[0]).toMatch(/outside your 10% max price change/);
+  });
+
+  it('stays quiet when the plan does not say which arm is the control', () => {
+    // Bare {label, price} arms give no baseline to compare against, and
+    // guessing one would risk refusing a launch that is perfectly valid.
+    expect(
+      findPriceChangeViolations(
+        100,
+        [
+          { label: 'Control', price: 100 },
+          { label: 'B', price: 108 },
+        ],
+        guardrails
+      )
+    ).toEqual([]);
+  });
+});

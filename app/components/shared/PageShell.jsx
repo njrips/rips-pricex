@@ -12,8 +12,13 @@ function PageShell({
   messageDuration,
   className = '',
 }) {
+  // A warning names something the merchant still has to do, so it gets the
+  // longer read as well.
   const duration =
-    messageDuration ?? (messageType === 'error' ? ERROR_TOAST_DURATION : DEFAULT_TOAST_DURATION);
+    messageDuration ??
+    (messageType === 'error' || messageType === 'warning'
+      ? ERROR_TOAST_DURATION
+      : DEFAULT_TOAST_DURATION);
 
   return (
     <div

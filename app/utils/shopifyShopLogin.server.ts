@@ -1,8 +1,7 @@
 import { login } from "../shopify.server";
 import { coerceShopifyShopInput } from "./shopifyAdmin";
-import { loginErrorMessage } from "../routes/auth.login/error.server";
 
-/** Coerce shop, then run Shopify login() so handle / Admin URL pastes succeed. */
+/** Coerce shop, then run Shopify login() for CLI / OAuth POST (no HTML login page). */
 export async function runShopLogin(request: Request) {
   const formData = await request.formData();
   const shop = coerceShopifyShopInput(String(formData.get("shop") || ""));
@@ -14,6 +13,5 @@ export async function runShopLogin(request: Request) {
     headers,
     body: formData,
   });
-  const errors = loginErrorMessage(await login(forwarded));
-  return { shop, errors };
+  return login(forwarded);
 }

@@ -16,6 +16,8 @@ jest.mock('../../../models/test', () => ({
 }));
 
 const {
+  assertProductIsFreeToPrice,
+  assertTestIsFreeToStart,
   getPriceTestEnrollment,
   previewResumeConflicts,
   findHold,
@@ -23,6 +25,7 @@ const {
   findLiveHoldForTest,
   describeHold,
   holdKind,
+  enrollmentLockKeys,
 } = require('../priceTestEnrollmentService');
 
 const PRODUCT = 'gid://shopify/Product/111';
@@ -52,6 +55,86 @@ function priceTest(overrides = {}) {
 beforeEach(() => {
   rows.length = 0;
   resumeCandidates.length = 0;
+});
+
+/**
+ * The check reads the enrollment and returns, and only then does the caller
+ * write `running`. Two requests landing together both read "free" before
+ * either writes, so the lease is what actually keeps them apart.
+ */
+describe('what a start has to lock before it may claim anything', () => {
+  const SECOND_PRODUCT = 'gid://shopify/Product/333';
+
+  it('locks every product a test names, not just the first', () => {
+    // One key meant a test over two products was serialised on the first
+    // alone: two starts overlapping on the *second* took different leases,
+    // neither blocked the other, and both went on to write `running`.
+    const keys = enrollmentLockKeys({
+      test: priceTest({ target_ids: [PRODUCT, SECOND_PRODUCT] }),
+    });
+
+    expect(keys).toContain(PRODUCT);
+    expect(keys).toContain(SECOND_PRODUCT);
+  });
+
+  it('gives two tests overlapping on one product a key in common', () => {
+    const mine = enrollmentLockKeys({ test: priceTest({ target_ids: [PRODUCT, SECOND_PRODUCT] }) });
+    const theirs = enrollmentLockKeys({
+      test: priceTest({
+        id: 'test-b',
+        target_id: SECOND_PRODUCT,
+        target_ids: [SECOND_PRODUCT],
+        variants: [{ id: 'control', config: { byProduct: { [SECOND_PRODUCT]: {} } } }],
+      }),
+    });
+
+    expect(mine.filter(key => theirs.includes(key))).toEqual([SECOND_PRODUCT]);
+  });
+
+  it('orders the keys, so overlapping starts contend in the same sequence', () => {
+    const keys = enrollmentLockKeys({
+      test: priceTest({ target_ids: [SECOND_PRODUCT, PRODUCT] }),
+    });
+
+    expect(keys).toEqual([...keys].sort());
+  });
+
+  it('falls back to variants when a product id could not be read', () => {
+    // Variant prices are nested under a product, so this only happens when
+    // that product key is unusable -- in which case the variants are still
+    // something to lock, and locking nothing would run the claim unguarded.
+    const keys = enrollmentLockKeys({
+      test: priceTest({
+        target_id: null,
+        target_ids: [],
+        variants: [{ id: 'control', config: { byProduct: { '': { byVariant: { [VARIANT]: {} } } } } }],
+      }),
+    });
+
+    expect(keys).toEqual([VARIANT]);
+  });
+
+  it('falls back to the product a caller names when there is no test yet', () => {
+    // A launch working from a plan locks before the test row exists.
+    expect(enrollmentLockKeys({ productId: PRODUCT })).toEqual([PRODUCT]);
+  });
+
+  it('names nothing when there is nothing to claim, so the work runs unlocked', () => {
+    expect(enrollmentLockKeys({})).toEqual([]);
+  });
+
+  it('uses one catalog-wide key for an all-products test', () => {
+    // There is no finite set of products to name.
+    expect(enrollmentLockKeys({ test: priceTest({ target_type: 'all-products' }) })).toEqual([
+      'catalog',
+    ]);
+  });
+
+  it('does not take a lease per product for an enormous test', () => {
+    const many = Array.from({ length: 60 }, (_unused, index) => `gid://shopify/Product/${index}`);
+
+    expect(enrollmentLockKeys({ test: priceTest({ target_ids: many }) })).toEqual(['catalog']);
+  });
 });
 
 describe('what counts as holding a product', () => {
@@ -459,5 +542,189 @@ describe('offer tests hold their product too', () => {
     expect(findLiveHold(enrollment, { productId: PRODUCT })).toMatchObject({
       test_id: 'offer-1',
     });
+  });
+
+  it('holds it under either spelling of the offer type', async () => {
+    // The plan builder writes `offer`, but `offer_test` is the wizard's name
+    // for the same thing and reaches this column by other routes. This set
+    // was maintained by hand in two files and the copy used here had lost
+    // `offer_test`, so a test stored under that name held nothing and a
+    // second test could be launched straight over the top of it.
+    rows.push(priceTest({ id: 'offer-2', name: 'Summer offer', type: 'offer_test' }));
+    const enrollment = await getPriceTestEnrollment('demo.myshopify.com');
+
+    expect(findLiveHold(enrollment, { productId: PRODUCT })).toMatchObject({
+      test_id: 'offer-2',
+    });
+  });
+
+  it('blocks a second offer test on a product an offer test is already running on', async () => {
+    // The case the merchant hits: two offers on one product means the shopper
+    // is shown one discount and charged another, and both tests count the sale.
+    rows.push(priceTest({ id: 'offer-1', name: 'Summer offer', type: 'offer' }));
+    const enrollment = await getPriceTestEnrollment('demo.myshopify.com');
+
+    await expect(
+      assertProductIsFreeToPrice({
+        shopDomain: 'demo.myshopify.com',
+        productId: PRODUCT,
+        variantId: VARIANT,
+        title: 'Runner Shoe',
+      })
+    ).rejects.toMatchObject({ code: 'PRODUCT_IN_ANOTHER_TEST' });
+    expect(findLiveHold(enrollment, { variantId: VARIANT })).toMatchObject({
+      test_id: 'offer-1',
+    });
+  });
+
+  it('blocks an offer test on a product a price test is running on, and the reverse', async () => {
+    rows.push(priceTest({ id: 'price-1', name: 'Spring pricing', type: 'price' }));
+
+    await expect(
+      assertProductIsFreeToPrice({
+        shopDomain: 'demo.myshopify.com',
+        productId: PRODUCT,
+        title: 'Runner Shoe',
+      })
+    ).rejects.toThrow(/already being priced by "Spring pricing"/);
+
+    rows.length = 0;
+    rows.push(priceTest({ id: 'offer-1', name: 'Summer offer', type: 'offer' }));
+
+    await expect(
+      assertProductIsFreeToPrice({
+        shopDomain: 'demo.myshopify.com',
+        productId: PRODUCT,
+        title: 'Runner Shoe',
+      })
+    ).rejects.toThrow(/already being priced by "Summer offer"/);
+  });
+
+  it('will not start a paused offer test onto a product another test took', async () => {
+    // Resuming is the other way a second live test appears on one product.
+    rows.push(priceTest({ id: 'price-1', name: 'Spring pricing', type: 'price' }));
+    const paused = priceTest({ id: 'offer-1', status: 'paused', type: 'offer_test' });
+
+    await expect(
+      assertTestIsFreeToStart({ shopDomain: 'demo.myshopify.com', test: paused })
+    ).rejects.toMatchObject({ code: 'PRODUCT_IN_ANOTHER_TEST' });
+  });
+
+  it('leaves a test that sets no price alone', async () => {
+    rows.push(priceTest({ id: 'price-1', name: 'Spring pricing', type: 'price' }));
+    const content = priceTest({ id: 'content-1', status: 'paused', type: 'content' });
+
+    await expect(
+      assertTestIsFreeToStart({ shopDomain: 'demo.myshopify.com', test: content })
+    ).resolves.toBeNull();
+  });
+});
+
+/**
+ * One classic experiment launches one test per variant, and the product step
+ * deliberately selects every variant of a chosen product. Each of those tests
+ * names the product, so the first to start held the whole product and every
+ * later variant in the same experiment was refused as "already being priced"
+ * -- by its own experiment. Any product with more than one variant launched
+ * its first variant and then stopped.
+ */
+describe('an experiment launching its own product one variant at a time', () => {
+  const SIBLING = 'gid://shopify/ProductVariant/333';
+
+  /** The test the experiment's first variant just started. */
+  function launched(over = {}) {
+    return priceTest({
+      id: 'test-v1',
+      metadata: { experiment_id: 'exp_autumn' },
+      ...over,
+    });
+  }
+
+  it('lets the next variant of the same product start', async () => {
+    rows.push(launched());
+
+    await expect(
+      assertProductIsFreeToPrice({
+        shopDomain: 'demo.myshopify.com',
+        productId: PRODUCT,
+        variantId: SIBLING,
+        title: 'Runner Shoe',
+        experimentId: 'exp_autumn',
+      })
+    ).resolves.toBeNull();
+  });
+
+  it('still refuses the variant that test is already pricing', async () => {
+    // The narrow part of the exemption: a sibling gives up its product-wide
+    // hold, not the variant it actually prices. Relaunching a running
+    // experiment would otherwise start a second test on the same variant.
+    rows.push(launched());
+
+    await expect(
+      assertProductIsFreeToPrice({
+        shopDomain: 'demo.myshopify.com',
+        productId: PRODUCT,
+        variantId: VARIANT,
+        title: 'Runner Shoe',
+        experimentId: 'exp_autumn',
+      })
+    ).rejects.toMatchObject({ code: 'PRODUCT_IN_ANOTHER_TEST' });
+  });
+
+  it('still refuses a different experiment reaching for the same product', async () => {
+    rows.push(launched());
+
+    await expect(
+      assertProductIsFreeToPrice({
+        shopDomain: 'demo.myshopify.com',
+        productId: PRODUCT,
+        variantId: SIBLING,
+        title: 'Runner Shoe',
+        experimentId: 'exp_something_else',
+      })
+    ).rejects.toMatchObject({ code: 'PRODUCT_IN_ANOTHER_TEST' });
+  });
+
+  it('refuses a launch that names no experiment, as it always did', async () => {
+    // Tests launched before experiments were recorded carry no experiment id,
+    // and must keep their product-wide hold rather than quietly losing it.
+    rows.push(launched({ metadata: {} }));
+
+    await expect(
+      assertProductIsFreeToPrice({
+        shopDomain: 'demo.myshopify.com',
+        productId: PRODUCT,
+        variantId: SIBLING,
+        title: 'Runner Shoe',
+        experimentId: 'exp_autumn',
+      })
+    ).rejects.toMatchObject({ code: 'PRODUCT_IN_ANOTHER_TEST' });
+  });
+
+  it('reads the experiment id from metadata stored as text', async () => {
+    // `metadata` is JSONB and arrives as a string on some drivers.
+    rows.push(launched({ metadata: JSON.stringify({ experiment_id: 'exp_autumn' }) }));
+
+    await expect(
+      assertProductIsFreeToPrice({
+        shopDomain: 'demo.myshopify.com',
+        productId: PRODUCT,
+        variantId: SIBLING,
+        experimentId: 'exp_autumn',
+      })
+    ).resolves.toBeNull();
+  });
+
+  it('does not let an offer test loose on a product its sibling is pricing', async () => {
+    // An offer names no variants, so it asks about the product itself. Its
+    // sibling gave up the product-wide hold, but the variant hold still
+    // stands, and an offer discounts that variant along with the rest.
+    rows.push(launched());
+    const enrollment = await getPriceTestEnrollment('demo.myshopify.com', {
+      siblingExperimentId: 'exp_autumn',
+    });
+
+    expect(findLiveHold(enrollment, { productId: PRODUCT })).toBeNull();
+    expect(findLiveHold(enrollment, { variantId: VARIANT })).toMatchObject({ test_id: 'test-v1' });
   });
 });

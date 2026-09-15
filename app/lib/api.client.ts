@@ -143,8 +143,6 @@ export const rpxApi = {
       method: "POST",
       body: JSON.stringify(guardrails),
     }),
-  markUninstall: (ctx: ApiTarget) =>
-    api(ctx, "/shops/uninstall", { method: "POST", body: "{}" }),
   settingsInstallation: (ctx: ApiTarget) =>
     api<{
       success?: boolean;

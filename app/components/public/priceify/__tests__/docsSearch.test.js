@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { DOCS_SECTIONS, searchDocsSections } from '../docsContent.js';
+import {
+  DOCS_NAV_CARDS,
+  DOCS_SECTIONS,
+  searchDocsNavTopics,
+  searchDocsSections,
+} from '../docsContent.js';
 
 const ids = (query) => searchDocsSections(query).map((section) => section.id);
 
@@ -46,5 +51,26 @@ describe('guide search', () => {
       expect(DOCS_SECTIONS).toContain(section);
       expect(Array.isArray(section.paragraphs)).toBe(true);
     }
+  });
+});
+
+describe('guide topic search', () => {
+  const topicTitles = (query) => searchDocsNavTopics(query).map((card) => card.title);
+
+  it('finds nav topics by title or group theme', () => {
+    expect(topicTitles('price safety')[0]).toBe('Price safety');
+    expect(topicTitles('statistics')[0]).toBe('Confidence and sample size');
+    expect(topicTitles('offer tests')[0]).toBe('Offer tests');
+  });
+
+  it('returns cards that match public guide anchors', () => {
+    for (const card of searchDocsNavTopics('AI')) {
+      expect(DOCS_NAV_CARDS).toContain(card);
+      expect(card.href).toMatch(/^#[a-z0-9-]+$/);
+    }
+  });
+
+  it('finds nothing for an empty query', () => {
+    expect(searchDocsNavTopics('')).toEqual([]);
   });
 });

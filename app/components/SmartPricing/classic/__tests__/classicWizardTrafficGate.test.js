@@ -124,12 +124,23 @@ async function renderWizard({ id, step = 1, variations }) {
 const read = testid => container.querySelector(`[data-testid="${testid}"]`)?.textContent ?? '';
 
 describe('variations step Continue gate', () => {
-  it('blocks Continue while the challenger has no traffic', async () => {
-    // The step opens with control on 100%, which is a complete 100 but not a
-    // runnable experiment.
+  it('opens ready to continue, on an even split', async () => {
+    // The step used to open on control 100 / challenger 0 -- a complete 100,
+    // but a starved arm, so Continue was disabled from the first render over a
+    // split the merchant had not touched.
     await renderWizard({ id: 'exp_default' });
 
     expect(read('step')).toBe('1');
+    expect(read('continue-disabled')).toBe('false');
+    expect(read('continue-reason')).toBe('');
+  });
+
+  it('blocks Continue when a challenger is left with no traffic', async () => {
+    await renderWizard({
+      id: 'exp_starved',
+      variations: [arm('control', 'Control', 100), arm('var_a', 'Variation A', 0)],
+    });
+
     expect(read('continue-disabled')).toBe('true');
     expect(read('continue-reason')).toMatch(/would get no traffic/i);
   });

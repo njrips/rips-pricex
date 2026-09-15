@@ -168,6 +168,45 @@ describe('audience segment as a radio group', () => {
   });
 });
 
+/**
+ * Only the edit modal renders this slider -- the create wizard asks for the
+ * allocation on the Variations step and passes showTrafficAllocation={false} --
+ * so the mismatch below was invisible everywhere except when editing.
+ */
+describe('traffic allocation slider fill', () => {
+  function slider() {
+    return container.querySelector('#classic-audience-traffic');
+  }
+
+  function fillPercent() {
+    const raw = slider().style.getPropertyValue('--slider-fill');
+    return Number.parseFloat(raw);
+  }
+
+  it('paints the fill as a fraction of the track, not of 100', async () => {
+    // The track runs 5-100, so 52.5 is its midpoint: the thumb sits halfway
+    // along and the paint has to stop there too. Reading the raw value put the
+    // fill at 52.5% of the width, ahead of a thumb that was at 50%.
+    await renderPanel({ value: { trafficAllocation: 52.5 } });
+    expect(fillPercent()).toBeCloseTo(50);
+  });
+
+  it('paints nothing at the floor, where the thumb is hard left', async () => {
+    await renderPanel({ value: { trafficAllocation: 5 } });
+    expect(fillPercent()).toBe(0);
+  });
+
+  it('fills the track at 100, where the thumb is hard right', async () => {
+    await renderPanel({ value: { trafficAllocation: 100 } });
+    expect(fillPercent()).toBe(100);
+  });
+
+  it('starts the track at the same floor it paints from', async () => {
+    await renderPanel({ value: { trafficAllocation: 50 } });
+    expect(slider().getAttribute('min')).toBe('5');
+  });
+});
+
 describe('revenue guardrail switch', () => {
   function guardrailSwitch() {
     return container.querySelector('[role="switch"][aria-label="Revenue guardrail"]');

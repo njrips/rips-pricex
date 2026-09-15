@@ -445,6 +445,16 @@ export default function ClassicRolloutReadinessPanel({
               skipped. Each product is applied on its own, so a failure on one does not stop the
               others.
             </p>
+            {summary.directionalPriceWriteCount > 0 ? (
+              <Banner tone="warning">
+                {summary.directionalPriceWriteCount === 1
+                  ? 'One of these prices is ahead on directional evidence only.'
+                  : `${summary.directionalPriceWriteCount} of these prices are ahead on directional evidence only.`}{' '}
+                Their confidence is calculated from an estimate that can read higher than the
+                result deserves, which is why Priceify will not apply them on its own. Open a
+                product to see which.
+              </Banner>
+            ) : null}
           </Modal.Section>
         </Modal>
       ) : null}

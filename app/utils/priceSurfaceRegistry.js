@@ -360,24 +360,6 @@ export function resolveListingPriceSurfaceKeys(pathname) {
   return ['plp', 'search', 'home', 'recommendation', 'global'];
 }
 
-export function resolvePricePreviewVariant(variants, options = {}) {
-  const list = Array.isArray(variants) ? variants : [];
-  if (!list.length) {
-    return null;
-  }
-  const preferredIndex = Number(options.preferredIndex);
-  if (Number.isInteger(preferredIndex) && preferredIndex >= 0 && preferredIndex < list.length) {
-    return list[preferredIndex];
-  }
-  const treatmentIndex = list.findIndex((variant, index) => {
-    const name = String(variant?.name || '')
-      .trim()
-      .toLowerCase();
-    return !(index === 0 || name === 'control' || name.startsWith('control '));
-  });
-  return treatmentIndex >= 0 ? list[treatmentIndex] : list[0];
-}
-
 export function inferPriceSurfaceRoleFromPickerHints({ selector, roleHint } = {}) {
   const hintedRole = normalizePriceSurfaceRole(String(roleHint || '').trim(), '');
   if (PRICE_SURFACE_ROLES.includes(hintedRole)) {
@@ -469,7 +451,8 @@ export function analyzePriceSurfaceRegistryGaps(testMappings, shopMappings) {
   }));
 }
 
-export function buildPriceSurfaceCoverageMatrix(testMappings, shopMappings) {
+/** Read only by the readiness status below. */
+function buildPriceSurfaceCoverageMatrix(testMappings, shopMappings) {
   return PRICE_SURFACE_READINESS_TARGETS.map(target => {
     const selectors = resolvePriceSurfaceSelectors(target.surface, target.role, {
       testMappings,
@@ -483,46 +466,6 @@ export function buildPriceSurfaceCoverageMatrix(testMappings, shopMappings) {
       configured: selectors.length > 0,
     };
   });
-}
-
-export function compareCheckoutPaintParity(targetUnit, displayedAmount, tolerance = 0.02) {
-  const target = Number(targetUnit);
-  const shown = Number(displayedAmount);
-  if (!Number.isFinite(target) || !Number.isFinite(shown)) {
-    return { ok: false, reason: 'missing_amount' };
-  }
-  if (Math.abs(shown - target) <= tolerance) {
-    return { ok: true, delta: 0 };
-  }
-  return {
-    ok: false,
-    reason: 'mismatch',
-    delta: Math.round((shown - target) * 100) / 100,
-    targetUnit: target,
-    displayedAmount: shown,
-  };
-}
-
-export function summarizePriceSurfaceRegistry(testMappings, shopMappings) {
-  const surfaces = ['pdp', 'plp', 'cart', 'search', 'home', 'global'];
-  const roles = ['regular', 'compare_at'];
-  const summary = [];
-  surfaces.forEach(surface => {
-    roles.forEach(role => {
-      const selectors = resolvePriceSurfaceSelectors(surface, role, {
-        testMappings,
-        shopMappings,
-      });
-      if (selectors.length > 0) {
-        summary.push({
-          surface,
-          role,
-          selectors,
-        });
-      }
-    });
-  });
-  return summary;
 }
 
 export function validatePriceSurfaceMappingsForEditor(rows) {
@@ -560,41 +503,15 @@ export function validatePriceSurfaceMappingsForEditor(rows) {
   return warnings;
 }
 
-export function collectPriceSurfaceMappingIssues(rows) {
-  const warnings = validatePriceSurfaceMappingsForEditor(rows);
-  const errors = [];
-  const normalized = normalizePriceSurfaceMappingsForEditor(rows);
-  if (normalized.length > MAX_PRICE_SURFACE_MAPPINGS) {
-    errors.push(`Only ${MAX_PRICE_SURFACE_MAPPINGS} price surface mappings can be saved.`);
-  }
-  const seen = new Map();
-  normalized.forEach((row, index) => {
-    const selector = String(row.selector || '').trim();
-    if (!selector) {
-      return;
-    }
-    if (selector.length > 1000) {
-      errors.push(`Price surface row ${index + 1} selector is too long.`);
-    }
-    const key = `${row.surface}:${row.role}:${selector}`;
-    if (seen.has(key)) {
-      errors.push(
-        `Price surface row ${index + 1} duplicates row ${seen.get(key) + 1} for the same surface and role.`
-      );
-    } else {
-      seen.set(key, index);
-    }
-  });
-  return { errors, warnings };
-}
-
 export function buildPriceSurfaceRegistryStatus(testMappings, shopMappings, options = {}) {
   const testRows = normalizePriceSurfaceMappingsForEditor(testMappings);
   const shopRows = normalizePriceSurfaceMappingsForEditor(shopMappings);
   const gaps = analyzePriceSurfaceRegistryGaps(testRows, shopRows);
   const coverageMatrix = buildPriceSurfaceCoverageMatrix(testRows, shopRows);
-  const configuredTest = testRows.filter(row => row.selector.trim()).length;
-  const configuredShop = shopRows.filter(row => row.selector.trim()).length;
+  // A row switched off is ignored when resolving selectors, so counting it here
+  // reported mappings the storefront would never use.
+  const configuredTest = testRows.filter(row => row.selector.trim() && row.enabled).length;
+  const configuredShop = shopRows.filter(row => row.selector.trim() && row.enabled).length;
   const highSeverityGaps = gaps.filter(gap => gap.severity === 'high');
   const actionableGaps = gaps.filter(gap => gap.severity === 'high' || gap.severity === 'medium');
   const picking = Boolean(options.picking);

@@ -3,11 +3,60 @@ import {
   describeSmartPricingLaunchReadiness,
   isCheckoutReady,
   priceSurfacesUnmapped,
+  priceSurfaceSummary,
   themeEmbedStatus,
   themeEmbedThemeName,
   unwrapCheckoutReadiness,
 } from '../checkoutReadinessClient';
 import { isOfferCheckoutReady } from '../../components/SmartPricing/classic/offerSelection';
+
+/**
+ * "We could not check" and "you have mapped nothing" look alike in the
+ * payload -- both carry `ready: false` and a zero count -- and the setup page
+ * turns the difference into either "Checking…" or a warning badge reading
+ * "Product page not mapped".
+ */
+describe('whether the price surface answer is a verdict at all', () => {
+  it('reports a real answer as known', () => {
+    const summary = priceSurfaceSummary({
+      price_surface: { ready: true, status: 'ready', configured_shop: 3 },
+    });
+
+    expect(summary).toMatchObject({ known: true, ready: true, configured: 3 });
+  });
+
+  it('reports a shop that has mapped nothing as known and unready', () => {
+    const summary = priceSurfaceSummary({
+      price_surface: { ready: false, status: 'blocked', configured_shop: 0 },
+    });
+
+    expect(summary).toMatchObject({ known: true, ready: false });
+  });
+
+  it('does not pass a failed lookup off as a verdict', () => {
+    // The server answers `unknown` when it could not read the selectors at
+    // all. Treated as an answer, it told a merchant whose theme is mapped
+    // that their product page is not.
+    const summary = priceSurfaceSummary({
+      price_surface: {
+        ready: false,
+        status: 'unknown',
+        configured_shop: 0,
+        message: 'Could not load theme price selectors.',
+      },
+    });
+
+    expect(summary.known).toBe(false);
+  });
+
+  it('still does not call an unknown answer "unmapped"', () => {
+    expect(
+      priceSurfacesUnmapped({
+        price_surface: { ready: false, status: 'unknown', configured_shop: 0 },
+      })
+    ).toBe(false);
+  });
+});
 
 describe('checkoutReadinessClient', () => {
   it('unwraps nested readiness payloads', () => {

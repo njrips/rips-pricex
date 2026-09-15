@@ -65,8 +65,40 @@ export function useThemeEmbedRedirect(
     openKnown(urls.href);
   }, [ctx.shop, ctx.apiKey, openKnown, resolveThemeId, themeId]);
 
+  /**
+   * Open the editor in a new tab, leaving the app where the merchant left it.
+   *
+   * Deliberately synchronous and deliberately the HTTPS url, unlike `open`:
+   *
+   * - Awaiting the theme lookup first would put the `window.open` outside the
+   *   click that asked for it, which is what a popup blocker blocks. The id is
+   *   prefetched on mount, and `themeEmbedActivateUrls` falls back to the
+   *   `current` theme segment when it has not landed yet.
+   * - `shopify://admin/...` is only documented for `_top`. A new tab is
+   *   top-level rather than the app iframe, so admin.shopify.com loads there
+   *   without the refused-to-connect problem that made `shopify://` necessary.
+   *
+   * @returns whether a url could be built -- false means the api key is missing
+   *          and the caller should keep offering the same-tab route.
+   */
+  const openInNewTab = useCallback(() => {
+    const urls = themeEmbedActivateUrls({
+      shop: ctx.shop,
+      apiKey: ctx.apiKey,
+      themeId,
+    });
+    if (!urls.https) return false;
+    try {
+      window.open(urls.https, '_blank', 'noopener');
+      return true;
+    } catch {
+      return false;
+    }
+  }, [ctx.shop, ctx.apiKey, themeId]);
+
   return {
     open,
+    openInNewTab,
     embedUrl: fallbackUrl,
     themeId,
     themeName,

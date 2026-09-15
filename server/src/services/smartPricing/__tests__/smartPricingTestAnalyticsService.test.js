@@ -13,7 +13,10 @@ jest.mock('../../../models/smartPricingInboxStore', () => ({
 const { getTestById } = require('../../../models/test');
 const analyticsService = require('../../analytics');
 const { findInboxPlanByTestId } = require('../../../models/smartPricingInboxStore');
-const { buildSmartPricingTestAnalytics } = require('../smartPricingTestAnalyticsService');
+const {
+  buildSmartPricingTestAnalytics,
+  matchVariantToArm,
+} = require('../smartPricingTestAnalyticsService');
 
 describe('smartPricingTestAnalyticsService', () => {
   beforeEach(() => {
@@ -369,5 +372,57 @@ describe('smartPricingTestAnalyticsService', () => {
     expect(result.arms[0].visitors).toBe(80);
     expect(result.arms[1].variant_id).toBe('v-a');
     expect(result.arms[1].visitors).toBe(90);
+  });
+});
+
+/**
+ * Which variation each row of the results table belongs to.
+ *
+ * This is the table a merchant reads before choosing a price to publish, so a
+ * row carrying the wrong arm's numbers is not a cosmetic fault.
+ */
+describe('pairing a plan arm with the variation that ran it', () => {
+  const analyticsVariants = [
+    { id: 'v-a', name: 'A', visitors: 90, conversions: 9 },
+    { id: 'v-b', name: 'B', visitors: 40, conversions: 2 },
+  ];
+  const testVariants = [
+    { id: 'v-a', name: 'A', config: { price: 19.99 } },
+    { id: 'v-b', name: 'B', config: { price: 20.0 } },
+  ];
+
+  it('uses the arm id when it names a variation', () => {
+    const { testVariant, analyticsVariant } = matchVariantToArm(
+      { id: 'v-b', price: 20.0 },
+      testVariants,
+      analyticsVariants,
+      { index: 1 }
+    );
+
+    expect(testVariant.id).toBe('v-b');
+    expect(analyticsVariant.visitors).toBe(40);
+  });
+
+  it('does not hand two arms a cent apart the same variation', () => {
+    // Price matching allows two cents of slack, so $19.99 and $20.00 both
+    // matched the first variation -- and arm B was shown arm A's 90 visitors.
+    const armA = matchVariantToArm({ id: 'v-a', price: 19.99 }, testVariants, analyticsVariants, {
+      index: 0,
+    });
+    const armB = matchVariantToArm({ id: 'v-b', price: 20.0 }, testVariants, analyticsVariants, {
+      index: 1,
+    });
+
+    expect(armA.testVariant.id).toBe('v-a');
+    expect(armB.testVariant.id).toBe('v-b');
+    expect(armA.analyticsVariant.visitors).not.toBe(armB.analyticsVariant.visitors);
+  });
+
+  it('still falls back to price when the arm carries no id', () => {
+    const { testVariant } = matchVariantToArm({ price: 19.99 }, testVariants, analyticsVariants, {
+      index: 0,
+    });
+
+    expect(testVariant.id).toBe('v-a');
   });
 });

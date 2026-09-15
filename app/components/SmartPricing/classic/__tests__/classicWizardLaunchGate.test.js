@@ -58,6 +58,9 @@ vi.mock('../../../../services/smartPricingApi', () => ({
   batchPreviewSmartPricingLaunch: vi.fn(async () => ({})),
 }));
 
+const HELD =
+  '"Runner Shoe" is already being priced by "Summer offer". Stop that test first, or leave this product out.';
+
 /** Exposes the gate props the footer button reads, plus the step body. */
 vi.mock('../ClassicWizardShell', () => ({
   default: ({ stepIndex, continueDisabled, continueDisabledReason, children }) =>
@@ -76,6 +79,7 @@ let root;
 let ClassicCreateWizard;
 let PolarisAppProvider;
 let writeClassicWizardDraft;
+let batchPreviewSmartPricingLaunch;
 
 beforeEach(async () => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -83,6 +87,9 @@ beforeEach(async () => {
   checkout.checkoutReady = true;
   checkout.offerCheckoutReady = true;
   checkout.loading = false;
+  ({ batchPreviewSmartPricingLaunch } = await import('../../../../services/smartPricingApi'));
+  batchPreviewSmartPricingLaunch.mockReset();
+  batchPreviewSmartPricingLaunch.mockResolvedValue({});
   ({ AppProvider: PolarisAppProvider } = await import('@shopify/polaris'));
   ({ default: ClassicCreateWizard } = await import('../ClassicCreateWizard'));
   ({ writeClassicWizardDraft } = await import('../classicExperimentHelpers'));
@@ -221,5 +228,62 @@ describe('the review page', () => {
 
     expect(container.textContent).not.toContain('Not ready to launch');
     expect(container.textContent).toMatch(/checkout is not ready/i);
+  });
+});
+
+/**
+ * The products step withholds anything another test is holding, but it read
+ * the catalog when that step opened. A draft picked its products days ago, and
+ * a batch built this morning can be overtaken by a test started since. Launch
+ * refuses either way; the point of asking again here is that the merchant
+ * reads the reason instead of pressing a button that fails.
+ *
+ * An offer test holds its product exactly as a price test does, because its
+ * discount lands on top of whatever price the other test is setting.
+ */
+describe('a product a live test is already pricing', () => {
+  it('refuses the launch and names the test holding the product', async () => {
+    batchPreviewSmartPricingLaunch.mockResolvedValue({
+      live_conflicts: [{ test_id: 'offer-1', test_name: 'Summer offer', message: HELD }],
+    });
+
+    await renderAtReview({ id: 'exp_held' });
+
+    expect(read('continue-disabled')).toBe('true');
+    expect(read('continue-reason')).toContain('Summer offer');
+    expect(container.textContent).toContain('Not ready to launch');
+    expect(container.textContent).toContain('Stop that test first');
+  });
+
+  it('asks on a draft resumed straight onto the review step', async () => {
+    // The check used to run only on the way out of the pricing step, so a
+    // draft reopened at review was never re-checked at all.
+    batchPreviewSmartPricingLaunch.mockResolvedValue({
+      live_conflicts: [{ test_id: 'offer-1', test_name: 'Summer offer', message: HELD }],
+    });
+
+    await renderAtReview({ id: 'exp_resumed_held' });
+
+    expect(batchPreviewSmartPricingLaunch).toHaveBeenCalled();
+    expect(read('continue-disabled')).toBe('true');
+  });
+
+  it('stays out of the way when nothing holds the products', async () => {
+    batchPreviewSmartPricingLaunch.mockResolvedValue({ live_conflicts: [] });
+
+    await renderAtReview({ id: 'exp_free' });
+
+    expect(read('continue-disabled')).toBe('false');
+    expect(container.textContent).not.toContain('Not ready to launch');
+  });
+
+  it('still lets the merchant launch when the check itself fails', async () => {
+    // Launch reads the same table and refuses for real. Left blocked on a
+    // failed preflight, a merchant could not launch at all.
+    batchPreviewSmartPricingLaunch.mockRejectedValue(new Error('offline'));
+
+    await renderAtReview({ id: 'exp_check_failed' });
+
+    expect(read('continue-disabled')).toBe('false');
   });
 });

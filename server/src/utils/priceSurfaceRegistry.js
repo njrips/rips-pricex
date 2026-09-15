@@ -257,8 +257,11 @@ function buildPriceSurfaceReadinessSummary(testMappings, shopMappings) {
   const testRows = normalizePriceSurfaceMappings(testMappings);
   const shopRows = normalizePriceSurfaceMappings(shopMappings);
   const gaps = analyzePriceSurfaceRegistryGaps(testRows, shopRows);
-  const configuredTest = testRows.filter(row => row.selector).length;
-  const configuredShop = shopRows.filter(row => row.selector).length;
+  // Only rows that are actually in use. A row switched off is kept but ignored
+  // when resolving selectors, so counting it as configured told a merchant who
+  // had just turned four rows off that five were still mapped.
+  const configuredTest = testRows.filter(row => row.selector && row.enabled).length;
+  const configuredShop = shopRows.filter(row => row.selector && row.enabled).length;
   const highSeverityGaps = gaps.filter(gap => gap.severity === 'high');
   const actionableGaps = gaps.filter(gap => gap.severity === 'high' || gap.severity === 'medium');
   let status = 'ready';

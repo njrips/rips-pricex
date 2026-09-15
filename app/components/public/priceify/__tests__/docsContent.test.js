@@ -10,6 +10,8 @@ import {
   DOCS_GROUPS,
   DOCS_HERO,
   DOCS_NAV_CARDS,
+  DOCS_FINAL_CTA,
+  DOCS_NAV_SECTION,
   DOCS_SECTION_IDS,
   DOCS_SECTIONS,
   getDocsSection,
@@ -45,7 +47,10 @@ describe('Priceify guides content', () => {
   it('exposes the Settings info-icon anchors', () => {
     assert.equal(PUBLIC_ROUTES.docs, '/docs');
     assert.equal(PUBLIC_ROUTES.docsSettings, '/docs/settings');
-    assert.equal(DOCS_HERO.eyebrow, 'GUIDES');
+    assert.equal(DOCS_HERO.eyebrow, 'Guides');
+    assert.ok(DOCS_NAV_SECTION.title && DOCS_NAV_SECTION.lead);
+    assert.ok(DOCS_FINAL_CTA.titleLine1 && DOCS_FINAL_CTA.lead);
+    assert.equal(/\bDocs\b/.test(DOCS_FINAL_CTA.lead), false);
     // Pinned to the group list rather than a hardcoded set of hrefs, so adding
     // a guide group fails here until it also gets a card someone can click.
     assert.deepEqual(
@@ -83,7 +88,13 @@ describe('Priceify guides content', () => {
     assert.equal(new Set(ids).size, ids.length, 'duplicate section ids');
     const ai = DOCS_SECTIONS.find((section) => section.id === 'ai-price');
     assert.ok(/hard cap/i.test(ai.paragraphs.join(' ')));
-    assert.ok(/increase/i.test(ai.paragraphs.join(' ')));
+    // The band is signed, so the guide has to say so: a merchant who believes
+    // Suggest only raises prices will never try the test their slow sellers
+    // most need. The minimum margin is the limit on a cut, so it is named too.
+    const aiCopy = ai.paragraphs.join(' ');
+    assert.ok(/band is signed/i.test(aiCopy));
+    assert.match(aiCopy, /cheaper/i);
+    assert.match(aiCopy, /minimum margin/i);
     const offers = DOCS_SECTIONS.find((section) => section.id === 'offers');
     assert.ok(/checkout/i.test(offers.paragraphs.join(' ')));
     const sequential = DOCS_SECTIONS.find((section) => section.id === 'sequential');

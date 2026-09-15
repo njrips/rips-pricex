@@ -157,4 +157,47 @@ describe('summarizeRolloutRows', () => {
     expect(summary.priceWriteCount).toBe(1);
     expect(summary.counts.blocked).toBe(1);
   });
+
+  /**
+   * Applied one at a time, a directional-only winner carries a warning in its
+   * own modal. Applied in bulk it carried none, so a merchant could publish
+   * several prices the app itself declines to publish unattended.
+   */
+  describe('price writes resting on directional evidence', () => {
+    const validated = {
+      ...READY,
+      winner: { ...READY.winner, evidence_validated: true },
+    };
+
+    it('counts a winner the exact boundary has not confirmed', () => {
+      const rows = buildProductRolloutRows({
+        plans: [plan('p1', 'Directional', 't1'), plan('p2', 'Confirmed', 't2')],
+        analyticsByTestId: { t1: payload(READY), t2: payload(validated) },
+      });
+      const summary = summarizeRolloutRows(rows);
+
+      expect(summary.priceWriteCount).toBe(2);
+      expect(summary.directionalPriceWriteCount).toBe(1);
+    });
+
+    it('says nothing when every winner was confirmed', () => {
+      const rows = buildProductRolloutRows({
+        plans: [plan('p1', 'Confirmed', 't1')],
+        analyticsByTestId: { t1: payload(validated) },
+      });
+
+      expect(summarizeRolloutRows(rows).directionalPriceWriteCount).toBe(0);
+    });
+
+    it('does not count a product that writes no price', () => {
+      // Keeping the existing price is not a claim about the challenger, so an
+      // unconfirmed reading there is nothing to warn about.
+      const rows = buildProductRolloutRows({
+        plans: [plan('p1', 'Control', 't1')],
+        analyticsByTestId: { t1: payload(CONTROL) },
+      });
+
+      expect(summarizeRolloutRows(rows).directionalPriceWriteCount).toBe(0);
+    });
+  });
 });

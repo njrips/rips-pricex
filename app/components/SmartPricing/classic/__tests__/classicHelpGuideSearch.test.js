@@ -126,4 +126,18 @@ describe('Help guide search', () => {
     expect(container.textContent).not.toContain('Setting guides');
     expect(container.textContent).toContain('Open a support ticket');
   });
+
+  it('surfaces guide topics that match the public nav cards', async () => {
+    await render();
+    await search('price safety');
+
+    expect(container.textContent).toContain('Guide topics');
+    expect(container.textContent).toContain('Price safety');
+    expect(container.textContent).toContain('Open on Priceify guides');
+  });
+
+  it('links to browse all guides before searching', async () => {
+    await render();
+    expect(container.textContent).toContain('Browse all guides on Priceify');
+  });
 });
