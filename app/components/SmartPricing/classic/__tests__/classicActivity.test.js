@@ -21,13 +21,13 @@ describe('classic activity log', () => {
     const first = createActivityEntry({
       id: 'paused_1',
       kind: 'paused',
-      title: 'Experiment paused',
+      title: 'Test paused',
       at: '2026-08-20T10:00:00.000Z',
     });
     const second = createActivityEntry({
       id: 'resumed_1',
       kind: 'resumed',
-      title: 'Experiment resumed',
+      title: 'Test resumed',
       at: '2026-08-20T12:00:00.000Z',
     });
     const log = prependActivityLog(prependActivityLog([], first), second);
@@ -60,17 +60,17 @@ describe('classic activity log', () => {
 
   it('collapses same-kind events written a second apart for each SKU', () => {
     const items = dedupeActivityItems([
-      { id: 'paused_1', kind: 'paused', title: 'Experiment paused', at: '2026-08-20T10:00:00.000Z' },
-      { id: 'paused_2', kind: 'paused', title: 'Experiment paused', at: '2026-08-20T10:00:01.200Z' },
-      { id: 'resumed_1', kind: 'resumed', title: 'Experiment resumed', at: '2026-08-20T11:00:00.000Z' },
+      { id: 'paused_1', kind: 'paused', title: 'Test paused', at: '2026-08-20T10:00:00.000Z' },
+      { id: 'paused_2', kind: 'paused', title: 'Test paused', at: '2026-08-20T10:00:01.200Z' },
+      { id: 'resumed_1', kind: 'resumed', title: 'Test resumed', at: '2026-08-20T11:00:00.000Z' },
     ]);
     expect(items.map(item => item.id)).toEqual(['paused_1', 'resumed_1']);
   });
 
   it('prefers the written log over a reconstructed snapshot of the same kind', () => {
     const merged = mergeActivityTimeline(
-      [{ id: 'paused', at: '2026-08-21T00:00:00.000Z', title: 'Experiment paused', kind: 'paused' }],
-      [{ id: 'paused_1', at: '2026-08-20T10:00:00.000Z', title: 'Experiment paused', kind: 'paused', detail: 'From the list menu' }]
+      [{ id: 'paused', at: '2026-08-21T00:00:00.000Z', title: 'Test paused', kind: 'paused' }],
+      [{ id: 'paused_1', at: '2026-08-20T10:00:00.000Z', title: 'Test paused', kind: 'paused', detail: 'From the list menu' }]
     );
     expect(merged).toHaveLength(1);
     expect(merged[0].id).toBe('paused_1');
@@ -99,13 +99,13 @@ describe('classic activity log', () => {
       {
         audience_ui: { segment: 'all_visitors' },
         activity_log: [
-          { id: 'started', kind: 'started', title: 'Launched experiment', at: '2026-08-20T10:00:00.000Z' },
+          { id: 'started', kind: 'started', title: 'Launched test', at: '2026-08-20T10:00:00.000Z' },
         ],
       },
       {
         audience_ui: { segment: 'new_visitors' },
         activity_log: [
-          { id: 'paused_1', kind: 'paused', title: 'Experiment paused', at: '2026-08-21T10:00:00.000Z' },
+          { id: 'paused_1', kind: 'paused', title: 'Test paused', at: '2026-08-21T10:00:00.000Z' },
         ],
       }
     );
@@ -173,8 +173,8 @@ describe('buildActivityTimeline log merge', () => {
       },
     });
     expect(items.find(item => item.kind === 'updated')?.title).toBe('Audience updated');
-    expect(items.find(item => item.kind === 'archived')?.title).toBe('Experiment archived');
-    expect(items.find(item => item.kind === 'created')?.title).toBe('Created experiment');
+    expect(items.find(item => item.kind === 'archived')?.title).toBe('Test archived');
+    expect(items.find(item => item.kind === 'created')?.title).toBe('Created test');
   });
 
   it('labels Self-QA pass and fail clearly', () => {

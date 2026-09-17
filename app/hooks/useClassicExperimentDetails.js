@@ -106,7 +106,7 @@ export function useClassicExperimentDetails(shopDomain, planId) {
       } catch (err) {
         if (!cancelled) {
           setMessageType('error');
-          setMessage(err.message || 'Could not load experiment.');
+          setMessage(err.message || 'Could not load test.');
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -253,7 +253,7 @@ export function useClassicExperimentDetails(shopDomain, planId) {
             return [id, data];
           } catch (err) {
             if (!analyticsError) {
-              analyticsError = err?.message || 'Could not load Smart Pricing analytics.';
+              analyticsError = err?.message || 'Could not load test analytics.';
             }
             return [id, null];
           }

@@ -37,7 +37,7 @@ async function assertSmartPricingPriceTest(test, shopDomain) {
   if (plan?.id) {
     return;
   }
-  throw new Error('This endpoint is for Smart Pricing tests only');
+  throw new Error('This action is only available for Priceify tests');
 }
 
 function parseVariantIndex(raw) {

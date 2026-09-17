@@ -152,7 +152,7 @@ describe('variations step Continue gate', () => {
     });
 
     expect(read('continue-disabled')).toBe('true');
-    expect(read('continue-reason')).toMatch(/35% of traffic is unassigned/i);
+    expect(read('continue-reason')).toMatch(/35\.0% of traffic is unassigned/i);
   });
 
   it('allows Continue once the split is complete', async () => {

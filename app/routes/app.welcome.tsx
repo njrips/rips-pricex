@@ -32,13 +32,13 @@ export default function PlanWelcomePage() {
       title={entitled ? 'You’re unlocked' : 'Confirm your plan'}
       subtitle={
         entitled
-          ? 'Your Smart Pricing plan is active. Finish Setup next so Launch can go green.'
-          : 'Shopify may still be finalizing the charge. Refresh or open Plan status, then finish Setup.'
+          ? 'Your Priceify plan is active. Finish Store setup next so Launch can go green.'
+          : 'Shopify may still be finalizing the charge. Refresh or open Plan status, then finish Store setup.'
       }
       footerPrimary={
         entitled
           ? {
-              label: 'Open Setup checklist',
+              label: 'Open Store setup',
               onClick: () => navigate('/app/setup'),
             }
           : {
@@ -49,7 +49,7 @@ export default function PlanWelcomePage() {
       footerSecondary={
         entitled
           ? {
-              label: 'Create experiment',
+              label: 'New test',
               onClick: () => navigate('/app/experiments/new'),
             }
           : {
@@ -74,15 +74,15 @@ export default function PlanWelcomePage() {
         <div className={styles.adminRow}>
           <p className={styles.adminRowTitle}>Next steps</p>
           <p className={styles.adminRowBody}>
-            1. Confirm readiness on <Link to="/app/setup">Setup</Link> (theme embed, cart transform,
-            price surfaces).
+            1. Confirm readiness on <Link to="/app/setup">Store setup</Link> (Theme connection,
+            Checkout pricing functions, price locations).
           </p>
           <p className={styles.adminRowBody}>
             2. Review or change the subscription anytime under{' '}
             <Link to="/app/settings?tab=plan">Settings → Plan</Link>.
           </p>
           <p className={styles.adminRowBody}>
-            3. Create your first experiment from Create (or TitleBar).
+            3. Create your first test from New test (or the title bar).
           </p>
         </div>
       </div>

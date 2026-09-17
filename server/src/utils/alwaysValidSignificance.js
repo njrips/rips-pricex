@@ -41,13 +41,8 @@ function inferPrimaryFamily(goal = {}) {
     .toLowerCase()
     .replace(/[\s-]+/g, '_');
   if (key === 'profit_per_visitor' || key === 'ppv') return 'profit';
-  if (
-    key === 'revenue_per_visitor' ||
-    key === 'rpv' ||
-    key === 'revenue' ||
-    key === 'aov' ||
-    key === 'average_order_value'
-  ) {
+  if (key === 'aov' || key === 'average_order_value') return 'aov';
+  if (key === 'revenue_per_visitor' || key === 'rpv' || key === 'revenue') {
     return 'revenue';
   }
   return 'conversion';
@@ -55,6 +50,13 @@ function inferPrimaryFamily(goal = {}) {
 
 function variantMean(variant, family) {
   if (family === 'profit') return Number(variant?.profitPerVisitor) || 0;
+  if (family === 'aov') {
+    const direct = Number(variant?.avgOrderValue);
+    if (Number.isFinite(direct) && direct > 0) return direct;
+    const conversions = Number(variant?.conversions) || 0;
+    if (conversions <= 0) return 0;
+    return familyRevenue(variant) / conversions;
+  }
   if (family === 'revenue') return Number(variant?.revenuePerVisitor) || 0;
   const visitors = asPositive(variant?.visitors);
   const conversions = Number(variant?.conversions) || 0;

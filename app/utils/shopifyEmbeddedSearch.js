@@ -32,3 +32,21 @@ export function isShopifySessionBounce(error) {
     data.includes('shopifycloud/app-bridge') || data.includes('data-api-key=')
   );
 }
+
+/**
+ * Shopify's boundary.error() renders ErrorResponse bodies as HTML. Redirects and
+ * other empty responses fall back to the placeholder "Handling response", which is
+ * what merchants see when navigation is still in flight.
+ */
+export function shouldRenderShopifyBoundaryHtml(error) {
+  if (!error || typeof error !== 'object') return false;
+  if (isShopifySessionBounce(error)) return true;
+  const data = typeof error.data === 'string' ? error.data.trim() : '';
+  return Boolean(data && data.includes('<'));
+}
+
+export function isShopifyRedirectResponse(error) {
+  if (!error || typeof error !== 'object') return false;
+  const status = Number(error.status);
+  return status >= 300 && status < 400;
+}

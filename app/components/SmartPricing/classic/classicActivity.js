@@ -129,7 +129,7 @@ export function stampLaunchOnPlan(plan, { status = 'running', testId = null } = 
     createActivityEntry({
       id: 'started',
       kind: 'started',
-      title: 'Launched experiment',
+      title: 'Launched test',
       detail: next.test_id ? `Test ${next.test_id}` : '',
       actor: plan?.owner_name || plan?.created_by_name || 'You',
     })

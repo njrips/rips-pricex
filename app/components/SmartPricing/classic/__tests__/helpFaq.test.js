@@ -18,8 +18,14 @@ import {
 } from '../helpFaq.js';
 
 describe('helpFaq', () => {
-  it('uses Admin-accurate FAQ copy (theme embed is required)', () => {
-    assert.match(HELP_FAQ_ITEMS[0].a, /theme app embed/i);
+  it('indexes the revenue guardrail FAQ', () => {
+    const hit = filterHelpFaq(HELP_FAQ_ITEMS, 'revenue guardrail');
+    assert.ok(hit.some((item) => /Results settings/i.test(item.a) && /100 visitors/i.test(item.a)));
+  });
+
+  it('uses Admin-accurate FAQ copy (Store setup checklist)', () => {
+    assert.match(HELP_FAQ_ITEMS[0].a, /Theme connection/i);
+    assert.match(HELP_FAQ_ITEMS[0].a, /Checkout pricing functions/i);
     assert.equal(
       HELP_FAQ_ITEMS.some((item) => /no theme changes/i.test(item.a)),
       false
@@ -146,7 +152,7 @@ describe('helpFaq', () => {
     assert.equal(filterHelpFaq(HELP_FAQ_ITEMS, '').length, HELP_FAQ_ITEMS.length);
     assert.equal(filterHelpFaq(HELP_FAQ_ITEMS, '   ').length, HELP_FAQ_ITEMS.length);
 
-    const bodyOnly = filterHelpFaq(HELP_FAQ_ITEMS, 'cart transform');
+    const bodyOnly = filterHelpFaq(HELP_FAQ_ITEMS, 'Checkout pricing functions');
     assert.ok(bodyOnly.length > 0);
 
     const cased = filterHelpFaq(HELP_FAQ_ITEMS, 'UNINSTALL');

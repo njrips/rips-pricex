@@ -53,7 +53,8 @@ export function wizardSnapshotBytes(snapshot) {
   }
 }
 
-function compactPlan(plan) {
+/** Drop preview-only plan fields before inbox sync or launch POST bodies. */
+export function compactInboxPlan(plan) {
   if (!plan || typeof plan !== 'object') return plan;
   const next = { ...plan };
   DROPPED_DRAFT_PLAN_FIELDS.forEach(field => {
@@ -68,6 +69,15 @@ function compactPlan(plan) {
     delete next.metadata.audience_ui;
   }
   return next;
+}
+
+function compactPlan(plan) {
+  return compactInboxPlan(plan);
+}
+
+/** Compact every plan in an inbox write or launch batch. */
+export function compactInboxPlans(plans) {
+  return (Array.isArray(plans) ? plans : []).map(compactInboxPlan);
 }
 
 /**

@@ -12,7 +12,7 @@ export function getClassicExperimentDeleteTargets(experiment) {
 }
 
 export function buildClassicExperimentDeleteConfirmMessage(experiment) {
-  const label = experiment?.title || 'this experiment';
+  const label = experiment?.title || 'this test';
   const { planIds, testIds } = getClassicExperimentDeleteTargets(experiment);
   const productCount = planIds.length;
   const parts = [`Delete ${label}?`];
@@ -72,7 +72,7 @@ export async function deleteClassicExperimentSynchronized(
       partial: false,
       deletedPlanIds: [],
       deletedTestIds: [],
-      errors: ['Nothing to delete for this experiment.'],
+      errors: ['Nothing to delete for this test.'],
     };
   }
 

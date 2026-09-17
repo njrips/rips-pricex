@@ -10,7 +10,7 @@ export const meta: MetaFunction = () =>
   publicMeta({
     title: "Priceify — Test Shopify prices before changing them for everyone",
     description:
-      "Launch Shopify price experiments in minutes. Split live traffic, measure revenue per visitor, and stop losing variations automatically with built-in guardrails.",
+      "Launch Shopify price tests in minutes. Split live traffic, measure revenue per visitor, and stop losing variations automatically with built-in guardrails.",
     path: "/",
   });
 

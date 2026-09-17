@@ -1,7 +1,9 @@
 import { describe, it } from 'vitest';
 import assert from 'node:assert/strict';
 import {
+  isShopifyRedirectResponse,
   isShopifySessionBounce,
+  shouldRenderShopifyBoundaryHtml,
   withCurrentEmbeddedSearch,
   withEmbeddedSearch,
 } from '../shopifyEmbeddedSearch.js';
@@ -51,5 +53,35 @@ describe('isShopifySessionBounce', () => {
       }),
       true,
     );
+  });
+});
+
+describe('shouldRenderShopifyBoundaryHtml', () => {
+  it('renders HTML bounces and redirects with bodies through the Shopify boundary', () => {
+    assert.equal(
+      shouldRenderShopifyBoundaryHtml({
+        status: 410,
+        data: '',
+      }),
+      true,
+    );
+    assert.equal(
+      shouldRenderShopifyBoundaryHtml({
+        status: 200,
+        data: '<div>App Bridge</div>',
+      }),
+      true,
+    );
+  });
+
+  it('does not render empty redirect placeholders as raw HTML', () => {
+    assert.equal(
+      shouldRenderShopifyBoundaryHtml({
+        status: 302,
+        data: '',
+      }),
+      false,
+    );
+    assert.equal(isShopifyRedirectResponse({ status: 302 }), true);
   });
 });

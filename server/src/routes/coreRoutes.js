@@ -36,6 +36,12 @@ router.post('/billing/sync-entitlement', requireInternalService, asyncHandler(as
   const body = req.body || {};
   const entitled = body.entitled === true || ['ACTIVE', 'active', 'trial', 'TRIAL', 'paid', 'PAID'].includes(String(body.status || ''));
   const planHandle = body.planHandle || body.plan_handle || null;
+  const current = await getShopEntitlement(req.shopDomain);
+  const operatorDevPlan =
+    String(current.planHandle || '').trim().toLowerCase() === 'dev' && current.entitled;
+  if (operatorDevPlan && !entitled) {
+    return res.json({ shop: req.shopDomain, ...current, synced: false, skipped: 'dev_plan' });
+  }
   await setEntitlement(req.shopDomain, {
     status: entitled ? String(body.status || 'ACTIVE') : 'none',
     planHandle: entitled ? planHandle || 'smart_pricing' : null,

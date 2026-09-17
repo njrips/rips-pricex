@@ -71,7 +71,8 @@ function isAllowedAdminOrigin(origin) {
 app.use('/api/track', storefrontCors);
 app.use('/api/proxy', storefrontCors);
 app.use(adminCors);
-app.use(express.json({ limit: '2mb' }));
+// Wizard drafts and full-shop inbox sync can exceed 2mb when many products carry preview metadata.
+app.use(express.json({ limit: '10mb' }));
 
 initDatabase();
 
@@ -177,6 +178,13 @@ try {
 
 app.use((err, _req, res, _next) => {
   logger.error('API error', { message: err.message, stack: err.stack });
+  if (err.type === 'entity.too.large') {
+    return res.status(413).json({
+      error: 'Request body too large',
+      reason: 'payload_too_large',
+      details: ['Try fewer products per test or save again — preview metadata was trimmed.'],
+    });
+  }
   const status = err.status || err.statusCode || 500;
   res.status(status).json({
     error: err.message || 'Internal error',

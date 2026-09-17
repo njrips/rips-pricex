@@ -95,7 +95,7 @@ describe('variation traffic split', () => {
     ];
     expect(setVariationTraffic(rows, 1, -10)[1].traffic).toBe(0);
     expect(setVariationTraffic(rows, 1, 'abc')[1].traffic).toBe(0);
-    expect(setVariationTraffic(rows, 1, 33.6)[1].traffic).toBe(34);
+    expect(setVariationTraffic(rows, 1, 33.6)[1].traffic).toBe(33.6);
   });
 
   it('puts an even split back in one call', () => {
@@ -109,7 +109,7 @@ describe('variation traffic split', () => {
 
   it('divides three arms as evenly as 100 allows', () => {
     const rows = splitEvenly([{ id: 'control' }, { id: 'var_a' }, { id: 'var_b' }]);
-    expect(rows.map(row => row.traffic)).toEqual([34, 33, 33]);
+    expect(rows.map(row => row.traffic)).toEqual([33.4, 33.3, 33.3]);
     expect(trafficRemaining(rows)).toBe(0);
   });
 });
@@ -165,7 +165,7 @@ describe('getVariationsStepContinueState', () => {
     });
     expect(gate.disabled).toBe(true);
     expect(gate.reason).toBe('under_allocated');
-    expect(gate.hint).toMatch(/35% of traffic is unassigned/i);
+    expect(gate.hint).toMatch(/35\.0% of traffic is unassigned/i);
   });
 
   it('recovers a draft saved over 100 before the cap existed', () => {
@@ -177,8 +177,8 @@ describe('getVariationsStepContinueState', () => {
     });
     expect(gate.disabled).toBe(true);
     expect(gate.reason).toBe('over_allocated');
-    expect(gate.hint).toMatch(/140%/);
-    expect(gate.hint).toMatch(/40%/);
+    expect(gate.hint).toMatch(/140\.0%/);
+    expect(gate.hint).toMatch(/40\.0%/);
   });
 
   it('lists the shape of the problem when several arms are starved', () => {

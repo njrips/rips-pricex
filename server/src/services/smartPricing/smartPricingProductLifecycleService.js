@@ -51,7 +51,7 @@ async function assertSmartPricingProductTest(test, shopDomain) {
     throw new Error('Test not found');
   }
   if (!isPriceLikeTestType(test.type) && String(test.type || '').toLowerCase() !== 'offer') {
-    throw new Error('This action is available only for Smart Pricing product tests');
+    throw new Error('This action is available only for Priceify product tests');
   }
   if (isSmartPricingTest(test)) {
     return;
@@ -60,7 +60,7 @@ async function assertSmartPricingProductTest(test, shopDomain) {
   if (plan?.id) {
     return;
   }
-  throw new Error('This endpoint is for Smart Pricing tests only');
+  throw new Error('This action is only available for Priceify tests');
 }
 
 /**
@@ -794,7 +794,7 @@ async function rerunSmartPricingProduct({
   await assertSmartPricingProductTest(test, shopDomain);
   const plan = await resolvePlanForTest(shopDomain, testId, test);
   if (!plan) {
-    throw new Error('No Smart Pricing plan linked to this test');
+    throw new Error('No test plan linked to this test');
   }
 
   const planStatus = String(plan.status || '').toLowerCase();

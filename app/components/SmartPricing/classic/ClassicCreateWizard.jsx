@@ -87,9 +87,9 @@ function draftSavedMessage(saved) {
   // missing, so interrupting each step would be noise; but Save draft is them
   // asking what was kept, and on another device this one opens a step short.
   if (saved?.plansOmitted) {
-    return 'Draft saved. This experiment covers too many products to sync its pricing table, so opening the draft on another device will rebuild the table when you pass through the Products step. Your products, variations, prices and audience are all saved.';
+    return 'Draft saved. This test covers too many products to sync its pricing table, so opening the draft on another device will rebuild the table when you pass through the Products step. Your products, variations, prices and audience are all saved.';
   }
-  return 'Draft saved. Keep editing here, or pick it up later from Drafts on the experiments page.';
+  return 'Draft saved. Keep editing here, or pick it up later from Drafts on the tests page.';
 }
 import {
   buildClassicGoalPayload,
@@ -379,7 +379,8 @@ export default function ClassicCreateWizard({ onTitleChange }) {
 
   const activeArmId = variations[activeArmIndex]?.id || 'control';
   const activePricing = pricingByArm[activeArmId] || {};
-  const priceMode = activePricing.priceMode || 'manual';
+  const defaultPriceMode = isOfferExperimentType(experimentType) ? 'manual' : 'ai';
+  const priceMode = activePricing.priceMode || defaultPriceMode;
   const bulkPercent = activePricing.bulkPercent ?? '10';
   const bulkDirection = activePricing.bulkDirection || 'increase';
   // The AI band describes the whole test: Suggest spreads one band across every
@@ -402,7 +403,7 @@ export default function ClassicCreateWizard({ onTitleChange }) {
       setPricingByArm(prev => ({
         ...prev,
         [activeArmId]: {
-          priceMode: 'manual',
+          priceMode: defaultPriceMode,
           bulkPercent: '10',
           bulkDirection: 'increase',
           aiMinPct: '10',
@@ -413,7 +414,7 @@ export default function ClassicCreateWizard({ onTitleChange }) {
         },
       }));
     },
-    [activeArmId]
+    [activeArmId, defaultPriceMode]
   );
 
   /** Band edits apply to every variation, since one band drives them all. */
@@ -423,7 +424,7 @@ export default function ClassicCreateWizard({ onTitleChange }) {
         const next = { ...prev };
         new Set([...Object.keys(prev), activeArmId]).forEach(id => {
           next[id] = {
-            priceMode: 'manual',
+            priceMode: defaultPriceMode,
             bulkPercent: '10',
             bulkDirection: 'increase',
             aiMinPct: '10',
@@ -436,7 +437,7 @@ export default function ClassicCreateWizard({ onTitleChange }) {
         return next;
       });
     },
-    [activeArmId]
+    [activeArmId, defaultPriceMode]
   );
 
   const markArmsAiSuggested = useCallback(armIds => {
@@ -491,6 +492,28 @@ export default function ClassicCreateWizard({ onTitleChange }) {
     refresh: refreshCheckoutReadiness,
   } = useSmartPricingCheckoutReadiness(shopDomain);
   const isOfferTest = isOfferExperimentType(experimentType);
+  useEffect(() => {
+    if (isOfferTest || resumeId) return;
+    setPricingByArm(prev => {
+      let changed = false;
+      const next = { ...prev };
+      variations.forEach((arm, index) => {
+        if (index === 0 || arm.id === 'control') return;
+        if (next[arm.id]?.priceMode) return;
+        changed = true;
+        next[arm.id] = {
+          bulkPercent: '10',
+          bulkDirection: 'increase',
+          aiMinPct: '10',
+          aiMaxPct: '20',
+          aiUnit: 'percent',
+          priceMode: 'ai',
+          ...(next[arm.id] || {}),
+        };
+      });
+      return changed ? next : prev;
+    });
+  }, [variations, isOfferTest, resumeId]);
   const launchCheckoutReady = isOfferTest ? offerCheckoutReady : checkoutReady;
   const experimentTypeLabel =
     EXPERIMENT_TYPES.find(type => type.id === experimentType)?.title || 'Price test';
@@ -753,7 +776,9 @@ export default function ClassicCreateWizard({ onTitleChange }) {
           'var_a';
         setPricingByArm({
           [armKey]: {
-            priceMode: snapshot.priceMode || 'manual',
+            priceMode:
+              snapshot.priceMode ||
+              (isOfferExperimentType(snapshot.experimentType || experimentType) ? 'manual' : 'ai'),
             bulkPercent:
               snapshot.bulkPercent !== null && snapshot.bulkPercent !== undefined
                 ? String(snapshot.bulkPercent)
@@ -1563,7 +1588,7 @@ export default function ClassicCreateWizard({ onTitleChange }) {
       if (!shopGuardrailsReady) {
         setAiPriceMeta({
           source: null,
-          summary: 'Still loading shop experiment defaults. Try again in a moment.',
+          summary: 'Still loading shop test defaults. Try again in a moment.',
           detail: null,
           busy: false,
         });
@@ -1893,12 +1918,12 @@ export default function ClassicCreateWizard({ onTitleChange }) {
   const saveDraft = async () => {
     if (!String(name).trim()) {
       setMessageType('error');
-      setMessage('Add an experiment name before saving a draft.');
+      setMessage('Add a test name before saving a draft.');
       return;
     }
     if (!shopGuardrailsReady) {
       setMessageType('error');
-      setMessage('Still loading shop experiment defaults. Try again in a moment.');
+      setMessage('Still loading shop test defaults. Try again in a moment.');
       return;
     }
     setSavingDraft(true);
@@ -1965,17 +1990,17 @@ export default function ClassicCreateWizard({ onTitleChange }) {
     if (step === 0) {
       if (!String(name).trim()) {
         setMessageType('error');
-        setMessage('Experiment name is required.');
+        setMessage('Test name is required.');
         return;
       }
       if (experimentType !== 'price_test' && experimentType !== 'offer_test') {
         setMessageType('error');
-        setMessage('Smart Pricing currently supports Price test and Offer test experiments.');
+        setMessage('Priceify currently supports Price test and Offer test types.');
         return;
       }
       if (!shopGuardrailsReady) {
         setMessageType('error');
-        setMessage('Still loading shop experiment defaults. Try again in a moment.');
+        setMessage('Still loading shop test defaults. Try again in a moment.');
         return;
       }
       goToStep(1);
@@ -2035,7 +2060,7 @@ export default function ClassicCreateWizard({ onTitleChange }) {
     if (step === 3) {
       if (!shopGuardrailsReady) {
         setMessageType('error');
-        setMessage('Still loading shop experiment defaults. Try again in a moment.');
+        setMessage('Still loading shop test defaults. Try again in a moment.');
         return;
       }
       const audienceCheck = validateClassicAudienceUi(audience || createDefaultAudienceState());
@@ -2055,7 +2080,7 @@ export default function ClassicCreateWizard({ onTitleChange }) {
       }
       if (!shopGuardrailsReady) {
         setMessageType('error');
-        setMessage('Still loading shop experiment defaults. Try again in a moment.');
+        setMessage('Still loading shop test defaults. Try again in a moment.');
         return;
       }
       // Same gate the Variations step uses, so a split broken by an edit made
@@ -2103,7 +2128,15 @@ export default function ClassicCreateWizard({ onTitleChange }) {
         experimentId
       );
       writeInboxPlans(shopDomain, merged);
-      await persistInboxPlansNow(shopDomain, merged).catch(() => null);
+      try {
+        await persistInboxPlansNow(shopDomain, merged);
+      } catch (persistErr) {
+        setMessageType('warning');
+        setMessage(
+          persistErr?.message ||
+            'Could not sync the inbox to your account. Launch will still try with this test.'
+        );
+      }
       try {
         setBusy(true);
         const result = await launchMany(enriched);
@@ -2132,7 +2165,7 @@ export default function ClassicCreateWizard({ onTitleChange }) {
     }
   };
 
-  const continueLabel = step === 4 ? 'Launch experiment' : 'Continue';
+  const continueLabel = step === 4 ? 'Launch test' : 'Continue';
   // A reduce over at most five rows; the compiler memoizes it on its own.
   const variationsStepGate = getVariationsStepContinueState({ variations });
   const productsStepGate = useMemo(
@@ -2226,7 +2259,7 @@ export default function ClassicCreateWizard({ onTitleChange }) {
    */
   const launchGate = (() => {
     if (!shopGuardrailsReady) {
-      return { disabled: true, code: 'loading', reason: 'Loading shop experiment defaults…' };
+      return { disabled: true, code: 'loading', reason: 'Loading shop test defaults…' };
     }
     if (variationsStepGate.disabled) {
       return { disabled: true, code: 'variations', reason: variationsStepGate.hint };
@@ -2318,9 +2351,9 @@ export default function ClassicCreateWizard({ onTitleChange }) {
                 No price selectors mapped.
                 {/* The why and the how live in the guide this already opens,
                     rather than as a paragraph everyone reads once. */}
-                <SettingsInfoLink hash="price-surfaces" label="Price surfaces" />
+                <SettingsInfoLink hash="price-surfaces" label="Price locations" />
                 <Button variant="plain" onClick={openPriceSurfaceSettings}>
-                  Add price surfaces
+                  Add price locations
                 </Button>
               </span>
             </Banner>
@@ -2330,6 +2363,7 @@ export default function ClassicCreateWizard({ onTitleChange }) {
         experimentType={experimentType}
         onBackToList={backToList}
         onBack={() => goToStep(step - 1)}
+        backLabel={step === 4 ? 'Back to edit' : 'Back'}
         onContinue={goNext}
         continueLabel={continueLabel}
         continueDisabled={
@@ -2346,7 +2380,7 @@ export default function ClassicCreateWizard({ onTitleChange }) {
               : step === 4
                 ? launchGate.reason
                 : (step === 0 || step === 3) && !shopGuardrailsReady
-                  ? 'Loading shop experiment defaults…'
+                  ? 'Loading shop test defaults…'
                   : ''
         }
         continueBusy={busy || launching}

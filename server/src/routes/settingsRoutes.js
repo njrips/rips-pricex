@@ -215,9 +215,9 @@ ${resourceHints}<script src="${scriptUrl}" defer crossorigin="anonymous" fetchpr
         method: 'App Proxy + App Embed (recommended)',
         steps: [
           'Configure App Proxy: subpath prefix "apps", subpath "ripspricex"',
-          'Enable Priceify theme app embed in Online Store → Themes → Customize',
-          'Deploy cart transform extension (ripspricex-cart-transform) for charged-price parity',
-          'Deploy checkout discount (ripspricex-checkout-discount) and Ensure it for offer tests',
+          'Complete Theme connection on Store setup (Online Store → Themes → Customize)',
+          'Install Checkout pricing functions on Store setup for cart and checkout pricing',
+          'Map price locations under Settings → Price locations for storefront paint',
         ],
       },
     });
@@ -251,7 +251,7 @@ router.post(
       return sendError(
         res,
         404,
-        'No cart transform function found for this app on the shop. Deploy ripspricex-cart-transform and try again.'
+        'Checkout pricing functions are not available on this shop yet. Open Store setup and use Check and install, or contact support.'
       );
     }
 
@@ -289,7 +289,7 @@ router.post(
       return sendError(
         res,
         409,
-        'A different cart transform is already installed on this shop. Shopify allows only one cart transform per store.',
+        'Another checkout pricing function is already installed on this shop. Shopify allows only one per store.',
         {
           existingCartTransforms: existingTransforms,
           function: {
@@ -376,7 +376,7 @@ router.post(
             return sendError(
               res,
               403,
-              'Missing write_cart_transforms scope for cartTransformCreate. Re-install the app with updated scopes and retry.',
+              'Missing checkout pricing permissions. Re-open Priceify from Shopify Admin, then click Check and install on Store setup.',
               {
                 function: {
                   id: chosenFunction.id,
@@ -393,7 +393,7 @@ router.post(
         return sendError(
           res,
           403,
-          'Missing write_cart_transforms scope for cartTransformCreate. Re-install the app with updated scopes and retry.',
+          'Missing checkout pricing permissions. Re-open Priceify from Shopify Admin, then click Check and install on Store setup.',
           {
             function: {
               id: chosenFunction.id,
@@ -434,7 +434,7 @@ router.post(
           },
         });
       }
-      return sendError(res, 400, userErrors[0]?.message || 'Could not install cart transform.', {
+      return sendError(res, 400, userErrors[0]?.message || 'Could not install dynamic cart prices for checkout.', {
         function: {
           id: chosenFunction.id,
           title: chosenFunction.title || null,
@@ -587,7 +587,7 @@ router.post(
           : err?.code === 'FUNCTION_MISSING'
             ? 404
             : 400;
-      return sendError(res, status, err.message || 'Could not attach checkout discount.', {
+      return sendError(res, status, err.message || 'Could not attach checkout discounts for offer tests.', {
         code: err.code || null,
         shopifyUserErrors: err.userErrors || [],
       });

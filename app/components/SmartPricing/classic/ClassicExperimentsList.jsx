@@ -25,6 +25,10 @@ import {
   filterClassicExperimentsByTab,
   listTabAfterClassicAction,
 } from './classicExperimentListActions';
+import {
+  enrichExperimentsWithListAnalytics,
+  fetchListAnalyticsForEditGating,
+} from './classicExperimentListAnalytics';
 import { classicCreateStepId } from './classicCreateSteps';
 import { useSmartPricingCheckoutReadiness } from '../../../hooks/useSmartPricingCheckoutReadiness';
 import {
@@ -35,21 +39,34 @@ import {
   IconPerson,
   IconTrendUp,
 } from './classicIcons';
+import TooltipWrapper from '../../shared/TooltipWrapper';
 import styles from './SmartPricingClassic.module.css';
+
+const STAT_TOOLTIPS = {
+  running: 'Number of tests currently running.',
+  visitors: 'Visitors who have entered any Priceify test this month.',
+  winning:
+    'Tests that have reached your minimum visitors and have a clear winner.',
+};
+
+const TABLE_HEADER_TOOLTIPS = {
+  visitors: 'Visitors who entered this test.',
+  lift: 'Revenue per visitor uplift vs control.',
+  confidence: 'How sure the maths is that the winner is better than control.',
+};
 
 const FILTERS = [
   { id: 'all', label: 'All' },
   { id: 'running', label: 'Running' },
-  { id: 'draft', label: 'Drafts' },
+  { id: 'draft', label: 'Draft' },
   { id: 'paused', label: 'Paused' },
-  { id: 'completed', label: 'Completed' },
-  { id: 'archived', label: 'Archived' },
+  { id: 'finished', label: 'Finished' },
 ];
 
 function statusVisual(experiment) {
   const status = experiment.status;
   if (status === 'archived' || experiment.archived) {
-    return { tone: undefined, text: 'Archived' };
+    return { tone: undefined, text: 'Finished' };
   }
   if (status === 'winner_ready' || status === 'applied' || status === 'completed') {
     return {
@@ -74,12 +91,11 @@ function emptyFilterCopy(filter, { reachedDraftServer = true } = {}) {
   if (filter === 'draft' && !reachedDraftServer) {
     return "Couldn't reach the server. Showing drafts saved in this browser.";
   }
-  if (filter === 'running') return 'No running experiments.';
-  if (filter === 'draft') return 'No draft experiments.';
-  if (filter === 'paused') return 'No paused experiments.';
-  if (filter === 'completed') return 'No completed experiments.';
-  if (filter === 'archived') return 'No archived experiments.';
-  return 'No experiments yet.';
+  if (filter === 'running') return 'No running tests.';
+  if (filter === 'draft') return 'No draft tests.';
+  if (filter === 'paused') return 'No paused tests.';
+  if (filter === 'finished') return 'No finished tests.';
+  return 'No tests yet.';
 }
 
 async function loadExperimentPlans(shopDomain, hydrateOptions) {
@@ -96,7 +112,7 @@ async function loadExperimentPlans(shopDomain, hydrateOptions) {
   } catch (err) {
     return {
       plans: readInboxPlans(shopDomain) || [],
-      message: err.message || 'Could not load experiments.',
+      message: err.message || 'Could not load tests.',
     };
   }
 }
@@ -205,23 +221,45 @@ export default function ClassicExperimentsList() {
     });
   }, [shopDomain, applyLoad]);
 
+  const inboxExperimentRows = useMemo(() => {
+    const fromPlans = groupPlansIntoExperiments(plans);
+    const draftRows = selectUnlistedWizardDrafts(localDrafts, plans.map(getPlanExperimentId))
+      .map(wizardDraftAsExperimentRow)
+      .filter(Boolean);
+    return sortExperimentRowsByRecency([...draftRows, ...fromPlans]);
+  }, [plans, localDrafts]);
+
   const experiments = useMemo(() => {
     const queried = filterPlansByQuery(plans, search);
     const fromPlans = groupPlansIntoExperiments(queried);
-    // A draft whose plans are already in the inbox is that experiment, not a
-    // second row beside it.
     const needle = search.trim().toLowerCase();
     const draftRows = selectUnlistedWizardDrafts(localDrafts, plans.map(getPlanExperimentId))
       .map(wizardDraftAsExperimentRow)
       .filter(Boolean)
-      // Drafts hold no plans, so the plan-level search cannot reach them; a
-      // draft is searchable by the only text it has.
       .filter(row => !needle || row.title.toLowerCase().includes(needle));
     return filterClassicExperimentsByTab(
       sortExperimentRowsByRecency([...draftRows, ...fromPlans]),
       filter
     );
   }, [plans, localDrafts, filter, search]);
+
+  const [listAnalyticsByTestId, setListAnalyticsByTestId] = useState({});
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!shopDomain) return undefined;
+    fetchListAnalyticsForEditGating(shopDomain, inboxExperimentRows).then(map => {
+      if (!cancelled) setListAnalyticsByTestId(map && typeof map === 'object' ? map : {});
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [shopDomain, inboxExperimentRows]);
+
+  const experimentsWithAnalytics = useMemo(
+    () => enrichExperimentsWithListAnalytics(experiments, listAnalyticsByTestId),
+    [experiments, listAnalyticsByTestId]
+  );
 
   const stats = useMemo(() => {
     const allExperiments = groupPlansIntoExperiments(plans.filter(p => !p.archived));
@@ -292,20 +330,22 @@ export default function ClassicExperimentsList() {
 
   const gridBusyLabel =
     gridBusy === 'pause'
-      ? 'Pausing experiment…'
+      ? 'Pausing test…'
       : gridBusy === 'resume'
-        ? 'Resuming experiment…'
+        ? 'Resuming test…'
         : gridBusy === 'delete'
-          ? 'Deleting experiment…'
+          ? 'Deleting test…'
           : gridBusy === 'launch'
-            ? 'Launching experiment…'
+            ? 'Launching test…'
             : gridBusy === 'archive'
-              ? 'Archiving experiment…'
+              ? 'Archiving test…'
               : gridBusy === 'restore'
-                ? 'Restoring experiment…'
-                : gridBusy
-                  ? 'Updating experiments…'
-                  : 'Loading experiments…';
+                ? 'Restoring test…'
+                : gridBusy === 'duplicate'
+                  ? 'Duplicating test…'
+                  : gridBusy
+                    ? 'Updating tests…'
+                    : 'Loading tests…';
 
   return (
     <PageShell message={message} messageType={messageType} onCloseMessage={() => setMessage('')}>
@@ -314,9 +354,12 @@ export default function ClassicExperimentsList() {
           <p className={styles.eyebrow}>Workspace</p>
           <div className={styles.listHeaderMain}>
             <div>
-              <h1 className={`${styles.listTitle} ripx-classic-sans`}>Experiments</h1>
+              <h1 className={`${styles.listTitle} ripx-classic-sans`}>Tests</h1>
               <p className={styles.subtitle} style={{ marginBottom: 0 }}>
-                Ship better product decisions. Launch a test in under two minutes.
+                Run price and offer tests to grow revenue per visitor.
+              </p>
+              <p className={styles.help} style={{ marginTop: 6, marginBottom: 0 }}>
+                Launch price tests in minutes. See which prices grow revenue per visitor.
               </p>
             </div>
             <div className={styles.listHeaderActions}>
@@ -326,7 +369,7 @@ export default function ClassicExperimentsList() {
                 disabled={loading || Boolean(gridBusy)}
                 onClick={() => navigate(ROUTES.appSmartPricingCreate(shopDomain))}
               >
-                New experiment
+                New test
               </Button>
             </div>
           </div>
@@ -338,7 +381,9 @@ export default function ClassicExperimentsList() {
               <div className={`${styles.statIcon} ${styles.statIconAccent}`} aria-hidden>
                 <IconBolt />
               </div>
-              <div className={styles.statLabel}>Running now</div>
+              <TooltipWrapper content={STAT_TOOLTIPS.running}>
+                <div className={styles.statLabel}>Running tests</div>
+              </TooltipWrapper>
             </div>
             <div className={styles.statValue}>{stats.running}</div>
           </div>
@@ -347,7 +392,9 @@ export default function ClassicExperimentsList() {
               <div className={styles.statIcon} aria-hidden>
                 <IconPerson />
               </div>
-              <div className={styles.statLabel}>Visitors this month</div>
+              <TooltipWrapper content={STAT_TOOLTIPS.visitors}>
+                <div className={styles.statLabel}>Visitors this month</div>
+              </TooltipWrapper>
             </div>
             <div className={styles.statValue}>{stats.visitors.toLocaleString()}</div>
           </div>
@@ -356,7 +403,9 @@ export default function ClassicExperimentsList() {
               <div className={styles.statIcon} aria-hidden>
                 <IconTrendUp />
               </div>
-              <div className={styles.statLabel}>Winning experiments</div>
+              <TooltipWrapper content={STAT_TOOLTIPS.winning}>
+                <div className={styles.statLabel}>Winning tests</div>
+              </TooltipWrapper>
             </div>
             <div className={styles.statValue}>{stats.winning}</div>
           </div>
@@ -369,7 +418,15 @@ export default function ClassicExperimentsList() {
             above it lists three. */}
 
         <div className={styles.filterRow}>
-          <div className={styles.filterPillTrack} role="tablist" aria-label="Filter experiments">
+          <div className={styles.filterGroup}>
+            <span className={styles.filterLabel} id="tests-status-filter-label">
+              Status
+            </span>
+            <div
+              className={styles.filterPillTrack}
+              role="tablist"
+              aria-labelledby="tests-status-filter-label"
+            >
             {FILTERS.map(item => (
               <button
                 key={item.id}
@@ -384,15 +441,16 @@ export default function ClassicExperimentsList() {
                 {item.label}
               </button>
             ))}
+            </div>
           </div>
           <div className={styles.listSearch}>
             <TextField
-              label="Search experiments"
+              label="Search tests"
               labelHidden
               value={search}
               onChange={setSearch}
               autoComplete="off"
-              placeholder="Search experiments"
+              placeholder="Search tests"
             />
           </div>
         </div>
@@ -401,23 +459,35 @@ export default function ClassicExperimentsList() {
           {loading || gridBusy ? (
             <div className={styles.expTableBusy} role="status" aria-live="polite">
               <Spinner size="small" />
-              <span>{gridBusy ? gridBusyLabel : 'Loading experiments…'}</span>
+              <span>{gridBusy ? gridBusyLabel : 'Loading tests…'}</span>
             </div>
           ) : null}
           <table className={styles.table}>
             <thead>
               <tr>
-                <th>Experiment</th>
+                <th>Test</th>
                 <th>Status</th>
                 <th>Primary metric</th>
-                <th>Visitors</th>
-                <th>Lift</th>
-                <th>Confidence</th>
+                <th>
+                  <TooltipWrapper content={TABLE_HEADER_TOOLTIPS.visitors}>
+                    <span>Visitors</span>
+                  </TooltipWrapper>
+                </th>
+                <th>
+                  <TooltipWrapper content={TABLE_HEADER_TOOLTIPS.lift}>
+                    <span>Lift</span>
+                  </TooltipWrapper>
+                </th>
+                <th>
+                  <TooltipWrapper content={TABLE_HEADER_TOOLTIPS.confidence}>
+                    <span>Confidence</span>
+                  </TooltipWrapper>
+                </th>
                 <th>Actions</th>
               </tr>
             </thead>
             <tbody>
-              {!loading && experiments.length === 0 ? (
+              {!loading && experimentsWithAnalytics.length === 0 ? (
                 <tr>
                   <td colSpan={7}>
                     <div className={styles.listEmptyState}>
@@ -430,7 +500,7 @@ export default function ClassicExperimentsList() {
                           icon={ButtonIconPlus}
                           onClick={() => navigate(ROUTES.appSmartPricingCreate(shopDomain))}
                         >
-                          New experiment
+                          New test
                         </Button>
                       ) : null}
                     </div>
@@ -438,7 +508,7 @@ export default function ClassicExperimentsList() {
                 </tr>
               ) : null}
               {!loading &&
-                experiments.map(experiment => {
+                experimentsWithAnalytics.map(experiment => {
                   const status = statusVisual(experiment);
                   const expanded = expandedIds.has(experiment.id);
                   const lift = experiment.lift;
@@ -473,10 +543,10 @@ export default function ClassicExperimentsList() {
                                 className={styles.rowLink}
                                 onClick={() => openExperiment(experiment)}
                               >
-                                {experiment.title || 'Untitled experiment'}
+                                {experiment.title || 'Untitled test'}
                               </button>
                               <div className={styles.productSub}>
-                                {experiment.typeLabel || 'PRICE'} ·{' '}
+                                {experiment.typeLabel || 'Price test'} ·{' '}
                                 {/* For an unfinished draft, how far it got is
                                     the useful thing to say and the owner is
                                     always the merchant reading it. This is what

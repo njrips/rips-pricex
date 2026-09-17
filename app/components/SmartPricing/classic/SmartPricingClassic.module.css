@@ -168,7 +168,9 @@ button.stepItem {
 }
 
 .stepItemClickable:hover .stepLabel,
-.stepItemClickable:focus-visible .stepLabel {
+.stepItemClickable:focus-visible .stepLabel,
+.stepItemClickable:hover .stepLabelMultiline .stepLabelLine,
+.stepItemClickable:focus-visible .stepLabelMultiline .stepLabelLine {
   color: var(--classic-orange-deep, #1a1a1a);
   text-decoration: underline;
   text-underline-offset: 2px;
@@ -190,8 +192,7 @@ button.stepItem {
   border: 0;
   border-radius: 0;
   background: var(--classic-line);
-  align-self: flex-start;
-  margin-top: 13.5px; /* center on 28px stepDot (dot mid = 14px) */
+  align-self: center;
 }
 
 .stepConnectorDone {
@@ -237,6 +238,8 @@ button.stepItem {
   flex-direction: column;
   gap: 0;
   min-width: 0;
+  min-height: 32px;
+  justify-content: center;
   position: relative;
   z-index: 1;
 }
@@ -253,6 +256,27 @@ button.stepItem {
   color: var(--classic-ink);
   line-height: 20px;
   white-space: nowrap;
+}
+
+.stepLabelMultiline {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.stepLabelMultiline .stepLabelLine {
+  font-family: var(--ripx-font-classic, var(--ripx-font-ui, 'Inter', system-ui, sans-serif));
+  font-size: var(--classic-fs-step);
+  font-weight: var(--classic-fw-medium);
+  color: inherit;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.stepItem:not(.stepItemActive):not(.stepItemDone) .stepLabelMultiline .stepLabelLine {
+  color: var(--classic-muted);
 }
 
 .stepItem:not(.stepItemActive):not(.stepItemDone) .stepLabel {
@@ -580,7 +604,9 @@ button.stepItem {
 }
 
 .stepItemActive .stepLabel,
-.stepItemDone .stepLabel {
+.stepItemDone .stepLabel,
+.stepItemActive .stepLabelMultiline .stepLabelLine,
+.stepItemDone .stepLabelMultiline .stepLabelLine {
   color: var(--classic-ink);
   font-weight: var(--classic-fw-medium);
 }
@@ -1116,7 +1142,6 @@ button.stepItem {
 }
 
 /* Variations */
-/* Variations */
 .trafficBanner {
   display: flex;
   align-items: center;
@@ -1375,7 +1400,7 @@ button.stepItem {
   /* Fits "100" and its "%" suffix, plus the ~30px Polaris reserves for the
      stepper. The stepper is only visible on hover but still holds its column,
      so the room has to be there whether or not it is on screen. */
-  width: 112px;
+  width: 120px;
   flex: 0 0 auto;
 }
 
@@ -3703,6 +3728,26 @@ button.stepItem {
   gap: 10px;
 }
 
+/* Portaled on Variations tab so the products search row cannot paint over the QR panel. */
+.variationQrPopover.variationQrPopoverPortal {
+  position: fixed;
+  z-index: 20100;
+  isolation: isolate;
+  overflow-y: auto;
+  box-sizing: border-box;
+}
+
+:global([data-palette='admin']:not([data-theme='dark'])) .variationQrPopoverPortal,
+:global([data-palette='orange-classic']:not([data-theme='dark'])) .variationQrPopoverPortal {
+  background: #ffffff;
+  border-color: #e3e3e3;
+}
+
+:global([data-theme='dark']) .variationQrPopoverPortal {
+  background: var(--classic-card);
+  border-color: var(--classic-line);
+}
+
 .variationQrImage {
   width: 168px;
   height: 168px;
@@ -4448,6 +4493,19 @@ button.stepItem {
   margin-bottom: 0;
 }
 
+.filterGroup {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.filterLabel {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--classic-muted, #616161);
+}
+
 .filterPillTrack {
   display: inline-flex;
   flex-wrap: wrap;
@@ -4650,6 +4708,47 @@ button.stepItem {
 .productsStep .tableScroll .table td:nth-child(4) {
   text-align: right;
   white-space: nowrap;
+}
+
+.productsStep .tableScroll .table th:nth-child(4) {
+  white-space: normal;
+  vertical-align: bottom;
+}
+
+.tableColumnHeaderStack {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+  line-height: 1.15;
+}
+
+.tableColumnHeaderMain {
+  font-weight: inherit;
+}
+
+.tableColumnHeaderHint {
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--classic-muted);
+}
+
+.fieldLabelStack {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: var(--classic-space-label);
+}
+
+.fieldLabelStack .label {
+  margin-bottom: 0;
+}
+
+.fieldLabelHint {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--classic-muted);
+  line-height: 1.25;
 }
 
 .expTableWrap .table td:nth-child(2) .statusPill {
@@ -4954,41 +5053,100 @@ button.stepItem {
     grid-template-columns: 1fr;
   }
 
+  /* Five steps share the row; two-line labels + smaller type avoid horizontal scroll. */
   .stepper {
-    gap: 8px;
-    justify-content: flex-start;
-    overflow-x: auto;
-    padding-bottom: 4px;
+    gap: 4px;
+    justify-content: center;
+    overflow-x: hidden;
+    padding-bottom: 2px;
   }
 
   .stepItem {
-    flex: 0 0 auto;
+    flex: 1 1 0;
+    min-width: 0;
     max-width: none;
+    gap: 6px;
+  }
+
+  .stepDot {
+    width: 24px;
+    height: 24px;
+    flex: 0 0 24px;
+    font-size: 11px;
+    line-height: 14px;
   }
 
   .stepConnector {
-    flex: 0 0 16px;
-    width: 16px;
-    min-width: 16px;
-    max-width: 16px;
-    margin: 0;
+    flex: 0 0 10px;
+    width: 10px;
+    min-width: 10px;
+    max-width: 10px;
   }
 
   .stepSub {
     display: none;
   }
 
-  .stepItem {
-    flex: 0 0 auto;
+  .stepLabel,
+  .stepLabelMultiline .stepLabelLine {
+    font-size: 0.6875rem;
+    line-height: 14px;
   }
 
-  .stepLabel {
-    font-size: var(--classic-fs-meta);
+  .stepText {
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 28px;
+  }
+
+  .trafficBanner {
+    flex-wrap: wrap;
+    row-gap: 10px;
+  }
+
+  .allocationRow {
+    flex-wrap: wrap;
+  }
+
+  .allocationRow .percentField {
+    width: 100%;
+    max-width: 120px;
   }
 
   .overviewSplit {
     grid-template-columns: 1fr;
-  }}
+  }
+}
+
+@media (max-width: 520px) {
+  .stepper {
+    gap: 2px;
+  }
+
+  .stepItem {
+    gap: 4px;
+  }
+
+  .stepDot {
+    width: 22px;
+    height: 22px;
+    flex: 0 0 22px;
+    font-size: 10px;
+  }
+
+  .stepConnector {
+    flex: 0 0 6px;
+    width: 6px;
+    min-width: 6px;
+    max-width: 6px;
+  }
+
+  .stepLabel,
+  .stepLabelMultiline .stepLabelLine {
+    font-size: 0.625rem;
+    line-height: 13px;
+  }
+}
 
 :global([data-theme='dark']) .page,
 :global([data-theme='dark']) .listPage,

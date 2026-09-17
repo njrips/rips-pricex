@@ -311,7 +311,7 @@ export function estimateSignificanceDuration({
   // estimate has to answer "what does my 5,000 buy me?" before it quotes the
   // larger sample the target lift would need.
   const perVariantLabel = formatVisitors(perVariantDaily);
-  const inputs = `~${formatVisitors(slowest.daily)} visitors/day on the slowest product, ${traffic}% experiment traffic, and a ${formatVisitors(slowestVariationPercent)}% slowest variation — about ${perVariantLabel} ${
+  const inputs = `~${formatVisitors(slowest.daily)} visitors/day on the slowest product, ${traffic}% test traffic, and a ${formatVisitors(slowestVariationPercent)}% slowest variation — about ${perVariantLabel} ${
     perVariantLabel === '1' ? 'visitor' : 'visitors'
   }/variation/day.`;
 
@@ -360,7 +360,7 @@ export function estimateSignificanceDuration({
         : '';
   const feasibilityNote = practical
     ? ''
-    : ` To reach the ${formatVisitorCount(earliestFloor)} minimum by 8 weeks with the current allocation, the slowest product needs about ${formatVisitorCount(requiredProductDailyForPracticalWindow)} eligible visitors/day. Choose a higher-traffic product, use fewer variations, or increase experiment and slowest-arm traffic.`;
+    : ` To reach the ${formatVisitorCount(earliestFloor)} minimum by 8 weeks with the current allocation, the slowest product needs about ${formatVisitorCount(requiredProductDailyForPracticalWindow)} eligible visitors/day. Choose a higher-traffic product, use fewer variations, or increase test and slowest-arm traffic.`;
 
   return {
     days,

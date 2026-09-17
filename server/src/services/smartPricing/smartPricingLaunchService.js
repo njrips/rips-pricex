@@ -103,7 +103,7 @@ async function launchSmartPricingPlanAsTest(
       const readiness = await resolveSmartPricingCheckoutReadiness(shopDomain, { accessToken });
       if (readiness?.ready === false) {
         const err = new Error(
-          readiness.message || 'Checkout price path is not ready. Fix setup before launching.'
+          readiness.message || 'Checkout is not ready. Complete Store setup before launching.'
         );
         err.isValidation = true;
         throw err;

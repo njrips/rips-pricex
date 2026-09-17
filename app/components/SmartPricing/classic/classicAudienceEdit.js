@@ -24,6 +24,49 @@ export function canEditClassicAudienceMetrics(status) {
   return !isClassicExperimentEnded(key);
 }
 
+/** Min visitors per variation stamped on the experiment at launch. */
+export function resolveExperimentMinSampleSize(experiment) {
+  const rep = experiment?.representative || experiment?.plans?.[0];
+  const ui = rep?.metadata?.audience_ui || rep?.metadata?.audienceUi || {};
+  return parseMinSampleSize(ui.minSampleSize ?? ui.min_sample_size, DEFAULT_MIN_SAMPLE_SIZE);
+}
+
+/** Smallest per-arm visitor count available on inbox analytics, if any. */
+export function minVisitorsAcrossExperimentArms(experiment) {
+  const plans = Array.isArray(experiment?.plans) ? experiment.plans : [];
+  let min = null;
+  for (const plan of plans) {
+    const arms = Array.isArray(plan?.analytics?.arms)
+      ? plan.analytics.arms
+      : Array.isArray(plan?.price_arms)
+        ? plan.price_arms
+        : [];
+    for (const arm of arms) {
+      const visitors = Number(arm?.visitors);
+      if (!Number.isFinite(visitors)) continue;
+      min = min === null ? visitors : Math.min(min, visitors);
+    }
+  }
+  return min;
+}
+
+/**
+ * PDF: Edit test while Draft, or live before each variation reaches minimum visitors.
+ */
+export function canEditClassicTestSetup(experiment) {
+  const status = String(experiment?.status || '')
+    .trim()
+    .toLowerCase();
+  if (status === 'draft' || status === 'queued') return true;
+  if (status !== 'running' && status !== 'paused') return false;
+  const min = resolveExperimentMinSampleSize(experiment);
+  const perArmMin = minVisitorsAcrossExperimentArms(experiment);
+  if (perArmMin !== null) return perArmMin < min;
+  const visitors = Number(experiment?.visitors);
+  if (!Number.isFinite(visitors) || visitors <= 0) return true;
+  return visitors < min;
+}
+
 const DEVICE_PILL_BY_KEY = new Map(
   CLASSIC_DEVICE_OPTIONS.map(label => [label.toLowerCase(), label])
 );

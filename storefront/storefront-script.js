@@ -1356,10 +1356,10 @@
       // Live PDPs often have unrelated query params; never treat those as a nested path.
       if (isRipxBootstrapPathname(window.location.pathname)) {
         var nestedTarget = getLiveSearchParams().get('url') || URL_PARAMS.get('url') || '';
-        if (nestedTarget) {
-          var parsedTarget = new URL(nestedTarget, window.location.origin);
-          var nestedPath = String(parsedTarget.pathname || '').toLowerCase();
-          if (nestedPath) return nestedPath;
+      if (nestedTarget) {
+        var parsedTarget = new URL(nestedTarget, window.location.origin);
+        var nestedPath = String(parsedTarget.pathname || '').toLowerCase();
+        if (nestedPath) return nestedPath;
         }
       }
     } catch (_eNestedPath) {}
@@ -1378,7 +1378,7 @@
   function inferPriceSurfaceFromPathname(pathname) {
     var path = stripStorefrontLocalePrefix(
       String(pathname || '')
-        .trim()
+      .trim()
         .toLowerCase()
     );
     if (!path) return 'home';
@@ -1534,7 +1534,7 @@
     try {
       const raw = window.sessionStorage && window.sessionStorage.getItem(PREVIEW_STORAGE_KEY);
       if (raw) {
-        const normalized = normalizePreviewCtxObject(JSON.parse(raw));
+      const normalized = normalizePreviewCtxObject(JSON.parse(raw));
         if (normalized) return normalized;
         try {
           window.sessionStorage.removeItem(PREVIEW_STORAGE_KEY);
@@ -1578,7 +1578,7 @@
       delete payload.launchTargetUrl;
       try {
         if (window.sessionStorage) {
-          window.sessionStorage.setItem(PREVIEW_STORAGE_KEY, JSON.stringify(payload));
+      window.sessionStorage.setItem(PREVIEW_STORAGE_KEY, JSON.stringify(payload));
         }
       } catch (_eSessionWrite) {}
       writePreviewCookie(payload);
@@ -3589,13 +3589,13 @@
           body: JSON.stringify(
             Object.assign(
               {
-                test_id: testId,
-                variant_id: variantId,
-                user_id: userId,
-                shop_domain: shopDomain,
-                event_type: 'conversion',
-                event_value: value,
-                metadata: meta,
+            test_id: testId,
+            variant_id: variantId,
+            user_id: userId,
+            shop_domain: shopDomain,
+            event_type: 'conversion',
+            event_value: value,
+            metadata: meta,
               },
               proof
             )
@@ -3643,14 +3643,14 @@
           body: JSON.stringify(
             Object.assign(
               {
-                test_id: testId,
-                variant_id: vid,
-                user_id: userId,
-                shop_domain: shopDomain,
-                event_type: 'custom',
-                event_name: String(eventName).trim(),
-                event_value: typeof value === 'number' ? value : 0,
-                metadata: metadata && typeof metadata === 'object' ? metadata : {},
+            test_id: testId,
+            variant_id: vid,
+            user_id: userId,
+            shop_domain: shopDomain,
+            event_type: 'custom',
+            event_name: String(eventName).trim(),
+            event_value: typeof value === 'number' ? value : 0,
+            metadata: metadata && typeof metadata === 'object' ? metadata : {},
               },
               proof
             )
@@ -7879,7 +7879,7 @@
               ? makeSyntheticPreviewShippingTest()
               : configLooksLikeOffer(variant.config)
                 ? makeSyntheticPreviewOfferTest()
-                : makeSyntheticPreviewPriceTest();
+              : makeSyntheticPreviewPriceTest();
           }
           if (test && testTypeIsPrice(test)) {
             seedFixedPriceCartAttributesWithoutProductId(
@@ -8330,7 +8330,7 @@
           num = catalogNow + deltaAmt;
         } else {
           var pctVal = parseFloat(liveCfg.pricePercent, 10);
-          if (isNaN(pctVal)) return null;
+        if (isNaN(pctVal)) return null;
           num = catalogNow * (1 - pctVal / 100);
         }
       } else {
@@ -9319,24 +9319,24 @@
           // so paint the leaves it contains instead of skipping it outright.
           resolveRipxPricePaintTargets(el).forEach(function (target) {
             var catalog = pm === 'fixed' ? 0 : getStableCatalogPriceForElement(target);
-            if (pm !== 'fixed' && catalog == null) return;
-            var adjusted = computeAllProductsAdjustedPrice(catalog, cfg);
-            if (adjusted == null) return;
-            var roundToVal = parseRoundTo(cfg.roundTo);
-            if (roundToVal > 0) {
-              adjusted = Math.round(adjusted / roundToVal) * roundToVal;
-              adjusted = Math.max(0, Math.round(adjusted * 100) / 100);
-            }
-            var display = formatShopPrice(adjusted);
-            if (!display) return;
-            paintPriceNode(
+          if (pm !== 'fixed' && catalog == null) return;
+          var adjusted = computeAllProductsAdjustedPrice(catalog, cfg);
+          if (adjusted == null) return;
+          var roundToVal = parseRoundTo(cfg.roundTo);
+          if (roundToVal > 0) {
+            adjusted = Math.round(adjusted / roundToVal) * roundToVal;
+            adjusted = Math.max(0, Math.round(adjusted * 100) / 100);
+          }
+          var display = formatShopPrice(adjusted);
+          if (!display) return;
+          paintPriceNode(
               target,
-              display,
-              testId,
-              variantIdForCart,
-              scope === 'cart' ? 'cart_global_fallback' : 'listing_global_fallback',
-              adjusted
-            );
+            display,
+            testId,
+            variantIdForCart,
+            scope === 'cart' ? 'cart_global_fallback' : 'listing_global_fallback',
+            adjusted
+          );
           });
         });
       } catch (e) {}
@@ -9698,14 +9698,14 @@
           rememberRipxPriceMethodForProduct(pid, checkoutMethodProof.applicationMethod);
         }
         paintTargets.forEach(function (target) {
-          paintPriceNode(
+        paintPriceNode(
             target,
-            display,
-            testId,
-            variantIdForCart,
-            'selector_inferred_listing',
-            priceNum
-          );
+          display,
+          testId,
+          variantIdForCart,
+          'selector_inferred_listing',
+          priceNum
+        );
         });
         painted += paintTargets.length;
       });
@@ -11168,8 +11168,8 @@
     // the fallback: a tab with nowhere to post back to, where reading the
     // selector and copying it is the only way to finish.
     if (!pickerCanPostBack()) {
-      bar.appendChild(selectorInput);
-      bar.appendChild(copyBtn);
+    bar.appendChild(selectorInput);
+    bar.appendChild(copyBtn);
     }
     bar.appendChild(closeBtn);
     document.body.appendChild(overlay);
@@ -13482,7 +13482,7 @@
       'src: ' + String(codeInfo.sourceKey === 'auto' ? 'auto' : codeInfo.sourceKey);
     sourceBadge.title = 'Code source: ' + String(codeInfo.sourceLabel || 'auto-generated');
     if (!offerMessage) {
-      rightWrap.appendChild(sourceBadge);
+    rightWrap.appendChild(sourceBadge);
     }
     var diag = getOfferCodeDiagnostics(codeName);
     var parseMeta = getOfferRuntimeParseMeta(variant.config);
@@ -14541,16 +14541,16 @@
                       targetIds: null,
                       targetId: null,
                       previewSynthetic: true,
-                    }
-                  : {
-                      id: PREVIEW_TEST_ID,
-                      type: 'price',
-                      targetType: 'product',
-                      // Empty until variant matrix / preview-storefront-test arrives.
-                      targetIds: null,
-                      targetId: null,
-                      previewSynthetic: true,
-                    }
+                  }
+                : {
+                    id: PREVIEW_TEST_ID,
+                    type: 'price',
+                    targetType: 'product',
+                    // Empty until variant matrix / preview-storefront-test arrives.
+                    targetIds: null,
+                    targetId: null,
+                    previewSynthetic: true,
+                  }
             );
             mergeMeta.usedSyntheticFallback = true;
             mergeMeta.previewStorefrontTestFetchDeferred = true;

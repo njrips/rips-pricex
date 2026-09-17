@@ -7,9 +7,25 @@ const {
   shouldUseSequentialDecision,
   resolveAnalysisConfidence,
   absoluteMde,
+  inferPrimaryFamily,
 } = require('../alwaysValidSignificance');
 
 describe('alwaysValidSignificance', () => {
+  it('treats average order value as its own primary family', () => {
+    assert.equal(inferPrimaryFamily({ primary_metric: 'aov' }), 'aov');
+    assert.equal(inferPrimaryFamily({ primary_metric: 'average_order_value' }), 'aov');
+    assert.equal(inferPrimaryFamily({ primary_metric: 'revenue_per_visitor' }), 'revenue');
+  });
+
+  it('compares challengers on order value when the primary metric is AOV', () => {
+    const result = twoSampleAlwaysValid(
+      { visitors: 10000, conversions: 500, revenue: 50000, avgOrderValue: 100 },
+      { visitors: 10000, conversions: 500, revenue: 60000, avgOrderValue: 120 },
+      { family: 'aov', alpha: 0.1, mdePercent: 10 }
+    );
+    assert.ok(result.delta > 0);
+  });
+
   it('returns no evidence when effective n is empty', () => {
     assert.equal(logMixtureLambda(0, 0.1, 0.02, 0.0004), 0);
   });

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import {
   classicMetricOptionsFor,
+  GOAL_METRIC_OPTIONS,
   CLASSIC_DEVICE_OPTIONS,
   CLASSIC_SEGMENT_OPTIONS,
   CLASSIC_SOURCE_OPTIONS,
@@ -25,6 +26,8 @@ import {
   formatRevenueDropThreshold,
   MAX_REVENUE_DROP_PERCENT,
   MIN_REVENUE_DROP_PERCENT,
+  DEFAULT_MAX_REVENUE_DROP_PERCENT,
+  MIN_VISITORS_FOR_REVENUE_GUARDRAIL,
   parseRevenueDropThreshold,
 } from './revenueGuardrail';
 import { formatPracticalDurationRange } from './estimateSignificanceDuration';
@@ -181,7 +184,17 @@ export default function AudienceSuccessStepPanel({
   const primaryMetricKey = primaryMetric;
   // Profit per visitor is no longer offered, but an experiment already running
   // on it keeps its pill so editing the audience does not re-goal the test.
-  const metricOptions = classicMetricOptionsFor([primaryMetric, ...secondaryMetrics]);
+  const legacyPrimaryOptions = classicMetricOptionsFor([primaryMetric]).filter(
+    opt => !GOAL_METRIC_OPTIONS.some(goal => goal.value === opt.value)
+  );
+  const primaryMetricOptions = [
+    ...GOAL_METRIC_OPTIONS.map(opt =>
+      opt.value === 'revenue_per_visitor'
+        ? { ...opt, label: 'Revenue per visitor (recommended)' }
+        : opt
+    ),
+    ...legacyPrimaryOptions,
+  ];
 
   const patch = partial => {
     if (disabled) return;
@@ -228,6 +241,9 @@ export default function AudienceSuccessStepPanel({
     <div>
       <div className={styles.stepSection}>
       <div className={styles.stepSectionTitle}>Audience</div>
+      <p className={styles.help} style={{ marginTop: 0 }}>
+        Only visitors who match these filters can enter the test.
+      </p>
 
       {/* The create wizard asks for this on the Variations step, next to the
           split it feeds, and passes false here. Editing a live experiment still
@@ -257,7 +273,7 @@ export default function AudienceSuccessStepPanel({
           disabled={disabled}
         />
         <p className={styles.help}>
-          {trafficAllocation}% of matching visitors will enter the experiment.
+          {trafficAllocation}% of eligible visitors will enter the test.
           {durationNotFeasible
             ? ' Current traffic does not support a practical 2–8 week test; Review shows the traffic needed.'
             : planningWindow
@@ -277,7 +293,7 @@ export default function AudienceSuccessStepPanel({
 
       {/* Device, source, segment and countries used to sit behind an "Advanced
           options" disclosure below the metrics, which put the whole definition
-          of who is in the experiment underneath the numbers measuring them --
+          of who is in the test underneath the numbers measuring them --
           and behind a click. They are the audience, so they are the audience
           section. */}
       <div className={styles.modeRow}>
@@ -300,7 +316,7 @@ export default function AudienceSuccessStepPanel({
             })}
           </div>
           <p className={styles.help}>
-            Which devices are eligible for the experiment. Tablet maps to mobile in launch
+            Which devices are eligible for the test. Tablet maps to mobile in launch
             targeting.
           </p>
         </div>
@@ -351,7 +367,7 @@ export default function AudienceSuccessStepPanel({
         </div>
         <p className={styles.help}>
           {CLASSIC_SEGMENT_OPTIONS.find(option => option.value === activeSegment)?.help ||
-            'Which visitors count toward the experiment.'}
+            'Which visitors count toward the test.'}
         </p>
       </div>
 
@@ -404,14 +420,14 @@ export default function AudienceSuccessStepPanel({
       </div>
 
       <div className={styles.stepSection}>
-      <div className={styles.stepSectionTitle}>Metrics</div>
+      <div className={styles.stepSectionTitle}>Success metrics</div>
 
       <div className={styles.field} id="classic-metrics-editor">
         <div className={styles.label}>
           Primary success metric<span className={styles.required}>*</span>
         </div>
         <div className={`${styles.pillRow} ${styles.metricPillRow}`}>
-          {metricOptions.map(metric => {
+          {primaryMetricOptions.map(metric => {
             const active = !primaryCustomGoal && primaryMetric === metric.value;
             return (
               <SelectablePill
@@ -449,14 +465,18 @@ export default function AudienceSuccessStepPanel({
           </button>
         </div>
         <p className={styles.help}>
-          Choose one metric to optimize, or add a custom goal. It cannot also be a secondary.
+          Choose one metric to optimise for this test. You can also add a custom goal; it cannot
+          also be a secondary.
         </p>
       </div>
 
       <div className={styles.field}>
-        <div className={styles.label}>Secondary metrics</div>
+        <div className={styles.fieldLabelStack}>
+          <span className={styles.label}>Secondary metrics</span>
+          <span className={styles.fieldLabelHint}>(optional)</span>
+        </div>
         <div className={`${styles.pillRow} ${styles.metricPillRow}`}>
-          {metricOptions.map(metric => {
+          {GOAL_METRIC_OPTIONS.map(metric => {
             const active = secondaryMetrics.includes(metric.value);
             const locked = metric.value === primaryMetricKey;
             return (
@@ -569,7 +589,9 @@ export default function AudienceSuccessStepPanel({
         {guardrailOn ? (
           <>
             <div className={styles.guardrailRule}>
-              <span>Pause the test if any variation drops more than</span>
+              <span>
+                Pause this test if revenue per visitor for any variation drops more than
+              </span>
               <span className={styles.guardrailInputWrap}>
                 <input
                   className={styles.guardrailInput}
@@ -588,17 +610,21 @@ export default function AudienceSuccessStepPanel({
                   %
                 </span>
               </span>
-              <span>versus control.</span>
+              <span>
+                below control, once each variation has about{' '}
+                {MIN_VISITORS_FOR_REVENUE_GUARDRAIL} visitors.
+              </span>
             </div>
             <p className={styles.guardrailHint} id="revenue-guardrail-help">
-              Operational safety pause based on the observed revenue-per-visitor point estimate; it
-              is not winner evidence. Set it per experiment, between {MIN_REVENUE_DROP_PERCENT}% and{' '}
-              {effectiveRevenueDropMax}%.
+              A safety pause, not a winner call — it limits how long a losing variation keeps
+              running. This test owns the threshold ({MIN_REVENUE_DROP_PERCENT}%–
+              {effectiveRevenueDropMax}%; default {DEFAULT_MAX_REVENUE_DROP_PERCENT}%). Max price
+              change and margin floors are checked on Products & prices, not while the test runs.
             </p>
           </>
         ) : (
           <p className={styles.guardrailHint}>
-            Off. This experiment will keep running even if a variation earns less per visitor than
+            Off. This test will keep running even if a variation earns less per visitor than
             control, until you stop it yourself.
           </p>
         )}

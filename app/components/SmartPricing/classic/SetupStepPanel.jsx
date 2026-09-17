@@ -11,7 +11,7 @@ export const EXPERIMENT_TYPES = [
   {
     id: 'offer_test',
     title: 'Offer test',
-    description: 'Test a percent or amount-off offer on selected products.',
+    description: 'Show a sale price with the original price crossed out.',
   },
 ];
 
@@ -28,21 +28,21 @@ export default function SetupStepPanel({
       <div className={styles.field}>
         <TextField
           id="classic-exp-name"
-          label="Experiment name"
+          label="Test name"
           requiredIndicator
           value={name}
           onChange={onNameChange}
           placeholder={
             experimentType === 'offer_test'
               ? 'e.g. Summer offer — 10% off'
-              : 'e.g. Growth plan — $39 price test'
+              : 'e.g. Growth plan – £39 price test'
           }
           autoComplete="off"
         />
       </div>
 
       <div className={styles.field}>
-        <span className={styles.label}>Hypothesis</span>
+        <span className={styles.label}>Optional: hypothesis</span>
         <TextField
           id="classic-hypothesis"
           label=""
@@ -52,11 +52,11 @@ export default function SetupStepPanel({
           placeholder="If we change… then… because…"
           multiline={3}
           autoComplete="off"
-          helpText="What do you expect to happen, and why?"
+          helpText="Optional, for your notes only."
         />
       </div>
 
-      <div className={styles.sectionLabel}>Experiment type</div>
+      <div className={styles.sectionLabel}>Test type</div>
       <div className={styles.typeGrid}>
         {EXPERIMENT_TYPES.map(type => {
           const selected = experimentType === type.id;

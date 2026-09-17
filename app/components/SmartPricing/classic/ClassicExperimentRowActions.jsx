@@ -28,6 +28,7 @@ import {
   deleteClassicExperimentSynchronized,
 } from './classicExperimentDelete';
 import { classicCreateStepId } from './classicCreateSteps';
+import { duplicateClassicExperimentAsDraft } from './classicExperimentDuplicate';
 import styles from './SmartPricingClassic.module.css';
 
 function sleep(ms) {
@@ -192,7 +193,7 @@ export default function ClassicExperimentRowActions({
       await fn();
       onActionDone?.(action, experiment);
     } catch (err) {
-      notify('error', err?.message || `Could not ${action} experiment.`);
+      notify('error', err?.message || `Could not ${action} test.`);
       onBusy?.('');
     } finally {
       setBusy('');
@@ -214,12 +215,12 @@ export default function ClassicExperimentRowActions({
         return status === 'draft' || status === 'queued';
       });
       if (!toLaunch.length) {
-        throw new Error('Nothing to launch for this experiment.');
+        throw new Error('Nothing to launch for this test.');
       }
       const guardrailsPayload = await getSmartPricingGuardrails(shopDomain).catch(() => ({}));
       await launchMany(enrichInboxPlansForLaunch(toLaunch, guardrailsPayload));
       await persistInboxPlansNow(shopDomain, readInboxPlans(shopDomain)).catch(() => null);
-      notify('success', 'Experiment launched.');
+      notify('success', 'Test launched.');
       await refreshList({ preferLocalIds: planIds, quiet: true });
     });
 
@@ -233,11 +234,11 @@ export default function ClassicExperimentRowActions({
       }
       const { succeeded, failed } = await postToEachTest(testIds, 'pause');
       if (!succeeded.length) {
-        throw failed[0]?.reason || new Error('Could not pause experiment.');
+        throw failed[0]?.reason || new Error('Could not pause test.');
       }
       const pauseEntry = createActivityEntry({
         kind: 'paused',
-        title: 'Experiment paused',
+        title: 'Test paused',
         detail: 'Traffic assignment stopped',
         actor: experiment?.representative?.owner_name || experiment?.representative?.created_by_name || 'You',
       });
@@ -274,11 +275,11 @@ export default function ClassicExperimentRowActions({
       }
       const { succeeded, failed } = await postToEachTest(testIds, 'stop');
       if (!succeeded.length) {
-        throw failed[0]?.reason || new Error('Could not stop experiment.');
+        throw failed[0]?.reason || new Error('Could not stop test.');
       }
       const stopEntry = createActivityEntry({
         kind: 'stopped',
-        title: 'Experiment stopped',
+        title: 'Test stopped',
         detail: 'Ended by you — no longer collecting results',
         actor:
           experiment?.representative?.owner_name ||
@@ -337,7 +338,7 @@ export default function ClassicExperimentRowActions({
       );
       const resumeEntry = createActivityEntry({
         kind: 'resumed',
-        title: 'Experiment resumed',
+        title: 'Test resumed',
         detail: 'Traffic assignment started again',
         actor: experiment?.representative?.owner_name || experiment?.representative?.created_by_name || 'You',
       });
@@ -345,7 +346,7 @@ export default function ClassicExperimentRowActions({
         plan => appendActivityToPlans([{ ...plan, status: 'running' }], resumeEntry)[0],
         { skipSettled: true }
       );
-      notify('success', 'Experiment resumed.');
+      notify('success', 'Test resumed.');
       await refreshList({ preferLocalIds: planIds, quiet: true });
     });
 
@@ -355,15 +356,15 @@ export default function ClassicExperimentRowActions({
       const archiveEntry = createActivityEntry({
         id: 'archived',
         kind: 'archived',
-        title: 'Experiment archived',
-        detail: 'Hidden from the active experiments list',
+        title: 'Test archived',
+        detail: 'Hidden from the active tests list',
         at,
         actor: experiment?.representative?.owner_name || experiment?.representative?.created_by_name || 'You',
       });
       await patchExperimentPlans(plan =>
         appendActivityToPlans([{ ...plan, archived: true, archived_at: at }], archiveEntry)[0]
       );
-      notify('success', 'Experiment archived.');
+      notify('success', 'Test archived.');
       await refreshList({ preferLocalIds: planIds, quiet: true });
     });
 
@@ -371,14 +372,14 @@ export default function ClassicExperimentRowActions({
     runBusy('restore', async () => {
       const restoreEntry = createActivityEntry({
         kind: 'restored',
-        title: 'Experiment restored',
-        detail: 'Moved back to the active experiments list',
+        title: 'Test restored',
+        detail: 'Moved back to the active tests list',
         actor: experiment?.representative?.owner_name || experiment?.representative?.created_by_name || 'You',
       });
       await patchExperimentPlans(plan =>
         appendActivityToPlans([{ ...plan, archived: false, archived_at: null }], restoreEntry)[0]
       );
-      notify('success', 'Experiment restored.');
+      notify('success', 'Test restored.');
       await refreshList({ preferLocalIds: planIds, quiet: true });
     });
 
@@ -395,7 +396,7 @@ export default function ClassicExperimentRowActions({
         deleteLinkedTests: true,
       });
       if (!result.ok && !result.partial) {
-        throw new Error(result.errors[0] || 'Could not delete experiment.');
+        throw new Error(result.errors[0] || 'Could not delete test.');
       }
       if (result.ok) {
         const detail =
@@ -404,12 +405,12 @@ export default function ClassicExperimentRowActions({
                 result.deletedTestIds.length === 1 ? '' : 's'
               }.`
             : '';
-        notify('success', `Experiment deleted.${detail}`);
+        notify('success', `Test deleted.${detail}`);
       } else {
         notify(
           'error',
           result.errors[0] ||
-            'Experiment was partially deleted. Refresh the list and retry if plans or tests remain.'
+            'Test was partially deleted. Refresh the list and retry if plans or tests remain.'
         );
       }
       await refreshList({ omitIds: planIds, quiet: true });
@@ -422,7 +423,7 @@ export default function ClassicExperimentRowActions({
         setOpen(false);
         openDetails();
         break;
-      case 'continue':
+      case 'edit':
         setOpen(false);
         // The step matters for an unfinished draft: the wizard opens at step 1
         // without it, so continuing a draft left on Audience walked the
@@ -434,6 +435,19 @@ export default function ClassicExperimentRowActions({
             classicCreateStepId(experiment?.wizardDraft?.step) || undefined
           )
         );
+        break;
+      case 'duplicate':
+        setOpen(false);
+        runBusy('duplicate', async () => {
+          const result = await duplicateClassicExperimentAsDraft(shopDomain, experiment);
+          if (!result.ok) {
+            notify('error', result.message);
+            return;
+          }
+          notify('success', 'Draft duplicated.');
+          await refreshList({ quiet: true });
+          navigate(buildClassicWizardResumePath(result.experimentId));
+        });
         break;
       case 'launch':
         handleLaunch();
@@ -511,7 +525,7 @@ export default function ClassicExperimentRowActions({
         <Button
           size="slim"
           icon={ButtonIconMore}
-          accessibilityLabel={`Actions for ${experiment?.title || 'experiment'}`}
+          accessibilityLabel={`Actions for ${experiment?.title || 'test'}`}
           aria-haspopup="menu"
           aria-expanded={open}
           disabled={isBusy}
@@ -524,7 +538,7 @@ export default function ClassicExperimentRowActions({
         onClose={() => {
           if (!isBusy) setDeleteOpen(false);
         }}
-        title="Delete experiment"
+        title="Delete test"
         primaryAction={{
           content: 'Delete',
           destructive: true,

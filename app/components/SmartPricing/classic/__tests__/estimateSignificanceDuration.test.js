@@ -100,7 +100,7 @@ describe('estimateSignificanceDuration', () => {
     expect(result.recommendedSampleSize).toBe(2000);
     expect(result.planningSampleSize).toBe(2000);
     expect(result.detail).toMatch(/40 visitors\/day/);
-    expect(result.detail).toMatch(/50% experiment traffic/);
+    expect(result.detail).toMatch(/50% test traffic/);
     expect(result.slowestVariationPercent).toBe(50);
   });
 

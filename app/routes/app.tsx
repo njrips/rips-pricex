@@ -1,6 +1,14 @@
 import { useEffect } from "react";
 import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
-import { Link, Outlet, useLoaderData, useLocation, useNavigate, useRouteError } from "react-router";
+import {
+  isRouteErrorResponse,
+  Link,
+  Outlet,
+  useLoaderData,
+  useLocation,
+  useNavigate,
+  useRouteError,
+} from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { AppProvider } from "@shopify/shopify-app-react-router/react";
 import { NavMenu } from "@shopify/app-bridge-react";
@@ -16,6 +24,14 @@ import {
   pushEntitlementToExpress,
 } from "../utils/appSubscriptionEntitlement.server";
 import ClassicRouteLoading from "../components/shared/ClassicRouteLoading";
+import {
+  EmbeddedAppErrorFallback,
+  EmbeddedAppLoadingFallback,
+} from "../components/shared/EmbeddedAppErrorFallback";
+import {
+  isShopifyRedirectResponse,
+  shouldRenderShopifyBoundaryHtml,
+} from "../utils/shopifyEmbeddedSearch";
 import { buildPricingPlansUrl } from "../utils/pricingPlansUrl";
 import { withCurrentEmbeddedSearch } from "../utils/shopifyEmbeddedSearch";
 import "../styles/classic-theme.css";
@@ -123,7 +139,19 @@ async function resolveEntitlement({
     fetchSubscriptionEntitlement(admin),
   ]);
 
+  const operatorDevPlan =
+    String(cached?.planHandle || "")
+      .trim()
+      .toLowerCase() === "dev" && Boolean(cached?.entitled);
+
   if (live) {
+    if (operatorDevPlan && !live.entitled) {
+      return {
+        entitled: true,
+        planHandle: planHandleFromQuery || "dev",
+        source: "dev_plan",
+      };
+    }
     // Only write when Shopify disagrees with our copy, so a steady state does
     // not post on every page load.
     if (Boolean(cached?.entitled) !== live.entitled) {
@@ -251,12 +279,12 @@ export default function App() {
       <PolarisAppProvider i18n={enTranslations}>
         <NavMenu>
           <Link to="/app" rel="home">
-            Experiments
+            Tests
           </Link>
-          <Link to="/app/experiments/new">Create</Link>
-          <Link to="/app/setup">Setup</Link>
-          <Link to="/app/settings">Settings</Link>
-          <Link to="/app/help">Help</Link>
+          <Link to="/app/experiments/new">New test</Link>
+          <Link to="/app/setup">Store setup</Link>
+          <Link to="/app/settings">App settings</Link>
+          <Link to="/app/help">Help & docs</Link>
         </NavMenu>
         <SupportLinkHandler />
         <div data-palette="admin">
@@ -269,7 +297,30 @@ export default function App() {
 }
 
 export function ErrorBoundary() {
-  return boundary.error(useRouteError());
+  const error = useRouteError();
+
+  if (shouldRenderShopifyBoundaryHtml(error)) {
+    return boundary.error(error);
+  }
+
+  if (isRouteErrorResponse(error)) {
+    const body = typeof error.data === 'string' ? error.data.trim() : '';
+    if (isShopifyRedirectResponse(error) || !body) {
+      return <EmbeddedAppLoadingFallback />;
+    }
+    return (
+      <EmbeddedAppErrorFallback
+        title={`Request failed (${error.status})`}
+        message={body || error.statusText || 'The app could not load this page.'}
+      />
+    );
+  }
+
+  return (
+    <EmbeddedAppErrorFallback
+      message={error instanceof Error ? error.message : 'The app hit an unexpected error.'}
+    />
+  );
 }
 
 export const headers: HeadersFunction = (headersArgs) => {

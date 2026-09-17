@@ -43,10 +43,17 @@ vi.mock('../../../services', () => ({
 
 /** What the shop already has saved, so a test can start from real rows. */
 let savedMappings = [];
+/** When set, POST …/auto-map returns this payload (Settings deep link + Auto-detect). */
+let autoMapPostResponse = null;
 
 vi.mock('../../../services/api', () => ({
   apiGet: () => Promise.resolve({ data: { mappings: savedMappings } }),
-  apiPost: () => Promise.resolve({ data: {} }),
+  apiPost: path => {
+    if (String(path).includes('auto-map')) {
+      return Promise.resolve({ data: autoMapPostResponse || { surfaces: [] } });
+    }
+    return Promise.resolve({ data: {} });
+  },
   apiPut: (path, body) => {
     savedBodies.push(body);
     return Promise.resolve({ data: { mappings: body.mappings } });
@@ -62,6 +69,9 @@ const { AppProvider } = await import('@shopify/polaris');
 const enTranslations = (await import('@shopify/polaris/locales/en.json')).default;
 const { StoreSettingsPriceSurfacesSection } = await import(
   '../sections/StoreSettingsPriceSurfacesSection'
+);
+const { formatThemeDefaultsHeaderLabel } = await import(
+  '../../TestWizard/PriceSurfaceMappingsPanel.jsx'
 );
 
 let container;
@@ -109,7 +119,8 @@ const switches = () => Array.from(container.querySelectorAll('[role="switch"]'))
  * A blocked Pick carries its reason in the accessible name as well as a
  * tooltip, because a tooltip on a disabled control is hover-only.
  */
-const pickReason = () => buttonNamed('Pick')?.getAttribute('aria-label') || '';
+const pickButton = () => buttonNamed('Pick on site');
+const pickReason = () => pickButton()?.getAttribute('aria-label') || '';
 
 const click = async node => {
   await act(async () => {
@@ -132,13 +143,14 @@ const setValue = async (node, value) => {
 };
 
 const addRow = async () => {
-  await click(buttonNamed('Add row'));
+  await click(buttonNamed('Add location'));
 };
 
 beforeEach(() => {
   savedBodies.length = 0;
   storeResourceRequests.length = 0;
   savedMappings = [];
+  autoMapPostResponse = null;
   storeProducts = [{ handle: 'sample-tee' }];
   container = document.createElement('div');
   document.body.appendChild(container);
@@ -162,8 +174,8 @@ describe('the page is only the mapping table', () => {
 
   it('keeps the three actions worth having', async () => {
     await render();
-    expect(buttonNamed('Add row')).toBeTruthy();
-    expect(buttonNamed('Auto-map prices')).toBeTruthy();
+    expect(buttonNamed('Add location')).toBeTruthy();
+    expect(buttonNamed('Scan storefront')).toBeTruthy();
     expect(buttonNamed('Save')).toBeTruthy();
     // Auto-map fills the table, so the other theme helpers were redundant.
     expect(buttonNamed('Suggest from theme')).toBeFalsy();
@@ -187,6 +199,24 @@ describe('the page is only the mapping table', () => {
     expect(text()).toContain('No selectors mapped yet');
     // The old copy pointed at coverage cards that no longer exist.
     expect(text()).not.toContain('smart pick card');
+  });
+
+});
+
+describe('formatThemeDefaultsHeaderLabel', () => {
+  it('wraps shop-defaults status and selector count in one string', () => {
+    expect(
+      formatThemeDefaultsHeaderLabel({ label: 'Shop defaults active', configuredShop: 22 })
+    ).toBe('Use theme defaults – Shop defaults active (22 selectors found)');
+    expect(
+      formatThemeDefaultsHeaderLabel({ label: 'Shop defaults active', configuredShop: 1 })
+    ).toBe('Use theme defaults – Shop defaults active (1 selector found)');
+  });
+
+  it('keeps other registry labels on the same prefix', () => {
+    expect(formatThemeDefaultsHeaderLabel({ label: '3 mapping gaps', configuredShop: 2 })).toBe(
+      'Use theme defaults – 3 mapping gaps'
+    );
   });
 });
 
@@ -215,10 +245,10 @@ describe('a row can name a specific page', () => {
   it('names the column for whichever of the two it is holding', async () => {
     await render();
     await addRow();
-    expect(text()).toContain('Role');
-    expect(text()).not.toContain('Role / page URL');
+    expect(text()).toContain('Price type');
+    expect(text()).not.toContain('Price type / page URL');
     await setValue(selects()[0], 'url');
-    expect(text()).toContain('Role / page URL');
+    expect(text()).toContain('Price type / page URL');
   });
 
   it('rejects a URL that is not a page', async () => {
@@ -258,12 +288,12 @@ describe('a row can name a specific page', () => {
     await render();
     await addRow();
     await setValue(selects()[0], 'url');
-    expect(isDisabled(buttonNamed('Pick'))).toBe(true);
+    expect(isDisabled(pickButton())).toBe(true);
     await setValue(
       inputs().find(node => node.placeholder === '/pages/black-friday'),
       '/pages/black-friday'
     );
-    expect(isDisabled(buttonNamed('Pick'))).toBe(false);
+    expect(isDisabled(pickButton())).toBe(false);
   });
 
   it('opens the picker on the page the row names', async () => {
@@ -274,7 +304,7 @@ describe('a row can name a specific page', () => {
       inputs().find(node => node.placeholder === '/pages/black-friday'),
       'https://custom-domain.com/pages/black-friday?preview=1'
     );
-    await click(buttonNamed('Pick'));
+    await click(pickButton());
     const frame = container.querySelector('iframe');
     expect(frame).toBeTruthy();
     const target = decodeURIComponent(frame.getAttribute('src') || '');
@@ -341,7 +371,7 @@ describe('the actions column', () => {
     expect(savedBodies.at(-1).mappings[0].enabled).toBe(false);
   });
 
-  // Every other test builds rows with Add row, which mints an id. Rows that
+  // Every other test builds rows with Add location, which mints an id. Rows that
   // came back from the server may have none, and the editor then derives one
   // from the row's position — so the id of a surviving row changes the moment
   // an earlier row is dropped.
@@ -381,7 +411,7 @@ describe('why Pick is unavailable', () => {
     await render();
     await addRow();
     await setValue(surfaceSelects()[0], 'url');
-    expect(isDisabled(buttonNamed('Pick'))).toBe(true);
+    expect(isDisabled(pickButton())).toBe(true);
     expect(pickReason()).toMatch(/page URL first/i);
   });
 
@@ -389,7 +419,7 @@ describe('why Pick is unavailable', () => {
     storeProducts = [];
     await render();
     await addRow();
-    expect(isDisabled(buttonNamed('Pick'))).toBe(true);
+    expect(isDisabled(pickButton())).toBe(true);
     expect(pickReason()).toMatch(/no published product/i);
     expect(pickReason()).toMatch(/Specific URL/);
   });
@@ -404,7 +434,7 @@ describe('why Pick is unavailable', () => {
   it('enables Pick once a product is found', async () => {
     await render();
     await addRow();
-    expect(isDisabled(buttonNamed('Pick'))).toBe(false);
+    expect(isDisabled(pickButton())).toBe(false);
     // Nothing to explain, so the button is just called Pick.
     expect(pickReason()).toBe('');
   });
@@ -525,6 +555,33 @@ describe('saving', () => {
     expect(savedBodies).toHaveLength(1);
     expect(savedBodies[0].mappings).toHaveLength(1);
     expect(savedBodies[0].mappings[0].enabled).toBe(false);
+  });
+
+  it('auto-saves verified mappings when opened with automap=1 and server is ready', async () => {
+    autoMapPostResponse = {
+      ready_to_save: true,
+      password_gate: false,
+      theme_drift: { detected: false },
+      surfaces: [
+        {
+          surface: 'pdp',
+          role: 'regular',
+          status: 'matched',
+          selector: '.price-item--regular',
+        },
+        { surface: 'cart', role: 'regular', status: 'missing', selector: '' },
+      ],
+      theme: { id: 'gid://shopify/Theme/1', name: 'Dawn' },
+    };
+    await render({ autoMapRequestToken: 1 });
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 600));
+    });
+    expect(savedBodies.length).toBeGreaterThan(0);
+    expect(savedBodies[0]?.mappings?.some(row => row.selector === '.price-item--regular')).toBe(
+      true
+    );
+    expect(text()).toMatch(/Theme prices mapped|verified price location|Auto-mapped selectors saved/i);
   });
 
   it('reports a bad URL row instead of saving it', async () => {

@@ -54,7 +54,7 @@ export function resolveProductActionAvailability({
   const canFinish = decision?.can_finish === true;
 
   const sharedBlock = sharedTest
-    ? 'This SKU shares a test with other products, so stop and re-run must happen at the experiment level.'
+    ? 'This SKU shares a test with other products, so stop and re-run must happen at the test level.'
     : null;
 
   // Reverting needs the per-variant snapshot taken at apply time. Offering it

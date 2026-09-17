@@ -115,9 +115,15 @@ describe('Settings tabs', () => {
   it('still offers the three tabs that own real settings', async () => {
     await render('/app/settings');
     const labels = tabLabels();
-    expect(labels).toContain('Plan');
-    expect(labels).toContain('Stat settings');
-    expect(labels).toContain('Price surfaces');
+    expect(labels).toContain('Plan & usage');
+    expect(labels).toContain('Results settings');
+    expect(labels).toContain('Price locations');
+  });
+
+  it('uses Theme price selectors as the in-tab page title while the tab stays Price locations', async () => {
+    await render('/app/settings?tab=price-surfaces');
+    expect(tabLabels()).toContain('Price locations');
+    expect(container.textContent).toContain('Theme price selectors');
   });
 
   it('sends a saved ?tab=installation link to Setup, where the work moved', async () => {
@@ -141,5 +147,11 @@ describe('Settings tabs', () => {
     const router = await render('/app/settings?tab=guardrails');
     expect(router.state.location.pathname).toBe('/app/settings');
     expect(router.state.location.search).toContain('tab=stats');
+  });
+
+  it('does not repeat the active tab name as both meta and card title', async () => {
+    await render('/app/settings?tab=stats');
+    expect(container.querySelectorAll('h1')).toHaveLength(0);
+    expect(container.textContent).toContain('Results settings');
   });
 });

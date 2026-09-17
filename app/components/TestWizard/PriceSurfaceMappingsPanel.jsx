@@ -5,7 +5,6 @@ import {
   Banner,
   BlockStack,
   Button,
-  Checkbox,
   InlineStack,
   Modal,
   Select,
@@ -33,6 +32,19 @@ import {
   isLocalDevStorefrontPasswordUiEnabled,
   resolveStorefrontPasswordForPreview,
 } from '../../utils/previewUrl';
+import {
+  autoMapModalIntroTooltip,
+  autoMapPrimaryActionLabel,
+  buildDefaultAcceptedSlots,
+  buildAutoMapModalIntro,
+  filterAutoMapModalSurfaces,
+  formatAutoMapRowLabel,
+  friendlyGapReason,
+  shouldAutoPersistAutoMapResult,
+  summarizeAutoMapResult,
+} from '../../utils/priceSurfaceAutoMapUi';
+import { IconInfo } from '../SmartPricing/classic/classicIcons';
+import classicStyles from '../SmartPricing/classic/SmartPricingClassic.module.css';
 
 // Saving shop defaults is one small PUT, so on a warm connection the spinner
 // can come and go inside a single frame and the click reads as a no-op. Hold
@@ -74,12 +86,28 @@ async function fetchShopMappings(settingsPath) {
   } catch (loadError) {
     return {
       mappings: null,
-      error: loadError?.message || 'Could not load shop price surface mappings.',
+      error: loadError?.message || 'Could not load shop price location mappings.',
     };
   }
 }
 
-const PICK_HINT = 'Open your storefront and click this price to fill the selector';
+const PICK_HINT =
+  'Open your storefront and click the price to capture its selector.';
+const AUTO_DETECT_HINT =
+  'Priceify checks your live shop and theme files to find prices automatically. Gaps use Pick on your storefront.';
+
+/** One header row per naming spec: status and selector count in the same label. */
+export function formatThemeDefaultsHeaderLabel(registryStatus) {
+  const label = String(registryStatus?.label || '').trim() || 'Shop defaults active';
+  const configuredShop = Number(registryStatus?.configuredShop) || 0;
+  let status = label;
+  if (label === 'Shop defaults active' && configuredShop > 0) {
+    status = `Shop defaults active (${configuredShop} selector${
+      configuredShop === 1 ? '' : 's'
+    } found)`;
+  }
+  return `Use theme defaults – ${status}`;
+}
 
 /**
  * Whether a saved row is painting, as a switch rather than a badge and a
@@ -92,15 +120,15 @@ function PriceSurfaceRowToggle({ styles, enabled, rowNumber, onChange }) {
     <TooltipWrapper
       content={
         enabled
-          ? 'Painting on your storefront. Turn off to keep the row but stop using it.'
-          : 'Saved but ignored. Turn on to paint this price again.'
+          ? 'Include this price in tests.'
+          : "Turn off if you don't want Priceify to change this price."
       }
     >
       <button
         type="button"
         role="switch"
         aria-checked={enabled}
-        aria-label={`Row ${rowNumber} ${enabled ? 'is painting' : 'is off'}`}
+        aria-label="Include in tests"
         className={`${styles.priceSurfaceRowToggle} ${
           enabled ? styles.priceSurfaceRowToggleOn : ''
         }`}
@@ -147,11 +175,11 @@ function PriceSurfaceMappingRows({
     <div className={styles.priceSurfaceMappingTable}>
       <div className={styles.priceSurfaceMappingHeaderRow} aria-hidden>
         <span></span>
-        <span>Surface</span>
+        <span>Page</span>
         {/* The column holds a price role for a page-type row and the page
             itself for a URL row, so it is named for whichever is on screen. */}
-        <span>{rows.some(isUrlRow) ? 'Role / page URL' : 'Role'}</span>
-        <span>Selector</span>
+        <span>{rows.some(isUrlRow) ? 'Price type / page URL' : 'Price type'}</span>
+        <span>Theme selector</span>
         <span>Actions</span>
       </div>
       {rows.map((row, index) => {
@@ -244,7 +272,7 @@ function PriceSurfaceMappingRows({
                   }
                   onClick={() => onBeginVisualPick(scope, index)}
                 >
-                  {isPicking ? 'Picking' : 'Pick'}
+                  {isPicking ? 'Picking' : 'Pick on site'}
                 </Button>
               </TooltipWrapper>
               <TooltipWrapper content="Remove this row">
@@ -297,6 +325,7 @@ export default function PriceSurfaceMappingsPanel({
   const [autoMapping, setAutoMapping] = useState(false);
   const [autoMapOpen, setAutoMapOpen] = useState(false);
   const [autoMapResult, setAutoMapResult] = useState(null);
+  const [autoMapShowTechnical, setAutoMapShowTechnical] = useState(false);
   const [acceptedSlots, setAcceptedSlots] = useState(() => new Set());
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -483,7 +512,7 @@ export default function PriceSurfaceMappingsPanel({
       return true;
     } catch (saveError) {
       setError(
-        saveError?.message || errorFallback || 'Could not save shop price surface mappings.'
+        saveError?.message || errorFallback || 'Could not save shop price location mappings.'
       );
       return false;
     } finally {
@@ -509,7 +538,7 @@ export default function PriceSurfaceMappingsPanel({
       setError(`Row ${badPage + 1}: ${priceSurfacePageUrlError(rows[badPage].pageUrl)}`);
       return;
     }
-    await persistShopMappings(rows, { flash: 'Shop price surfaces saved' });
+    await persistShopMappings(rows, { flash: 'Shop price locations saved' });
   };
 
   const beginVisualPick = async (scope, index) => {
@@ -628,6 +657,76 @@ export default function PriceSurfaceMappingsPanel({
     setPickerModalUrl(launchUrl);
   };
 
+  const applyAutoMapToShop = useCallback(
+    async ({ save = false, result, accepted } = {}) => {
+      const resolvedResult = result ?? autoMapResult;
+      const resolvedAccepted = accepted ?? acceptedSlots;
+      if (!resolvedResult) return false;
+      const selected = (resolvedResult.surfaces || []).filter(
+        row =>
+          resolvedAccepted.has(`${row.surface}:${row.role}`) &&
+          String(row.selector || '').trim()
+      );
+      if (!selected.length) {
+        setError('Accept at least one matched selector before applying.');
+        return false;
+      }
+      const existing = normalizePriceSurfaceMappingsForEditor(shopMappings);
+      const lockedVisual = new Set(
+        existing
+          .filter(row => ['visual', 'merchant'].includes(String(row.source || '')))
+          .map(row => `${row.surface}:${row.role}`)
+      );
+      const withoutReplaced = existing.filter(row => {
+        const slot = `${row.surface}:${row.role}`;
+        if (lockedVisual.has(slot)) return true;
+        return !selected.some(s => `${s.surface}:${s.role}` === slot);
+      });
+      const next = [
+        ...withoutReplaced,
+        ...selected
+          .filter(row => !lockedVisual.has(`${row.surface}:${row.role}`))
+          .map(row =>
+            applyRecommendedPriceSurfaceDefaults({
+              surface: row.surface,
+              role: row.role,
+              selector: row.selector,
+              source:
+                row.source === 'theme_pack' ||
+                row.source === 'theme_file' ||
+                row.source === 'openai'
+                  ? row.source
+                  : 'heuristic',
+              priority: 20,
+              enabled: true,
+            })
+          ),
+      ];
+      const normalized = normalizePriceSurfaceMappingsForEditor(next).slice(
+        0,
+        MAX_PRICE_SURFACE_MAPPINGS
+      );
+      setShopMappings(normalized);
+      setAutoMapOpen(false);
+      if (!save) {
+        setNoticeTitle('Applied');
+        setNotice('Auto-map selectors applied to the editor. Save to persist them.');
+        return true;
+      }
+      return persistShopMappings(normalized, {
+        autoMapTheme: resolvedResult.theme
+          ? {
+              id: resolvedResult.theme.id || null,
+              name: resolvedResult.theme.name || null,
+            }
+          : null,
+        flash: 'Auto-mapped selectors saved',
+        errorFallback: 'Applied to the editor but the save failed. Try Save.',
+      });
+    },
+    [acceptedSlots, autoMapResult, persistShopMappings, shopMappings]
+  );
+
   const runAutoMap = useCallback(async () => {
     setAutoMapping(true);
     setError('');
@@ -648,23 +747,38 @@ export default function PriceSurfaceMappingsPanel({
         setError('Auto-map found no prices to map. Add a row and use Pick instead.');
         return;
       }
-      const accepted = new Set(
-        surfaces
-          .filter(row => row.status === 'matched' && String(row.selector || '').trim())
-          .map(row => `${row.surface}:${row.role}`)
-      );
+      const accepted = buildDefaultAcceptedSlots(surfaces);
+      if (shouldAutoPersistAutoMapResult(result)) {
+        setAutoMapResult(result);
+        setAcceptedSlots(accepted);
+        const summary = summarizeAutoMapResult(result);
+        const saved = await applyAutoMapToShop({ save: true, result, accepted });
+        if (saved !== false) {
+          setNoticeTitle('Theme prices mapped');
+          setNotice(
+            `Saved ${summary.matchedCount} verified price location${
+              summary.matchedCount === 1 ? '' : 's'
+            }${summary.missingCount ? '. Use Pick for remaining gaps.' : '.'}`
+          );
+        }
+        return;
+      }
       setAcceptedSlots(accepted);
       setAutoMapResult(result);
+      setAutoMapShowTechnical(false);
       setAutoMapOpen(true);
-      const themeLabel = result?.theme?.name ? `Theme “${result.theme.name}”. ` : '';
-      setNoticeTitle('Auto-map ready');
-      setNotice(`${themeLabel}Review matched selectors, then Apply & save. Gaps can use Pick.`);
     } catch (autoMapError) {
       setError(autoMapError?.message || 'Could not auto-map theme prices.');
     } finally {
       setAutoMapping(false);
     }
-  }, [priceSurfaceSettingsPath, productPath, storefrontPassword]);
+  }, [
+    applyAutoMapToShop,
+    autoMapRequestToken,
+    priceSurfaceSettingsPath,
+    productPath,
+    storefrontPassword,
+  ]);
 
   useEffect(() => {
     const token = Number(autoMapRequestToken) || 0;
@@ -707,69 +821,31 @@ export default function PriceSurfaceMappingsPanel({
     setAcceptedSlots(prev => new Set(prev).add(`${surface}:${role}`));
   };
 
-  const applyAutoMapToShop = async ({ save = false } = {}) => {
-    if (!autoMapResult) return;
-    const selected = (autoMapResult.surfaces || []).filter(
-      row => acceptedSlots.has(`${row.surface}:${row.role}`) && String(row.selector || '').trim()
-    );
-    if (!selected.length) {
-      setError('Accept at least one matched selector before applying.');
-      return;
-    }
-    const existing = normalizePriceSurfaceMappingsForEditor(shopMappings);
-    const lockedVisual = new Set(
-      existing
-        .filter(row => ['visual', 'merchant'].includes(String(row.source || '')))
-        .map(row => `${row.surface}:${row.role}`)
-    );
-    const withoutReplaced = existing.filter(row => {
-      const slot = `${row.surface}:${row.role}`;
-      if (lockedVisual.has(slot)) return true;
-      return !selected.some(s => `${s.surface}:${s.role}` === slot);
-    });
-    const next = [
-      ...withoutReplaced,
-      ...selected
-        .filter(row => !lockedVisual.has(`${row.surface}:${row.role}`))
-        .map(row =>
-          applyRecommendedPriceSurfaceDefaults({
-            surface: row.surface,
-            role: row.role,
-            selector: row.selector,
-            source:
-              row.source === 'theme_pack' ||
-              row.source === 'theme_file' ||
-              row.source === 'openai'
-                ? row.source
-                : 'heuristic',
-            priority: 20,
-            enabled: true,
-          })
-        ),
-    ];
-    const normalized = normalizePriceSurfaceMappingsForEditor(next).slice(
-      0,
-      MAX_PRICE_SURFACE_MAPPINGS
-    );
-    setShopMappings(normalized);
-    setAutoMapOpen(false);
-    if (!save) {
-      setNoticeTitle('Applied');
-      setNotice('Auto-map selectors applied to the editor. Save to persist them.');
-      return;
-    }
-    await persistShopMappings(normalized, {
-      autoMapTheme: autoMapResult.theme
-        ? {
-            id: autoMapResult.theme.id || null,
-            name: autoMapResult.theme.name || null,
-          }
-        : null,
-      flash: 'Auto-mapped selectors saved',
-      errorFallback: 'Applied to the editor but the save failed. Try Save.',
-    });
-  };
+  const autoMapSummary = useMemo(
+    () => summarizeAutoMapResult(autoMapResult),
+    [autoMapResult]
+  );
+  const acceptedMatchedCount = useMemo(() => {
+    if (!autoMapResult?.surfaces) return 0;
+    return autoMapResult.surfaces.filter(
+      row =>
+        row.status === 'matched' &&
+        acceptedSlots.has(`${row.surface}:${row.role}`) &&
+        String(row.selector || '').trim()
+    ).length;
+  }, [autoMapResult, acceptedSlots]);
 
+  const autoMapModalSurfaces = useMemo(
+    () =>
+      filterAutoMapModalSurfaces(autoMapResult?.surfaces, {
+        showTechnical: autoMapShowTechnical,
+      }),
+    [autoMapResult, autoMapShowTechnical]
+  );
+  const autoMapIntro = useMemo(
+    () => buildAutoMapModalIntro(autoMapResult, autoMapSummary),
+    [autoMapResult, autoMapSummary]
+  );
 
   return (
     <div
@@ -779,12 +855,9 @@ export default function PriceSurfaceMappingsPanel({
       <div className={styles.priceSurfaceHeaderRow}>
         <span className={styles.priceSurfaceHeaderMain}>
           <Text as="span" variant="bodySm" fontWeight="semibold">
-            Shop theme price selectors
+            {formatThemeDefaultsHeaderLabel(registryStatus)}
           </Text>
-          <SettingsInfoLink hash="price-surfaces" label="Price surfaces" />
-          <Badge tone={registryStatus.tone} size="small">
-            {registryStatus.label}
-          </Badge>
+          <SettingsInfoLink hash="price-surfaces" label="Price locations" />
           {pickTarget ? (
             <Badge tone="attention" size="small">
               Picking
@@ -843,7 +916,7 @@ export default function PriceSurfaceMappingsPanel({
           </Banner>
         ) : null}
         {error ? (
-          <Banner tone="critical" title="Price surfaces">
+          <Banner tone="critical" title="Price locations">
             <p>{error}</p>
           </Banner>
         ) : null}
@@ -878,17 +951,19 @@ export default function PriceSurfaceMappingsPanel({
 
         <InlineStack gap="150" wrap>
           <Button size="slim" onClick={() => addShopMapping()} disabled={loading || savingShop}>
-            Add row
+            Add location
           </Button>
-          <Button
-            size="slim"
-            variant="primary"
-            loading={autoMapping}
-            disabled={loading || savingShop}
-            onClick={runAutoMap}
-          >
-            Auto-map prices
-          </Button>
+          <TooltipWrapper content={AUTO_DETECT_HINT}>
+            <Button
+              size="slim"
+              variant="primary"
+              loading={autoMapping}
+              disabled={loading || savingShop}
+              onClick={runAutoMap}
+            >
+              Scan storefront
+            </Button>
+          </TooltipWrapper>
           <Button size="slim" loading={savingShop} onClick={saveShopDefaults} disabled={loading}>
             {savingShop ? 'Saving…' : 'Save'}
           </Button>
@@ -897,38 +972,58 @@ export default function PriceSurfaceMappingsPanel({
       <Modal
         open={autoMapOpen}
         onClose={() => setAutoMapOpen(false)}
-        title="Auto-map theme prices"
+        title="Storefront price scan"
         primaryAction={{
-          content: autoMapResult?.ready_to_save ? 'Apply & save' : 'Apply to editor',
+          content: autoMapPrimaryActionLabel(autoMapResult, acceptedMatchedCount),
           loading: savingShop,
-          onAction: () => applyAutoMapToShop({ save: Boolean(autoMapResult?.ready_to_save) }),
+          disabled: acceptedMatchedCount === 0,
+          onAction: () =>
+            applyAutoMapToShop({ save: Boolean(autoMapResult?.ready_to_save) }),
         }}
         secondaryActions={[
           {
-            content: 'Apply without saving',
-            onAction: () => applyAutoMapToShop({ save: false }),
-          },
-          {
-            content: 'Close',
+            content: 'Not now',
             onAction: () => setAutoMapOpen(false),
           },
         ]}
       >
         <Modal.Section>
           <BlockStack gap="400">
-            <Text as="p" variant="bodySm">
-              {autoMapResult?.theme?.name
-                ? `Detected “${autoMapResult.theme.name}” (${autoMapResult.confidence || 'unknown'} confidence). `
-                : ''}
-              {autoMapResult?.rationale ||
-                'Live pages and theme files were scanned. Accept matched selectors, then save.'}
-              {autoMapResult?.theme_files?.scanned
-                ? ` Scanned ${autoMapResult.theme_files.scanned} theme file${
-                    autoMapResult.theme_files.scanned === 1 ? '' : 's'
-                  }.`
-                : ''}
-              {autoMapResult?.ai_enabled ? ' AI ranking is available for this shop.' : ''}
-            </Text>
+            <InlineStack gap="200" blockAlign="start" wrap={false}>
+              <Text as="p" variant="bodyMd">
+                {autoMapIntro}
+              </Text>
+              <TooltipWrapper
+                content={autoMapModalIntroTooltip(autoMapResult)}
+                accessibilityLabel="How the scan works"
+              >
+                <button
+                  type="button"
+                  className={classicStyles.infoIconLink}
+                  aria-label="How the scan works"
+                >
+                  <IconInfo size={14} />
+                </button>
+              </TooltipWrapper>
+            </InlineStack>
+            {autoMapSummary.matchedCount > 0 ? (
+              <Banner tone="success" title="Found automatically">
+                <p>
+                  {autoMapSummary.matchedCount} price location
+                  {autoMapSummary.matchedCount === 1 ? '' : 's'} on your shop
+                  {acceptedMatchedCount === autoMapSummary.matchedCount
+                    ? ' will be saved when you continue.'
+                    : ' — some are excluded; open technical details to change.'}
+                </p>
+              </Banner>
+            ) : null}
+            <Button
+              size="slim"
+              variant="plain"
+              onClick={() => setAutoMapShowTechnical(prev => !prev)}
+            >
+              {autoMapShowTechnical ? 'Hide technical details' : 'Show technical details'}
+            </Button>
             {autoMapResult?.theme_drift?.detected ? (
               <Banner tone="warning" title="Theme changed since last Auto-map">
                 <p>
@@ -946,10 +1041,73 @@ export default function PriceSurfaceMappingsPanel({
                 </p>
               </Banner>
             ) : null}
-            {(autoMapResult?.surfaces || []).map(row => {
+            {!autoMapModalSurfaces.length &&
+            autoMapSummary.matchedCount > 0 &&
+            !autoMapShowTechnical ? (
+              <Text as="p" variant="bodySm" tone="subdued">
+                No gaps left on this scan. Save to apply the locations we found on your shop.
+              </Text>
+            ) : null}
+            {(autoMapSummary.missingCount > 0 || autoMapSummary.ambiguousCount > 0) &&
+            !autoMapShowTechnical ? (
+              <Text as="span" variant="bodySm" fontWeight="semibold">
+                Needs your storefront
+              </Text>
+            ) : null}
+            {autoMapModalSurfaces.map(row => {
               const slot = `${row.surface}:${row.role}`;
               const accepted = acceptedSlots.has(slot);
-              const probeReason = row?.probe?.reason || '';
+              const label = formatAutoMapRowLabel(
+                row.surface,
+                row.role,
+                PRICE_SURFACE_LABELS
+              );
+              const isGap = row.status === 'missing' || row.status === 'ambiguous';
+
+              if (!autoMapShowTechnical && isGap) {
+                return (
+                  <div key={slot} className={styles.priceSurfaceAutoMapCard || undefined}>
+                    <Text as="p" variant="bodyMd" fontWeight="semibold">
+                      {label}
+                    </Text>
+                    <Text as="p" variant="bodySm" tone="subdued">
+                      {friendlyGapReason(row)}
+                    </Text>
+                    <InlineStack gap="200">
+                      <Button
+                        size="slim"
+                        onClick={() => {
+                          setAutoMapOpen(false);
+                          startQuickPick(row.surface || 'pdp');
+                        }}
+                      >
+                        Pick on storefront
+                      </Button>
+                      {row.status === 'ambiguous' &&
+                      Array.isArray(row.alternatives) &&
+                      row.alternatives[0] ? (
+                        <Button
+                          size="slim"
+                          variant="plain"
+                          onClick={() =>
+                            chooseAlternative(
+                              row.surface,
+                              row.role,
+                              row.alternatives[0].selector,
+                              row.alternatives[0].sample_text
+                            )
+                          }
+                        >
+                          Use suggested match
+                        </Button>
+                      ) : null}
+                    </InlineStack>
+                  </div>
+                );
+              }
+
+              if (!autoMapShowTechnical) return null;
+
               const tone =
                 row.status === 'matched'
                   ? 'success'
@@ -962,17 +1120,26 @@ export default function PriceSurfaceMappingsPanel({
                     <InlineStack gap="200" blockAlign="center">
                       <Badge tone={tone}>{String(row.status || 'missing').toUpperCase()}</Badge>
                       <Text as="span" variant="bodyMd" fontWeight="semibold">
-                        {PRICE_SURFACE_LABELS[row.surface] ||
-                          String(row.surface || '').toUpperCase()}{' '}
-                        · {String(row.role || '').replace(/_/g, ' ')}
+                        {label}
                       </Text>
                     </InlineStack>
                     {row.status === 'matched' ? (
-                      <Checkbox
-                        label="Accept"
-                        checked={accepted}
-                        onChange={() => toggleAcceptedSlot(row.surface, row.role)}
-                      />
+                      accepted ? (
+                        <Button
+                          size="slim"
+                          variant="plain"
+                          onClick={() => toggleAcceptedSlot(row.surface, row.role)}
+                        >
+                          Exclude
+                        </Button>
+                      ) : (
+                        <Button
+                          size="slim"
+                          onClick={() => toggleAcceptedSlot(row.surface, row.role)}
+                        >
+                          Include
+                        </Button>
+                      )
                     ) : (
                       <Button
                         size="slim"
@@ -981,32 +1148,20 @@ export default function PriceSurfaceMappingsPanel({
                           startQuickPick(row.surface || 'pdp');
                         }}
                       >
-                        Pick instead
+                        Pick on storefront
                       </Button>
                     )}
                   </InlineStack>
                   <Text as="p" variant="bodySm" tone="subdued">
                     {row.selector && row.status !== 'missing' ? (
                       <>
-                        Selector: <code>{row.selector}</code>
-                        {row.sample_text ? ` · Sample: ${row.sample_text}` : ''}
-                        {row.source ? ` · ${String(row.source).replace(/_/g, ' ')}` : ''}
-                        {row.file_hint ? ` · ${row.file_hint}` : ''}
+                        CSS: <code>{row.selector}</code>
+                        {row.sample_text ? ` · Example: ${row.sample_text}` : ''}
                       </>
                     ) : (
-                      row.rationale || 'No selector found on the live page.'
+                      friendlyGapReason(row)
                     )}
                   </Text>
-                  {row.status === 'missing' && probeReason ? (
-                    <Text as="p" variant="bodySm" tone="critical">
-                      Probe: {probeReason.replace(/_/g, ' ')}
-                    </Text>
-                  ) : null}
-                  {row.status === 'ambiguous' ? (
-                    <Text as="p" variant="bodySm" tone="subdued">
-                      Ambiguous match — pick an alternative or use visual Pick (not auto-accepted).
-                    </Text>
-                  ) : null}
                   {Array.isArray(row.alternatives) && row.alternatives.length > 0 ? (
                     <InlineStack gap="200" wrap>
                       {row.alternatives.slice(0, 3).map(alt => (
@@ -1018,7 +1173,7 @@ export default function PriceSurfaceMappingsPanel({
                             chooseAlternative(row.surface, row.role, alt.selector, alt.sample_text)
                           }
                         >
-                          Use {alt.selector}
+                          {alt.selector}
                         </Button>
                       ))}
                     </InlineStack>
@@ -1026,12 +1181,11 @@ export default function PriceSurfaceMappingsPanel({
                 </div>
               );
             })}
-            {!autoMapResult?.ready_to_save ? (
-              <Banner tone="warning" title="Not ready to auto-save">
+            {!autoMapResult?.ready_to_save && acceptedMatchedCount > 0 ? (
+              <Banner tone="info" title="Save from the table">
                 <p>
-                  Apply &amp; save needs a verified PDP regular selector and medium/high theme
-                  confidence. You can still apply accepted selectors, fix gaps with Pick, then save
-                  manually.
+                  We found some prices, but the product-page check did not pass for one-click save.
+                  Continue to add them to the table, finish gaps with Pick, then Save.
                 </p>
               </Banner>
             ) : null}
@@ -1049,12 +1203,12 @@ export default function PriceSurfaceMappingsPanel({
       >
         <div data-price-surface-picker-modal className={styles.priceSurfacePickerModal}>
           <Text as="p" variant="bodySm" tone="subdued">
-            Click a price in the preview. The selector is sent back to Theme price mapping
+            Click a price in the preview. The selector is sent back to Price locations
             automatically. Store links stay inside this preview so picking does not break.
           </Text>
           {pickerModalUrl ? (
             <iframe
-              title="Priceify price surface picker"
+              title="Priceify price location picker"
               src={pickerModalUrl}
               className={styles.priceSurfacePickerIframe}
             />

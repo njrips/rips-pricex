@@ -7,9 +7,9 @@ export default function ExperimentDetails() {
   const navigate = useNavigate();
   return (
     <>
-      <TitleBar title="Experiment">
+      <TitleBar title="Test">
         <button type="button" variant="breadcrumb" onClick={() => navigate("/app")}>
-          Experiments
+          Tests
         </button>
       </TitleBar>
       <ClassicExperimentOverview />

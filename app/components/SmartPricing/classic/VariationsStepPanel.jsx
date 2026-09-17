@@ -9,8 +9,11 @@ import {
   MIN_ALLOCATION_PERCENT,
   setVariationTraffic,
   sliderFillPercent,
+  formatTrafficPercent,
+  roundTrafficPercent,
   splitEvenly,
   trafficRemaining,
+  trafficSplitIsComplete,
   trafficTotal,
   variationTrafficHeadroom,
 } from './variationsStepHelpers';
@@ -26,11 +29,23 @@ export {
   trafficTotal,
 } from './variationsStepHelpers';
 
-/** Digits only, and never more than three, so a field cannot hold "1000". */
-function percentDigits(raw) {
-  return String(raw ?? '')
-    .replace(/\D/g, '')
-    .slice(0, 3);
+/** Up to 100 with one decimal (e.g. 33.3). */
+function percentDraft(raw) {
+  let s = String(raw ?? '').replace(/[^\d.]/g, '');
+  const firstDot = s.indexOf('.');
+  if (firstDot >= 0) {
+    s =
+      s.slice(0, firstDot + 1) +
+      s
+        .slice(firstDot + 1)
+        .replace(/\./g, '')
+        .slice(0, 1);
+  }
+  const whole = firstDot >= 0 ? s.slice(0, firstDot) : s;
+  if (whole.length > 3) {
+    s = firstDot >= 0 ? `${whole.slice(0, 3)}.${s.slice(firstDot + 1)}` : whole.slice(0, 3);
+  }
+  return s;
 }
 
 /**
@@ -51,7 +66,8 @@ function percentDigits(raw) {
 function PercentField({ label, value, min = 0, max = 100, disabled = false, onCommit }) {
   const [draft, setDraft] = useState(null);
 
-  const clampPercent = next => Math.max(min, Math.min(max, Math.round(Number(next) || 0)));
+  const clampPercent = next =>
+    roundTrafficPercent(Math.max(min, Math.min(max, Number(next) || 0)));
 
   const commit = () => {
     if (draft === null) return;
@@ -96,9 +112,8 @@ function PercentField({ label, value, min = 0, max = 100, disabled = false, onCo
         suffix="%"
         align="right"
         disabled={disabled}
-        value={draft ?? String(value)}
-        // Digits only, so a pasted "-5" or "1e3" cannot reach the draft.
-        onChange={next => setDraft(percentDigits(next))}
+        value={draft ?? formatTrafficPercent(value)}
+        onChange={next => setDraft(percentDraft(next))}
         onSpinnerChange={step}
         onBlur={commit}
       />
@@ -142,12 +157,13 @@ export default function VariationsStepPanel({
   // Appended at 0% rather than re-split: silently taking traffic off arms the
   // merchant has already set is the behaviour this step moved away from.
   const addVariation = () => {
-    if (variations.length >= 5) return;
+    if (variations.length >= 4) return;
     onChange([...variations, buildNextVariation(variations)]);
   };
 
   return (
     <div>
+      <div className={styles.sectionLabel}>How much traffic enters this test</div>
       <div className={styles.field}>
         <LabelWithInfo
           htmlFor="classic-variations-allocation"
@@ -178,10 +194,19 @@ export default function VariationsStepPanel({
           />
         </div>
         <p className={styles.help}>
-          {allocation}% of matching visitors enter the experiment. The rest keep your current
-          prices and are not measured. The split below then divides those {allocation}%.
+          What percentage of eligible visitors should enter this test?
+        </p>
+        <p className={styles.help} style={{ marginTop: 0 }}>
+          {formatTrafficPercent(allocation)}% of eligible visitors will enter this test.
         </p>
       </div>
+
+      <div className={styles.sectionLabel}>Split traffic between variations</div>
+      {!isOffer ? (
+        <p className={styles.help} style={{ marginTop: 0, marginBottom: 12 }}>
+          Split test traffic between your current price (control) and up to 4 price variations.
+        </p>
+      ) : null}
 
       <div className={styles.trafficBanner}>
         <span className={styles.trafficBannerLeft}>
@@ -189,12 +214,16 @@ export default function VariationsStepPanel({
             <IconScales size={16} />
           </span>
           <span className={styles.trafficBannerText}>Traffic split</span>
-          <span className={gate.disabled ? styles.trafficBad : styles.trafficOk}>{total}%</span>
+          <span className={gate.disabled ? styles.trafficBad : styles.trafficOk}>
+            {formatTrafficPercent(total)}%
+          </span>
           <span className={styles.trafficBannerMuted}>
-            {remaining === 0 ? '/ 100%' : `/ 100% · ${Math.abs(remaining)}% ${remaining > 0 ? 'left' : 'over'}`}
+            {trafficSplitIsComplete(variations)
+              ? '/ 100%'
+              : `/ 100% · ${formatTrafficPercent(Math.abs(remaining))}% ${remaining > 0 ? 'left' : 'over'}`}
           </span>
         </span>
-        <Button onClick={() => onChange(splitEvenly(variations))}>Split equally</Button>
+        <Button onClick={() => onChange(splitEvenly(variations))}>Split evenly</Button>
       </div>
 
       {gate.disabled ? (
@@ -227,13 +256,15 @@ export default function VariationsStepPanel({
                   isControl ? styles.controlVariationMarker : ''
                 }`}
                 aria-label={
-                  isControl ? 'Control — current catalog baseline' : `Variation ${row.letter}`
+                  isControl ? 'Control – current price' : `Variation ${row.letter}`
                 }
-                title={isControl ? 'Current catalog baseline' : undefined}
+                title={isControl ? 'Keeps your current catalog price.' : undefined}
               >
                 {isControl ? <IconControlBaseline size={14} /> : row.letter}
               </span>
-              <span className={styles.variationTag}>{row.role}</span>
+              <span className={styles.variationTag}>
+                {isControl ? 'Control – current price' : row.role}
+              </span>
               {index > 1 ? (
                 <span className={styles.variationRemove}>
                   <Button
@@ -246,28 +277,30 @@ export default function VariationsStepPanel({
                 </span>
               ) : null}
             </div>
-            <TextField
-              label="Variation name"
-              labelHidden
-              value={row.name}
-              onChange={value => updateRow(index, { name: value })}
-              autoComplete="off"
-              placeholder="Variation name"
-            />
-            <TextField
-              label="Variation description"
-              labelHidden
-              value={row.description}
-              onChange={value => updateRow(index, { description: value })}
-              autoComplete="off"
-              placeholder={
-                index === 0
-                  ? isOffer
-                    ? 'No offer (baseline)'
-                    : 'Current price'
-                  : "Describe what's different (optional)"
-              }
-            />
+            {isControl ? (
+              <p className={styles.help} style={{ margin: '0 0 8px' }}>
+                Keeps your current catalog price.
+              </p>
+            ) : (
+              <TextField
+                label="Variation name"
+                labelHidden
+                value={row.name}
+                onChange={value => updateRow(index, { name: value })}
+                autoComplete="off"
+                placeholder={`Variation ${row.letter}`}
+              />
+            )}
+            {!isControl ? (
+              <TextField
+                label="Variation description"
+                labelHidden
+                value={row.description}
+                onChange={value => updateRow(index, { description: value })}
+                autoComplete="off"
+                placeholder="Describe what's different"
+              />
+            ) : null}
             <div className={styles.sliderRow}>
               <div className={styles.sliderCol}>
                 <div className={styles.sliderMeta}>
@@ -316,11 +349,16 @@ export default function VariationsStepPanel({
         );
       })}
 
-      {variations.length < 5 ? (
+      {variations.length < 4 ? (
         <Button icon={ButtonIconPlus} onClick={addVariation}>
           Add variation
         </Button>
       ) : null}
+
+      <p className={styles.help}>
+        If you pause a variation, its traffic will be automatically redistributed to the remaining
+        variations.
+      </p>
     </div>
   );
 }

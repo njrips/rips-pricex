@@ -46,10 +46,10 @@ export default function ExperimentsHome() {
 
   return (
     <>
-      <TitleBar title="Experiments">
+      <TitleBar title="Tests">
         {!ctx.entitled ? (
           <button variant="primary" onClick={() => upgrade()}>
-            Upgrade to create
+            View plans
           </button>
         ) : null}
       </TitleBar>
@@ -59,32 +59,28 @@ export default function ExperimentsHome() {
             tone="warning"
             title="Create is locked"
             action={{
-              content: 'Open Plan',
-              onAction: () => navigate('/app/settings?tab=plan'),
+              content: 'Open setup',
+              onAction: () => navigate('/app/setup'),
             }}
-            secondaryAction={{ content: 'Upgrade', onAction: upgrade }}
+            secondaryAction={{ content: 'View plans', onAction: upgrade }}
           >
-            <p>
-              This shop needs an active Smart Pricing plan before you can create or launch
-              experiments. You can still browse the list and finish{' '}
-              <Link to="/app/setup">Setup</Link>.
-            </p>
+            <p>Finish setup to start a test.</p>
           </Banner>
         </Box>
       ) : launchSummary.anyReady === false ? (
         <Box paddingInline="800" paddingBlockStart="400" paddingBlockEnd="0">
           <Banner
             tone="warning"
-            title="Finish Setup before launch"
-            action={{ content: 'Open Setup', onAction: () => navigate('/app/setup') }}
+            title="Finish store setup before launch"
+            action={{ content: 'Open Store setup', onAction: () => navigate('/app/setup') }}
             secondaryAction={{
-              content: 'Price surfaces',
+              content: 'Price locations',
               onAction: () => navigate('/app/settings?tab=price-surfaces&automap=1'),
             }}
           >
             <p>
               {launchSummary.detail ||
-                'Offer tests need the checkout discount. Price tests need cart transform and theme price selectors.'}
+                'Offer tests need Checkout pricing functions. Price tests also need Theme connection and price locations.'}
             </p>
           </Banner>
         </Box>
@@ -93,15 +89,15 @@ export default function ExperimentsHome() {
           <Banner
             tone="info"
             title="Offer tests can launch"
-            action={{ content: 'Open Setup', onAction: () => navigate('/app/setup') }}
+            action={{ content: 'Open Store setup', onAction: () => navigate('/app/setup') }}
             secondaryAction={{
-              content: 'Price surfaces',
+              content: 'Price locations',
               onAction: () => navigate('/app/settings?tab=price-surfaces&automap=1'),
             }}
           >
             <p>
               {launchSummary.detail ||
-                'Price tests still need cart transform and theme price selectors. Offer tests apply at checkout and do not wait on those steps.'}
+                'Price tests still need Checkout pricing functions and price locations. Offer tests apply at checkout and do not wait on those steps.'}
             </p>
           </Banner>
         </Box>

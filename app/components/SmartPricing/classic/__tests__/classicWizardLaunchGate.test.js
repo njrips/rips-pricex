@@ -168,7 +168,7 @@ describe('the Launch button', () => {
     });
 
     expect(read('continue-disabled')).toBe('true');
-    expect(read('continue-reason')).toMatch(/35% of traffic is unassigned/i);
+    expect(read('continue-reason')).toMatch(/35\.0% of traffic is unassigned/i);
   });
 
   it('refuses while checkout is not ready, instead of erroring on click', async () => {
@@ -216,7 +216,7 @@ describe('the review page', () => {
     });
 
     expect(container.textContent).toContain('Not ready to launch');
-    expect(container.textContent).toMatch(/35% of traffic is unassigned/i);
+    expect(container.textContent).toMatch(/35\.0% of traffic is unassigned/i);
   });
 
   it('does not say checkout twice', async () => {

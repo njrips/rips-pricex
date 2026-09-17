@@ -135,7 +135,7 @@ describe('audience and metrics cards', () => {
   it('splits the old combined card in two, matching the Audience step', async () => {
     await renderPanel();
     expect(headingText('Audience')).toBe(true);
-    expect(headingText('Metrics')).toBe(true);
+    expect(headingText('Metrics & guardrail')).toBe(true);
     expect(headingText('Audience & metrics')).toBe(false);
   });
 
@@ -148,7 +148,7 @@ describe('audience and metrics cards', () => {
       'Countries',
       'Primary',
       'Secondary',
-      'Min sample',
+      'Min visitors',
       'Revenue guardrail',
       'Analysis',
     ]) {
@@ -227,7 +227,9 @@ describe('experiment traffic allocation', () => {
 
   it('reads out above the split it divides', async () => {
     await renderPanel();
-    expect(sectionFor('Variations').textContent).toContain('60% of matching visitors enter');
+    expect(sectionFor('Variations & traffic').textContent).toContain(
+      '60% of eligible visitors enter'
+    );
   });
 
   it('is no longer filed under an Audience card that cannot change it', async () => {
@@ -237,7 +239,7 @@ describe('experiment traffic allocation', () => {
 
   it('sends the merchant to the variations step to change it', async () => {
     const { onEditStep } = await renderPanel();
-    const edit = sectionFor('Variations').querySelector('button');
+    const edit = sectionFor('Variations & traffic').querySelector('button');
     await act(async () => {
       edit.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
@@ -246,7 +248,9 @@ describe('experiment traffic allocation', () => {
 
   it('shows a full allocation rather than the old 50% default', async () => {
     await renderPanel({ audience: { ...AUDIENCE, trafficAllocation: 100 } });
-    expect(sectionFor('Variations').textContent).toContain('100% of matching visitors enter');
+    expect(sectionFor('Variations & traffic').textContent).toContain(
+      '100% of eligible visitors enter'
+    );
   });
 });
 
@@ -358,7 +362,10 @@ describe('banner order', () => {
       },
     });
 
-    expect(container.textContent).toContain('Choose a higher-traffic product');
+    expect(container.textContent).toContain(
+      'try testing fewer products or fewer variations'
+    );
+    expect(container.textContent).not.toContain('Choose a higher-traffic product');
     expect(container.textContent).not.toContain('conservative planning prior');
 
     const hint = [...container.querySelectorAll('button')].find(node =>

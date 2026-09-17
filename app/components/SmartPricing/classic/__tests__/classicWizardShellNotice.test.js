@@ -58,9 +58,9 @@ function orderOf(...matchers) {
   return matchers.map(match => all.findIndex(match));
 }
 
-const isBackLink = node => /back to experiments/i.test(node.textContent || '') && node.tagName === 'BUTTON';
+const isBackLink = node => /back to tests/i.test(node.textContent || '') && node.tagName === 'BUTTON';
 const isNotice = node => node.getAttribute('data-testid') === 'notice-body';
-const isStepper = node => node.getAttribute('aria-label') === 'Experiment setup progress';
+const isStepper = node => node.getAttribute('aria-label') === 'Test setup progress';
 
 describe('ClassicWizardShell notice slot', () => {
   it('places the notice below the back link and above the stepper', async () => {
@@ -83,6 +83,20 @@ describe('ClassicWizardShell notice slot', () => {
   });
 });
 
+describe('ClassicWizardShell stepper labels', () => {
+  it('shows each step name once in the stepper', async () => {
+    await renderShell({ stepIndex: 0 });
+    const stepper = container.querySelector('[aria-label="Test setup progress"]');
+    expect(stepper).toBeTruthy();
+    const normalized = (stepper.textContent || '').replace(/\s+/g, ' ').trim();
+    expect(normalized).toMatch(/Basics/);
+    expect(normalized).toMatch(/Traffic/);
+    expect(normalized).toMatch(/Products\s*&\s*prices/);
+    expect(normalized).toMatch(/Audience\s*&\s*goals/);
+    expect(normalized).toMatch(/Review\s*&\s*launch/);
+  });
+});
+
 /**
  * Launching commits an experiment to live shopper traffic, and it used to be
  * the same primary button as the four Continues that precede it.
@@ -93,7 +107,7 @@ describe('the launch button', () => {
   }
 
   it('is larger than a Continue', async () => {
-    await renderShell({ continueLabel: 'Launch experiment' });
+    await renderShell({ continueLabel: 'Launch test' });
     expect(primaryButton().className).toMatch(/sizeLarge/);
   });
 
@@ -103,7 +117,7 @@ describe('the launch button', () => {
   });
 
   it('carries the launch treatment only on the launch step', async () => {
-    await renderShell({ continueLabel: 'Launch experiment' });
+    await renderShell({ continueLabel: 'Launch test' });
     const launchWrap = primaryButton().closest('span');
     expect(launchWrap.className).toBeTruthy();
 
@@ -119,7 +133,7 @@ describe('the launch button', () => {
 
   it('still reports why it is blocked', async () => {
     await renderShell({
-      continueLabel: 'Launch experiment',
+      continueLabel: 'Launch test',
       continueDisabled: true,
       continueDisabledReason: 'Checkout is not ready',
     });

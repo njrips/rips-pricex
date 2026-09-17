@@ -68,7 +68,7 @@ describe('Priceify guides content', () => {
     assert.ok(rolloutQueue, 'missing rollout-queue section');
     const rolloutCopy = rolloutQueue.paragraphs.join(' ');
     assert.match(rolloutCopy, /one row per product/i);
-    assert.match(rolloutCopy, /rest of the experiment keeps running/i);
+    assert.match(rolloutCopy, /rest of the test keeps running/i);
     assert.match(rolloutCopy, /revenue guardrail stopped is never offered for rollout/i);
     assert.match(rolloutCopy, /only ever mentioned once/i);
     assert.ok(DOCS_FAQ.length >= 3);

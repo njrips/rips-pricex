@@ -335,7 +335,7 @@ async function buildSmartPricingTestAnalytics(shopDomain, testId) {
   const plan = (await findInboxPlanByTestId(shopDomain, testId)) || null;
   const isSmartPricing = isSmartPricingTest(test) || Boolean(plan?.id);
   if (!isSmartPricing) {
-    throw new Error('Test is not linked to Smart Pricing');
+    throw new Error('Test is not linked to Priceify');
   }
 
   const armsFromPlan = Array.isArray(plan?.price_arms) ? plan.price_arms : [];

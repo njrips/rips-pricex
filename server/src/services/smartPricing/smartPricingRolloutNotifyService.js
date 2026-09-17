@@ -169,7 +169,7 @@ function winnerReadyEmail({ shopDomain, rows, autoApplyAt, appUrl }) {
   const link = safeHref(appUrl ? `${String(appUrl).replace(/\/+$/, '')}/app/experiments` : '');
 
   const text = [
-    `${count} ${noun} in your Smart Pricing tests reached a decision.`,
+    `${count} ${noun} in your Priceify tests reached a decision.`,
     '',
     ...lines,
     '',

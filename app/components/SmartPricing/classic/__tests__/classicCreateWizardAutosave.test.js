@@ -394,7 +394,7 @@ describe('ClassicCreateWizard save draft', () => {
     await renderWizard('/app/experiments/new');
     await click('save-draft');
 
-    expect(container.textContent).toContain('Add an experiment name');
+    expect(container.textContent).toContain('Add a test name');
     expect(readClassicWizardDraft(SHOP)).toBeNull();
   });
 });

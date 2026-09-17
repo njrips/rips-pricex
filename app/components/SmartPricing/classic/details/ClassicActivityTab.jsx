@@ -30,7 +30,7 @@ export default function ClassicActivityTab({ activity }) {
         <h3 className={styles.panelTitle}>Activity history</h3>
         <p className={styles.help}>
           Launch, pause, resume, Self-QA, audience changes, guardrail stops, and per-product
-          winner decisions will appear here as the experiment progresses.
+          winner decisions will appear here as the test progresses.
         </p>
       </div>
     );

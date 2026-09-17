@@ -1,15 +1,65 @@
+/** Shared vocabulary (Global naming principles). */
+export const HELP_GLOSSARY_TERMS = [
+  { term: 'Test', definition: 'A single price or offer comparison you run in Priceify.' },
+  {
+    term: 'Price test',
+    definition: 'Changes the actual price shown to shoppers, without a crossed-out original.',
+  },
+  {
+    term: 'Offer test',
+    definition: 'Shows a sale price with the original price crossed out.',
+  },
+  { term: 'Control', definition: 'The current price your store already uses.' },
+  {
+    term: 'Variation',
+    definition: 'A different price or offer you’re testing against control.',
+  },
+  {
+    term: 'Revenue per visitor',
+    definition: 'Revenue generated divided by number of visitors who saw the test.',
+  },
+  {
+    term: 'Confidence',
+    definition: 'How sure the maths is that one variation is better than another.',
+  },
+  {
+    term: 'Minimum visitors per variation',
+    definition:
+      'The number of visitors each variation must see before results are calculated.',
+  },
+  {
+    term: 'Revenue guardrail',
+    definition:
+      'Per-test limit on revenue-per-visitor drop vs control. After about 100 visitors per variation, Priceify pauses the test if a variation falls more than your threshold below control.',
+  },
+  {
+    term: 'Results settings',
+    definition:
+      'Shop-wide confidence level and minimum visitors per variation (Settings → Results settings).',
+  },
+  {
+    term: 'Price locations',
+    definition:
+      'The pages where prices appear (product, collection, cart, search, home).',
+  },
+  {
+    term: 'Theme selector',
+    definition: 'The CSS selector Priceify uses to find a price on your theme.',
+  },
+];
+
 export const HELP_FAQ_ITEMS = [
   {
     q: 'Checkout is not ready / Launch is blocked',
-    a: 'Open Setup and work the checklist in order: enable the theme app embed, install the checkout functions (one button covers both cart transform and the checkout discount), then map PDP price selectors under Settings → Price surfaces. Re-check readiness on Setup. Offer tests need the checkout discount; price tests also need cart transform and mapped selectors. Setup reads the embed from your live theme, so a step already done shows as enabled rather than asking you to confirm it.',
+    a: 'Open Store setup and work the checklist in order: complete Theme connection, install Checkout pricing functions (one button covers dynamic cart prices and checkout discounts), then map price locations under Settings → Price locations. Refresh status on Store setup when you change something. Offer tests need checkout discounts; price tests also need Checkout pricing functions and mapped price locations. Store setup reads your live theme, so a step already done shows as enabled rather than asking you to confirm it.',
   },
   {
     q: 'Shoppers do not see the offer under the product price',
-    a: 'Offer tests apply the discount at checkout. On the product page, assigned shoppers see a sale cutout (catalog price struck through plus the offer price) and the offer message — or the offer amount if you left the message empty — directly under that cutout on live and Preview (Dawn and Horizon-style themes). If several offer tests target the same product, shoppers see the newest one. Enable the theme app embed and map the PDP price selector under Settings → Price surfaces if your theme uses a custom price block.',
+    a: 'Offer tests apply the discount at checkout. On the product page, assigned shoppers see a sale cutout (catalog price struck through plus the offer price) and the offer message — or the offer amount if you left the message empty — directly under that cutout on live and Preview (Dawn and Horizon-style themes). If several offer tests target the same product, shoppers see the newest one. Finish Theme connection on Store setup and map price locations under Settings if your theme uses a custom price block.',
   },
   {
     q: 'Preview, QR, or copy link is wrong',
-    a: 'Preview and Open land on the storefront product page (not an app URL). Each click clears the previous preview bucket for that browser, then keeps the new variation in session storage and a session cookie so theme navigation stays on that arm. Price tests keep the anti-flicker guard on the PDP. Offer tests show the sale cutout and the assigned message or offer amount under the product price. If either is missing, confirm the theme embed is enabled and the PDP price selector is mapped, then retry Preview from the Variations tab.',
+    a: 'Preview and Open land on the storefront product page (not an app URL). Each click clears the previous preview bucket for that browser, then keeps the new variation in session storage and a session cookie so theme navigation stays on that arm. Price tests keep the anti-flicker guard on the PDP. Offer tests show the sale cutout and the assigned message or offer amount under the product price. If either is missing, confirm Theme connection on Store setup and price locations in Settings, then retry Preview from the Variations tab.',
   },
   {
     q: 'How does sample size and significance work?',
@@ -21,7 +71,7 @@ export const HELP_FAQ_ITEMS = [
   },
   {
     q: 'What does Suggest send to the AI?',
-    a: 'Per product you selected: its title, current price, margin percent, units sold in the last 30 days, its opportunity score, and Priceify’s own read on how hard it can be pushed. Plus your variation names, the min–max band you typed, the test metric, and two numbers from Settings — max price change and minimum margin. Nothing about a shopper is sent: no customer details, orders, or visitor data. Your shop domain and your Shopify product ids are not sent either, and nothing is stored or reused, so each click asks fresh. The reply is re-checked against your own catalog prices and limits before it becomes a price, so a suggestion cannot exceed your guardrails even if the model ignores them.',
+    a: 'Per product you selected: its title, current price, margin percent, units sold in the last 30 days, its opportunity score, and Priceify’s own read on how hard it can be pushed. Plus your variation names, the min–max band you typed, the test metric, and your shop price safety limits (max price change and minimum margin). Nothing about a shopper is sent: no customer details, orders, or visitor data. Your shop domain and your Shopify product ids are not sent either, and nothing is stored or reused, so each click asks fresh. The reply is re-checked against your own catalog prices and limits before it becomes a price, so a suggestion cannot exceed your guardrails even if the model ignores them.',
   },
   {
     q: 'The prices filled in but the banner says they are not from AI',
@@ -29,7 +79,7 @@ export const HELP_FAQ_ITEMS = [
   },
   {
     q: 'I edited audience or metrics on a live test',
-    a: 'Saving audience or metrics updates the plan. Visitors already assigned stay on the targeting from launch until you pause and relaunch. Draft and queued experiments pick up the new targeting on start.',
+    a: 'Saving audience or metrics updates the plan. Visitors already assigned stay on the targeting from launch until you pause and relaunch. Draft and queued tests pick up the new targeting on start.',
   },
   {
     q: 'Pause, resume, or apply a winner',
@@ -37,11 +87,15 @@ export const HELP_FAQ_ITEMS = [
   },
   {
     q: 'One product finished but the others have not — do I have to end the whole test?',
-    a: 'No. Every product in an experiment is its own test and finishes on its own schedule. The rollout queue at the top of the Performance tab lists them by what needs you: ready first, then anything blocked by a traffic-split fault, then the ones still collecting with the nearest to their floors first. Apply on a row writes that product’s price and stops only that product; Apply all ready does every finished one at once and leaves the rest running. Products where control won, or offer tests, finish without a catalog change. You are emailed once per product the first time it reaches a decision, and if automatic writes are on there is a review window — three days by default — before Priceify applies anything itself.',
+    a: 'No. Every product in a test is its own measurement and finishes on its own schedule. The rollout queue at the top of the Performance tab lists them by what needs you: ready first, then anything blocked by a traffic-split fault, then the ones still collecting with the nearest to their floors first. Apply on a row writes that product’s price and stops only that product; Apply all ready does every finished one at once and leaves the rest running. Products where control won, or offer tests, finish without a catalog change. You are emailed once per product the first time it reaches a decision, and if automatic writes are on there is a review window — three days by default — before Priceify applies anything itself.',
   },
   {
     q: 'Create is locked',
-    a: 'Create and Launch unlock with an active Smart Pricing plan. Open Settings → Plan to subscribe or confirm entitlement.',
+    a: 'Finish setup to start a test. Subscribe or confirm your Priceify plan under Settings → Plan & usage, then complete Store setup (Theme connection, Checkout pricing functions, and price locations).',
+  },
+  {
+    q: 'Where is the revenue guardrail?',
+    a: 'On each test — Audience & goals when you create it, and Settings on the test after launch. It is not in Results settings. Choose 3%–50% (default 10%); after about 100 visitors per variation, Priceify pauses if revenue per visitor drops further below control than your threshold. Max price change and margin limits are enforced on Products & prices, not here.',
   },
   {
     q: 'How do I contact support?',

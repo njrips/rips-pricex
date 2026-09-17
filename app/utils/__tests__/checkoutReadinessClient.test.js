@@ -106,7 +106,7 @@ describe('checkoutReadinessClient', () => {
     expect(summary.offerReady).toBe(false);
     expect(summary.priceReady).toBe(true);
     expect(summary.anyReady).toBe(true);
-    expect(summary.detail).toMatch(/checkout discount/i);
+    expect(summary.detail).toMatch(/Checkout pricing functions/i);
   });
 });
 

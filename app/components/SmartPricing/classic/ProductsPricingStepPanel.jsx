@@ -252,6 +252,13 @@ export default function ProductsPricingStepPanel({
 
   const activeArm = variations[activeArmIndex] || variations[0];
   const isControlArm = activeArmIndex === 0 || activeArm?.id === 'control';
+  const testPriceColumnLabel = useMemo(() => {
+    if (isControlArm) return 'Test price';
+    const name =
+      String(activeArm?.name || activeArm?.role || '').trim() ||
+      (activeArm?.letter ? `Variation ${activeArm.letter}` : 'Variation');
+    return `Test price – ${name}`;
+  }, [activeArm, isControlArm]);
 
   /**
    * Control has no tab. Its price is the catalog price by definition, so the
@@ -825,14 +832,14 @@ export default function ProductsPricingStepPanel({
         {[
           {
             id: 'manual',
-            title: 'Pick manually',
-            desc: 'Choose specific products below.',
+            title: 'Pick specific products',
+            desc: 'Choose individual products or collections.',
             icon: <IconHandPick size={16} />,
           },
           {
             id: 'all',
             title: 'All products',
-            desc: 'Include every product in the catalog.',
+            desc: 'Include every product in your catalog.',
             icon: <IconCheckCircle size={16} />,
           },
         ].map(mode => {
@@ -912,7 +919,7 @@ export default function ProductsPricingStepPanel({
                   onClick={() => onSelectedIdsChange([])}
                   disabled={!selectedIds.length}
                 >
-                  Clear
+                  Clear selection
                 </Button>
               </div>
             ) : null}
@@ -937,8 +944,8 @@ export default function ProductsPricingStepPanel({
 
       {productsOverCap && !loading && !loadError ? (
         <p className={styles.help}>
-          One experiment covers up to {maxSelection} products, so {productsLeftOut} of your{' '}
-          {catalogProductCount} are left out. Run a second experiment for the rest.
+          One test covers up to {maxSelection} products, so {productsLeftOut} of your{' '}
+          {catalogProductCount} are left out. Run a second test for the rest.
         </p>
       ) : null}
 
@@ -981,7 +988,7 @@ export default function ProductsPricingStepPanel({
         />
       ) : (
         <>
-      <div className={styles.sectionLabel}>Set prices for</div>
+      <div className={styles.sectionLabel}>Set test prices</div>
       <div className={styles.priceTabs} role="tablist" aria-label="Variation prices">
         {priceableArms.map(({ arm, index }) => (
           <button
@@ -1012,8 +1019,7 @@ export default function ProductsPricingStepPanel({
         ))}
       </div>
       <p className={styles.help} style={{ marginTop: 0, marginBottom: 18 }}>
-        Control keeps your current catalog prices, so there is nothing to set for it. Pick which
-        variation you&rsquo;re pricing — each one can have its own prices.
+        Control keeps your current catalog prices, so there&rsquo;s nothing to set for it.
       </p>
 
       {/* Control's price cells are read-only, so a pricing strategy has nothing
@@ -1022,27 +1028,27 @@ export default function ProductsPricingStepPanel({
       {!isControlArm ? (
         <>
       <LabelWithInfo hash="ai-price" label="AI price suggestions">
-        How would you like to price them?
+        How would you like to set prices?
       </LabelWithInfo>
       <div className={`${styles.modeRow} ${styles.modeRow3}`}>
         {[
           {
-            id: 'manual',
-            title: 'Manual',
-            desc: 'Set each price yourself.',
-            icon: <IconHandPick size={16} />,
-          },
-          {
             id: 'ai',
-            title: 'AI suggested',
-            desc: 'Prices inside your min–max band.',
+            title: 'AI suggested (recommended)',
+            desc: 'Let Priceify suggest prices within your min–max band.',
             icon: <IconWand size={16} />,
           },
           {
             id: 'bulk',
             title: 'Bulk adjust',
-            desc: 'Change all by a %.',
+            desc: 'Increase or decrease prices for all selected products by a % or fixed amount.',
             icon: <IconPlusCircle size={16} />,
+          },
+          {
+            id: 'manual',
+            title: 'Set manually',
+            desc: 'Set each test price yourself.',
+            icon: <IconHandPick size={16} />,
           },
         ].map(mode => {
           const selected = priceMode === mode.id;
@@ -1347,9 +1353,16 @@ export default function ProductsPricingStepPanel({
           <thead>
             <tr>
               <th>Product</th>
-              <th>Base</th>
-              <th>Test price</th>
-              <th>{deltaDisplayUnit === 'amount' ? 'Δ $' : 'Δ %'}</th>
+              <th>Base price</th>
+              <th>{testPriceColumnLabel}</th>
+              <th>
+                <TooltipWrapper content="Optional. Difference vs base price when you set a test price.">
+                  <span className={styles.tableColumnHeaderStack}>
+                    <span className={styles.tableColumnHeaderMain}>Change</span>
+                    <span className={styles.tableColumnHeaderHint}>(optional)</span>
+                  </span>
+                </TooltipWrapper>
+              </th>
             </tr>
           </thead>
           <tbody>

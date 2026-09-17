@@ -309,7 +309,7 @@ export function StoreSettingsPriceSurfacesSection({ shopDomain = '', autoMapRequ
     return (
       <div className={classicStyles.adminStackTight}>
         <p className={classicStyles.help}>
-          Open Settings from a connected shop to edit theme price selectors.
+          Open Settings from a connected shop to edit price locations.
         </p>
       </div>
     );

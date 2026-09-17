@@ -61,16 +61,27 @@ export function nextChallengerLetter(variations = []) {
   return LETTERS[challengerCount] || String(challengerCount + 1);
 }
 
+export function roundTrafficPercent(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return 0;
+  return Math.round(n * 10) / 10;
+}
+
+/** One decimal place for variation traffic shares (e.g. 33.3%, 50.0%). */
+export function formatTrafficPercent(value) {
+  return roundTrafficPercent(value).toFixed(1);
+}
+
 function rowTraffic(row) {
-  const value = Number(row?.traffic);
-  return Number.isFinite(value) && value > 0 ? value : 0;
+  const value = roundTrafficPercent(row?.traffic);
+  return value > 0 ? value : 0;
 }
 
 /** What is left for one row once every other row has taken its share. */
 export function variationTrafficHeadroom(variations, index) {
   const rows = Array.isArray(variations) ? variations : [];
   const others = rows.reduce((sum, row, i) => (i === index ? sum : sum + rowTraffic(row)), 0);
-  return Math.max(0, 100 - others);
+  return roundTrafficPercent(Math.max(0, 100 - others));
 }
 
 /**
@@ -85,32 +96,43 @@ export function variationTrafficHeadroom(variations, index) {
  */
 export function setVariationTraffic(variations, index, nextTraffic) {
   const rows = Array.isArray(variations) ? variations : [];
-  const requested = Math.max(0, Math.min(100, Math.round(Number(nextTraffic) || 0)));
+  const requested = roundTrafficPercent(
+    Math.max(0, Math.min(100, Number(nextTraffic) || 0))
+  );
   const capped = Math.min(requested, variationTrafficHeadroom(rows, index));
   return rows.map((row, i) => (i === index ? { ...row, traffic: capped } : row));
 }
 
 export function splitEvenly(variations) {
   const n = variations.length || 1;
-  const base = Math.floor(100 / n);
-  let rem = 100 - base * n;
+  const totalTenths = 1000;
+  const base = Math.floor(totalTenths / n);
+  let rem = totalTenths - base * n;
   return variations.map(row => {
-    const traffic = base + (rem > 0 ? 1 : 0);
+    const tenths = base + (rem > 0 ? 1 : 0);
     if (rem > 0) rem -= 1;
-    return { ...row, traffic };
+    return { ...row, traffic: tenths / 10 };
   });
 }
 
 export function trafficTotal(variations) {
-  return (Array.isArray(variations) ? variations : []).reduce(
-    (sum, row) => sum + rowTraffic(row),
-    0
+  return roundTrafficPercent(
+    (Array.isArray(variations) ? variations : []).reduce(
+      (sum, row) => sum + rowTraffic(row),
+      0
+    )
   );
 }
 
 /** Positive while traffic is still unassigned, negative if a draft is over. */
 export function trafficRemaining(variations) {
-  return 100 - trafficTotal(variations);
+  return roundTrafficPercent(100 - trafficTotal(variations));
+}
+
+const TRAFFIC_SPLIT_TOLERANCE = 0.05;
+
+export function trafficSplitIsComplete(variations) {
+  return Math.abs(trafficRemaining(variations)) < TRAFFIC_SPLIT_TOLERANCE;
 }
 
 /**
@@ -142,25 +164,25 @@ export function getVariationsStepContinueState({ variations = [] } = {}) {
     return {
       disabled: true,
       reason: 'too_few_arms',
-      hint: 'An experiment needs a control and at least one variation.',
+      hint: 'A test needs a control and at least one variation.',
     };
   }
 
   const remaining = trafficRemaining(rows);
-  if (remaining > 0) {
+  if (remaining > TRAFFIC_SPLIT_TOLERANCE) {
     return {
       disabled: true,
       reason: 'under_allocated',
-      hint: `${remaining}% of traffic is unassigned. Give it to a variation, or use Split equally.`,
+      hint: `${formatTrafficPercent(remaining)}% of traffic is unassigned. Give it to a variation, or use Split evenly.`,
     };
   }
   // Not reachable from the controls, which cap each row at the free remainder,
   // but a draft saved before that cap existed can still restore over 100.
-  if (remaining < 0) {
+  if (remaining < -TRAFFIC_SPLIT_TOLERANCE) {
     return {
       disabled: true,
       reason: 'over_allocated',
-      hint: `The split adds up to ${trafficTotal(rows)}%. Take ${Math.abs(remaining)}% back off a variation.`,
+      hint: `The split adds up to ${formatTrafficPercent(trafficTotal(rows))}%. Take ${formatTrafficPercent(Math.abs(remaining))}% back off a variation.`,
     };
   }
 

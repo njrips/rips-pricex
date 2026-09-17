@@ -1684,14 +1684,14 @@ export function buildActivityTimeline({
     items.push({
       id: 'created',
       at: createdAt,
-      title: 'Created experiment',
+      title: 'Created test',
       kind: 'created',
       actor,
       detail:
         productCount > 1
-          ? `${productCount} products in this experiment`
+          ? `${productCount} products in this test`
           : productCount === 1
-            ? '1 product in this experiment'
+            ? '1 product in this test'
             : '',
     });
   }
@@ -1700,7 +1700,7 @@ export function buildActivityTimeline({
     items.push({
       id: 'started',
       at: startedAt,
-      title: 'Launched experiment',
+      title: 'Launched test',
       kind: 'started',
       actor,
       detail: plan?.test_id || test?.id ? `Test ${plan?.test_id || test.id}` : '',
@@ -1777,7 +1777,7 @@ export function buildActivityTimeline({
       detail: isOffer
         ? 'Offer test finished — catalog prices were not changed'
         : productCount > 1
-          ? 'This product’s winning variation was written to Shopify. Other products in the experiment keep running until they have a result.'
+          ? 'This product’s winning variation was written to Shopify. Other products in the test keep running until they have a result.'
           : 'This product’s winning variation was written to Shopify.',
     });
   } else if (planStatus === 'completed') {
@@ -1810,7 +1810,7 @@ export function buildActivityTimeline({
       items.push({
         id: 'paused',
         at: pausedAt,
-        title: 'Experiment paused',
+        title: 'Test paused',
         kind: 'paused',
         actor,
         detail: 'Traffic assignment stopped',
@@ -1822,10 +1822,10 @@ export function buildActivityTimeline({
     items.push({
       id: 'archived',
       at: plan.archived_at || plan.updated_at,
-      title: 'Experiment archived',
+      title: 'Test archived',
       kind: 'archived',
       actor,
-      detail: 'Hidden from the active experiments list',
+      detail: 'Hidden from the active tests list',
     });
   }
 

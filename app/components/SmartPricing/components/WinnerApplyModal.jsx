@@ -37,7 +37,7 @@ export default function WinnerApplyModal({
       <Modal.Section>
         <BlockStack gap="300">
           <Text as="p" tone="subdued">
-            Writes this product’s reviewed challenger to Shopify. Other products in the experiment
+            Writes this product’s reviewed challenger to Shopify. Other products in the test
             are not changed. Confirm only after checking the effect size, traffic quality, and
             revenue guardrail.
           </Text>

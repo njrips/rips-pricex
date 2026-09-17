@@ -21,9 +21,9 @@ export const LANDING_ASSETS = {
 
 export const HERO = {
   badge: 'A/B PRICE TESTING FOR SHOPIFY',
-  title: 'Turn Your Shopify Pricing Into a Growth Experiment',
+  title: 'Turn Your Shopify Pricing Into a Growth Test',
   lead:
-    'Launch a price experiment in under 2 minutes. Guardrails auto-stop anything that hurts your store, page speed, refunds, bounce rate — before it matters.',
+    'Launch a price test in under 2 minutes. Guardrails auto-stop anything that hurts your store, page speed, refunds, bounce rate — before it matters.',
   primaryCta: 'Add to Shopify',
   secondaryCta: 'Start Free Trial',
 };
@@ -43,11 +43,11 @@ export const PRICE_TEST_DEMO = {
 
 export const PLATFORM_SECTION = {
   title: 'Your entire pricing strategy in one place',
-  lead: 'Run experiments, track performance, and find the price that drives the most revenue.',
+  lead: 'Run tests, track performance, and find the price that drives the most revenue.',
   steps: [
     {
       title: 'Choose products',
-      body: 'Select the products you want to include in your experiment.',
+      body: 'Select the products you want to include in your test.',
     },
     {
       title: 'Split traffic',
@@ -65,7 +65,7 @@ export const PLATFORM_SECTION = {
 };
 
 export const FEATURES_SECTION = {
-  title: 'Everything a price experiment needs.',
+  title: 'Everything a price test needs.',
   lead: 'Built around price, checkout and the way Shopify stores actually run.',
   items: [
     {
@@ -77,7 +77,7 @@ export const FEATURES_SECTION = {
     {
       icon: 'alt_route',
       iconSrc: LANDING_ASSETS.featureAltRoute,
-      title: 'Diverse Experiment Options',
+      title: 'Diverse Test Options',
       body: 'Conduct A/B, multivariate, split URL, and offer tests.',
     },
     {
@@ -90,7 +90,7 @@ export const FEATURES_SECTION = {
       icon: 'tune',
       iconSrc: LANDING_ASSETS.featureTune,
       title: 'Instant Confidence Metrics',
-      body: 'Monitor lift %, confidence %, and experiment progress.',
+      body: 'Monitor lift %, confidence %, and test progress.',
     },
     {
       icon: 'data_exploration',
@@ -102,7 +102,7 @@ export const FEATURES_SECTION = {
       icon: 'assistant',
       iconSrc: LANDING_ASSETS.featureAssistant,
       title: 'RipX Virtual Assistant',
-      body: 'Receive assistance and troubleshoot experiments within the app.',
+      body: 'Receive assistance and troubleshoot tests within the app.',
     },
   ],
 };
@@ -110,7 +110,7 @@ export const FEATURES_SECTION = {
 export const PRICING_SECTION = {
   title: 'Priced so one winning test covers the year.',
   lead:
-    'Banded by test orders per month — you only pay for traffic that actually went through an experiment. Change or cancel from your Shopify admin.',
+    'Banded by test orders per month — you only pay for traffic that actually went through a test. Change or cancel from your Shopify admin.',
   saveBadge: 'Save 20%',
   seeAllPlansLabel: 'See All Plans',
   tiers: [
@@ -128,7 +128,7 @@ export const PRICING_SECTION = {
       cta: 'Start free trial',
       featured: false,
       features: [
-        '1 experiment running at a time',
+        '1 test running at a time',
         'Price and shipping-threshold tests',
         'All 6 guardrails, auto-stop included',
         'Real-time confidence tracking',
@@ -151,8 +151,8 @@ export const PRICING_SECTION = {
       featured: true,
       badge: 'MOST POPULAR',
       features: [
-        'Unlimited concurrent experiments',
-        'Every experiment type, including A/B/n',
+        'Unlimited concurrent tests',
+        'Every test type, including A/B/n',
         'AI-suggested price ranges',
         'Audience targeting by country and source',
         'Slack and email guardrail alerts',
@@ -192,15 +192,15 @@ export const FAQ_SECTION = {
 export const FAQ_ITEMS = [
   {
     q: 'Will this slow down my store?',
-    a: 'Page load time is one of the six guardrail metrics Priceify watches on every experiment. If a variation pushes load time past the threshold you set, Priceify alerts you or stops the test automatically — so a slow variation cannot quietly stay live.',
+    a: 'Page load time is one of the six guardrail metrics Priceify watches on every test. If a variation pushes load time past the threshold you set, Priceify alerts you or stops the test automatically — so a slow variation cannot quietly stay live.',
   },
   {
     q: 'Will customers see different prices at the same time?',
-    a: 'Yes — that is how a price test works. Each shopper is assigned to one variation for the experiment, so they see a consistent price while they browse and checkout.',
+    a: 'Yes — that is how a price test works. Each shopper is assigned to one variation for the test, so they see a consistent price while they browse and checkout.',
   },
   {
     q: 'Do I need a developer to set this up?',
-    a: 'No. Install from the Shopify App Store, enable the theme app embed in Setup, and create your first experiment from the admin — no theme code edits required.',
+    a: 'No. Install from the Shopify App Store, complete Theme connection on Store setup, map price locations if your theme needs it, and create your first test from the admin — no theme code edits required.',
   },
   {
     q: 'How long does a test need to run?',
@@ -233,7 +233,7 @@ export const GET_STARTED_SECTION = {
     },
     {
       title: 'Priceify Guardrails',
-      body: 'Track six essential metrics for every experiment',
+      body: 'Track six essential metrics for every test',
       to: '/docs/settings',
     },
   ],
@@ -243,7 +243,7 @@ export const FINAL_CTA = {
   titleLine1: 'Your current price is a guess.',
   titleLine2: 'Fix that this week.',
   lead:
-    'Install Priceify, pick one product, and have a real price experiment running before the end of the day — with six guardrails watching it the whole time.',
+    'Install Priceify, pick one product, and have a real price test running before the end of the day — with six guardrails watching it the whole time.',
   primaryCta: 'Add to Shopify',
   secondaryCta: 'Start Free Trial',
   fine: '14-day free trial · No credit card · No theme code · Uninstall in one click',
@@ -261,7 +261,7 @@ export const LANDING_SECTION_ORDER = [
   'final-cta',
 ];
 
-export const FOOTER_BRAND_TAGLINE = 'Experiment Your Way to Better Pricing.';
+export const FOOTER_BRAND_TAGLINE = 'Test Your Way to Better Pricing.';
 
 /** @deprecated use FOOTER_BRAND_TAGLINE */
 export const FOOTER_BLURB = FOOTER_BRAND_TAGLINE;
@@ -367,16 +367,22 @@ export const WALKTHROUGH_STEPS = PLATFORM_SECTION.steps.map((step, index) => ({
 }));
 export const WALKTHROUGH_EYEBROW = 'How it works';
 export const USE_CASES = [];
+/** @deprecated use PRICE_TEST_DEMO.lead */
 export const EXPERIMENT_INTRO = PRICE_TEST_DEMO.lead;
 export const EXPERIMENT_POINTS = [];
 export const RESULTS_POINTS = [];
 export const HERO_SETUP_MOCK = { nav: [] };
+/** @deprecated layout mock only */
 export const EXPERIMENT_MOCK = { heading: '', charts: [], control: {}, variation: {} };
 export const RESULTS_BOARD = { columns: [], control: {}, variation: {} };
 export const WALKTHROUGH_MOCKS = {};
 
 export const PUBLIC_COPY_FORBIDDEN =
   /Watch a 90|no theme changes|no code or theme changes|\bDocs\b|\bBlog\b/;
+
+/** Merchant-facing public copy uses "test", not "experiment"; "Price locations", not "Price surfaces". */
+export const PUBLIC_NAMING_FORBIDDEN =
+  /\bexperiments\b|\bExperiment\b|\bexperiment\b|Price surfaces|\bprice surfaces\b|\btheme app embed\b|\bPricing experimentation\b|\bSmart Pricing\b/i;
 
 export function buildFaqJsonLd(items = FAQ_ITEMS) {
   return {

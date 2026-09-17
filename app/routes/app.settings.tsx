@@ -18,23 +18,22 @@ type TabId = 'plan' | 'stats' | 'price-surfaces';
 const TABS: { id: TabId; label: string; title: string; subtitle: string }[] = [
   {
     id: 'plan',
-    label: 'Plan',
-    title: 'Plan & entitlement',
+    label: 'Plan & usage',
+    title: 'Plan & usage',
     subtitle:
-      'Subscriptions are managed by Shopify App Pricing. Create and Launch unlock with an active plan.',
+      'Your plan is active. You can create and run price and offer tests.',
   },
   {
     id: 'stats',
-    label: 'Stat settings',
-    title: 'Stat settings',
-    subtitle:
-      'When a test may be called. These two settings decide it for every experiment you launch.',
+    label: 'Results settings',
+    title: 'Results settings',
+    subtitle: 'These settings apply to every new test you launch.',
   },
   {
     id: 'price-surfaces',
-    label: 'Price surfaces',
+    label: 'Price locations',
     title: 'Theme price selectors',
-    subtitle: 'Tell Priceify where each price shows, so a running test can repaint it.',
+    subtitle: 'Tell Priceify where prices appear on your theme so tests can safely update them.',
   },
 ];
 
@@ -46,7 +45,7 @@ function normalizeTab(raw: string | null): TabId {
   if (value === 'price-surfaces' || value === 'price_surfaces' || value === 'surfaces') {
     return 'price-surfaces';
   }
-  // Default when opening Settings without ?tab= — keep merchants on Stat settings.
+  // Default when opening Settings without ?tab= — keep merchants on Results settings.
   // 'guardrails' is the tab's former name and still arrives from saved links.
   return 'stats';
 }
@@ -80,7 +79,7 @@ export default function SettingsPage() {
 
   // Canonicalize legacy aliases in the URL (?tab=billing → plan). The former
   // Installation tab is gone — everything it did lives on Setup — so saved
-  // links to it are sent there rather than silently landing on Stat settings.
+  // links to it are sent there rather than silently landing on Results settings.
   useEffect(() => {
     const raw = String(searchParams.get('tab') || '')
       .trim()
@@ -171,7 +170,7 @@ export default function SettingsPage() {
       const adjusted: string[] = [];
       const numericFields: Array<[keyof typeof payload, string, (value: string) => void]> = [
         ['confidence_level', 'Confidence level', setConfidenceLevel],
-        ['min_sample_size_per_variation', 'Minimum sample size', setMinSampleSize],
+        ['min_sample_size_per_variation', 'Minimum visitors per variation', setMinSampleSize],
       ];
       numericFields.forEach(([key, label, setValue]) => {
         const stored = g[key];
@@ -184,7 +183,7 @@ export default function SettingsPage() {
       });
 
       setMessage(
-        adjusted.length ? `Stat settings saved. ${adjusted.join('. ')}.` : 'Stat settings saved'
+        adjusted.length ? `Results settings saved. ${adjusted.join('. ')}.` : 'Results settings saved'
       );
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Save failed');
@@ -204,7 +203,7 @@ export default function SettingsPage() {
         }
       : tab === 'stats'
         ? {
-            label: 'Save stat settings',
+            label: 'Save results settings',
             onClick: () => void saveStatSettings(),
             busy: saving || guardrailsLoading,
             busyLabel: saving ? 'Saving…' : 'Loading…',
@@ -215,19 +214,19 @@ export default function SettingsPage() {
   const footerSecondary =
     tab === 'plan' && planState.needsSetup && !planState.loading
       ? {
-          label: 'Open Setup checklist',
+          label: 'Open setup checklist',
           onClick: () => navigate('/app/setup'),
         }
       : tab === 'price-surfaces'
         ? {
-            label: 'Open Setup checklist',
+            label: 'Open setup checklist',
             onClick: () => navigate('/app/setup'),
           }
         : undefined;
 
   return (
     <ClassicAdminShell
-      titleBar="Settings"
+      titleBar="App settings"
       meta={activeMeta.label}
       title={activeMeta.title}
       subtitle={activeMeta.subtitle}

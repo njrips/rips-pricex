@@ -42,6 +42,25 @@ describe('planToOfferTestService', () => {
     expect(payload.goal.guardrails.max_revenue_drop_percent).toBe(10);
   });
 
+  it('keeps internal spaces in offer messages', () => {
+    const message = 'Limited time 10% off today only';
+    const payload = buildOfferTestPayloadFromPlan({
+      ...plan,
+      price_arms: [
+        plan.price_arms[0],
+        {
+          ...plan.price_arms[1],
+          offer: {
+            discount_type: 'percent',
+            discount_value: 10,
+            offer_message: `  ${message}  `,
+          },
+        },
+      ],
+    });
+    expect(payload.variants[1].config.offer_message).toBe(message);
+  });
+
   it('copies min_sample_size onto the offer test goal', () => {
     const payload = buildOfferTestPayloadFromPlan({
       ...plan,

@@ -159,7 +159,7 @@ export default function LandingPage({ storeUrl }) {
           <img
             className="px-hero-shot"
             src={LANDING_ASSETS.heroDashboard}
-            alt="Priceify experiments dashboard showing running tests and workspace metrics"
+            alt="Priceify tests dashboard showing running tests and workspace metrics"
             width={1200}
             height={686}
             loading="eager"

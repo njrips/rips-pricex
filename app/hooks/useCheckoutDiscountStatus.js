@@ -13,13 +13,16 @@ function unwrapBody(res) {
 // See useCartTransformStatus: `checking` keeps a not-yet-asked state from
 // reading as a failed check.
 const CHECKING = {
-  status: 'Checking checkout discount…',
+  status: 'Checking checkout discounts…',
   installed: false,
   functionAvailable: false,
   verified: false,
   checking: true,
   error: /** @type {string | null} */ (null),
 };
+
+const NEEDS_INSTALL =
+  'Use Check and install on Store setup to add checkout discounts for offer tests';
 
 /** What the status payload means for the merchant, as a complete state. */
 function describeStatus(data) {
@@ -29,7 +32,7 @@ function describeStatus(data) {
 
   if (hasDiscount) {
     return {
-      status: 'Automatic checkout discount attached',
+      status: 'Checkout discounts enabled for offer tests',
       installed: true,
       functionAvailable,
       verified: true,
@@ -39,10 +42,10 @@ function describeStatus(data) {
   }
   return {
     status: scopeMissing
-      ? 'Re-approve read_discounts and write_discounts, then Ensure'
+      ? 'Re-approve read_discounts and write_discounts, then click Check and install on Store setup'
       : functionAvailable
-        ? 'Function found — click Ensure to attach the automatic discount'
-        : 'Deploy ripspricex-checkout-discount, then Ensure',
+        ? 'Checkout discounts found — click Check and install on Store setup'
+        : NEEDS_INSTALL,
     installed: false,
     functionAvailable,
     verified: true,
@@ -61,7 +64,7 @@ async function loadStatus(shopDomain) {
   } catch (e) {
     return {
       next: {
-        status: 'Could not load checkout discount status',
+        status: 'Could not load checkout discounts status',
         installed: false,
         functionAvailable: false,
         verified: false,
@@ -113,8 +116,8 @@ export default function useCheckoutDiscountStatus(shopDomain, { enabled = true }
       setState(prev => ({
         ...prev,
         status: data.created
-          ? 'Automatic checkout discount created'
-          : 'Automatic checkout discount already attached',
+          ? 'Checkout discounts installed for offer tests'
+          : 'Checkout discounts already attached for offer tests',
         installed: true,
         functionAvailable: true,
         verified: true,
@@ -125,7 +128,7 @@ export default function useCheckoutDiscountStatus(shopDomain, { enabled = true }
     } catch (e) {
       setState(prev => ({
         ...prev,
-        error: e?.response?.data?.error || e?.message || 'Ensure failed',
+        error: e?.response?.data?.error || e?.message || 'Check and install failed',
       }));
       return null;
     } finally {

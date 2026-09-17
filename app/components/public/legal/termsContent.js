@@ -7,7 +7,7 @@ export const TERMS_SECTIONS = [
   {
     title: 'The service',
     paragraphs: [
-      'Priceify is the Shopify price-testing app used in Admin: price experiments, theme price mapping, checkout readiness, and applying a winner. RipX AI is the in-app assistant for questions and suggestions — not a separate login.',
+      'Priceify is the Shopify price-testing app used in Admin: price tests, price location mapping, checkout readiness, and applying a winner. RipX AI is the in-app assistant for questions and suggestions — not a separate login.',
     ],
   },
   {
@@ -20,7 +20,7 @@ export const TERMS_SECTIONS = [
   {
     title: 'Merchant responsibilities',
     paragraphs: [
-      'You must enable the theme app embed, confirm cart transform where checkout money must follow the test, and map price selectors before Launch. You decide which products and prices to test and when to apply a winner to the catalog.',
+      'You must complete Theme connection and Checkout pricing functions on Store setup, map price locations where needed, and confirm checkout pricing before you launch a test. You decide which products and prices to test and when to apply a winner to the catalog.',
       'You are responsible for complying with consumer-pricing and advertising rules in the markets you sell to.',
     ],
   },
@@ -33,7 +33,7 @@ export const TERMS_SECTIONS = [
   {
     title: 'Availability',
     paragraphs: [
-      'The app depends on Shopify Admin, your theme, and (for checkout money) cart transform. We do not warrant uninterrupted storefront paint on every third-party theme. Setup and Preview exist so you can verify before traffic is split.',
+      'The app depends on Shopify Admin, your theme, and checkout pricing functions where checkout money must follow the test. We do not warrant uninterrupted storefront paint on every third-party theme. Store setup and Preview exist so you can verify before traffic is split.',
     ],
   },
   {

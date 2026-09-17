@@ -1,3 +1,4 @@
+import { canEditClassicTestSetup } from './classicAudienceEdit';
 import { getPlanExperimentId, getPlanExperimentTitle, rollupExperimentStatus } from './classicExperimentHelpers';
 import {
   isActionableOfferConfig,
@@ -16,7 +17,7 @@ export function getClassicExperimentLaunchReadiness(experiment) {
   }
 
   const title = String(experiment?.title || getPlanExperimentTitle(plans[0]) || '').trim();
-  if (!title || title.toLowerCase() === 'untitled experiment') {
+  if (!title || title.toLowerCase() === 'untitled test') {
     return { ready: false, missing: ['setup'] };
   }
 
@@ -143,7 +144,7 @@ export function splitSettledByIds(ids = [], results = []) {
 export function classicBatchOutcomeMessage({ verb = 'paused', done = 0, failed = 0 } = {}) {
   if (done <= 0) return '';
   const past = verb === 'stopped' ? 'Stopped' : 'Paused';
-  if (failed <= 0) return `Experiment ${verb}.`;
+  if (failed <= 0) return `Test ${verb}.`;
   const products = `${done} product${done === 1 ? '' : 's'}`;
   const rest = failed === 1 ? 'one is' : `${failed} are`;
   return `${past} ${products}, but ${rest} still running. Try again for those.`;
@@ -181,14 +182,17 @@ export function resolveClassicExperimentMenuActions(experiment, { checkoutReady 
 
   // An unfinished wizard draft has no plan behind it, so there is no detail
   // page to open and offering one led to a menu item that did nothing.
-  const actions = plans.length ? [{ id: 'view', label: 'View details' }] : [];
+  const actions = plans.length ? [{ id: 'view', label: 'View results' }] : [];
 
-  if (isDraft && !launch.ready) {
-    actions.push({ id: 'continue', label: 'Continue setup' });
+  if (isDraft) {
+    actions.push({ id: 'edit', label: 'Edit test' });
+    actions.push({ id: 'duplicate', label: 'Duplicate' });
+  } else if ((isRunning || isPaused) && canEditClassicTestSetup(experiment)) {
+    actions.push({ id: 'edit', label: 'Edit test' });
   }
 
   if (isDraft && launch.ready && checkoutReady) {
-    actions.push({ id: 'launch', label: 'Launch experiment' });
+    actions.push({ id: 'launch', label: 'Launch test' });
   }
 
   if (isRunning && testIds.length) {
@@ -206,6 +210,10 @@ export function resolveClassicExperimentMenuActions(experiment, { checkoutReady 
 
   if (isPaused || isEnded) {
     actions.push({ id: 'archive', label: 'Archive' });
+  }
+
+  if (!isDraft && plans.length) {
+    actions.push({ id: 'duplicate', label: 'Duplicate' });
   }
 
   if (archived) {
@@ -316,8 +324,10 @@ export function filterClassicExperimentsByTab(experiments = [], filter = 'all') 
   const isArchived = experiment =>
     Boolean(experiment?.archived) || String(experiment?.status || '') === 'archived';
 
-  if (tab === 'archived') {
-    return rows.filter(isArchived);
+  if (tab === 'finished' || tab === 'archived' || tab === 'completed') {
+    return rows.filter(
+      experiment => isArchived(experiment) || isClassicExperimentEnded(experiment.status)
+    );
   }
 
   const live = rows.filter(experiment => !isArchived(experiment));
@@ -327,9 +337,6 @@ export function filterClassicExperimentsByTab(experiments = [], filter = 'all') 
   }
   if (tab === 'paused') {
     return live.filter(experiment => experiment.status === 'paused' || experiment.status === 'stopped');
-  }
-  if (tab === 'completed') {
-    return live.filter(experiment => isClassicExperimentEnded(experiment.status));
   }
   return live;
 }
@@ -341,9 +348,10 @@ export function listTabAfterClassicAction(action, experiment, currentTab = 'all'
     .toLowerCase();
   if (key === 'pause') return 'paused';
   if (key === 'resume' || key === 'launch') return 'running';
-  if (key === 'archive') return 'archived';
-  // Stopping finishes the experiment, so it leaves the live tabs entirely.
-  if (key === 'stop') return 'completed';
+  if (key === 'archive') return 'finished';
+  // Stopping finishes the test, so it leaves the live tabs entirely.
+  if (key === 'stop') return 'finished';
+  if (key === 'duplicate') return 'draft';
   if (key === 'restore') {
     const plans = (Array.isArray(experiment?.plans) ? experiment.plans : []).map(plan => ({
       ...plan,
@@ -354,7 +362,7 @@ export function listTabAfterClassicAction(action, experiment, currentTab = 'all'
       .toLowerCase();
     if (status === 'running') return 'running';
     if (status === 'paused' || status === 'stopped') return 'paused';
-    if (isClassicExperimentEnded(status)) return 'completed';
+    if (isClassicExperimentEnded(status)) return 'finished';
     if (status === 'draft' || status === 'queued') return 'draft';
     return 'all';
   }

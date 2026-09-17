@@ -36,7 +36,7 @@ const MONEY_HELP = {
   rpvByVariation:
     'Revenue per visitor for this variation: sales divided by visitors. Each product counts once, however much traffic it got.',
   rpvAllTraffic:
-    'Revenue per visitor across the whole experiment, control and variations together, weighted by visitors. Higher or lower than the per-variation averages because busier products pull it further.',
+    'Revenue per visitor across the whole test, control and variations together, weighted by visitors. Higher or lower than the per-variation averages because busier products pull it further.',
   armRpv: 'Measured revenue per visitor for this variation, averaged across the products in it.',
 };
 
@@ -183,7 +183,7 @@ export default function ClassicPerformanceTab({
       <div className={styles.statCard}>
         <h3 className={styles.panelTitle}>Performance</h3>
         <p className={styles.help}>
-          Live arm analytics appear once this experiment is launched and collecting visitors.
+          Live arm analytics appear once this test is launched and collecting visitors.
         </p>
       </div>
     );
@@ -353,7 +353,7 @@ export default function ClassicPerformanceTab({
           <div className={styles.reviewHead}>
             <h3 className={styles.panelTitle}>Arm rollup</h3>
             <span className={styles.productSub}>
-              {analytics?.multi_test ? 'Merged across product tests' : 'Experiment arms'}
+              {analytics?.multi_test ? 'Merged across product tests' : 'Test arms'}
             </span>
           </div>
           <div className={styles.detailTableWrap}>
@@ -533,7 +533,7 @@ export default function ClassicPerformanceTab({
                       <div className={styles.productName}>{row.decisionLabel || '—'}</div>
                       {row.sharedTest ? (
                         <div className={styles.productSub}>
-                          Shared test — stop/re-run at experiment level
+                          Shared test — stop/re-run at test level
                         </div>
                       ) : null}
                     </td>

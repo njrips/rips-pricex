@@ -89,7 +89,7 @@ async function renderPanel(props = {}) {
   });
 }
 
-const PRICE_MODE_HEADING = /How would you like to price them\?/i;
+const PRICE_MODE_HEADING = /How would you like to set prices\?/i;
 
 function fieldByLabel(label) {
   return container.querySelector(`input[aria-label="${label}"]`);

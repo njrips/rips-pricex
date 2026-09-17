@@ -183,7 +183,7 @@ describe('products step selection area', () => {
     // product, while the button capped the selection and then went grey.
     // The cap itself is covered directly, on limitSelectionToProducts.
     expect(buttonByText('Select all')).toBeUndefined();
-    expect(buttonByText('Clear')).toBeTruthy();
+    expect(buttonByText('Clear selection')).toBeTruthy();
     expect(container.textContent).toMatch(/All products/);
   });
 
@@ -221,13 +221,13 @@ describe('products step selection area', () => {
   it('clears the selection', async () => {
     const { onSelectedIdsChange } = await renderPanel({ selectedIds: ['v1', 'v2'] });
 
-    await click(buttonByText('Clear'));
+    await click(buttonByText('Clear selection'));
     expect(onSelectedIdsChange).toHaveBeenLastCalledWith([]);
   });
 
-  it('offers Clear only once something is selected', async () => {
+  it('offers Clear selection only once something is selected', async () => {
     await renderPanel();
-    expect(isDisabled(buttonByText('Clear'))).toBe(true);
+    expect(isDisabled(buttonByText('Clear selection'))).toBe(true);
   });
 
   it('says nothing loaded rather than showing an empty grid', async () => {

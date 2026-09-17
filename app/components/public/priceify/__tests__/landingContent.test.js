@@ -15,6 +15,7 @@ import {
   PLATFORM_SECTION,
   PRICING_SECTION,
   PUBLIC_COPY_FORBIDDEN,
+  PUBLIC_NAMING_FORBIDDEN,
   buildFaqJsonLd,
 } from '../landingContent.js';
 import { PUBLIC_HEADER_NAV, PUBLIC_ROUTES } from '../../../../constants/publicRoutes.js';
@@ -29,11 +30,12 @@ import {
 describe('Priceify landing copy (Figma brochure)', () => {
   it('matches hero, nav, sections, and FAQ from the updated design', () => {
     assert.equal(HERO.badge, 'A/B PRICE TESTING FOR SHOPIFY');
-    assert.match(HERO.title, /Growth Experiment/);
+    assert.match(HERO.title, /Growth Test/);
     assert.equal(HERO.primaryCta, 'Add to Shopify');
     assert.equal(FAQ_ITEMS.length, 6);
     assert.match(FAQ_ITEMS[0].q, /slow down/);
-    assert.match(FAQ_ITEMS[2].a, /theme app embed/);
+    assert.match(FAQ_ITEMS[2].a, /Theme connection/);
+    assert.match(FAQ_ITEMS[2].a, /Store setup/);
     assert.deepEqual(
       PUBLIC_HEADER_NAV.map(item => item.label),
       ['Features', 'How it works', 'Pricing', 'Guides', 'FAQ']
@@ -60,7 +62,7 @@ describe('Priceify landing copy (Figma brochure)', () => {
       PLATFORM_SECTION.steps.map(step => step.title),
       ['Choose products', 'Split traffic', 'Create price variations', 'Measure the results']
     );
-    assert.equal(FOOTER_BRAND_TAGLINE, 'Experiment Your Way to Better Pricing.');
+    assert.equal(FOOTER_BRAND_TAGLINE, 'Test Your Way to Better Pricing.');
     assert.equal(FOOTER_NEWSLETTER.title, 'Join our newsletter');
     assert.equal(FOOTER_COPYRIGHT, 'Copyright © Priceify. All rights reserved.');
     assert.deepEqual(
@@ -114,6 +116,7 @@ describe('Priceify landing copy (Figma brochure)', () => {
       ...PRICING_SECTION.tiers.map(tier => `${tier.name} ${tier.blurb}`),
     ].join('\n');
     assert.equal(PUBLIC_COPY_FORBIDDEN.test(publicCopy), false);
+    assert.equal(PUBLIC_NAMING_FORBIDDEN.test(publicCopy), false);
   });
 
   it('exposes FAQPage JSON-LD for crawlers', () => {

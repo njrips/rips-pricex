@@ -454,14 +454,14 @@ async function ensureOfferCheckoutDiscount({
     }
     if (!status.function?.id) {
       const err = new Error(
-        'No checkout discount function found for this app. Deploy ripspricex-checkout-discount, then try again.'
+        'Checkout pricing functions are not available for this app. Open Store setup and use Check and install, or contact support.'
       );
       err.code = 'FUNCTION_MISSING';
       throw err;
     }
     if (status.lookup_status === 'scope_missing') {
       const err = new Error(
-        'This shop token is missing read_discounts / write_discounts. Re-approve app permissions, then Ensure again.'
+        'This shop is missing checkout discount permissions. Re-open Priceify from Shopify Admin, then click Check and install on Store setup.'
       );
       err.code = 'SCOPE_MISSING';
       throw err;
@@ -559,7 +559,7 @@ async function ensureOfferCheckoutDiscount({
   const result = await withTimeout(
     run(),
     ENSURE_TIMEOUT_MS,
-    'Timed out attaching the checkout discount. Open Setup, tap Ensure, then launch again.'
+    'Timed out attaching the checkout discount. Open Store setup, refresh Checkout pricing functions, then launch again.'
   );
   rememberEnsure(shopDomain, result);
   return result;

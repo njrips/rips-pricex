@@ -5,6 +5,7 @@ import {
   saveSmartPricingInboxPlans,
 } from '../../services/smartPricingApi';
 import { mergePlanActivityLogs } from './classic/classicActivity';
+import { compactInboxPlans } from './classic/classicWizardDraftSize';
 import { readInboxPlans, updateInboxPlan } from './smartPricingConstants';
 
 const persistTimers = new Map();
@@ -393,8 +394,9 @@ export async function persistInboxPlansNow(domain, plans) {
     clearTimeout(persistTimers.get(key));
     persistTimers.delete(key);
   }
+  const wirePlans = compactInboxPlans(plans);
   try {
-    const saved = await saveSmartPricingInboxPlans(domain, plans, {
+    const saved = await saveSmartPricingInboxPlans(domain, wirePlans, {
       revision: getInboxServerRevision(domain),
     });
     if (saved?.revision) {
@@ -407,10 +409,10 @@ export async function persistInboxPlansNow(domain, plans) {
     if (!conflictPayload) {
       throw err;
     }
-    const merged = mergeServerAndLocalInbox(conflictPayload.plans || [], plans, {
-      preferLocalIds: (Array.isArray(plans) ? plans : []).map(plan => plan?.id).filter(Boolean),
+    const merged = mergeServerAndLocalInbox(conflictPayload.plans || [], wirePlans, {
+      preferLocalIds: wirePlans.map(plan => plan?.id).filter(Boolean),
     });
-    const saved = await saveSmartPricingInboxPlans(domain, merged);
+    const saved = await saveSmartPricingInboxPlans(domain, compactInboxPlans(merged));
     if (saved?.revision) {
       setInboxServerRevision(domain, saved.revision);
     }

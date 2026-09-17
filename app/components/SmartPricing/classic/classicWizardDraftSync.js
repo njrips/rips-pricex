@@ -201,7 +201,12 @@ export async function saveWizardDraftEverywhere(shopDomain, snapshot) {
     // on their other devices, and the table is rebuilt from those the next
     // time the Products step is passed. The alternative was a draft that never
     // left this browser and a red error on every Continue.
-    if (refused && err?.response?.data?.reason === 'draft_too_large') {
+    if (
+      refused &&
+      (err?.response?.data?.reason === 'draft_too_large' ||
+        status === 413 ||
+        err?.response?.data?.reason === 'payload_too_large')
+    ) {
       const withoutPlans = omitPlansFromSnapshot(outgoing);
       if (withoutPlans !== outgoing) {
         try {

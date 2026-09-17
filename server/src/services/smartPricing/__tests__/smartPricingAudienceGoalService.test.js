@@ -176,7 +176,9 @@ describe('smartPricingAudienceGoalService', () => {
     });
 
     expect(preview.ready_to_launch).toBe(false);
-    expect(preview.blockers.some(b => /checkout discount function/i.test(b))).toBe(true);
+    expect(preview.blockers.some(b => /Checkout pricing functions on Store setup/i.test(b))).toBe(
+      true
+    );
   });
 });
 

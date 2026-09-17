@@ -6,22 +6,16 @@ import { isOfferExperimentType } from './offerSelection';
 export function getClassicCreateSteps(experimentType = 'price_test') {
   const isOffer = isOfferExperimentType(experimentType);
   return CLASSIC_CREATE_STEPS.map(step => {
+    // Traffic step copy lives in VariationsStepPanel (PDF); no card subtitle here.
     if (step.id === 'variations') {
-      return {
-        ...step,
-        description: isOffer
-          ? 'Each variation applies its offer to every selected product. Traffic must total 100%.'
-          : step.description,
-      };
+      return { ...step, description: '' };
     }
     if (step.id === 'products') {
       return {
         ...step,
-        subtitle: isOffer ? 'Pick & offer' : 'Pick & price',
+        label: isOffer ? 'Products & offers' : step.label,
         title: isOffer ? 'Choose products & offers' : step.title,
-        description: isOffer
-          ? 'Pick which products are part of this experiment and set an offer per variation.'
-          : step.description,
+        description: '',
       };
     }
     return step;
@@ -42,42 +36,43 @@ export function classicCreateStepIndex(stepId) {
   return index >= 0 ? index : null;
 }
 
+/** Two-line stepper labels for "Foo & bar" without changing the spec wording. */
+export function stepLabelLines(label) {
+  const text = String(label || '').trim();
+  if (!text.includes(' & ')) return [text];
+  const amp = text.indexOf(' & ');
+  return [text.slice(0, amp + 3).trimEnd(), text.slice(amp + 3).trim()];
+}
+
 export const CLASSIC_CREATE_STEPS = [
   {
     id: 'setup',
     label: 'Basics',
-    subtitle: 'Name & type',
-    title: 'Set up your experiment',
-    description: 'Give it a clear name, describe what you expect, and pick a type.',
+    title: 'Set up your test',
+    description: '',
   },
   {
     id: 'variations',
-    label: 'Variations',
-    subtitle: 'Traffic split',
-    title: 'Build your variations',
-    description:
-      'Choose how much traffic enters the experiment, then split it across your variations. Each variation applies its price change to every selected product.',
+    label: 'Traffic',
+    title: 'Traffic & variations',
+    description: '',
   },
   {
     id: 'products',
-    label: 'Products',
-    subtitle: 'Pick & price',
-    title: 'Choose products & pricing',
-    description: 'Pick which products are part of this experiment and set their test prices.',
+    label: 'Products & prices',
+    title: 'Choose products & set test prices',
+    description: '',
   },
   {
     id: 'audience',
-    label: 'Audience',
-    subtitle: 'Choose Audience',
-    title: 'Audience & success',
-    description:
-      "Decide who sees the experiment, how you'll measure success, and what must not break.",
+    label: 'Audience & goals',
+    title: 'Audience & goals',
+    description: '',
   },
   {
     id: 'review',
-    label: 'Review',
-    subtitle: 'Launch',
+    label: 'Review & launch',
     title: 'Review & launch',
-    description: 'A quick summary before your experiment goes live.',
+    description: '',
   },
 ];

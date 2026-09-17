@@ -170,23 +170,23 @@ describe('Setup checklist', () => {
       readiness({ theme_embed: { status: 'enabled', theme_name: 'Craft' } })
     );
     await render();
-    expect(text()).toContain('Already enabled');
+    expect(text()).toContain('No action needed');
     expect(text()).toContain('Craft');
     // Offering "Enable" next to "already enabled" is the confusion this fixes,
     // in the step and in the page footer alike.
-    expect(buttonByLabel('Enable theme app embed')).toBeUndefined();
+    expect(buttonByLabel('Open theme settings')).toBeUndefined();
     const footerLinks = Array.from(container.querySelectorAll('a')).map(
       node => node.textContent || ''
     );
-    expect(footerLinks.some(label => label.includes('Enable theme app embed'))).toBe(false);
+    expect(footerLinks.some(label => label.includes('Open theme settings'))).toBe(false);
   });
 
   it('asks the merchant to enable it when the theme says it is off', async () => {
     checkoutReadiness.mockResolvedValue(readiness({ theme_embed: { status: 'disabled' } }));
     await render();
     expect(text()).toContain('Not enabled');
-    expect(text()).not.toContain('Already enabled');
-    expect(buttonByLabel('Enable theme app embed')).toBeDefined();
+    expect(text()).not.toContain('No action needed');
+    expect(buttonByLabel('Open theme settings')).toBeDefined();
   });
 
   it('falls back to confirming by eye when the theme could not be read', async () => {
@@ -198,7 +198,7 @@ describe('Setup checklist', () => {
     await render();
     expect(text()).toContain('Confirm in theme editor');
     expect(text()).toContain('could not read your theme settings');
-    expect(text()).not.toContain('Already enabled');
+    expect(text()).not.toContain('No action needed');
   });
 
   /**
@@ -212,7 +212,7 @@ describe('Setup checklist', () => {
     /** The selectors badge, which sits in the step 3 heading. */
     function surfaceBadge() {
       const heading = Array.from(container.querySelectorAll('p')).find(
-        node => (node.textContent || '') === '3. Theme price selectors'
+        node => (node.textContent || '') === '3. Price locations on your site'
       );
       const head = heading?.parentElement?.parentElement;
       return Array.from(head?.querySelectorAll('span') || [])
@@ -256,7 +256,7 @@ describe('Setup checklist', () => {
 
     it('counts the mappings once the answer lands', async () => {
       await render();
-      expect(surfaceBadge()).toBe('3 mappings');
+      expect(surfaceBadge()).toBe('3 price locations mapped');
     });
 
     it('admits it could not check rather than blaming the theme', async () => {
@@ -272,12 +272,12 @@ describe('Setup checklist', () => {
   it('holds both checkout functions in one step, each with its own status', async () => {
     await render();
     expect(stepTitles()).toEqual([
-      '1. Theme app embed',
-      '2. Checkout functions',
-      '3. Theme price selectors',
+      '1. Theme connection',
+      '2. Checkout pricing functions',
+      '3. Price locations on your site',
     ]);
-    expect(text()).toContain('Cart transform (price tests)');
-    expect(text()).toContain('Checkout discount (offer tests)');
+    expect(text()).toContain('Dynamic cart prices (for price tests)');
+    expect(text()).toContain('Checkout discounts (for offer tests)');
   });
 
   it('installs both from the one button, so neither is left behind', async () => {
@@ -316,7 +316,7 @@ describe('Setup checklist', () => {
     // each say which part, so it only made the merchant look twice.
     expect(text()).not.toContain('Partly installed');
     expect(text()).toContain('Enabled');
-    expect(text()).toContain('Needs install');
+    expect(text()).toContain('Not enabled');
     expect(buttonByLabel('Check and install')).toBeDefined();
   });
 
@@ -333,14 +333,14 @@ describe('Setup checklist', () => {
 
   it('offers a re-check rather than an install once both are in place', async () => {
     await render();
-    expect(buttonByLabel('Re-check checkout functions')).toBeDefined();
+    expect(buttonByLabel('Refresh status')).toBeDefined();
     expect(buttonByLabel('Check and install')).toBeUndefined();
   });
 
   it('re-checks by reading, so a healthy shop is not written to for nothing', async () => {
     await render();
     await act(async () => {
-      buttonByLabel('Re-check checkout functions').click();
+      buttonByLabel('Refresh status').click();
     });
     expect(apiPost).not.toHaveBeenCalled();
   });
@@ -363,45 +363,10 @@ describe('Setup checklist', () => {
     expect(posted).toEqual(['/settings/checkout-discount/ensure']);
   });
 
-  it('folds the manual script into the step it is the fallback for', async () => {
+  it('does not offer a manual script install path on Store setup', async () => {
     await render();
-    const details = container.querySelector('details');
-    // Standing alone at the foot of the page it read as another thing to do,
-    // and a merchant whose theme cannot load the embed had to scroll past two
-    // unrelated steps to reach the one answer to their problem.
-    expect(details.closest('[class*="adminRow"]').textContent).toContain('1. Theme app embed');
-  });
-
-  it('keeps the manual script out of the way until it is asked for', async () => {
-    await render();
+    expect(text()).not.toContain('Alternative install');
     expect(settingsInstallation).not.toHaveBeenCalled();
-    const details = container.querySelector('details');
-    expect(details).toBeDefined();
-    expect(details.textContent).toContain('Alternative install');
-    await act(async () => {
-      details.open = true;
-      details.dispatchEvent(new Event('toggle'));
-    });
-    await act(async () => {
-      await Promise.resolve();
-    });
-    expect(settingsInstallation).toHaveBeenCalledTimes(1);
-    expect(text()).toContain('/apps/ripspricex/script.js');
-  });
-
-  it('does not re-fetch the snippet each time the disclosure is reopened', async () => {
-    await render();
-    const details = container.querySelector('details');
-    for (const open of [true, false, true]) {
-      await act(async () => {
-        details.open = open;
-        details.dispatchEvent(new Event('toggle'));
-      });
-      await act(async () => {
-        await Promise.resolve();
-      });
-    }
-    expect(settingsInstallation).toHaveBeenCalledTimes(1);
   });
 
   it('reads the theme afresh on arrival rather than serving a cached verdict', async () => {
@@ -438,9 +403,9 @@ describe('Setup checklist', () => {
       node.getAttribute('aria-label')
     );
     expect(tips).toEqual([
-      'About 1. Theme app embed',
-      'About 2. Checkout functions',
-      'About 3. Theme price selectors',
+      'About 1. Theme connection',
+      'About 2. Checkout pricing functions',
+      'About 3. Price locations on your site',
     ]);
   });
 
@@ -452,21 +417,24 @@ describe('Setup checklist', () => {
     expect(text()).not.toContain('charges a test price at checkout');
     expect(text()).not.toContain('Create and Launch unlock');
     // What is left is the one line saying what to do.
-    expect(text()).toContain('Enable Priceify, Save, then come back');
+    expect(text()).toContain(
+      'Enable the Priceify app embed in your Online Store theme to start testing prices.'
+    );
   });
 
   it('holds back the scope-update advice until an install actually fails', async () => {
     await render();
-    expect(text()).not.toContain('write_discounts');
+    expect(text()).not.toContain('Check and install again');
   });
 
-  it('offers the scope-update advice once an install fails', async () => {
+  it('offers the permission-update advice once an install fails', async () => {
     apiGet.mockImplementation(path => {
       if (String(path).includes('checkout-discount')) return Promise.reject(new Error('403'));
       return Promise.resolve(cartStatus({ installed: true }));
     });
     await render();
-    expect(text()).toContain('write_discounts');
+    expect(text()).toContain('Check and install again');
+    expect(text()).toContain('Shopify Admin');
   });
 
   it('has no plan step, leaving the checks that are about this shop', async () => {
@@ -477,14 +445,14 @@ describe('Setup checklist', () => {
     // The gate itself is real, so an unentitled shop still has to be told
     // where Create is -- just not with a step of its own.
     expect(text()).toContain('unlock Create under Settings → Plan');
-    expect(text()).toContain('Three checks');
+    expect(text()).toContain('Check these three items once');
   });
 
   it('opens the theme editor beside the app rather than over it', async () => {
     checkoutReadiness.mockResolvedValue(readiness({ theme_embed: { status: 'disabled' } }));
     await render();
     await act(async () => {
-      buttonByLabel('Enable theme app embed').click();
+      buttonByLabel('Open theme settings').click();
     });
     // Same-tab navigation cost the merchant the page they were working on.
     expect(openEmbedInNewTab).toHaveBeenCalled();
@@ -496,7 +464,7 @@ describe('Setup checklist', () => {
     checkoutReadiness.mockResolvedValue(readiness({ theme_embed: { status: 'disabled' } }));
     await render();
     await act(async () => {
-      buttonByLabel('Enable theme app embed').click();
+      buttonByLabel('Open theme settings').click();
     });
     // A blocked popup must still get them to the editor.
     expect(openEmbed).toHaveBeenCalled();
@@ -506,7 +474,7 @@ describe('Setup checklist', () => {
     checkoutReadiness.mockResolvedValue(readiness({ theme_embed: { status: 'disabled' } }));
     await render();
     await act(async () => {
-      buttonByLabel('Enable theme app embed').click();
+      buttonByLabel('Open theme settings').click();
     });
     const before = checkoutReadiness.mock.calls.length;
     await act(async () => {

@@ -115,10 +115,10 @@ export function usePlanBillingState(ctx, { enabled = true } = {}) {
       : !entitled
         ? 'Create and Launch are locked'
         : checkoutReady === false
-          ? 'Plan active — finish Setup before launch'
+          ? 'Plan active — finish Store setup before launch'
           : checkoutReady == null
-            ? 'Plan active — confirm Setup next'
-            : launchSummary.title || 'Smart Pricing is unlocked',
+            ? 'Plan active — confirm Store setup next'
+            : launchSummary.title || 'Ready to launch tests',
   };
 }
 
@@ -152,8 +152,9 @@ export default function SettingsPlanPanel({ ctx, planState }) {
           title={calloutTitle}
         >
           <p>
-            Subscriptions are managed by Shopify App Pricing. Plan selection opens outside the app
-            iframe; status lives here under Settings.
+            {unlocked
+              ? 'Your plan is active. You can create and run price and offer tests.'
+              : 'Subscriptions are managed by Shopify App Pricing. Plan selection opens outside the app iframe; status lives here under Settings.'}
           </p>
         </Banner>
       </div>
@@ -163,7 +164,7 @@ export default function SettingsPlanPanel({ ctx, planState }) {
       <div className={styles.adminStack}>
         <div className={styles.adminRow}>
           <div className={styles.adminRowHead}>
-            <p className={styles.adminRowTitle}>Plan status</p>
+            <p className={styles.adminRowTitle}>Current plan</p>
             <Badge tone={loading ? undefined : entitled ? 'success' : 'warning'}>
               {loading ? 'Checking…' : entitled ? 'Active' : 'Locked'}
             </Badge>
@@ -194,17 +195,18 @@ export default function SettingsPlanPanel({ ctx, planState }) {
 
         <div className={styles.adminRow}>
           <div className={styles.adminRowHead}>
-            <p className={styles.adminRowTitle}>What unlocks</p>
+            <p className={styles.adminRowTitle}>What your plan includes</p>
             <Badge tone={unlocked ? 'success' : entitled ? undefined : 'warning'}>
               {unlocked ? 'Unlocked' : entitled ? 'Plan ok · setup pending' : 'Locked'}
             </Badge>
           </div>
-          <p className={styles.adminRowBody}>• Create experiment wizard</p>
-          <p className={styles.adminRowBody}>• Launch price tests (cart transform)</p>
-          <p className={styles.adminRowBody}>• Launch offer tests (checkout discount)</p>
+          <p className={styles.adminRowBody}>• Create and run price tests</p>
+          <p className={styles.adminRowBody}>• Create and run offer tests</p>
+          <p className={styles.adminRowBody}>• Track revenue per visitor and test confidence</p>
           <p className={styles.adminRowBody}>
-            After upgrading, complete <Link to="/app/setup">Setup</Link>. Offer tests need the
-            checkout discount; price tests need cart transform and theme price selectors. Checkout
+            After upgrading, complete <Link to="/app/setup">Store setup</Link>. Offer tests need
+            Checkout pricing functions; price tests also need Theme connection and price locations.
+            Checkout
             readiness:{' '}
             <strong>
               {loading
@@ -224,10 +226,10 @@ export default function SettingsPlanPanel({ ctx, planState }) {
           <div className={styles.adminRowActions}>
             {unlocked ? (
               <Button variant="primary" onClick={() => navigate('/app/experiments/new')}>
-                Create experiment
+                New test
               </Button>
             ) : null}
-            <Button onClick={() => navigate('/app/setup')}>Open Setup checklist</Button>
+            <Button onClick={() => navigate('/app/setup')}>Open setup checklist</Button>
           </div>
         </div>
       </div>

@@ -40,7 +40,7 @@ function loadRouter() {
     '../services/billing/entitlementService': {
       requireEntitlement: () => (req, res, next) => {
         if (entitled) return next();
-        return res.status(402).json({ error: 'Smart Pricing requires an active plan' });
+        return res.status(402).json({ error: 'Priceify requires an active plan' });
       },
     },
     '../services/smartPricing/smartPricingInboxStopSyncService': {

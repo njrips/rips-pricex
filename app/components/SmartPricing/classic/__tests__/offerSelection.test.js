@@ -9,8 +9,10 @@ import {
   getOfferCheckoutBlockReason,
   isOfferCheckoutReady,
   isOfferExperimentType,
+  capOfferMessageLength,
   normalizeOfferConfig,
   slugOfferCodeName,
+  trimOfferMessageForSave,
 } from '../offerSelection';
 import { getProductsStepContinueState } from '../productsStepReadiness';
 import { variationsFromPlanArms } from '../variationsStepHelpers';
@@ -67,7 +69,7 @@ describe('offerSelection', () => {
         discount_function_available: false,
         message: 'Checkout price override path looks configured (live Shopify check).',
       })
-    ).toMatch(/checkout discount function/i);
+    ).toMatch(/Checkout pricing functions/i);
     expect(
       offerByArmFromPlanArms([
         { id: 'control', role: 'control' },
@@ -85,6 +87,15 @@ describe('offerSelection', () => {
     expect(normalizeOfferConfig({ discountType: 'fixed', discountValue: 3 }).discount_type).toBe(
       'fixed'
     );
+    expect(
+      normalizeOfferConfig({
+        discount_type: 'percent',
+        discount_value: 10,
+        offer_message: '  Limited time 10% off  ',
+      }).offer_message
+    ).toBe('Limited time 10% off');
+    expect(capOfferMessageLength('Save 10%, today only ')).toBe('Save 10%, today only ');
+    expect(trimOfferMessageForSave('Save 10%, today only ')).toBe('Save 10%, today only');
   });
 
   it('requires a test variation offer before Continue on offer tests', () => {

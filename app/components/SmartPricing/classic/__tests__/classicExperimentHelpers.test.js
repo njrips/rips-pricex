@@ -17,8 +17,8 @@ import { filterClassicExperimentsByTab } from '../classicExperimentListActions';
 
 describe('classicExperimentHelpers', () => {
   it('formats experiment type labels for list sublines', () => {
-    expect(formatExperimentTypeLabel('price_test')).toBe('PRICE');
-    expect(formatExperimentTypeLabel('offer_test')).toBe('OFFER');
+    expect(formatExperimentTypeLabel('price_test')).toBe('Price test');
+    expect(formatExperimentTypeLabel('offer_test')).toBe('Offer test');
     expect(formatExperimentTypeLabel('ab_test')).toBe('AB');
     expect(formatExperimentTypeLabel('multivariate')).toBe('MULTIVARIATE');
   });
@@ -109,10 +109,10 @@ describe('classicExperimentHelpers', () => {
   });
 
   it('labels offer winner_ready as Result ready', () => {
-    expect(formatClassicStatusLabel('winner_ready', 'offer_test')).toBe('Result ready');
-    expect(formatClassicStatusLabel('winner_ready', 'price_test')).toBe('Winner ready');
-    expect(formatClassicStatusLabel('applied', 'price_test')).toBe('Applied');
-    expect(formatClassicStatusLabel('completed', 'price_test')).toBe('Completed');
+    expect(formatClassicStatusLabel('winner_ready', 'offer_test')).toBe('Finished');
+    expect(formatClassicStatusLabel('winner_ready', 'price_test')).toBe('Finished');
+    expect(formatClassicStatusLabel('applied', 'price_test')).toBe('Finished');
+    expect(formatClassicStatusLabel('completed', 'price_test')).toBe('Finished');
   });
 
   it('enriches inbox drafts from audience_ui before list launch', () => {
@@ -223,7 +223,7 @@ describe('wizardDraftAsExperimentRow', () => {
       id: 'exp_1',
       title: 'Spring pricing',
       status: 'draft',
-      typeLabel: 'OFFER',
+      typeLabel: 'Offer test',
       hypothesis: 'Bundles lift AOV',
       archived: false,
     });
@@ -269,7 +269,7 @@ describe('wizardDraftAsExperimentRow', () => {
 
   it('falls back to a placeholder title rather than an empty row', () => {
     expect(wizardDraftAsExperimentRow({ experiment_id: 'exp_1', name: '   ' }).title).toBe(
-      'Untitled experiment'
+      'Untitled test'
     );
   });
 
@@ -326,7 +326,6 @@ describe('draft rows in the list tabs', () => {
 
   it('stays out of the tabs for experiments that have run', () => {
     expect(filterClassicExperimentsByTab([draftRow], 'running')).toEqual([]);
-    expect(filterClassicExperimentsByTab([draftRow], 'completed')).toEqual([]);
-    expect(filterClassicExperimentsByTab([draftRow], 'archived')).toEqual([]);
+    expect(filterClassicExperimentsByTab([draftRow], 'finished')).toEqual([]);
   });
 });

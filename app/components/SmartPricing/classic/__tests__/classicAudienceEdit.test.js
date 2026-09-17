@@ -3,6 +3,8 @@ import {
   applyAudienceUiToPlans,
   audienceUiFromSummaries,
   canEditClassicAudienceMetrics,
+  canEditClassicTestSetup,
+  minVisitorsAcrossExperimentArms,
   mergeInboxPlansById,
   normalizeAudienceDevicePills,
   normalizeAudienceSegment,
@@ -31,6 +33,57 @@ describe('canEditClassicAudienceMetrics', () => {
     expect(canEditClassicAudienceMetrics('applied')).toBe(false);
     expect(canEditClassicAudienceMetrics('completed')).toBe(false);
     expect(canEditClassicAudienceMetrics('archived')).toBe(false);
+  });
+});
+
+describe('canEditClassicTestSetup', () => {
+  it('allows drafts and live tests that have not reached the visitor floor', () => {
+    expect(canEditClassicTestSetup({ status: 'draft' })).toBe(true);
+    expect(
+      canEditClassicTestSetup({
+        status: 'running',
+        visitors: 1200,
+        representative: { metadata: { audience_ui: { minSampleSize: '5000' } } },
+      })
+    ).toBe(true);
+  });
+
+  it('blocks live tests once total visitors meet the minimum sample floor', () => {
+    expect(
+      canEditClassicTestSetup({
+        status: 'running',
+        visitors: 5000,
+        representative: { metadata: { audience_ui: { minSampleSize: '5000' } } },
+      })
+    ).toBe(false);
+  });
+
+  it('uses per-arm visitor counts when analytics arms are present', () => {
+    const experiment = {
+      status: 'running',
+      visitors: 12000,
+      representative: { metadata: { audience_ui: { minSampleSize: '5000' } } },
+      plans: [
+        {
+          analytics: {
+            arms: [{ visitors: 6000 }, { visitors: 4800 }],
+          },
+        },
+      ],
+    };
+    expect(minVisitorsAcrossExperimentArms(experiment)).toBe(4800);
+    expect(canEditClassicTestSetup(experiment)).toBe(true);
+    experiment.plans[0].analytics.arms[1].visitors = 5000;
+    expect(canEditClassicTestSetup(experiment)).toBe(false);
+  });
+
+  it('blocks finished tests even when visitor counts are low', () => {
+    expect(
+      canEditClassicTestSetup({
+        status: 'winner_ready',
+        visitors: 100,
+      })
+    ).toBe(false);
   });
 });
 
@@ -262,6 +315,7 @@ describe('profit per visitor, after it stopped being offered', () => {
     expect(GOAL_METRIC_OPTIONS.map(option => option.value)).toEqual([
       'revenue_per_visitor',
       'conversion_rate',
+      'aov',
     ]);
     expect(classicMetricOptionsFor([]).map(option => option.value)).not.toContain(
       'profit_per_visitor'

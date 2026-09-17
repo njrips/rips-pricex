@@ -158,7 +158,7 @@ export default function ClassicGoalPickerModal({
 
   const handleCreateOrAddExisting = async () => {
     if (draftAlreadySelected) {
-      setCreateError('That event is already selected for this experiment.');
+      setCreateError('That event is already selected for this test.');
       return;
     }
 
@@ -184,7 +184,7 @@ export default function ClassicGoalPickerModal({
         const saved = await saveGoalMetricDefinition(domain, {
           name: checked.definition.label,
           event_name: checked.definition.event_name,
-          description: `Smart Pricing custom goal · ${catalogGoalTriggerSummary(checked.definition)}`,
+          description: `Priceify custom goal · ${catalogGoalTriggerSummary(checked.definition)}`,
           category: 'custom',
           aggregation: checked.definition.aggregation,
           direction: checked.definition.direction,

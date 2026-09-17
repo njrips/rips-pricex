@@ -163,7 +163,7 @@ describe('unfinished drafts in the experiments list', () => {
     await renderList('/app?tab=draft');
 
     expect(row('Spring pricing')).toBeTruthy();
-    expect(container.textContent).not.toContain('No draft experiments');
+    expect(container.textContent).not.toContain('No draft tests');
   });
 
   it('keeps it out of the tabs for experiments that have run', async () => {
@@ -171,14 +171,14 @@ describe('unfinished drafts in the experiments list', () => {
     await renderList('/app?tab=running');
 
     expect(row('Spring pricing')).toBeFalsy();
-    expect(container.textContent).toContain('No running experiments');
+    expect(container.textContent).toContain('No running tests');
   });
 
   it('says how far through the wizard it got', async () => {
     serverDrafts.current = [draft({ step: 1 })];
     await renderList();
 
-    expect(row('Spring pricing').textContent).toContain('Step 2 of 5 · Variations');
+    expect(row('Spring pricing').textContent).toContain('Step 2 of 5 · Traffic');
   });
 
   it('shows no results, because a draft has never run', async () => {
@@ -250,7 +250,8 @@ describe('unfinished drafts in the experiments list', () => {
 
       const items = await openMenu('Spring pricing');
       expect(items.map(node => node.textContent.trim())).toEqual([
-        'Continue setup',
+        'Edit test',
+        'Duplicate',
         'Delete draft',
       ]);
     });
@@ -260,7 +261,7 @@ describe('unfinished drafts in the experiments list', () => {
       await renderList();
 
       const items = await openMenu('Spring pricing');
-      await click(items.find(node => node.textContent.trim() === 'Continue setup'));
+      await click(items.find(node => node.textContent.trim() === 'Edit test'));
 
       expect(currentPath).toBe('/app/experiments/new?resume=exp_draft&step=audience');
     });

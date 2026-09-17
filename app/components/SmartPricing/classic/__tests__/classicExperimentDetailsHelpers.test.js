@@ -755,8 +755,8 @@ describe('classicExperimentDetailsHelpers', () => {
     });
     expect(items[0].id).toBe('qa_r1');
     expect(items.some(item => item.id === 'created')).toBe(true);
-    expect(items.find(item => item.id === 'created')?.title).toBe('Created experiment');
-    expect(items.find(item => item.id === 'started')?.title).toBe('Launched experiment');
+    expect(items.find(item => item.id === 'created')?.title).toBe('Created test');
+    expect(items.find(item => item.id === 'started')?.title).toBe('Launched test');
     expect(items.find(item => item.id === 'created')?.actor).toBe('You');
   });
 

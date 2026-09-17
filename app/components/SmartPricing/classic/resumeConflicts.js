@@ -47,7 +47,7 @@ export function planResume(preflight, testIds = []) {
  */
 export function resumeOutcomeMessage({ started = 0, skipped = 0 } = {}) {
   if (started <= 0) return '';
-  if (skipped <= 0) return 'Experiment resumed.';
+  if (skipped <= 0) return 'Test resumed.';
   const products = `${started} product${started === 1 ? '' : 's'}`;
   const them = skipped === 1 ? 'it' : 'them';
   return `Resumed ${products}. ${skipped} stayed paused because another test is pricing ${them}.`;
@@ -60,8 +60,8 @@ export function resumeConflictTitle({ start = [] } = {}) {
 
 export function resumeConflictBody({ start = [] } = {}) {
   return start.length
-    ? 'These products started a different test while this experiment was paused. Resuming them too would put two prices on one product, so they will stay paused:'
-    : 'Every product in this experiment started a different test while it was paused. End those tests to free the products, then resume:';
+    ? 'These products started a different test while this test was paused. Resuming them too would put two prices on one product, so they will stay paused:'
+    : 'Every product in this test started a different test while it was paused. End those tests to free the products, then resume:';
 }
 
 export function resumeConflictConfirmLabel({ start = [] } = {}) {
@@ -81,8 +81,8 @@ export function resumeConflictListMessage(plan) {
   const more = blocked.length > 2 ? `, and ${blocked.length - 2} more` : '';
   const detail = names ? ` ${names}${more}.` : '';
   return plan?.action === 'blocked'
-    ? `Every product in this experiment is in another test now.${detail} End those tests to free the products.`
-    : `Some products are in another test now.${detail} Open the experiment to resume the rest.`;
+    ? `Every product in this test is in another test now.${detail} End those tests to free the products.`
+    : `Some products are in another test now.${detail} Open the test to resume the rest.`;
 }
 
 /** One line per held product: what it is, and who has it. */

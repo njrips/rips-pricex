@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Button, Select, TextField } from '@shopify/polaris';
 import { ensureSmartPricingPlanPreviewTest } from '../../../../services/smartPricingApi';
 import { apiGet, unwrapData } from '../../../../services/api';
@@ -26,6 +27,7 @@ import {
   resolvePlanProductPath,
 } from '../classicExperimentDetailsHelpers';
 import { createPreviewSessionId } from '../../../../utils/previewUrl';
+import { formatTrafficPercent } from '../variationsStepHelpers';
 import useExclusivePreviewBusy from '../useExclusivePreviewBusy';
 import { useKeyedState } from '../../../../hooks/useKeyedState';
 import {
@@ -40,6 +42,26 @@ import styles from '../SmartPricingClassic.module.css';
 function openPreview(url) {
   if (!url || typeof window === 'undefined') return;
   window.open(url, '_blank', 'noopener,noreferrer');
+}
+
+/** Fixed coordinates for the QR panel — portaled so it is not covered by the products toolbar. */
+function measureQrPopoverBox(anchorEl) {
+  if (!anchorEl || typeof window === 'undefined') return null;
+  const rect = anchorEl.getBoundingClientRect();
+  const width = Math.min(280, Math.max(240, window.innerWidth - 48));
+  const gap = 8;
+  const estimatedHeight = 340;
+  let top = rect.bottom + gap;
+  if (top + estimatedHeight > window.innerHeight - 16 && rect.top > estimatedHeight + gap) {
+    top = Math.max(16, rect.top - estimatedHeight - gap);
+  }
+  const left = Math.max(16, Math.min(rect.left, window.innerWidth - width - 16));
+  return {
+    top,
+    left,
+    width,
+    maxHeight: Math.min(420, window.innerHeight - 32),
+  };
 }
 
 function withFreshPreviewSession(url) {
@@ -245,7 +267,7 @@ async function prepareArmPreviewUrl(
   );
   if (!url) {
     window.alert(
-      'Preview unavailable for this variation until the experiment is launched and linked.'
+      'Preview unavailable for this variation until the test is launched and linked.'
     );
     return null;
   }
@@ -358,6 +380,7 @@ function VariationCard({
   inboxPlans = [],
 }) {
   const popoverRef = useRef(null);
+  const qrPanelRef = useRef(null);
   const copyTimerRef = useRef(null);
   const primaryProduct = arm.products?.[0] || null;
   const previewKey = buildPreviewBusyKey({
@@ -395,13 +418,33 @@ function VariationCard({
   const isQrOpen = qrOpenId === arm.id;
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState('');
+  const [qrBox, setQrBox] = useState(null);
+
+  const syncQrBox = useCallback(() => {
+    if (!popoverRef.current) return;
+    setQrBox(measureQrPopoverBox(popoverRef.current));
+  }, []);
+
+  useEffect(() => {
+    if (!isQrOpen) {
+      setQrBox(null);
+      return undefined;
+    }
+    syncQrBox();
+    window.addEventListener('resize', syncQrBox);
+    window.addEventListener('scroll', syncQrBox, true);
+    return () => {
+      window.removeEventListener('resize', syncQrBox);
+      window.removeEventListener('scroll', syncQrBox, true);
+    };
+  }, [isQrOpen, syncQrBox, ensuredQrUrl, previewUrl]);
 
   useEffect(() => {
     if (!isQrOpen) return undefined;
     const onDoc = event => {
-      if (popoverRef.current && !popoverRef.current.contains(event.target)) {
-        setQrOpenId('');
-      }
+      const target = event.target;
+      if (popoverRef.current?.contains(target) || qrPanelRef.current?.contains(target)) return;
+      setQrOpenId('');
     };
     const onKey = event => {
       if (event.key === 'Escape') setQrOpenId('');
@@ -516,7 +559,46 @@ function VariationCard({
     Boolean(shopDomain) &&
     Boolean(primaryProduct?.planId || primaryProduct?.productId || previewUrl);
 
+  const qrPopoverPanel =
+    isQrOpen && (ensuredQrUrl || previewUrl) && qrBox && typeof document !== 'undefined' ? (
+      <div
+        ref={qrPanelRef}
+        className={`${styles.variationQrPopover} ${styles.variationQrPopoverPortal}`}
+        style={{
+          top: qrBox.top,
+          left: qrBox.left,
+          width: qrBox.width,
+          maxHeight: qrBox.maxHeight,
+        }}
+        role="dialog"
+        aria-label={`QR preview for ${arm.label}`}
+      >
+        {qrUrl ? (
+          <img className={styles.variationQrImage} src={qrUrl} alt={`QR for ${arm.label}`} />
+        ) : null}
+        <p className={styles.help}>
+          Scan to open {arm.label}
+          {primaryProduct?.title ? ` on ${primaryProduct.title}` : ''}.
+          {multiSku ? ' Per-SKU previews are also in the products table below.' : ''}
+        </p>
+        <div className={styles.variationPreviewRow}>
+          <Button disabled={previewBtn.disabled} loading={previewBtn.loading} onClick={runPreview}>
+            Open link
+          </Button>
+          <Button disabled={copyBtn.disabled} loading={copyBtn.loading} onClick={copyLink}>
+            {copied ? 'Copied' : 'Copy link'}
+          </Button>
+        </div>
+        {copyError ? (
+          <p className={styles.error} role="status">
+            {copyError}
+          </p>
+        ) : null}
+      </div>
+    ) : null;
+
   return (
+    <>
     <div className={`${styles.statCard} ${styles.variationArmCard}`}>
       <div className={styles.reviewHead}>
         <h3 className={styles.panelTitle}>
@@ -539,7 +621,9 @@ function VariationCard({
       <div className={styles.selectionBar}>
         <span>Traffic split</span>
         <strong>
-          {arm.allocation !== null && arm.allocation !== undefined ? `${arm.allocation}%` : '—'}
+          {arm.allocation !== null && arm.allocation !== undefined
+            ? `${formatTrafficPercent(arm.allocation)}%`
+            : '—'}
         </strong>
       </div>
       {isOfferTest ? null : (
@@ -600,45 +684,10 @@ function VariationCard({
             Preview available after this arm is linked to a running test.
           </p>
         )}
-        {isQrOpen && (ensuredQrUrl || previewUrl) ? (
-          <div
-            className={styles.variationQrPopover}
-            role="dialog"
-            aria-label={`QR preview for ${arm.label}`}
-          >
-            {qrUrl ? (
-              <img className={styles.variationQrImage} src={qrUrl} alt={`QR for ${arm.label}`} />
-            ) : null}
-            <p className={styles.help}>
-              Scan to open {arm.label}
-              {primaryProduct?.title ? ` on ${primaryProduct.title}` : ''}.
-              {multiSku ? ' Per-SKU previews are also in the products table below.' : ''}
-            </p>
-            <div className={styles.variationPreviewRow}>
-              <Button
-                disabled={previewBtn.disabled}
-                loading={previewBtn.loading}
-                onClick={runPreview}
-              >
-                Open link
-              </Button>
-              <Button
-                disabled={copyBtn.disabled}
-                loading={copyBtn.loading}
-                onClick={copyLink}
-              >
-                {copied ? 'Copied' : 'Copy link'}
-              </Button>
-            </div>
-            {copyError ? (
-              <p className={styles.error} role="status">
-                {copyError}
-              </p>
-            ) : null}
-          </div>
-        ) : null}
       </div>
     </div>
+    {qrPopoverPanel ? createPortal(qrPopoverPanel, document.body) : null}
+    </>
   );
 }
 
@@ -768,7 +817,7 @@ function VariationsProductsTable({
     return (
       <div className={styles.statCard}>
         <h3 className={styles.panelTitle}>Products</h3>
-        <p className={styles.help}>No products are attached to this experiment yet.</p>
+        <p className={styles.help}>No products are attached to this test yet.</p>
       </div>
     );
   }
@@ -850,7 +899,7 @@ function VariationsProductsTable({
       </div>
 
       <div className={`${styles.tableScroll} ${styles.variationsProductsTableScroll}`}>
-        <table className={styles.table} aria-label="Experiment products grouped by variant">
+        <table className={styles.table} aria-label="Test products grouped by variant">
           <thead>
             <tr>
               <th scope="col">Product</th>
@@ -1147,7 +1196,7 @@ export default function ClassicVariationsTab({
       <div className={styles.statCard}>
         <h3 className={styles.panelTitle}>Variations</h3>
         <p className={styles.help}>
-          {isOfferTest ? 'No offer variations on this experiment yet.' : 'No price arms on this experiment yet.'}
+          {isOfferTest ? 'No offer variations on this test yet.' : 'No price arms on this test yet.'}
         </p>
       </div>
     );

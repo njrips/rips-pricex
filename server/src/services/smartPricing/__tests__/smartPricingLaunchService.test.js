@@ -158,7 +158,7 @@ describe('smartPricingLaunchService', () => {
     ensureOfferCheckoutDiscount.mockRejectedValueOnce(
       Object.assign(
         new Error(
-          'No checkout discount function found for this app. Deploy ripspricex-checkout-discount, then try again.'
+          'Checkout pricing functions are not available for this app. Open Store setup and use Check and install, or contact support.'
         ),
         { code: 'FUNCTION_MISSING' }
       )
@@ -186,7 +186,7 @@ describe('smartPricingLaunchService', () => {
         'demo.myshopify.com',
         { autoStart: true }
       )
-    ).rejects.toThrow(/checkout discount function/i);
+    ).rejects.toThrow(/checkout pricing functions/i);
 
     expect(ensureOfferCheckoutDiscount).toHaveBeenCalled();
     expect(resolveSmartPricingCheckoutReadiness).not.toHaveBeenCalled();

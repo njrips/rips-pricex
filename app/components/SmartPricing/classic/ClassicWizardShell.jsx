@@ -1,6 +1,6 @@
 import React from 'react';
 import { Button } from '@shopify/polaris';
-import { CLASSIC_CREATE_STEPS, getClassicCreateSteps } from './classicCreateSteps';
+import { CLASSIC_CREATE_STEPS, getClassicCreateSteps, stepLabelLines } from './classicCreateSteps';
 import {
   ButtonIconArrowLeft,
   ButtonIconArrowRight,
@@ -8,6 +8,22 @@ import {
   IconCheck,
 } from './classicIcons';
 import styles from './SmartPricingClassic.module.css';
+
+function StepperStepLabel({ label }) {
+  const lines = stepLabelLines(label);
+  if (lines.length === 1) {
+    return <span className={styles.stepLabel}>{lines[0]}</span>;
+  }
+  return (
+    <span className={styles.stepLabelMultiline}>
+      {lines.map(line => (
+        <span key={line} className={styles.stepLabelLine}>
+          {line}
+        </span>
+      ))}
+    </span>
+  );
+}
 
 export default function ClassicWizardShell({
   stepIndex = 0,
@@ -40,7 +56,7 @@ export default function ClassicWizardShell({
   const steps = getClassicCreateSteps(experimentType);
   const step = steps[stepIndex] || steps[0] || CLASSIC_CREATE_STEPS[0];
   const heading = title || step.title;
-  const sub = subtitle || step.description;
+  const sub = String(subtitle ?? step.description ?? '').trim();
   const isLaunch = String(continueLabel || '')
     .toLowerCase()
     .includes('launch');
@@ -51,7 +67,7 @@ export default function ClassicWizardShell({
       <div className={styles.topBar}>
         <div className={styles.pageBack}>
           <Button variant="plain" icon={ButtonIconArrowLeft} textAlign="start" onClick={onBackToList}>
-            Back to experiments
+            Back to tests
           </Button>
         </div>
         <span className={styles.stepOf}>
@@ -65,7 +81,7 @@ export default function ClassicWizardShell({
           list may only contain listitems, so the list role forced a
           non-interactive role onto them. Position is carried by
           aria-current="step" on the active item. */}
-      <div className={styles.stepper} role="group" aria-label="Experiment setup progress">
+      <div className={styles.stepper} role="group" aria-label="Test setup progress">
         {steps.map((item, index) => {
           const done = index < stepIndex;
           const active = index === stepIndex;
@@ -75,14 +91,18 @@ export default function ClassicWizardShell({
           const itemClass = `${styles.stepItem} ${active ? styles.stepItemActive : ''} ${
             done ? styles.stepItemDone : ''
           } ${canJump ? styles.stepItemClickable : ''}`;
+          const stepSub =
+            item.subtitle && String(item.subtitle).trim() !== String(item.label || '').trim()
+              ? item.subtitle
+              : null;
           const itemBody = (
             <>
               <span className={styles.stepDot} aria-hidden>
                 {done ? <IconCheck size={14} /> : index + 1}
               </span>
               <span className={styles.stepText}>
-                <span className={styles.stepLabel}>{item.label}</span>
-                <span className={styles.stepSub}>{item.subtitle}</span>
+                <StepperStepLabel label={item.label} />
+                {stepSub ? <span className={styles.stepSub}>{stepSub}</span> : null}
               </span>
             </>
           );
@@ -117,7 +137,7 @@ export default function ClassicWizardShell({
 
       <div className={styles.card}>
         <h1 className={`${styles.title} ripx-classic-sans`}>{heading}</h1>
-        <p className={styles.subtitle}>{sub}</p>
+        {sub ? <p className={styles.subtitle}>{sub}</p> : null}
         {children}
       </div>
 

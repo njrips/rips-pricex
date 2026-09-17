@@ -12,6 +12,10 @@ import {
 } from '../revenueGuardrail.js';
 
 describe('ensureRevenueGuardrailRows', () => {
+  it('names the row Revenue guardrail for merchant UI', () => {
+    assert.equal(createRevenueGuardrailRow(10).label, 'Revenue guardrail');
+  });
+
   it('keeps only the revenue pause row', () => {
     const rows = ensureRevenueGuardrailRows([
       createRevenueGuardrailRow(12),

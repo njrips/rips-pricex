@@ -1,3 +1,7 @@
+import {
+  compactInboxPlan,
+  compactInboxPlans,
+} from '../components/SmartPricing/classic/classicWizardDraftSize';
 import { apiGet, apiPost, apiPut, apiDelete, apiPatch, unwrapData } from './api';
 
 export async function getSmartPricingStatus(domain) {
@@ -117,7 +121,7 @@ export async function launchSmartPricingPlan(
   try {
     const res = await apiPost(
       '/smart-pricing/plans/launch',
-      { plan, status, auto_start: autoStart },
+      { plan: compactInboxPlan(plan), status, auto_start: autoStart },
       domain ? { params: { domain }, timeout: 45000 } : { timeout: 45000 }
     );
     return unwrapData(res);
@@ -128,7 +132,7 @@ export async function launchSmartPricingPlan(
       (code === 'ECONNABORTED' || code === 'ERR_CANCELED' || /timeout/i.test(String(err?.message || '')))
     ) {
       err.message =
-        'Launch timed out while starting the test. Open Setup, tap Ensure on the checkout discount, then try again.';
+        'Launch timed out while starting the test. Open Store setup, refresh Checkout pricing functions status, then try again.';
     }
     throw err;
   }
@@ -391,7 +395,7 @@ export async function saveSmartPricingInboxPlans(
   const res = await apiPut(
     '/smart-pricing/inbox/plans',
     {
-      plans,
+      plans: compactInboxPlans(plans),
       ...(deletedPlanIds.length ? { deleted_plan_ids: deletedPlanIds } : {}),
       ...(revision ? { expected_revision: revision } : {}),
     },

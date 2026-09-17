@@ -392,7 +392,7 @@ export default function ClassicProductDetailPanel({
         <Modal.Section>
           <p>
             Creates a queued follow-up plan for this product. Review the new arms, then launch
-            when ready. Sibling products in the experiment are not affected.
+            when ready. Sibling products in the test are not affected.
           </p>
           <label style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '12px 0' }}>
             <input

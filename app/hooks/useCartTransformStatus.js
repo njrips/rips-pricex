@@ -15,14 +15,15 @@ function unwrapBody(res) {
 // installed". Without it a caller reading only `installed` renders a red verdict
 // for the first moment of every page load.
 const CHECKING = {
-  status: 'Checking cart transform…',
+  status: 'Checking dynamic cart prices…',
   installed: false,
   verified: false,
   checking: true,
   error: /** @type {string | null} */ (null),
 };
 
-const DEPLOY_FIRST = 'Deploy ripspricex-cart-transform, then Ensure';
+const NEEDS_INSTALL =
+  'Use Check and install on Store setup to add dynamic cart prices for price tests';
 
 /** What the status payload means for the merchant, as a complete state. */
 function describeStatus(data) {
@@ -30,7 +31,7 @@ function describeStatus(data) {
   const hasFunction = Boolean(data.function?.id);
   if (flag === true) {
     return {
-      status: 'Cart transform installed for this app',
+      status: 'Dynamic cart prices enabled for price tests',
       installed: true,
       verified: true,
       checking: false,
@@ -39,7 +40,9 @@ function describeStatus(data) {
   }
   if (flag === false) {
     return {
-      status: hasFunction ? 'Function found — click Ensure to install' : DEPLOY_FIRST,
+      status: hasFunction
+        ? 'Dynamic cart prices found — click Check and install on Store setup'
+        : NEEDS_INSTALL,
       installed: false,
       verified: true,
       checking: false,
@@ -48,7 +51,9 @@ function describeStatus(data) {
   }
   // Install check was inconclusive (null).
   return {
-    status: hasFunction ? 'Function found — could not verify install; click Ensure' : DEPLOY_FIRST,
+    status: hasFunction
+      ? 'Dynamic cart prices found — could not verify install; click Check and install'
+      : NEEDS_INSTALL,
     installed: false,
     verified: false,
     checking: false,
@@ -66,7 +71,7 @@ async function loadStatus(shopDomain) {
   } catch (e) {
     return {
       next: {
-        status: 'Could not load cart transform status',
+        status: 'Could not load dynamic cart prices status',
         installed: false,
         verified: false,
         checking: false,
@@ -117,10 +122,10 @@ export default function useCartTransformStatus(shopDomain, { enabled = true } = 
       setState(prev => ({
         ...prev,
         status: data.created
-          ? 'Cart transform installed'
+          ? 'Dynamic cart prices installed'
           : data.assumedInstalled
-            ? 'Cart transform already present'
-            : 'Cart transform already installed',
+            ? 'Dynamic cart prices already present'
+            : 'Dynamic cart prices already installed',
         installed: true,
         verified: true,
         checking: false,
@@ -130,7 +135,7 @@ export default function useCartTransformStatus(shopDomain, { enabled = true } = 
     } catch (e) {
       setState(prev => ({
         ...prev,
-        error: e?.response?.data?.error || e?.message || 'Ensure failed',
+        error: e?.response?.data?.error || e?.message || 'Check and install failed',
       }));
       return null;
     } finally {

@@ -83,10 +83,10 @@ function lastChange(onChange) {
 }
 
 describe('step 4 sections', () => {
-  it('puts Audience above Metrics', async () => {
+  it('puts Audience above Success metrics', async () => {
     await renderPanel();
     const audience = headingAt('Audience');
-    const metrics = headingAt('Metrics');
+    const metrics = headingAt('Success metrics');
     expect(audience).not.toBeNull();
     expect(metrics).not.toBeNull();
     expect(documentOrder(audience, metrics)).toBe(-1);
@@ -109,14 +109,14 @@ describe('step 4 sections', () => {
     await renderPanel();
     const source = headingAt('Traffic source');
     const segment = headingAt('Audience segment');
-    const metrics = headingAt('Metrics');
+    const metrics = headingAt('Success metrics');
     expect(documentOrder(source, segment)).toBe(-1);
     expect(documentOrder(segment, metrics)).toBe(-1);
   });
 
   it('ends the step with the revenue guardrail', async () => {
     await renderPanel();
-    const metrics = headingAt('Metrics');
+    const metrics = headingAt('Success metrics');
     const guardrail = headingAt('Revenue guardrail');
     expect(documentOrder(metrics, guardrail)).toBe(-1);
   });
@@ -255,5 +255,13 @@ describe('revenue guardrail switch', () => {
     );
     expect(field).not.toBeNull();
     expect(field.value).toBe('14');
+  });
+
+  it('documents the ~100-visitor guardrail floor, not Results settings min sample', async () => {
+    await renderPanel();
+    expect(container.textContent).toMatch(/about 100 visitors/i);
+    expect(container.textContent).not.toMatch(/minimum visitors per variation is reached/i);
+    expect(container.textContent).toMatch(/safety pause, not a winner call/i);
+    expect(container.textContent).toMatch(/Products & prices, not while the test runs/i);
   });
 });

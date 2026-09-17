@@ -1,5 +1,5 @@
 /** Long-form help moved to tooltips on section titles */
 export const SECTION_HELP = {
   themePriceSelectors:
-    'Shop-wide selectors for where Priceify paints test prices. Auto-map reads allowlisted theme files and verifies them on the live storefront. AI only ranks verified selectors — it never invents CSS. Visual pick remains the fallback.',
+    'Shop-wide price locations for where Priceify paints test prices. Scan storefront checks your live shop and theme files automatically; AI only ranks verified matches. Use Pick on your storefront for anything the scan misses.',
 };

@@ -190,7 +190,7 @@ async function resolveSmartPricingCheckoutReadiness(
     configured_shop: 0,
     actionable_gap_count: 0,
     message:
-      'The product page price is mapped, which is all a price test needs. Other surfaces are optional.',
+      'The product page price is mapped, which is all a price test needs. Other locations are optional.',
     action_path: SETTINGS_PRICE_SURFACES_TAB,
   };
   try {
@@ -208,7 +208,7 @@ async function resolveSmartPricingCheckoutReadiness(
       // so both messages now say that outright: a merchant who mapped one row
       // and deleted the rest was left wondering what the other four had been for.
       message: surfaceReady
-        ? 'The product page price is mapped, which is all a price test needs. Other surfaces are optional.'
+        ? 'The product page price is mapped, which is all a price test needs. Other locations are optional.'
         : `Map the product page price under ${SETTINGS_PRICE_SURFACES_TAB} so bucketed visitors see test prices. It is the only surface a price test requires.`,
       action_path: SETTINGS_PRICE_SURFACES_TAB,
     };
@@ -222,7 +222,7 @@ async function resolveSmartPricingCheckoutReadiness(
       status: 'unknown',
       configured_shop: 0,
       actionable_gap_count: 1,
-      message: `Could not load theme price selectors. Open ${SETTINGS_PRICE_SURFACES_TAB} and map PDP selectors.`,
+      message: `Could not load price locations. Open ${SETTINGS_PRICE_SURFACES_TAB} and map the product page price.`,
       action_path: SETTINGS_PRICE_SURFACES_TAB,
     };
   }
@@ -300,7 +300,7 @@ async function resolveSmartPricingCheckoutReadiness(
         ? automaticDiscountAvailable
           ? 'Checkout discount function is attached for offer tests.'
           : 'Checkout discount function is deployed. Launch will attach the automatic discount.'
-        : 'Offer tests need the Priceify checkout discount function. Deploy ripspricex-checkout-discount, then re-check Setup.',
+        : 'Offer tests need Checkout pricing functions on Store setup. Use Check and install, then refresh status.',
     offer_ready:
       live.live_api_checked !== true ||
       discountFunctionAvailable === true ||

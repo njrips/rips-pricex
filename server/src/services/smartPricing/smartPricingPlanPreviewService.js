@@ -310,7 +310,7 @@ function buildExperimentPreviewPayload(primaryPlan, experimentPlans, guardrails,
     ),
   ];
 
-  payload.name = `Smart Pricing Preview · ${String(primaryPlan?.title || 'Experiment')}`
+  payload.name = `Smart Pricing Preview · ${String(primaryPlan?.title || 'Untitled test')}`
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, 120);
@@ -318,7 +318,7 @@ function buildExperimentPreviewPayload(primaryPlan, experimentPlans, guardrails,
   payload.target_type = 'product';
   payload.target_id = primaryPlan.product_id || productIds[0] || null;
   payload.target_ids = productIds;
-  payload.description = `Classic experiment preview covering ${productIds.length} products`;
+  payload.description = `Classic test preview covering ${productIds.length} products`;
   payload.metadata = {
     ...(payload.metadata && typeof payload.metadata === 'object' ? payload.metadata : {}),
     smart_pricing_source: 'smart_pricing',

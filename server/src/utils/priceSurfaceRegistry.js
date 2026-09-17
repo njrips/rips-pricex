@@ -249,7 +249,7 @@ function analyzePriceSurfaceRegistryGaps(testMappings, shopMappings) {
     surface: target.surface,
     role: target.role,
     severity: target.severity,
-    message: `Theme price selector missing for ${target.surface} (${target.role.replace(/_/g, ' ')}).`,
+    message: `Price location missing for ${target.surface} (${target.role.replace(/_/g, ' ')}).`,
   }));
 }
 

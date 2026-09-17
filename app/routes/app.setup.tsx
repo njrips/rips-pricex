@@ -41,7 +41,9 @@ function surfaceBadgeLabel(view: SurfaceView, configured: number) {
   // looking for a button to press. How many rows there are is not the question:
   // one product page row is a complete mapping.
   if (view === 'unmapped') return 'Product page not mapped';
-  if (configured > 0) return `${configured} mapping${configured === 1 ? '' : 's'}`;
+  if (configured > 0) {
+    return `${configured} price location${configured === 1 ? '' : 's'} mapped`;
+  }
   return 'Ready';
 }
 
@@ -118,7 +120,7 @@ async function loadReadiness(target: ApiTarget, { refresh = false } = {}) {
         priceReady: false,
         offerReady: false,
         anyReady: false,
-        title: 'Checkout needs attention',
+        title: 'Not ready to launch tests yet',
         detail: 'Could not load checkout readiness.',
       },
       hints: ['Could not load checkout readiness'],
@@ -230,36 +232,6 @@ export default function SetupPage() {
     };
   }, [refreshReadiness]);
 
-  // The manual snippet is a fallback almost nobody needs, so it is fetched the
-  // first time the disclosure is opened rather than on every Setup visit.
-  const [install, setInstall] = useKeyedState(target, () => ({
-    snippet: '',
-    scriptUrl: '',
-    error: false,
-  }));
-  // A ref, not state: the guard has to answer synchronously inside the toggle
-  // handler, and reading state there would let a second toggle fire a second
-  // request before the first render lands. Keyed on the shop so switching shops
-  // fetches that shop's snippet rather than reusing the previous one.
-  const snippetRequestedFor = useRef<string | null>(null);
-
-  const loadInstallSnippet = useCallback(async () => {
-    if (!shop || snippetRequestedFor.current === shop) return;
-    snippetRequestedFor.current = shop;
-    try {
-      const data = await rpxApi.settingsInstallation(target);
-      setInstall({
-        snippet: String(data?.snippetHtml || ''),
-        scriptUrl: String(data?.scriptUrl || data?.directUrl || ''),
-        error: false,
-      });
-    } catch {
-      setInstall({ snippet: '', scriptUrl: '', error: true });
-      // Let a re-open retry, since the failure may have been transient.
-      snippetRequestedFor.current = null;
-    }
-  }, [shop, target, setInstall]);
-
   const functionsReady = cart.installed && discount.installed;
   const functionsBusy = cart.busy || discount.busy || readinessBusy;
 
@@ -291,16 +263,13 @@ export default function SetupPage() {
 
   return (
     <ClassicAdminShell
-      titleBar="Setup"
-      // "Store readiness" sat above a heading that said the same thing in more
-      // words, on a page already labelled Setup in the nav. Three names for one
-      // page is two too many.
-      title="Connect Priceify to your store"
-      subtitle="Three checks stand between this shop and its first test. Hover any step for what it does."
+      titleBar="Store setup"
+      title="Store setup"
+      subtitle="Check these three items once to get your store ready for testing."
       footerPrimary={
         overallReady
           ? {
-              label: 'Create experiment',
+              label: 'New test',
               onClick: () => navigate('/app/experiments/new'),
             }
           : {
@@ -318,7 +287,7 @@ export default function SetupPage() {
         // Nothing to enable once the theme already has it on.
         embedUrl && embedView !== 'enabled'
           ? {
-              label: 'Enable theme app embed',
+              label: 'Open theme settings',
               // The https form, not the shopify:// one, so the link says where
               // it goes and opens the editor beside the app rather than over it.
               href: embedHttpsUrl || embedUrl,
@@ -327,7 +296,7 @@ export default function SetupPage() {
             }
           : !ctx.entitled
             ? {
-                label: 'Open Plan',
+                label: 'Plan & usage',
                 onClick: () => navigate('/app/settings?tab=plan'),
               }
             : undefined
@@ -351,10 +320,10 @@ export default function SetupPage() {
         >
           <p>
             {launchSummary.detail ||
-              'Setup covers storefront paint, checkout functions, and theme price selectors.'}
+              'Store setup covers Theme connection, Checkout pricing functions, and price locations on your site.'}
           </p>
           {embedView === 'disabled' ? (
-            <p>The theme app embed is off, so price tests cannot paint. Offer tests still work.</p>
+            <p>Theme connection is off, so price tests cannot paint. Offer tests still work.</p>
           ) : null}
         </Banner>
       </div>
@@ -363,7 +332,7 @@ export default function SetupPage() {
         <div className={styles.adminRow}>
           <div className={styles.adminRowHead}>
             <StepTitle
-              label="1. Theme app embed"
+              label="1. Theme connection"
               tip="Priceify's storefront script loads through this embed, so price tests cannot repaint prices without it. Apps are not allowed to switch on their own embed — open the theme editor, enable Priceify, and Save. Offer tests apply at checkout and do not need it."
             />
             <Badge tone={embedBadgeTone(embedView)}>
@@ -373,14 +342,14 @@ export default function SetupPage() {
           {embedView === 'enabled' ? (
             <Banner tone="success">
               <p>
-                Already enabled
+                Priceify is installed in your live theme
                 {embedThemeName ? (
                   <>
                     {' '}
-                    in your live theme <strong>{embedThemeName}</strong>
+                    (<strong>{embedThemeName}</strong>)
                   </>
-                ) : null}{' '}
-                — nothing to do here.
+                ) : null}
+                . No action needed.
               </p>
             </Banner>
           ) : (
@@ -388,12 +357,12 @@ export default function SetupPage() {
               <p className={styles.adminRowBody}>
                 {embedView === 'unknown'
                   ? 'We could not read your theme settings — confirm it in the theme editor.'
-                  : 'The theme editor opens in a new tab. Enable Priceify, Save, then come back — this page re-checks itself.'}
+                  : 'Enable the Priceify app embed in your Online Store theme to start testing prices.'}
               </p>
               <div className={styles.adminRowActions}>
                 {embedUrl ? (
                   <Button variant="primary" onClick={goToThemeEditor}>
-                    Enable theme app embed
+                    Open theme settings
                   </Button>
                 ) : (
                   <p className={styles.help}>
@@ -410,41 +379,6 @@ export default function SetupPage() {
               </div>
             </>
           )}
-
-          {/* The fallback for this step, so it folds away inside it. On its own
-              at the foot of the page it read as a fourth thing to do, and a
-              merchant whose theme cannot load the embed had to scroll past two
-              unrelated steps to find the one answer to their problem. */}
-          <details
-            className={styles.advanced}
-            onToggle={event => {
-              if ((event.currentTarget as HTMLDetailsElement).open) void loadInstallSnippet();
-            }}
-          >
-            <summary className={styles.advancedSummary}>
-              Alternative install: add the script to your theme by hand
-            </summary>
-            <div className={styles.advancedBody}>
-              <p className={styles.adminRowBody}>
-                For a theme that cannot load the embed. Paste this before <code>&lt;/head&gt;</code>{' '}
-                in <code>theme.liquid</code>; leaving the embed on as well is safe.
-              </p>
-              {install.scriptUrl ? (
-                <p className={styles.help}>
-                  Script URL: <code>{install.scriptUrl}</code>
-                </p>
-              ) : null}
-              {install.snippet ? (
-                <pre className={styles.adminCodeBlock}>{install.snippet}</pre>
-              ) : (
-                <p className={styles.help}>
-                  {install.error
-                    ? 'Could not load the snippet for this shop. Close and re-open this section to try again.'
-                    : 'Loading the snippet for this shop…'}
-                </p>
-              )}
-            </div>
-          </details>
         </div>
 
         {/* Cart transform and the checkout discount were two steps asking the
@@ -454,8 +388,8 @@ export default function SetupPage() {
         <div className={styles.adminRow}>
           <div className={styles.adminRowHead}>
             <StepTitle
-              label="2. Checkout functions"
-              tip="Two Shopify functions, both installed for you. The cart transform is what charges a test price at checkout for price tests. The automatic discount is what applies money off for offer tests. Checking installs whichever is missing and leaves the other alone."
+              label="2. Checkout pricing functions"
+              tip="Two Shopify functions, both installed for you. Dynamic cart prices charge the test price at checkout for price tests. Checkout discounts apply money off for offer tests. Check and install adds whichever is missing and leaves the other alone."
             />
             {/* No badge on the heading: the two rows below already carry a
                 verdict each, and a third one summarising them said "Partly
@@ -466,23 +400,27 @@ export default function SetupPage() {
                 two verdicts do not cost two paragraphs. */}
             <div className={styles.adminStatusLine}>
               <TooltipWrapper content={cart.status}>
-                <span className={styles.adminStatusLineLabel}>Cart transform (price tests)</span>
+                <span className={styles.adminStatusLineLabel}>
+                  Dynamic cart prices (for price tests)
+                </span>
               </TooltipWrapper>
               {/* "Installed" and "Attached" described how each function got
                   there, which left a merchant comparing two different words for
                   the same good news. Both now report whether they are on. */}
               <Badge tone={cart.checking ? undefined : cart.installed ? 'success' : 'warning'}>
-                {cart.checking ? 'Checking…' : cart.installed ? 'Enabled' : 'Needs install'}
+                {cart.checking ? 'Checking…' : cart.installed ? 'Enabled' : 'Not enabled'}
               </Badge>
             </div>
             <div className={styles.adminStatusLine}>
               <TooltipWrapper content={discount.status}>
-                <span className={styles.adminStatusLineLabel}>Checkout discount (offer tests)</span>
+                <span className={styles.adminStatusLineLabel}>
+                  Checkout discounts (for offer tests)
+                </span>
               </TooltipWrapper>
               <Badge
                 tone={discount.checking ? undefined : discount.installed ? 'success' : 'warning'}
               >
-                {discount.checking ? 'Checking…' : discount.installed ? 'Enabled' : 'Needs install'}
+                {discount.checking ? 'Checking…' : discount.installed ? 'Enabled' : 'Not enabled'}
               </Badge>
             </div>
           </div>
@@ -491,10 +429,13 @@ export default function SetupPage() {
           {/* Only worth saying when an install has actually just failed. */}
           {cart.error || discount.error ? (
             <p className={styles.help}>
-              If this followed a scope update, re-approve <code>write_discounts</code> and try
-              again.
+              If this followed a permission update, re-open Priceify from Shopify Admin and try
+              Check and install again.
             </p>
           ) : null}
+          <p className={styles.help}>
+            These functions let Priceify update prices in the cart and checkout during a test.
+          </p>
           <div className={styles.adminRowActions}>
             <Button
               variant="primary"
@@ -502,7 +443,7 @@ export default function SetupPage() {
               loading={functionsBusy}
               onClick={() => void ensureFunctions()}
             >
-              {functionsReady ? 'Re-check checkout functions' : 'Check and install'}
+              {functionsReady ? 'Refresh status' : 'Check and install'}
             </Button>
           </div>
         </div>
@@ -510,7 +451,7 @@ export default function SetupPage() {
         <div className={styles.adminRow}>
           <div className={styles.adminRowHead}>
             <StepTitle
-              label="3. Theme price selectors"
+              label="3. Price locations on your site"
               tip="Where the storefront script finds a price to repaint, on the product page and on listings. Bucketed visitors only see test prices on surfaces mapped here. Offer tests apply at checkout and do not need these."
             />
             <Badge tone={surfaceBadgeTone(surfaceView)}>
@@ -523,10 +464,10 @@ export default function SetupPage() {
               variant="primary"
               onClick={() => navigate('/app/settings?tab=price-surfaces&automap=1')}
             >
-              Auto-map price surfaces
+              Scan storefront
             </Button>
             <Button onClick={() => navigate('/app/settings?tab=price-surfaces')}>
-              Open Price surfaces
+              Edit price locations
             </Button>
           </div>
         </div>
@@ -544,8 +485,8 @@ export default function SetupPage() {
       ) : null}
 
       <p className={styles.help} style={{ marginTop: 20 }}>
-        <Link to="/app/settings?tab=plan">Plan</Link> ·{' '}
-        <Link to="/app/settings?tab=price-surfaces">Price surfaces</Link> ·{' '}
+        <Link to="/app/settings?tab=plan">Plan & usage</Link> ·{' '}
+        <Link to="/app/settings?tab=price-surfaces">Price locations</Link> ·{' '}
         <Link to={withCurrentEmbeddedSearch(searchParams, '/app/help')}>Get support</Link>
       </p>
     </ClassicAdminShell>

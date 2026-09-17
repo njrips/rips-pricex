@@ -126,7 +126,13 @@ describe('selectUnlistedWizardDrafts', () => {
 describe('wizardDraftStepLabel', () => {
   it('names the step the draft was left on', () => {
     expect(wizardDraftStepLabel({ step: 0 })).toBe('Step 1 of 5 · Basics');
-    expect(wizardDraftStepLabel({ step: 3 })).toBe('Step 4 of 5 · Audience');
+    expect(wizardDraftStepLabel({ step: 3 })).toBe('Step 4 of 5 · Audience & goals');
+  });
+
+  it('uses offer-test step labels when the draft is an offer test', () => {
+    expect(wizardDraftStepLabel({ step: 2, experimentType: 'offer_test' })).toBe(
+      'Step 3 of 5 · Products & offers'
+    );
   });
 
   it('says nothing when the step is missing or out of range', () => {

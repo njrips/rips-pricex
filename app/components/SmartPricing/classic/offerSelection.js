@@ -45,9 +45,9 @@ export function getOfferCheckoutBlockReason(readiness, { loading = false } = {})
     return String(readiness.offer_message);
   }
   if (readiness?.live_api_checked === true && readiness?.discount_function_available !== true) {
-    return 'Offer tests need the Priceify checkout discount function. Deploy ripspricex-checkout-discount, then re-check Setup.';
+    return 'Offer tests need Checkout pricing functions on Store setup. Refresh status after deploy, then try again.';
   }
-  return 'Could not confirm the checkout discount function. Open Setup and Ensure checkout discount.';
+  return 'Could not confirm Checkout pricing functions. Open Store setup and refresh status.';
 }
 
 export function normalizeOfferDiscountType(raw) {
@@ -60,13 +60,21 @@ export function normalizeOfferDiscountType(raw) {
   return 'percent';
 }
 
+/** While the merchant types — keep every space; only enforce length. */
+export function capOfferMessageLength(raw) {
+  return String(raw ?? '').slice(0, 120);
+}
+
+/** On blur / save — drop leading and trailing spaces, then cap length. */
+export function trimOfferMessageForSave(raw) {
+  return capOfferMessageLength(String(raw ?? '').trim());
+}
+
 export function normalizeOfferConfig(raw = {}) {
   const source = raw && typeof raw === 'object' ? raw : {};
   const discountType = normalizeOfferDiscountType(source.discount_type || source.discountType);
   const rawValue = source.discount_value ?? source.discountValue ?? '';
-  const message = String(source.offer_message || source.offerMessage || '')
-    .trim()
-    .slice(0, 120);
+  const message = trimOfferMessageForSave(source.offer_message || source.offerMessage || '');
   return {
     discount_type: discountType,
     discount_value: rawValue === null || rawValue === undefined ? '' : String(rawValue),

@@ -105,7 +105,7 @@ router.use((req, res, next) => {
     return next();
   }
   if (!isSmartPricingEnabled()) {
-    return sendValidationError(res, ['Smart Pricing is disabled for this environment']);
+    return sendValidationError(res, ['Priceify is disabled for this environment']);
   }
   next();
 });
@@ -538,7 +538,7 @@ router.get(
     }
     const plan = await getInboxPlanById(req.shopDomain, planId);
     if (!plan) {
-      return sendError(res, HTTP_STATUS.NOT_FOUND, 'Smart Pricing plan not found in inbox.');
+      return sendError(res, HTTP_STATUS.NOT_FOUND, 'Test plan not found in inbox.');
     }
     return sendSuccess(res, HTTP_STATUS.OK, {
       plan,

@@ -7,7 +7,11 @@
  * address and restores, while "Create experiment" still opens clean.
  */
 
-import { CLASSIC_CREATE_STEPS, classicCreateStepId } from './classicCreateSteps';
+import {
+  CLASSIC_CREATE_STEPS,
+  classicCreateStepId,
+  getClassicCreateSteps,
+} from './classicCreateSteps';
 
 /** Fields whose presence means the merchant put something into the wizard. */
 function hasListValue(value) {
@@ -81,10 +85,12 @@ export function selectUnlistedWizardDrafts(drafts, listedExperimentIds) {
   });
 }
 
-/** "Step 2 of 5 · Variations", for telling one saved draft from another. */
+/** "Step 2 of 5 · Traffic", for telling one saved draft from another. */
 export function wizardDraftStepLabel(draft) {
   const index = Number(draft?.step);
-  const step = Number.isInteger(index) ? CLASSIC_CREATE_STEPS[index] : null;
+  if (!Number.isInteger(index)) return '';
+  const steps = getClassicCreateSteps(draft?.experimentType || 'price_test');
+  const step = steps[index];
   if (!step) return '';
-  return `Step ${index + 1} of ${CLASSIC_CREATE_STEPS.length} · ${step.label}`;
+  return `Step ${index + 1} of ${steps.length} · ${step.label}`;
 }

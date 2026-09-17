@@ -43,8 +43,10 @@ import {
   applyAudienceUiToPlans,
   audienceUiFromSummaries,
   canEditClassicAudienceMetrics,
+  canEditClassicTestSetup,
   validateClassicAudienceUi,
 } from './classicAudienceEdit';
+import { enrichExperimentsWithListAnalytics } from './classicExperimentListAnalytics';
 import { appendActivityToPlans, createActivityEntry } from './classicActivity';
 import {
   formatClassicStatusLabel,
@@ -128,6 +130,7 @@ export default function ClassicExperimentOverview() {
     setMessageType,
     experimentPlans,
     experimentTestIds,
+    analyticsByTestId,
     refresh,
     replaceExperimentPlansLocal,
     shopGuardrails,
@@ -185,9 +188,22 @@ export default function ClassicExperimentOverview() {
   );
   const canRollOut = Boolean(leftoverWinnerPlan?.test_id) && !isOfferTest;
 
-  const experimentTitle = experiment?.title || plan?.title || 'Experiment';
+  const experimentTitle = experiment?.title || plan?.title || 'Untitled test';
   const currency = plan?.currency || analytics?.currency || 'USD';
   const resumeId = getClassicExperimentResumeId(experiment) || experiment?.id || planId;
+
+  const experimentForEditGating = useMemo(() => {
+    if (!experiment) return experiment;
+    const row = {
+      ...experiment,
+      plans: Array.isArray(experimentPlans) ? experimentPlans : experiment.plans,
+    };
+    const enriched = enrichExperimentsWithListAnalytics([row], analyticsByTestId || {});
+    return enriched[0] || row;
+  }, [experiment, experimentPlans, analyticsByTestId]);
+
+  const canEditSetup =
+    !isArchived && canEditClassicTestSetup(experimentForEditGating || {});
 
   const selectTab = nextTab => {
     const resolved = resolveClassicDetailsTab(nextTab);
@@ -423,7 +439,7 @@ export default function ClassicExperimentOverview() {
     try {
       const { succeeded, failed } = await postToEachTest(actionableTestIds, 'pause');
       if (!succeeded.length) {
-        showError(failed[0]?.reason, 'Could not pause experiment.');
+        showError(failed[0]?.reason, 'Could not pause test.');
         return;
       }
       await replaceExperimentPlansLocal(
@@ -431,7 +447,7 @@ export default function ClassicExperimentOverview() {
           experimentPlans,
           {
             kind: 'paused',
-            title: 'Experiment paused',
+            title: 'Test paused',
             detail: 'Traffic assignment stopped',
           },
           { status: 'paused' },
@@ -451,7 +467,7 @@ export default function ClassicExperimentOverview() {
         preferLocalIds: (experiment?.plans || []).map(row => row.id).filter(Boolean),
       });
     } catch (err) {
-      showError(err, 'Could not pause experiment.');
+      showError(err, 'Could not pause test.');
     } finally {
       setBusyAction('');
     }
@@ -470,7 +486,7 @@ export default function ClassicExperimentOverview() {
     try {
       const { succeeded, failed } = await postToEachTest(actionableTestIds, 'stop');
       if (!succeeded.length) {
-        showError(failed[0]?.reason, 'Could not stop experiment.');
+        showError(failed[0]?.reason, 'Could not stop test.');
         return;
       }
       await replaceExperimentPlansLocal(
@@ -478,7 +494,7 @@ export default function ClassicExperimentOverview() {
           experimentPlans,
           {
             kind: 'stopped',
-            title: 'Experiment stopped',
+            title: 'Test stopped',
             detail: 'Ended by you — no longer collecting results',
           },
           { status: CLASSIC_STOPPED_PLAN_STATUS },
@@ -498,7 +514,7 @@ export default function ClassicExperimentOverview() {
         preferLocalIds: (experiment?.plans || []).map(row => row.id).filter(Boolean),
       });
     } catch (err) {
-      showError(err, 'Could not stop experiment.');
+      showError(err, 'Could not stop test.');
     } finally {
       setBusyAction('');
     }
@@ -547,7 +563,7 @@ export default function ClassicExperimentOverview() {
           experimentPlans,
           {
             kind: 'resumed',
-            title: 'Experiment resumed',
+            title: 'Test resumed',
             detail: 'Traffic assignment started again',
           },
           { status: 'running' },
@@ -590,12 +606,12 @@ export default function ClassicExperimentOverview() {
 
       const { started, failed } = await startTests(plan.start);
       if (!started) {
-        showError(failed[0]?.reason, 'Could not resume experiment.');
+        showError(failed[0]?.reason, 'Could not resume test.');
         return;
       }
       await finishResume({ started, skipped: failed.length });
     } catch (err) {
-      showError(err, 'Could not resume experiment.');
+      showError(err, 'Could not resume test.');
     } finally {
       setBusyAction('');
     }
@@ -611,12 +627,12 @@ export default function ClassicExperimentOverview() {
     try {
       const { started, failed } = await startTests(clear);
       if (!started) {
-        showError(failed[0]?.reason, 'Could not resume experiment.');
+        showError(failed[0]?.reason, 'Could not resume test.');
         return;
       }
       await finishResume({ started, skipped: skipped + failed.length });
     } catch (err) {
-      showError(err, 'Could not resume experiment.');
+      showError(err, 'Could not resume test.');
     } finally {
       setBusyAction('');
     }
@@ -634,17 +650,17 @@ export default function ClassicExperimentOverview() {
           {
             id: 'archived',
             kind: 'archived',
-            title: 'Experiment archived',
-            detail: 'Hidden from the active experiments list',
+            title: 'Test archived',
+            detail: 'Hidden from the active tests list',
             at: archivedAt,
           },
           { archived: true, archived_at: archivedAt }
         )
       );
-      showSuccess('Experiment archived.');
+      showSuccess('Test archived.');
       navigate(`${ROUTES.appSmartPricing(shopDomain)}?tab=archived`);
     } catch (err) {
-      showError(err, 'Could not archive experiment.');
+      showError(err, 'Could not archive test.');
     } finally {
       setBusyAction('');
     }
@@ -660,19 +676,19 @@ export default function ClassicExperimentOverview() {
           experimentPlans,
           {
             kind: 'restored',
-            title: 'Experiment restored',
-            detail: 'Moved back to the active experiments list',
+            title: 'Test restored',
+            detail: 'Moved back to the active tests list',
           },
           { archived: false, archived_at: null }
         )
       );
-      showSuccess('Experiment restored.');
+      showSuccess('Test restored.');
       refresh({
         quiet: true,
         preferLocalIds: (experiment?.plans || []).map(row => row.id).filter(Boolean),
       });
     } catch (err) {
-      showError(err, 'Could not restore experiment.');
+      showError(err, 'Could not restore test.');
     } finally {
       setBusyAction('');
     }
@@ -695,16 +711,16 @@ export default function ClassicExperimentOverview() {
         deleteLinkedTests: true,
       });
       if (!result.ok && !result.partial) {
-        throw new Error(result.errors[0] || 'Could not delete experiment.');
+        throw new Error(result.errors[0] || 'Could not delete test.');
       }
       showSuccess(
         result.ok
-          ? 'Experiment deleted.'
-          : result.errors[0] || 'Experiment was partially deleted.'
+          ? 'Test deleted.'
+          : result.errors[0] || 'Test was partially deleted.'
       );
       navigate(ROUTES.appSmartPricing(shopDomain));
     } catch (err) {
-      showError(err, 'Could not delete experiment.');
+      showError(err, 'Could not delete test.');
     } finally {
       // Clearing this on success relied on `navigate` unmounting the page. When
       // it does not, every action on the header stays disabled with a spinner
@@ -788,7 +804,7 @@ export default function ClassicExperimentOverview() {
       return;
     }
     if (shopGuardrails == null) {
-      showError(null, 'Still loading shop experiment defaults. Try again in a moment.');
+      showError(null, 'Still loading shop test defaults. Try again in a moment.');
       return;
     }
     setEditSaving(true);
@@ -851,7 +867,7 @@ export default function ClassicExperimentOverview() {
 
   if (!loading && !plan) {
     return (
-      <PageShell message={message || 'Experiment not found.'} messageType="error">
+      <PageShell message={message || 'Test not found.'} messageType="error">
         <div className={styles.listPage}>
           <div className={styles.pageLead}>
             <div className={styles.pageBack}>
@@ -861,12 +877,12 @@ export default function ClassicExperimentOverview() {
                 icon={ButtonIconArrowLeft}
                 onClick={() => navigate(ROUTES.appSmartPricing(shopDomain))}
               >
-                Experiments
+                Tests
               </Button>
             </div>
             <p className={styles.help}>
-              That plan is missing from the Smart Pricing inbox. It may have been deleted, or this
-              browser is out of sync — try refreshing the experiments list.
+              That plan is missing from the Priceify inbox. It may have been deleted, or this
+              browser is out of sync — try refreshing the tests list.
             </p>
             <Button onClick={refresh}>Retry load</Button>
           </div>
@@ -886,7 +902,7 @@ export default function ClassicExperimentOverview() {
               icon={ButtonIconArrowLeft}
               onClick={() => navigate(ROUTES.appSmartPricing(shopDomain))}
             >
-              Experiments
+              Tests
             </Button>
           </div>
 
@@ -902,7 +918,7 @@ export default function ClassicExperimentOverview() {
                 {plan?.hypothesis ||
                   plan?.metadata?.hypothesis ||
                   experiment?.hypothesis ||
-                  (isOfferTest ? 'Offer test experiment overview.' : 'Price test experiment overview.')}
+                  (isOfferTest ? 'Offer test overview.' : 'Price test overview.')}
               </p>
               <div className={styles.overviewMeta}>
                 <span>Owner · {plan?.owner_name || plan?.created_by_name || 'You'}</span>
@@ -921,10 +937,18 @@ export default function ClassicExperimentOverview() {
                 variant="primary"
                 onClick={() => navigate(buildClassicWizardResumePath(resumeId))}
               >
-                Continue editing
+                Edit test
               </Button>
             ) : (
               <>
+                {canEditSetup && (isRunning || isPaused) ? (
+                  <Button
+                    onClick={() => navigate(buildClassicWizardResumePath(resumeId))}
+                    disabled={Boolean(busyAction)}
+                  >
+                    Edit test
+                  </Button>
+                ) : null}
                 {isRunning ? (
                   <Button
                     icon={ButtonIconPause}
@@ -1028,7 +1052,7 @@ export default function ClassicExperimentOverview() {
         </div>
         </div>
 
-        <div className={styles.overviewTabs} role="tablist" aria-label="Experiment sections">
+        <div className={styles.overviewTabs} role="tablist" aria-label="Test sections">
           {TABS.map(item => {
             const Icon = item.icon;
             const selected = tab === item.id;
@@ -1155,7 +1179,7 @@ export default function ClassicExperimentOverview() {
         readOnlyReason={
           canEditClassicAudienceMetrics(status)
             ? ''
-            : 'Audience and metrics are locked after this experiment ends. Start a new experiment to test different targeting or a different goal.'
+            : 'Audience and metrics are locked after this test ends. Start a new test to try different targeting or a different goal.'
         }
         liveWarning={
           (isRunning || isPaused) && linkedTestIds.length
@@ -1187,7 +1211,7 @@ export default function ClassicExperimentOverview() {
         onClose={() => {
           if (!busyAction) setDeleteOpen(false);
         }}
-        title="Delete experiment"
+        title="Delete test"
         primaryAction={{
           content: 'Delete',
           destructive: true,

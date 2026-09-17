@@ -106,7 +106,7 @@ describe('ClassicSettingsTab', () => {
     expect(visible).toContain('Traffic ramp');
     expect(visible).toContain('How a winner is decided');
     expect(visible).toContain('Confidence level');
-    expect(visible).toContain('Minimum sample per variation');
+    expect(visible).toContain('Minimum visitors per variation');
     expect(visible).toContain('5,000');
   });
 
@@ -144,8 +144,9 @@ describe('ClassicSettingsTab', () => {
   it('shows the revenue guardrail with a way to change it', async () => {
     const onEditMetrics = vi.fn();
     await render({ settings: SETTINGS, audience: AUDIENCE, metrics: METRICS, onEditMetrics });
-    expect(visibleText()).toContain('Revenue per visitor');
+    expect(visibleText()).toContain('Revenue guardrail');
     expect(visibleText()).toContain('10%');
+    expect(visibleText()).toMatch(/about 100 visitors/i);
     const edit = buttonLabelled('Edit guardrail');
     expect(edit).toBeTruthy();
     await act(async () => {

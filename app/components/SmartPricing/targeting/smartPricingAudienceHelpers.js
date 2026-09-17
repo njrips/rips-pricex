@@ -21,6 +21,7 @@ export const CUSTOMER_OPTIONS = [
 export const GOAL_METRIC_OPTIONS = [
   { label: 'Revenue per visitor', value: 'revenue_per_visitor' },
   { label: 'Conversion rate', value: 'conversion_rate' },
+  { label: 'Average order value', value: 'aov' },
 ];
 
 /**
@@ -133,7 +134,7 @@ export const CLASSIC_SEGMENT_OPTIONS = [
   {
     value: 'all_visitors',
     label: 'All visitors',
-    help: 'Everyone who matches the rest of this audience enters the experiment.',
+    help: 'Everyone who matches the rest of this audience enters the test.',
   },
   {
     value: 'new_visitors',

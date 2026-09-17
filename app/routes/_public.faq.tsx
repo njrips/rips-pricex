@@ -6,7 +6,7 @@ import { publicMeta } from "../components/public/publicMeta";
 export const meta: MetaFunction = () =>
   publicMeta({
     title: "FAQ",
-    description: "Frequently asked questions about Priceify pricing experiments on Shopify.",
+    description: "Frequently asked questions about Priceify price tests on Shopify.",
     path: "/faq",
   });
 

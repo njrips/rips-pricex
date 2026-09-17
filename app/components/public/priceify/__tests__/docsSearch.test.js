@@ -19,7 +19,7 @@ describe('guide search', () => {
   // name of a setting found nothing about it.
   it('finds a setting by the name it carries in Settings', () => {
     expect(ids('confidence level')[0]).toBe('confidence');
-    expect(ids('minimum sample size per variation')[0]).toBe('min-sample');
+    expect(ids('minimum visitors per variation')[0]).toBe('min-sample');
   });
 
   it('ranks the section named after the term above ones that mention it', () => {
@@ -32,9 +32,9 @@ describe('guide search', () => {
   // Word-by-word matching is the point: the field is labelled "Minimum sample
   // size per variation", and no wording of that should come back empty.
   it('matches word by word rather than as one phrase', () => {
-    expect(ids('sample size')[0]).toBe('min-sample');
-    expect(ids('per-variation sample size')[0]).toBe('min-sample');
-    expect(ids('size sample minimum')[0]).toBe('min-sample');
+    expect(ids('minimum visitors')[0]).toBe('min-sample');
+    expect(ids('visitors per variation')[0]).toBe('min-sample');
+    expect(ids('variation minimum visitors')[0]).toBe('min-sample');
   });
 
   it('requires every word, so a long phrase does not return everything', () => {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  compactInboxPlan,
   compactWizardSnapshot,
   DROPPED_DRAFT_PLAN_FIELDS,
   omitPlansFromSnapshot,
@@ -154,6 +155,17 @@ describe('prepareWizardSnapshotForSave', () => {
     };
 
     expect(prepareWizardSnapshotForSave(snapshot)).toEqual(snapshot);
+  });
+});
+
+describe('compactInboxPlan', () => {
+  it('strips preview-only fields from inbox payloads', () => {
+    const compact = compactInboxPlan(planFixture());
+    DROPPED_DRAFT_PLAN_FIELDS.forEach(field => {
+      expect(compact).not.toHaveProperty(field);
+    });
+    expect(compact.price_arms).toHaveLength(2);
+    expect(compact.product_id).toMatch(/Product/);
   });
 });
 

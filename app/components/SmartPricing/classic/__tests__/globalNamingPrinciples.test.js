@@ -1,0 +1,152 @@
+/**
+ * Spot-checks merchant copy against Priceify Global naming principles (PDF).
+ * Complements merchantNaming.test.js (forbidden legacy strings).
+ */
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { describe, expect, it } from 'vitest';
+import {
+  CLASSIC_CREATE_STEPS,
+  getClassicCreateSteps,
+  stepLabelLines,
+} from '../classicCreateSteps';
+
+const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+
+function read(relative) {
+  return readFileSync(join(root, relative), 'utf8');
+}
+
+describe('global naming principles (PDF spot checks)', () => {
+  it('uses the five wizard step labels from the spec', () => {
+    expect(stepLabelLines('Products & prices')).toEqual(['Products &', 'prices']);
+    expect(CLASSIC_CREATE_STEPS.map(step => step.label)).toEqual([
+      'Basics',
+      'Traffic',
+      'Products & prices',
+      'Audience & goals',
+      'Review & launch',
+    ]);
+  });
+
+  it('names the tests dashboard and primary CTA per the spec', () => {
+    const list = read('ClassicExperimentsList.jsx');
+    expect(list).toMatch(/Run price and offer tests to grow revenue per visitor/);
+    expect(list).toMatch(/Launch price tests in minutes/);
+    expect(list).toMatch(/Running tests/);
+    expect(list).toMatch(/Winning tests/);
+    expect(list).toMatch(/>\s*New test\s*</);
+    expect(list).toMatch(/label: 'Draft'/);
+    expect(list).toMatch(/label: 'Finished'/);
+    expect(list).toContain('Status');
+  });
+
+  it('offers PDF row actions for draft tests', () => {
+    const actions = read('classicExperimentListActions.js');
+    expect(actions).toContain("label: 'Edit test'");
+    expect(actions).toContain("label: 'Duplicate'");
+    expect(actions).toContain("label: 'View results'");
+  });
+
+  it('uses Store setup on welcome and plan surfaces', () => {
+    const welcome = read('../../../routes/app.welcome.tsx');
+    const plan = read('../../../components/Settings/sections/SettingsPlanPanel.jsx');
+    expect(welcome).toMatch(/Store setup/);
+    expect(welcome).not.toMatch(/theme embed/i);
+    expect(plan).toMatch(/Open setup checklist/);
+  });
+
+  it('aligns store setup card titles with the spec', () => {
+    const setup = read('../../../routes/app.setup.tsx');
+    expect(setup).toContain('1. Theme connection');
+    expect(setup).toContain('2. Checkout pricing functions');
+    expect(setup).toContain('3. Price locations on your site');
+    expect(setup).toContain('Scan storefront');
+    expect(setup).toContain('Edit price locations');
+  });
+
+  it('aligns public setup vocabulary with Store setup cards', () => {
+    const landing = read('../../public/priceify/landingContent.js');
+    const docs = read('../../public/priceify/docsContent.js');
+    expect(landing).toMatch(/Theme connection on Store setup/);
+    expect(docs).toMatch(/Checkout pricing functions on Store setup/);
+    expect(docs).not.toMatch(/theme app embed/i);
+  });
+
+  it('uses Priceify as the product name in merchant copy', () => {
+    const welcome = read('../../../routes/app.welcome.tsx');
+    const help = read('helpFaq.js');
+    expect(welcome).toMatch(/Priceify plan/);
+    expect(help).toMatch(/Priceify plan/);
+    expect(welcome).not.toMatch(/Smart Pricing plan/);
+  });
+
+  it('names the Price locations settings tab consistently', () => {
+    const settings = read('../../../routes/app.settings.tsx');
+    expect(settings).toMatch(/label: 'Price locations'/);
+    expect(settings).toMatch(/title: 'Theme price selectors'/);
+  });
+
+  it('aligns create wizard step titles and review copy with the spec', () => {
+    expect(CLASSIC_CREATE_STEPS.every(step => step.description === '')).toBe(true);
+    expect(CLASSIC_CREATE_STEPS.map(step => step.title)).toEqual([
+      'Set up your test',
+      'Traffic & variations',
+      'Choose products & set test prices',
+      'Audience & goals',
+      'Review & launch',
+    ]);
+    const setup = read('SetupStepPanel.jsx');
+    const variations = read('VariationsStepPanel.jsx');
+    const wizard = read('ClassicCreateWizard.jsx');
+    expect(setup).toContain('Compare different price points for the same product.');
+    const audienceHelpers = read('../targeting/smartPricingAudienceHelpers.js');
+    expect(audienceHelpers).toContain("label: 'Average order value'");
+    expect(variations).toContain('How much traffic enters this test');
+    expect(variations).toContain('What percentage of eligible visitors should enter this test?');
+    expect(variations).not.toMatch(/price change to every selected product/i);
+    const trafficStep = CLASSIC_CREATE_STEPS.find(step => step.id === 'variations');
+    expect(trafficStep?.description).toBe('');
+    expect(getClassicCreateSteps('offer_test').find(step => step.id === 'variations')?.description).toBe(
+      '',
+    );
+    const productsStep = CLASSIC_CREATE_STEPS.find(step => step.id === 'products');
+    expect(productsStep?.description).toBe('');
+    expect(getClassicCreateSteps('offer_test').find(step => step.id === 'products')?.description).toBe(
+      '',
+    );
+    const productsPanel = read('ProductsPricingStepPanel.jsx');
+    expect(productsPanel).toContain('tableColumnHeaderMain');
+    expect(productsPanel).not.toMatch(/>\s*Change \(optional\)\s*</);
+    expect(productsPanel).toContain('Base price');
+    expect(variations).toContain('If you pause a variation');
+    expect(variations).not.toMatch(/Describe what's different \(optional\)/);
+    expect(wizard).toContain("backLabel={step === 4 ? 'Back to edit' : 'Back'}");
+    expect(wizard).toContain("'Launch test'");
+    const audience = read('AudienceSuccessStepPanel.jsx');
+    expect(audience).toContain('MIN_VISITORS_FOR_REVENUE_GUARDRAIL');
+    expect(audience).not.toMatch(/minimum visitors per variation is reached/i);
+    expect(audience).toMatch(/safety pause, not a winner call/i);
+    expect(CLASSIC_CREATE_STEPS.find(step => step.id === 'audience')?.description).toBe('');
+    expect(CLASSIC_CREATE_STEPS.find(step => step.id === 'review')?.description).toBe('');
+    const review = read('ReviewLaunchStepPanel.jsx');
+    expect(review).toContain('Open Store setup');
+    expect(review).toContain('Open Settings → Price locations');
+    expect(review).not.toMatch(/Fix setup before launching/i);
+    const helpFaq = read('helpFaq.js');
+    expect(helpFaq).toMatch(/term: 'Revenue guardrail'/);
+    expect(helpFaq).toMatch(/term: 'Results settings'/);
+    expect(helpFaq).toMatch(/Where is the revenue guardrail\?/);
+  });
+
+  it('uses Results settings field labels from the spec', () => {
+    const panel = read('../../../components/Settings/sections/SettingsStatSettingsPanel.jsx');
+    const settingsPage = read('../../../routes/app.settings.tsx');
+    expect(panel).toContain('Minimum visitors per variation');
+    expect(settingsPage).toContain('Save results settings');
+    expect(settingsPage).toContain('These settings apply to every new test you launch.');
+    expect(panel).toContain('When Priceify can call a winner.');
+    expect(panel).toMatch(/80% \(faster, less strict\)/);
+  });
+});

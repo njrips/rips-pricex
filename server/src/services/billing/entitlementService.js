@@ -115,7 +115,7 @@ function requireEntitlement(capability = 'create') {
       req.entitlement = entitlement;
       if (entitlement.entitled) return next();
       return res.status(402).json({
-        error: 'Smart Pricing requires an active plan',
+        error: 'Priceify requires an active plan',
         capability,
         upgradeUrl: entitlement.upgradeUrl,
         locked: true,

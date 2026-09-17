@@ -146,8 +146,8 @@ export function describeSmartPricingLaunchReadiness(readiness) {
       priceReady: true,
       offerReady: true,
       anyReady: true,
-      title: 'Ready to launch price and offer tests',
-      detail: 'Cart transform and checkout discount are both available.',
+      title: 'Ready to launch tests',
+      detail: 'Your store is connected. You can create and run price and offer tests.',
     };
   }
   if (offerReady) {
@@ -156,16 +156,16 @@ export function describeSmartPricingLaunchReadiness(readiness) {
       : [];
     const surface = priceSurfaceSummary(readiness);
     let detail =
-      'Offer tests apply at checkout and do not wait on cart transform or theme price selectors.';
+      'Offer tests apply at checkout and do not wait on Theme connection, Checkout pricing functions, or mapped price locations.';
     if (!priceReady) {
       if (failed.length) {
         detail = `Offer tests can launch. Price tests: ${failed[0]}`;
       } else if (!surface.ready) {
         detail =
-          'Offer tests can launch. Price tests still need theme price selectors (Settings → Price surfaces).';
+          'Offer tests can launch. Price tests still need price locations (Settings → Price locations).';
       } else {
         detail =
-          'Offer tests can launch. Price tests still need the Priceify cart transform (Setup step 2).';
+          'Offer tests can launch. Price tests still need Checkout pricing functions (Store setup step 2).';
       }
     }
     return {
@@ -184,16 +184,16 @@ export function describeSmartPricingLaunchReadiness(readiness) {
       title: 'Ready to launch price tests',
       detail:
         getOfferCheckoutBlockReason(readiness) ||
-        'Offer tests need the checkout discount function (Setup step 3).',
+        'Offer tests need Checkout pricing functions (Store setup step 2).',
     };
   }
   return {
     priceReady: false,
     offerReady: false,
     anyReady: false,
-    title: 'Checkout needs attention',
+    title: 'Not ready to launch tests yet',
     detail:
-      'Offer tests need the checkout discount (Setup step 3). Price tests need cart transform (step 2).',
+      'Complete the steps below to connect Priceify to your theme and checkout.',
   };
 }
 

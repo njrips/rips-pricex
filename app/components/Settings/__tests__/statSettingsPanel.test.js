@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /**
- * Stat settings is two fields. It used to open with a three-paragraph banner and
+ * Results settings is two fields. It used to open with a three-paragraph banner and
  * then repeat most of it under each field, which buried the two controls the
  * page exists for. The reasoning now lives on each field's info icon.
  */
@@ -68,12 +68,12 @@ function fieldLabels() {
   );
 }
 
-describe('Stat settings panel', () => {
+describe('Results settings panel', () => {
   it('puts confidence level above minimum sample size', async () => {
     await render();
     const labels = fieldLabels();
     const confidence = labels.indexOf('Confidence level');
-    const sample = labels.indexOf('Minimum sample size per variation');
+    const sample = labels.indexOf('Minimum visitors per variation');
     expect(confidence).toBeGreaterThanOrEqual(0);
     expect(sample).toBeGreaterThanOrEqual(0);
     expect(confidence).toBeLessThan(sample);
@@ -88,7 +88,7 @@ describe('Stat settings panel', () => {
 
   it('keeps the one thing neither field can say alone — that they are a sequence', async () => {
     await render();
-    expect(text()).toContain('Sample size decides when the maths may start');
+    expect(text()).toContain('Sample size decides when analysis can start');
   });
 
   it('offers each field a guide rather than a paragraph', async () => {
@@ -96,7 +96,7 @@ describe('Stat settings panel', () => {
     const guides = Array.from(container.querySelectorAll('button[aria-label$="guide"]')).map(
       node => node.getAttribute('aria-label')
     );
-    expect(guides).toEqual(['Confidence level guide', 'Minimum sample guide']);
+    expect(guides).toEqual(['Confidence level guide', 'Minimum visitors guide']);
   });
 
   it('has a summary to show on hover for both of those guides', async () => {
@@ -108,8 +108,8 @@ describe('Stat settings panel', () => {
   });
 
   it('still surfaces a save result and an error', async () => {
-    await render({ message: 'Stat settings saved' });
-    expect(text()).toContain('Stat settings saved');
+    await render({ message: 'Results settings saved' });
+    expect(text()).toContain('Results settings saved');
     await render({ error: 'Save failed' });
     expect(text()).toContain('Save failed');
   });

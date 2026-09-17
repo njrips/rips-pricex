@@ -18,32 +18,32 @@ export default function CreateExperiment() {
   if (!ctx.entitled) {
     return (
       <ClassicAdminShell
-        titleBar="Create experiment"
+        titleBar="New test"
         meta="Plan required"
         title="Create is locked"
-        subtitle="Choose a Smart Pricing plan to unlock the experiment wizard. You can still browse Experiments and finish Setup."
+        subtitle="Finish setup to start your first test."
         footerPrimary={{
-          label: 'Upgrade',
+          label: 'View plans',
           onClick: () => upgrade(),
         }}
         footerSecondary={{
-          label: 'Open Plan',
-          onClick: () => navigate('/app/settings?tab=plan'),
+          label: 'Open setup',
+          onClick: () => navigate('/app/setup'),
         }}
       >
         <div style={{ marginBottom: 16 }}>
           <Banner tone="warning" title="Active plan required">
             <p>
               Plan selection opens in Shopify Admin (`pricing_plans`). After approval, welcome
-              returns here so you can finish Setup.
+              returns here so you can finish store setup.
             </p>
           </Banner>
         </div>
         <div className={styles.adminRowActions}>
           <Button variant="plain" onClick={() => navigate('/app')}>
-            Back to experiments
+            Back to tests
           </Button>
-          <Button onClick={() => navigate('/app/setup')}>Open Setup</Button>
+          <Button onClick={() => navigate('/app/setup')}>Open setup</Button>
         </div>
       </ClassicAdminShell>
     );
@@ -51,12 +51,9 @@ export default function CreateExperiment() {
 
   return (
     <>
-      {/* Once the draft has a name, that name is what the merchant is looking
-          at, so the bar says it. "New experiment" is only the answer until
-          there is a better one -- on a resumed draft it was actively wrong. */}
-      <TitleBar title={draftTitle || 'New experiment'}>
+      <TitleBar title={draftTitle || 'New test'}>
         <button type="button" variant="breadcrumb" onClick={() => navigate('/app')}>
-          Experiments
+          Tests
         </button>
       </TitleBar>
       <ClassicCreateWizard onTitleChange={setDraftTitle} />

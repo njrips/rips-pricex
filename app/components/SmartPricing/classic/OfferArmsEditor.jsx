@@ -1,13 +1,19 @@
 import { Select, TextField } from '@shopify/polaris';
 import LabelWithInfo from '../../Settings/primitives/LabelWithInfo';
 import {
+  capOfferMessageLength,
   EMPTY_OFFER_CONFIG,
   formatOfferRule,
   isActionableOfferConfig,
   normalizeOfferConfig,
+  trimOfferMessageForSave,
 } from './offerSelection';
-import { IconControlBaseline } from './classicIcons';
+import TooltipWrapper from '../../shared/TooltipWrapper';
+import { IconControlBaseline, IconInfo } from './classicIcons';
 import styles from './SmartPricingClassic.module.css';
+
+const OFFER_MESSAGE_TOOLTIP =
+  'Shown under the sale cutout (and on cart) when this variation is assigned. Spaces and punctuation are kept while you type; leading and trailing spaces are removed when you leave the field. Leave empty to show the offer amount only.';
 
 const TYPE_OPTIONS = [
   { label: 'Percentage off', value: 'percent' },
@@ -34,29 +40,32 @@ export default function OfferArmsEditor({
   onChange,
   currency = 'USD',
 }) {
-  const patchArm = (armId, patch) => {
-    const prev = normalizeOfferConfig(offerByArm[armId] || EMPTY_OFFER_CONFIG);
+  const patchArm = (armId, patch, { finalizeMessage = false } = {}) => {
+    const prev = offerByArm[armId] || EMPTY_OFFER_CONFIG;
+    let offerMessage = prev.offer_message ?? '';
+    if (Object.prototype.hasOwnProperty.call(patch, 'offer_message')) {
+      offerMessage = finalizeMessage
+        ? trimOfferMessageForSave(patch.offer_message)
+        : capOfferMessageLength(patch.offer_message);
+    }
+    const merged = { ...prev, ...patch, offer_message: offerMessage };
+    const next = { ...normalizeOfferConfig(merged), offer_message: offerMessage };
     onChange?.({
       ...offerByArm,
-      [armId]: { ...prev, ...patch },
+      [armId]: next,
     });
   };
 
   return (
     <div className={styles.offerArmsStack}>
-      <LabelWithInfo hash="offers" label="Offer tests">
+      <LabelWithInfo hash="offers" label="Offers for each variation">
         Offers for each variation
       </LabelWithInfo>
-      <p className={styles.help}>
-        Control stays at the catalog price with no discount. Each test variation applies one offer
-        to every selected product. Assigned shoppers see the catalog price struck through, the
-        offer price beside it, and the message directly under that cutout. If you leave the
-        message empty, they still see the offer amount under the cutout. Checkout applies the
-        discount.
-      </p>
       {(variations || []).map((arm, index) => {
         const isControl = index === 0 || arm.id === 'control';
-        const cfg = normalizeOfferConfig(offerByArm[arm.id] || EMPTY_OFFER_CONFIG);
+        const stored = offerByArm[arm.id] || EMPTY_OFFER_CONFIG;
+        const cfg = normalizeOfferConfig(stored);
+        const messageDraft = capOfferMessageLength(stored.offer_message ?? '');
         const ready = !isControl && isActionableOfferConfig(cfg);
         return (
           <div key={arm.id} className={styles.offerArmCard}>
@@ -109,16 +118,39 @@ export default function OfferArmsEditor({
                       : 'Amount off each selected product, in store currency.'
                   }
                 />
-                <TextField
-                  label="Message (optional)"
-                  value={cfg.offer_message}
-                  onChange={value => patchArm(arm.id, { offer_message: value })}
-                  autoComplete="off"
-                  maxLength={120}
-                  showCharacterCount
-                  placeholder="e.g. Limited-time 10% off"
-                  helpText="Shown under the sale cutout (and on cart) when this variation is assigned. Leave empty to show the offer amount only."
-                />
+                <div>
+                  <div className={styles.titleWithInfo}>
+                    <label className={styles.label} htmlFor={`offer-message-${arm.id}`}>
+                      Message (optional)
+                    </label>
+                    <TooltipWrapper
+                      content={OFFER_MESSAGE_TOOLTIP}
+                      accessibilityLabel="Offer message details"
+                    >
+                      <button
+                        type="button"
+                        className={styles.infoIconLink}
+                        aria-label="Offer message details"
+                      >
+                        <IconInfo size={14} />
+                      </button>
+                    </TooltipWrapper>
+                  </div>
+                  <TextField
+                    id={`offer-message-${arm.id}`}
+                    label="Message (optional)"
+                    labelHidden
+                    value={messageDraft}
+                    onChange={value => patchArm(arm.id, { offer_message: value })}
+                    onBlur={() =>
+                      patchArm(arm.id, { offer_message: messageDraft }, { finalizeMessage: true })
+                    }
+                    autoComplete="off"
+                    maxLength={120}
+                    showCharacterCount
+                    placeholder="e.g. Limited-time 10% off"
+                  />
+                </div>
               </div>
             )}
           </div>

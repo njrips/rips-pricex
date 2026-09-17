@@ -12,7 +12,7 @@ export default function ContactPage({ storeUrl, supportEmail = '' }) {
       <p className="eyebrow">COMPANY</p>
       <h1 className="title">Contact</h1>
       <p className="subtitle">
-        Pricing experimentation for Shopify merchants. Test before you change.
+        Price and offer testing for Shopify merchants. Test before you change.
       </p>
       <p className="docBody">
         If the app is already installed, open Help from Shopify Admin (Get support) so we get shop

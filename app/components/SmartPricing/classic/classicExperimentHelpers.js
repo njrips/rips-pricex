@@ -104,8 +104,8 @@ export function getPlanExperimentTitle(plan) {
   if (metaTitle) return metaTitle;
   const raw = String(plan?.title || '').trim();
   const sep = raw.indexOf(' · ');
-  if (sep > 0) return raw.slice(0, sep).trim() || 'Untitled experiment';
-  return raw || 'Untitled experiment';
+  if (sep > 0) return raw.slice(0, sep).trim() || 'Untitled test';
+  return raw || 'Untitled test';
 }
 
 export function getPlanProductTitle(plan) {
@@ -175,13 +175,13 @@ export function formatExperimentTypeLabel(raw) {
     multivariate: 'MULTIVARIATE',
     split_url: 'SPLIT URL',
     feature_flag: 'FEATURE FLAG',
-    price_test: 'PRICE',
-    offer_test: 'OFFER',
-    offer: 'OFFER',
-    price: 'PRICE',
+    price_test: 'Price test',
+    offer_test: 'Offer test',
+    offer: 'Offer test',
+    price: 'Price test',
   };
   if (map[key]) return map[key];
-  if (!key) return 'PRICE';
+  if (!key) return 'Price test';
   return key.replace(/_/g, ' ').toUpperCase();
 }
 
@@ -299,7 +299,7 @@ export function wizardDraftAsExperimentRow(draft) {
   const selected = Array.isArray(draft?.selectedIds) ? draft.selectedIds : [];
   return {
     id: experimentId,
-    title: String(draft?.name || '').trim() || 'Untitled experiment',
+    title: String(draft?.name || '').trim() || 'Untitled test',
     plans: [],
     // What the merchant has picked so far, not what has been built. Reported so
     // a draft abandoned mid-catalogue says how far it got.
@@ -454,18 +454,12 @@ export function formatClassicStatusLabel(status, experimentType) {
   const key = String(status || '')
     .trim()
     .toLowerCase();
-  if (key === 'winner_ready') {
-    return isOfferExperimentType(experimentType) ? 'Result ready' : 'Winner ready';
-  }
-  if (key === 'applied') {
-    return isOfferExperimentType(experimentType) ? 'Completed' : 'Applied';
-  }
-  if (key === 'completed' || key === 'complete' || key === 'ended') {
-    return 'Completed';
+  if (key === 'winner_ready' || key === 'applied' || key === 'completed' || key === 'complete' || key === 'ended') {
+    return 'Finished';
   }
   if (key === 'running') return 'Running';
   if (key === 'paused') return 'Paused';
-  if (key === 'archived') return 'Archived';
+  if (key === 'archived') return 'Finished';
   return 'Draft';
 }
 

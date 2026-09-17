@@ -190,7 +190,7 @@ describe('create wizard price surface notice', () => {
     readiness = UNMAPPED;
     await renderWizardAtStep(2);
 
-    const guide = container.querySelector('[data-testid="notice"] [aria-label="Price surfaces guide"]');
+    const guide = container.querySelector('[data-testid="notice"] [aria-label="Price locations guide"]');
     expect(guide).toBeTruthy();
 
     await act(async () => {
@@ -205,7 +205,7 @@ describe('create wizard price surface notice', () => {
     readiness = UNMAPPED;
     await renderWizardAtStep(1);
     const action = [...container.querySelectorAll('[data-testid="notice"] button')].find(button =>
-      /price surface/i.test(button.textContent || '')
+      /price location/i.test(button.textContent || '')
     );
     expect(action).toBeTruthy();
 

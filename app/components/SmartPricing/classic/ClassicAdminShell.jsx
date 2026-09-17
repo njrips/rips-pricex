@@ -42,7 +42,7 @@ export default function ClassicAdminShell({
   subtitle,
   meta = null,
   backTo = null,
-  backLabel = 'Back to experiments',
+  backLabel = 'Back to tests',
   tabs = null,
   activeTab = null,
   onTabChange = null,
@@ -54,12 +54,14 @@ export default function ClassicAdminShell({
   const navigate = useNavigate();
   const shopDomain = useClassicShopDomain();
   const backPath = backTo || ROUTES.appSmartPricing(shopDomain);
+  const showTitle =
+    title && String(title).trim() !== String(meta || '').trim();
 
   return (
     <PageShell>
       <TitleBar title={titleBar}>
         <button type="button" variant="breadcrumb" onClick={() => navigate(backPath)}>
-          Experiments
+          Tests
         </button>
       </TitleBar>
       <div className={styles.page}>
@@ -97,7 +99,9 @@ export default function ClassicAdminShell({
         ) : null}
 
         <div className={styles.card}>
-          {title ? <h1 className={`${styles.title} ripx-classic-sans`}>{title}</h1> : null}
+          {showTitle ? (
+            <h1 className={`${styles.title} ripx-classic-sans`}>{title}</h1>
+          ) : null}
           {subtitle ? <p className={styles.subtitle}>{subtitle}</p> : null}
           {children}
         </div>

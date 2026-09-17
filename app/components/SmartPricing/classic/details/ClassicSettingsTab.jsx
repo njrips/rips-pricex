@@ -3,7 +3,10 @@ import { Button } from '@shopify/polaris';
 import SettingsInfoLink from '../../../Settings/SettingsInfoLink';
 import { IconChevron, IconShield } from '../classicIcons';
 import { formatAudienceFactValue } from '../classicExperimentDetailsHelpers';
-import { ensureRevenueGuardrailRows } from '../revenueGuardrail';
+import {
+  ensureRevenueGuardrailRows,
+  MIN_VISITORS_FOR_REVENUE_GUARDRAIL,
+} from '../revenueGuardrail';
 import DetailFactCard from './DetailFactCard';
 import styles from '../SmartPricingClassic.module.css';
 
@@ -179,11 +182,11 @@ export default function ClassicSettingsTab({
             infoLabel="Confidence level"
           />
           <SettingRow
-            label="Minimum sample per variation"
+            label="Minimum visitors per variation"
             value={minSample ? Number(minSample).toLocaleString() : '—'}
-            note="Set once for the whole shop, in Stat settings."
+            note="Set once for the whole shop, in Results settings."
             infoHash="min-sample"
-            infoLabel="Minimum sample"
+            infoLabel="Minimum visitors"
           />
           {metrics?.mdePercent ? (
             <SettingRow
@@ -215,15 +218,20 @@ export default function ClassicSettingsTab({
               </div>
               {on ? (
                 <div className={styles.guardrailRule}>
-                  <span>Pauses the test if any variation drops more than</span>
+                  <span>
+                    Pauses the test if revenue per visitor for any variation drops more than
+                  </span>
                   <span className={styles.guardrailRuleValue}>
                     {String(row.threshold || '').replace(/^-/, '') || '—'}
                   </span>
-                  <span>versus control.</span>
+                  <span>
+                    versus control, after each variation has about{' '}
+                    {MIN_VISITORS_FOR_REVENUE_GUARDRAIL} visitors.
+                  </span>
                 </div>
               ) : (
                 <div className={styles.guardrailRule}>
-                  <span>Not pausing on revenue drop. Stop this experiment yourself if needed.</span>
+                  <span>Not pausing on revenue drop. Stop this test yourself if needed.</span>
                 </div>
               )}
               {/* row.hint is deliberately not rendered: the badge above and the
@@ -318,7 +326,7 @@ export default function ClassicSettingsTab({
                   // revenue per visitor.
                   note={
                     cogs.enabled === false
-                      ? 'Margin floors are not applied to this experiment’s prices.'
+                      ? 'Margin floors are not applied to this test’s prices.'
                       : cogs.value === null || cogs.value === undefined
                         ? 'Costs read from Shopify where available. Used for margin floors, not for results.'
                         : `Using ${
@@ -334,8 +342,8 @@ export default function ClassicSettingsTab({
             <div className={styles.settingsDisclosureGroup}>
               <div className={styles.sectionLabel}>Shop defaults at launch</div>
               <p className={styles.help}>
-                Fixed limits this experiment was built against. They are not adjustable per
-                experiment.
+                Fixed limits this test was built against. They are not adjustable per
+                test.
               </p>
               <div className={styles.detailChipRow}>
                 {shopNotes.map(note => (

@@ -67,7 +67,7 @@ describe('deciding what Resume does', () => {
 
 describe('what the merchant is told afterwards', () => {
   it('says the experiment resumed when all of it did', () => {
-    expect(resumeOutcomeMessage({ started: 4, skipped: 0 })).toBe('Experiment resumed.');
+    expect(resumeOutcomeMessage({ started: 4, skipped: 0 })).toBe('Test resumed.');
   });
 
   it('names both numbers for a partial resume', () => {
@@ -135,7 +135,7 @@ describe('resumeConflictListMessage', () => {
     });
     expect(message).toMatch(/Runner Shoe/);
     expect(message).toMatch(/Summer/);
-    expect(message).toMatch(/open the experiment/i);
+    expect(message).toMatch(/open the test/i);
   });
 
   it('says so plainly when there is nothing left to resume', () => {

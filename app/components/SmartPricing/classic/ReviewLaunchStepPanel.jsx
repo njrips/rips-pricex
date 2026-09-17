@@ -13,6 +13,7 @@ import {
   secondaryMetricLabel,
 } from '../targeting/smartPricingAudienceHelpers';
 import { parseMinSampleSize } from './classicAudienceEdit';
+import { formatTrafficPercent } from './variationsStepHelpers';
 import {
   formatApproxTestDuration,
   formatVisitorCount,
@@ -31,6 +32,9 @@ function formatPriceModeLabel(mode, { bulkPercent = '10', bulkDirection = 'incre
   if (mode === 'ai') return 'AI suggested';
   return 'Manual';
 }
+
+const TRAFFIC_TOO_LOW_BODY =
+  'At your current traffic and number of variations, this test may take a long time to reach your minimum visitors per variation. To get a clearer result, try testing fewer products or fewer variations.';
 
 function formatModeList(mode, values, emptyLabel) {
   const list = (Array.isArray(values) ? values : []).filter(Boolean);
@@ -150,13 +154,13 @@ export default function ReviewLaunchStepPanel({
   const durationMethod = significanceEstimate?.summary ? significanceEstimate.method || '' : '';
   const durationRange = significanceEstimate?.practicalDurationRange || '';
   const durationTitle = durationNotFeasible
-    ? 'Traffic does not support a practical test'
+    ? 'Traffic may be too low for a reliable result'
     : durationRange
       ? `Estimated collection window: ${durationRange}`
       : estimatedDays && estimatedDays <= PRACTICAL_TEST_MAX_DAYS
         ? `Estimated collection window: ${formatApproxTestDuration(estimatedDays)}`
         : estimatedDays
-          ? 'Traffic does not support a practical test'
+          ? 'Traffic may be too low for a reliable result'
           : 'Timeline needs measured product traffic';
 
   return (
@@ -165,8 +169,8 @@ export default function ReviewLaunchStepPanel({
         <Banner tone="info" title="Checking checkout readiness…">
           <p>
             {isOfferTest
-              ? 'Confirming the checkout discount function before launch.'
-              : 'Confirming cart transform and pricing infra before launch.'}
+              ? 'Confirming checkout discounts before launch.'
+              : 'Confirming checkout pricing functions before launch.'}
           </p>
         </Banner>
       ) : !checkoutReady ? (
@@ -179,7 +183,7 @@ export default function ReviewLaunchStepPanel({
             </strong>{' '}
             {isOfferTest
               ? getOfferCheckoutBlockReason(checkoutReadiness)
-              : checkoutReadiness?.message || 'Fix setup before launching.'}
+              : checkoutReadiness?.message || 'Complete Store setup before launching.'}
           </div>
           {!isOfferTest && failedChecks.length > 0 ? (
             <ul className={styles.errorList}>
@@ -191,7 +195,7 @@ export default function ReviewLaunchStepPanel({
           <div className={styles.errorActions}>
             {typeof onFixSetup === 'function' ? (
               <Button variant="plain" onClick={onFixSetup}>
-                Open Setup checklist
+                Open Store setup
               </Button>
             ) : null}
             {typeof onRefreshCheckout === 'function' ? (
@@ -210,7 +214,7 @@ export default function ReviewLaunchStepPanel({
       ) : null}
 
       {priceSurfaceNeedsAttention ? (
-        <Banner tone="warning" title="Theme price selectors recommended">
+        <Banner tone="warning" title="Price locations recommended">
           <p>
             {priceSurface.message ||
               'Map shop-wide PDP selectors so bucketed visitors see test prices on the product page.'}
@@ -222,7 +226,7 @@ export default function ReviewLaunchStepPanel({
                 and it always passes the handler. */}
             {typeof onFixPriceSurfaces === 'function' ? (
               <Button variant="plain" onClick={onFixPriceSurfaces}>
-                Open Settings → Price surfaces
+                Open Settings → Price locations
               </Button>
             ) : null}
             {typeof onRefreshCheckout === 'function' ? (
@@ -244,8 +248,10 @@ export default function ReviewLaunchStepPanel({
             introduces. The method belongs in the guide the Analysis row links
             to. */}
         <p>
-          {durationSummary ||
-            `From ${audience?.trafficAllocation ?? 100}% experiment traffic and the products you selected.`}
+          {durationNotFeasible
+            ? TRAFFIC_TOO_LOW_BODY
+            : durationSummary ||
+              `From ${audience?.trafficAllocation ?? 100}% test traffic and the products you selected.`}
         </p>
         {/* The arithmetic behind the estimate, and the caveats on the traffic
             it was built from. Worth reading once, not on the way to Launch. */}
@@ -264,12 +270,12 @@ export default function ReviewLaunchStepPanel({
         <Banner tone="info" title="Automatic discount will attach on launch">
           <p>
             The function is deployed. If the discount fails to create, re-approve write_discounts
-            from Setup.
+            from Store setup.
           </p>
           <div className={styles.errorActions}>
             {typeof onFixSetup === 'function' ? (
               <Button variant="plain" onClick={onFixSetup}>
-                Open Setup
+                Open Store setup
               </Button>
             ) : null}
           </div>
@@ -286,7 +292,7 @@ export default function ReviewLaunchStepPanel({
         <div className={styles.reviewRows}>
           <div className={styles.reviewRow}>
             <div className={styles.kvLabel}>Name</div>
-            <p className={styles.kvValue}>{name || 'Untitled experiment'}</p>
+            <p className={styles.kvValue}>{name || 'Untitled test'}</p>
           </div>
           <div className={styles.reviewRow}>
             <div className={styles.kvLabel}>Type</div>
@@ -305,7 +311,7 @@ export default function ReviewLaunchStepPanel({
 
       <section className={styles.reviewSection}>
         <div className={styles.reviewHead}>
-          <h2>Products</h2>
+          <h2>Products & prices</h2>
           <Button variant="plain" accessibilityLabel="Edit products" onClick={() => onEditStep(2)}>
             Edit
           </Button>
@@ -314,7 +320,7 @@ export default function ReviewLaunchStepPanel({
           {/* The count leads: with the product list gone it is the fact this
               card exists to report. */}
           <Badge tone="info">{selectedCount || plans.length} products</Badge>
-          <Badge>{pickMode === 'all' ? 'Whole catalog' : 'Picked manually'}</Badge>
+          <Badge>{pickMode === 'all' ? 'Whole catalog' : 'Pick specific products'}</Badge>
           <Badge>
             {isOfferTest
               ? `Offers: ${(variations || [])
@@ -339,7 +345,7 @@ export default function ReviewLaunchStepPanel({
 
       <section className={styles.reviewSection}>
         <div className={styles.reviewHead}>
-          <h2>Variations</h2>
+          <h2>Variations & traffic</h2>
           <Button
             variant="plain"
             accessibilityLabel="Edit variations"
@@ -353,7 +359,7 @@ export default function ReviewLaunchStepPanel({
             moved next to the split it feeds. The percentages below divide this
             number, so they only make sense underneath it. */}
         <p className={styles.help} style={{ margin: 0 }}>
-          {audience?.trafficAllocation ?? 100}% of matching visitors enter, split as:
+          {audience?.trafficAllocation ?? 100}% of eligible visitors enter, split as:
         </p>
         <div className={styles.reviewRows}>
           {variations.map((arm, index) => {
@@ -375,7 +381,7 @@ export default function ReviewLaunchStepPanel({
                   </span>
                 </div>
                 <p className={styles.kvValue}>
-                  {arm.name || arm.role} · {arm.traffic}% traffic
+                  {arm.name || arm.role} · {formatTrafficPercent(arm.traffic)}% traffic
                   {isOfferTest && arm.id !== 'control'
                     ? ` — ${formatOfferSummary(offerByArm[arm.id])}`
                     : ''}
@@ -433,7 +439,7 @@ export default function ReviewLaunchStepPanel({
 
       <section className={styles.reviewSection}>
         <div className={styles.reviewHead}>
-          <h2>Metrics</h2>
+          <h2>Metrics & guardrail</h2>
           <Button variant="plain" accessibilityLabel="Edit metrics" onClick={() => onEditStep(3)}>
             Edit
           </Button>
@@ -449,8 +455,8 @@ export default function ReviewLaunchStepPanel({
           </div>
           <div className={styles.reviewGridItem}>
             <div className={styles.kvLabel}>
-              Min sample
-              <SettingsInfoLink hash="min-sample" label="Minimum sample" />
+              Min visitors
+              <SettingsInfoLink hash="min-sample" label="Minimum visitors per variation" />
             </div>
             <p className={styles.kvValue}>
               {parseMinSampleSize(audience?.minSampleSize)} visitors

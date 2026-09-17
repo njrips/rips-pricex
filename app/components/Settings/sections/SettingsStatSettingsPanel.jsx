@@ -34,7 +34,7 @@ export default function SettingsStatSettingsPanel({
     <div>
       {loading ? (
         <div style={{ marginBottom: 16 }}>
-          <Banner tone="info" title="Loading stat settings…" />
+          <Banner tone="info" title="Loading results settings…" />
         </div>
       ) : null}
       {message ? (
@@ -43,6 +43,10 @@ export default function SettingsStatSettingsPanel({
         </div>
       ) : null}
       {error ? <p className={styles.error}>{error}</p> : null}
+
+      <p className={styles.help} style={{ marginTop: 0, marginBottom: 16 }}>
+        When Priceify can call a winner.
+      </p>
 
       <div className={styles.field}>
         <LabelWithInfo htmlFor="confidence-level" hash="confidence" label="Confidence level">
@@ -53,8 +57,9 @@ export default function SettingsStatSettingsPanel({
           label="Confidence level"
           labelHidden
           options={[
+            { label: '80% (faster, less strict)', value: '80' },
             { label: '90% (recommended)', value: '90' },
-            { label: '95% (stricter)', value: '95' },
+            { label: '95% (safer, more strict)', value: '95' },
           ]}
           value={String(confidenceLevel ?? '90')}
           disabled={disabled}
@@ -64,12 +69,12 @@ export default function SettingsStatSettingsPanel({
       </div>
 
       <div className={styles.field}>
-        <LabelWithInfo htmlFor="min-sample-default" hash="min-sample" label="Minimum sample">
-          Minimum sample size per variation
+        <LabelWithInfo htmlFor="min-sample-default" hash="min-sample" label="Minimum visitors">
+          Minimum visitors per variation
         </LabelWithInfo>
         <TextField
           id="min-sample-default"
-          label="Minimum sample size per variation"
+          label="Minimum visitors per variation"
           labelHidden
           type="number"
           min={1}
@@ -78,17 +83,13 @@ export default function SettingsStatSettingsPanel({
           disabled={disabled}
           onChange={onMinSampleSize}
           autoComplete="off"
-          helpText="Visitors each variation must reach before anything is calculated."
+          helpText="Visitors each variation must reach before results are calculated."
         />
       </div>
 
-      {/* The one thing neither field can say on its own: they are a sequence,
-          not two independent numbers. Without it, the confidence level reads as
-          the only gate and merchants expect calls the sample floor is holding
-          back. Everything else moved to the info icons. */}
       <p className={styles.help}>
-        Sample size decides when the maths may start; confidence decides when it may call a
-        winner. Both apply to experiments launched from now on.
+        Sample size decides when analysis can start; confidence decides when Priceify may call a
+        winner. Both apply to new tests from now on.
       </p>
     </div>
   );

@@ -118,7 +118,7 @@ function buildOfferTestPayloadFromPlan(plan = {}, options = {}) {
         ? Math.floor(100 / arms.length)
         : Number(rawAllocation);
     if (!Number.isFinite(allocation) || allocation <= 0) {
-      throw new Error('Every Smart Pricing variation must receive more than 0% traffic');
+      throw new Error('Every test variation must receive more than 0% traffic');
     }
     return {
       name: formatOfferArmName(arm, index, currency),
@@ -131,7 +131,7 @@ function buildOfferTestPayloadFromPlan(plan = {}, options = {}) {
 
   const allocationTotal = variants.reduce((sum, v) => sum + (Number(v.allocation) || 0), 0);
   if (Math.abs(allocationTotal - 100) > 0.001) {
-    throw new Error('Smart Pricing variation traffic must total 100%');
+    throw new Error('Test variation traffic must total 100%');
   }
 
   const segments = resolvePlanSegments(plan, guardrails);

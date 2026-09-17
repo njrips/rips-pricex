@@ -101,7 +101,7 @@ function detectSkuOverlap(plans = [], inboxPlans = []) {
         title: existing.title,
         variant_id: vid,
         status: existing.status,
-        message: `Another Smart Pricing plan is already active for this variant (${existing.title || vid}).`,
+        message: `Another test is already active for this product (${existing.title || vid}).`,
       });
     }
   });
@@ -260,7 +260,7 @@ async function buildBatchPreviewLaunch({
   if (offerBatch) {
     if (readiness?.live_api_checked === true && readiness?.discount_function_available !== true) {
       blockers.push(
-        'Offer tests need a deployed checkout discount function. Deploy ripspricex-checkout-discount, then re-check Setup.'
+        'Offer tests need Checkout pricing functions on Store setup. Use Check and install, then refresh status.'
       );
     }
   } else if (readiness?.ready === false) {

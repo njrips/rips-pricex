@@ -103,7 +103,7 @@ describe('reporting an action that only some products accepted', () => {
 
   it('says plainly when everything worked', () => {
     expect(classicBatchOutcomeMessage({ verb: 'paused', done: 3, failed: 0 })).toBe(
-      'Experiment paused.'
+      'Test paused.'
     );
   });
 
@@ -112,7 +112,7 @@ describe('reporting an action that only some products accepted', () => {
 
     expect(message).toContain('2 products');
     expect(message).toContain('still running');
-    expect(message).not.toBe('Experiment paused.');
+    expect(message).not.toBe('Test paused.');
   });
 
   it('counts more than one leftover correctly', () => {
@@ -162,7 +162,7 @@ describe('classicExperimentListActions', () => {
     expect(getClassicExperimentLaunchReadiness(incomplete).ready).toBe(false);
     const actions = resolveClassicExperimentMenuActions(incomplete, { checkoutReady: true });
     expect(actions.some(a => a.id === 'launch')).toBe(false);
-    expect(actions.some(a => a.id === 'continue')).toBe(true);
+    expect(actions.some(a => a.id === 'edit')).toBe(true);
   });
 
   it('treats offer drafts as ready when a test-arm offer is set', () => {
@@ -205,6 +205,46 @@ describe('classicExperimentListActions', () => {
     const allowed = resolveClassicExperimentMenuActions(readyExperiment, { checkoutReady: true });
     expect(blocked.some(a => a.id === 'launch')).toBe(false);
     expect(allowed.some(a => a.id === 'launch')).toBe(true);
+  });
+
+  it('offers Edit test on a running test before the minimum visitor floor is met', () => {
+    const running = {
+      ...readyExperiment,
+      status: 'running',
+      visitors: 800,
+      plans: [
+        {
+          ...readyExperiment.plans[0],
+          status: 'running',
+          test_id: 'test-1',
+          metadata: { audience_ui: { minSampleSize: '5000' } },
+        },
+      ],
+    };
+    const actions = resolveClassicExperimentMenuActions(running, { checkoutReady: true });
+    expect(actions.some(a => a.id === 'edit' && a.label === 'Edit test')).toBe(true);
+  });
+
+  it('hides Edit test once a running test has reached the visitor floor', () => {
+    const running = {
+      ...readyExperiment,
+      status: 'running',
+      visitors: 6000,
+      plans: [
+        {
+          ...readyExperiment.plans[0],
+          status: 'running',
+          test_id: 'test-1',
+          metadata: { audience_ui: { minSampleSize: '5000' } },
+          analytics: {
+            arms: [{ visitors: 6000 }, { visitors: 5200 }],
+          },
+        },
+      ],
+    };
+    const actions = resolveClassicExperimentMenuActions(running, { checkoutReady: true });
+    expect(actions.some(a => a.id === 'edit')).toBe(false);
+    expect(actions.some(a => a.id === 'duplicate')).toBe(true);
   });
 
   it('shows pause without archive while an experiment is still running', () => {
@@ -256,14 +296,14 @@ describe('classicExperimentListActions', () => {
     expect(actions.some(a => a.id === 'resume')).toBe(true);
   });
 
-  it('offers an unfinished draft only the two things that can be done to it', () => {
+  it('offers edit, duplicate, and delete for an unfinished wizard draft', () => {
     // A wizard draft has no plans, so there is no detail page to view and no
     // test to launch or pause. View details used to be offered anyway and did
     // nothing when clicked.
     const draftRow = { id: 'exp_draft', title: 'Spring pricing', status: 'draft', plans: [] };
     const actions = resolveClassicExperimentMenuActions(draftRow, { checkoutReady: true });
 
-    expect(actions.map(a => a.id)).toEqual(['continue', 'delete']);
+    expect(actions.map(a => a.id)).toEqual(['edit', 'duplicate', 'delete']);
     expect(actions.find(a => a.id === 'delete').label).toBe('Delete draft');
   });
 
@@ -407,7 +447,7 @@ describe('classicExperimentListActions', () => {
     });
 
     it('moves a stopped experiment out of the live tabs', () => {
-      expect(listTabAfterClassicAction('stop', running, 'running')).toBe('completed');
+      expect(listTabAfterClassicAction('stop', running, 'running')).toBe('finished');
     });
 
     it('leaves a stopped experiment in a state that reads as finished', () => {
@@ -457,9 +497,22 @@ describe('classicExperimentListActions', () => {
     ];
     expect(filterClassicExperimentsByTab(rows, 'running').map(e => e.id)).toEqual(['run']);
     expect(filterClassicExperimentsByTab(rows, 'paused').map(e => e.id)).toEqual(['pause']);
-    expect(filterClassicExperimentsByTab(rows, 'completed').map(e => e.id)).toEqual(['done', 'applied']);
+    expect(filterClassicExperimentsByTab(rows, 'finished').map(e => e.id)).toEqual([
+      'done',
+      'applied',
+      'old',
+    ]);
+    expect(filterClassicExperimentsByTab(rows, 'completed').map(e => e.id)).toEqual([
+      'done',
+      'applied',
+      'old',
+    ]);
     expect(filterClassicExperimentsByTab(rows, 'draft').map(e => e.id)).toEqual(['draft']);
-    expect(filterClassicExperimentsByTab(rows, 'archived').map(e => e.id)).toEqual(['old']);
+    expect(filterClassicExperimentsByTab(rows, 'archived').map(e => e.id)).toEqual([
+      'done',
+      'applied',
+      'old',
+    ]);
     expect(filterClassicExperimentsByTab(rows, 'all').map(e => e.id)).toEqual([
       'run',
       'pause',
@@ -475,8 +528,9 @@ describe('classicExperimentListActions', () => {
       plans: [{ id: 'p1', status: 'paused', archived: false }],
     };
     expect(listTabAfterClassicAction('pause', paused, 'running')).toBe('paused');
-    expect(listTabAfterClassicAction('archive', paused, 'paused')).toBe('archived');
+    expect(listTabAfterClassicAction('archive', paused, 'paused')).toBe('finished');
     expect(listTabAfterClassicAction('resume', paused, 'paused')).toBe('running');
+    expect(listTabAfterClassicAction('duplicate', paused, 'all')).toBe('draft');
     expect(
       listTabAfterClassicAction(
         'restore',
@@ -490,7 +544,7 @@ describe('classicExperimentListActions', () => {
         { status: 'winner_ready', plans: [{ id: 'p1', status: 'winner_ready', archived: true }] },
         'archived'
       )
-    ).toBe('completed');
+    ).toBe('finished');
   });
 
   it('builds wizard resume paths with an optional step', () => {

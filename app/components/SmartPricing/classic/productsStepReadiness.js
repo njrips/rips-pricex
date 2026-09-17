@@ -1115,7 +1115,7 @@ export function aiSuggestBlockedReason({
 } = {}) {
   if (loadingProducts) return 'Loading your catalog — Suggest unlocks when products finish loading.';
   if (!shopDefaultsReady) {
-    return 'Loading your shop experiment defaults — Suggest unlocks in a moment.';
+    return 'Loading your shop test defaults — Suggest unlocks in a moment.';
   }
   if (!hasProducts) {
     return 'Select at least one product above — Suggest stays locked until you do.';

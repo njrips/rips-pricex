@@ -8,6 +8,7 @@ import { openPublicDocsHref, publicDocsHref } from '../../Settings/settingsGuide
 import ClassicAdminShell from './ClassicAdminShell';
 import {
   HELP_FAQ_ITEMS,
+  HELP_GLOSSARY_TERMS,
   HELP_TABS,
   TICKET_CATEGORY_OPTIONS,
   attentionTicketToPrompt,
@@ -140,9 +141,9 @@ export default function ClassicHelpPage({
 
   return (
     <ClassicAdminShell
-      titleBar="Help"
+      titleBar="Help & docs"
       meta="Support"
-      title="Help & support"
+      title="Help & docs"
       subtitle="Answers for Setup, launch, and live tests. File a ticket if you still need us — we attach shop diagnostics automatically."
       tabs={HELP_TABS.map(item =>
         item.id === 'tickets' && awaitingMerchant > 0
@@ -186,7 +187,7 @@ export default function ClassicHelpPage({
       {tab === 'answers' ? (
         <div>
           <LabelWithInfo hash="how-settings-work" label="How Settings apply">
-            Experiment setting guides
+            Test setting guides
           </LabelWithInfo>
           <p className={styles.help} style={{ marginTop: 0, marginBottom: 12 }}>
             Info icons in Create and Settings open the matching guide. Use the icon here for how
@@ -197,6 +198,25 @@ export default function ClassicHelpPage({
               Browse all guides on Priceify
             </Button>
           </p>
+
+          {!faqQuery.trim() ? (
+            <>
+              <div className={styles.sectionLabel}>Naming glossary</div>
+              <p className={styles.help} style={{ marginTop: 0, marginBottom: 8 }}>
+                Shared terms across Priceify — tests, metrics, and setup.
+              </p>
+              <dl className={styles.glossaryList} style={{ marginBottom: 20 }}>
+                {HELP_GLOSSARY_TERMS.map(({ term, definition }) => (
+                  <div key={term} className={styles.adminRow}>
+                    <dt className={styles.adminRowTitle}>{term}</dt>
+                    <dd className={styles.adminRowBody} style={{ marginTop: 4, marginLeft: 0 }}>
+                      {definition}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            </>
+          ) : null}
 
           <div className={styles.sectionLabel}>Common questions</div>
           <div style={{ maxWidth: 420, margin: '8px 0 12px' }}>
@@ -329,7 +349,7 @@ export default function ClassicHelpPage({
           New ticket
         </div>
         <p className={styles.help} style={{ marginBottom: 12 }}>
-          We include shop domain, plan, checkout readiness, and recent experiment ids. Do not paste
+          We include shop domain, plan, checkout readiness, and recent test ids. Do not paste
           access tokens.
         </p>
         <Form method="post">
@@ -446,7 +466,7 @@ export default function ClassicHelpPage({
       ) : null}
 
       <p className={styles.help} style={{ marginTop: 24 }}>
-        <Link to={withCurrentEmbeddedSearch(searchParams, '/app/setup')}>Setup</Link>
+        <Link to={withCurrentEmbeddedSearch(searchParams, '/app/setup')}>Store setup</Link>
         {' · '}
         <Link to={withCurrentEmbeddedSearch(searchParams, '/app/settings')}>Settings</Link>
         {' · '}
