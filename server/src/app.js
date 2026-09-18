@@ -77,7 +77,7 @@ app.use(express.json({ limit: '10mb' }));
 initDatabase();
 
 app.get('/health', (_req, res) => {
-  res.json({ ok: true, service: 'ripspricex-api' });
+  res.json({ ok: true, service: 'priceify-api' });
 });
 
 app.use('/api', coreRoutes);

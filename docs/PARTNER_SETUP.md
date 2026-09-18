@@ -3,7 +3,7 @@
 ## One-time app setup
 
 1. Open [Shopify Partner Dashboard](https://partners.shopify.com/) → Apps → **Create app** (or use Dev Dashboard)
-2. Name: **RipsPriceX**
+2. Name: **Priceify** (must match `name` in `shopify.app*.toml`; run `npm run deploy:production` or `npm run deploy:dev` to push renames to Shopify Admin)
 3. Enable **Shopify App Pricing** and add plans (Free list-only + paid Smart Pricing)
 4. Link locally:
 
@@ -62,7 +62,7 @@ npm run dev -- --store YOUR-DEV-STORE.myshopify.com
 ```
 
 1. Open the CLI install link and approve the **updated scopes**
-2. Theme editor → enable **RipsPriceX App Embed**
+2. Theme editor → enable **Priceify App Embed**
 3. App → Setup → **Ensure cart transform**
 
 ### Tunnel URLs
@@ -80,6 +80,26 @@ If the tunnel changes mid-session:
 ```bash
 npm run tunnel:sync -- https://YOUR-NEW-TUNNEL.trycloudflare.com
 ```
+
+**Cloudflare tunnel fails (`max retries` / `unexpected EOF`)** — often HTTP/2 to `api.trycloudflare.com` on some networks. Options:
+
+1. **Localtunnel (no account)** — starts tunnel + `shopify app dev` (Remix + Express together):
+
+   ```bash
+   npm run dev:localtunnel -- YOUR-DEV-STORE.myshopify.com
+   ```
+
+   First visit to the `*.loca.lt` URL may show a “Click to continue” page; use the tunnel host Shopify prints (`Using URL: https://….loca.lt`).
+
+2. **ngrok** — add authtoken, run `ngrok http 3458`, then:
+
+   ```bash
+   npm run dev -- --tunnel-url=https://YOUR-SUBDOMAIN.ngrok-free.app:3458 --store YOUR-DEV-STORE.myshopify.com
+   ```
+
+3. **Retry Cloudflare** — disable VPN, switch network, or run `shopify app dev` again later.
+
+Do **not** use `--use-localhost` for full dev: Shopify rejects webhook URLs on `localhost`. Keep a public HTTPS tunnel for webhooks and app proxy.
 
 Until Partner pricing is live:
 

@@ -1,4 +1,5 @@
-# Alternate: EchoLogyx Ltd production app (listing handle may remain rips-pricex)
+# EchoLogyx Ltd production app (Priceify). App Store handle may stay rips-pricex.
+# Admin display name comes from `name` below — push with: npm run deploy:production
 # Default local testing: shopify.app.ripspricex.toml
 # Learn more: https://shopify.dev/docs/apps/tools/cli/configuration
 
