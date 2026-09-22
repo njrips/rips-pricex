@@ -85,6 +85,25 @@ describe('smartPricingAiSuggestFeatures', () => {
     assert.notDeepEqual(a, b);
   });
 
+  it('shifts duplicate model bands on regenerate attempts', () => {
+    const model = { lo: 12, hi: 18 };
+    const row = {
+      variant_id: 'gid://shopify/ProductVariant/1',
+      current_price: 40,
+      units_sold_30d: 2,
+      margin_percent: 55,
+    };
+    const first = mergeModelBandWithHeuristics(row, model, 10, 25, {
+      duplicateBand: true,
+      varietyAttempt: 1,
+    });
+    const second = mergeModelBandWithHeuristics(row, model, 10, 25, {
+      duplicateBand: true,
+      varietyAttempt: 2,
+    });
+    assert.notDeepEqual(first, second);
+  });
+
   it('spreads deterministic prices across two SKUs', () => {
     const result = deterministicPriceSuggestions({
       variants: [

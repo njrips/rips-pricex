@@ -3181,6 +3181,30 @@ button.stepItem {
   gap: 24px; /* Figma Review Main content gap */
 }
 
+.reviewOverview {
+  border: 1px solid var(--classic-line);
+  border-radius: 6px;
+  padding: 17px;
+  background: var(--classic-card);
+}
+
+.reviewOverviewList {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-family: var(--ripx-font-classic, var(--ripx-font-ui, 'Inter', system-ui, sans-serif));
+  font-size: var(--classic-fs-body, 14px);
+  line-height: 20px;
+  color: var(--classic-ink);
+}
+
+.reviewOverviewLabel {
+  font-weight: var(--classic-fw-semibold, 600);
+}
+
 .reviewSection {
   border: 1px solid var(--classic-line);
   border-radius: 6px;
@@ -4682,7 +4706,7 @@ button.stepItem {
 }
 
 
-/* Figma pricing table: Product left · Base right · Test price center · Δ right */
+/* Figma pricing table: Product left · Base price right · Test price center · Δ right */
 .productsStep .tableScroll .table th:first-child,
 .productsStep .tableScroll .table td:first-child {
   text-align: left;

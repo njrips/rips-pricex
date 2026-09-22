@@ -89,7 +89,7 @@ npm run tunnel:sync -- https://YOUR-NEW-TUNNEL.trycloudflare.com
    npm run dev:localtunnel -- YOUR-DEV-STORE.myshopify.com
    ```
 
-   First visit to the `*.loca.lt` URL may show a “Click to continue” page; use the tunnel host Shopify prints (`Using URL: https://….loca.lt`).
+   First visit to the `*.loca.lt` URL may show a “Click to continue” page (required once per tunnel host in the browser). An IPv4 bridge (`127.0.0.1:34580` → `[::1]:3458`) reaches Shopify CLI’s IPv6-only proxy without mangling the `Host` header (avoid `localtunnel --local-host ::1` — it breaks Vite).
 
 2. **ngrok** — add authtoken, run `ngrok http 3458`, then:
 

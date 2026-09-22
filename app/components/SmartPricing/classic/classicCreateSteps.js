@@ -73,6 +73,7 @@ export const CLASSIC_CREATE_STEPS = [
     id: 'review',
     label: 'Review & launch',
     title: 'Review & launch',
-    description: '',
+    description:
+      'Check your settings before launching. You can pause or stop a test at any time.',
   },
 ];

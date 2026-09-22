@@ -217,6 +217,63 @@ describe('ClassicCreateWizard AI suggest', () => {
     expect(await priceInputValue()).toMatch(/44\.99/);
   });
 
+  it('requests every AI variation in one suggest call', async () => {
+    writeClassicWizardDraft(SHOP, {
+      experiment_id: 'exp_ai',
+      name: 'AI suggest test',
+      step: 2,
+      experimentType: 'price_test',
+      selectedIds: ['v1'],
+      pickMode: 'manual',
+      variations: [
+        { id: 'control', role: 'Control', name: 'Control', traffic: 34 },
+        { id: 'var_a', letter: 'A', role: 'Variation A', name: 'Variation A', traffic: 33 },
+        { id: 'var_b', letter: 'B', role: 'Variation B', name: 'Variation B', traffic: 33 },
+      ],
+      activeArmIndex: 1,
+      pricingByArm: {
+        var_a: { priceMode: 'ai', aiMinPct: '10', aiMaxPct: '20', aiUnit: 'percent' },
+        var_b: { priceMode: 'ai', aiMinPct: '10', aiMaxPct: '20', aiUnit: 'percent' },
+      },
+    });
+    suggestSmartPricingPrices.mockResolvedValue({
+      source: 'openai',
+      suggestions: [
+        { variant_id: 'v1', arm_id: 'var_a', price: 44.99 },
+        { variant_id: 'v1', arm_id: 'var_b', price: 46.99 },
+      ],
+    });
+    await act(async () => {
+      root.render(
+        h(
+          PolarisAppProvider,
+          { i18n: {} },
+          h(
+            MemoryRouter,
+            { initialEntries: ['/app/experiments/new?resume=exp_ai'] },
+            h(
+              Routes,
+              null,
+              h(Route, { path: '/app/experiments/new', element: h(ClassicCreateWizard, null) })
+            )
+          )
+        )
+      );
+    });
+
+    const suggestBtn = await readySuggestButton();
+    await act(async () => {
+      suggestBtn.click();
+    });
+    await waitFor(100);
+
+    expect(suggestSmartPricingPrices).toHaveBeenCalled();
+    const body = suggestSmartPricingPrices.mock.calls.at(-1)?.[1];
+    expect(body.arms).toHaveLength(2);
+    expect(body.arms.map(a => a.id).sort()).toEqual(['var_a', 'var_b']);
+    expect(body.regenerate).toBe(false);
+  });
+
   it('falls back locally when the draft saved numeric ids but the catalog uses GIDs', async () => {
     const { getSmartPricingOpportunities } = await import('../../../../services/smartPricingApi');
     getSmartPricingOpportunities.mockResolvedValue({

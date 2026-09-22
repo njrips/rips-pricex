@@ -28,6 +28,8 @@ import {
   priceOverrideKey,
   reconcileSelectedVariantIds,
   getAiSuggestCopy,
+  filterPriceSuggestionsRespectingEdits,
+  resolveAiSuggestTargetArms,
   hasAnyTestPriceChange,
   hasProductSelection,
   limitSelectionToProducts,
@@ -495,6 +497,21 @@ describe('productsStepReadiness', () => {
     );
   });
 
+  it('spaces two test arms in one local band patch', () => {
+    const patch = buildAiBandPriceOverrides({
+      rows: [{ variant_id: 'gid://shopify/ProductVariant/9', current_price: 100 }],
+      targetArms: [{ id: 'var_a' }, { id: 'var_b' }],
+      min: 10,
+      max: 20,
+      unit: 'percent',
+      maxChangePct: 30,
+    });
+    const a = Number(patch['gid://shopify/ProductVariant/9::var_a']);
+    const b = Number(patch['gid://shopify/ProductVariant/9::var_b']);
+    expect(a).not.toBe(b);
+    expect(a).toBeLessThan(b);
+  });
+
   it('spans a cut-only band across one arm using SKU signals', () => {
     const position = variationPositionInBand({
       armIndex: 0,
@@ -894,5 +911,51 @@ describe('variations still missing a test price', () => {
       })
     ).toMatch(/click Suggest/);
     expect(describeUnpricedTestArms([])).toBe('');
+  });
+});
+
+describe('resolveAiSuggestTargetArms', () => {
+  it('includes every AI variation in one suggest call', () => {
+    const variations = [
+      { id: 'control' },
+      { id: 'var_a' },
+      { id: 'var_b' },
+    ];
+    const arms = resolveAiSuggestTargetArms({
+      variations,
+      pricingByArm: {
+        var_a: { priceMode: 'ai' },
+        var_b: { priceMode: 'ai' },
+      },
+    });
+    expect(arms.map(a => a.id)).toEqual(['var_a', 'var_b']);
+  });
+
+  it('prices only AI arms when modes are mixed', () => {
+    const arms = resolveAiSuggestTargetArms({
+      variations: [{ id: 'control' }, { id: 'var_a' }, { id: 'var_b' }],
+      pricingByArm: {
+        var_a: { priceMode: 'manual' },
+        var_b: { priceMode: 'ai' },
+      },
+    });
+    expect(arms.map(a => a.id)).toEqual(['var_b']);
+  });
+});
+
+describe('filterPriceSuggestionsRespectingEdits', () => {
+  it('skips cells the merchant edited after AI filled them', () => {
+    const key = priceOverrideKey('v1', 'var_a');
+    const suggestions = [
+      { variant_id: 'v1', arm_id: 'var_a', price: 50 },
+      { variant_id: 'v1', arm_id: 'var_b', price: 55 },
+    ];
+    const filtered = filterPriceSuggestionsRespectingEdits(
+      suggestions,
+      { [key]: '48.00' },
+      {},
+    );
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0].arm_id).toBe('var_b');
   });
 });

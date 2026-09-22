@@ -15,8 +15,17 @@ if (
   delete process.env.HOST;
 }
 
-const host = new URL(process.env.SHOPIFY_APP_URL || "http://localhost")
-  .hostname;
+function tunnelHostname(): string {
+  const raw = String(process.env.SHOPIFY_APP_URL || "http://localhost").trim();
+  try {
+    const hostname = new URL(raw).hostname;
+    return hostname && hostname !== ":" ? hostname : "localhost";
+  } catch {
+    return "localhost";
+  }
+}
+
+const host = tunnelHostname();
 
 let hmrConfig;
 if (host === "localhost") {
@@ -57,7 +66,11 @@ export default defineConfig(({ mode }) => {
         JSON.stringify(devStorefrontPassword),
     },
     server: {
-      allowedHosts: [host],
+      // Tunnels rotate hostnames; localtunnel must not use --local-host ::1 (breaks Host header).
+      allowedHosts:
+        mode === "development"
+          ? true
+          : [host, ".loca.lt", ".trycloudflare.com"],
       cors: {
         preflightContinue: true,
       },

@@ -430,6 +430,63 @@ export function applyPriceSuggestionsToOverrides(priceOverrides = {}, suggestion
 }
 
 /**
+ * Test arms that receive one Suggest call. AI mode spaces every AI variation
+ * together; bulk/manual stay per-tab.
+ */
+export function resolveAiSuggestTargetArms({
+  variations = [],
+  pricingByArm = {},
+  defaultPriceMode = 'ai',
+} = {}) {
+  const testArms = (variations || []).filter(
+    (row, i) => i > 0 && row?.id && row.id !== 'control',
+  );
+  const aiArms = testArms.filter(arm => {
+    const mode = pricingByArm[arm.id]?.priceMode || defaultPriceMode;
+    return mode === 'ai';
+  });
+  return aiArms.length ? aiArms : testArms;
+}
+
+/** Skip cells the merchant edited (override kept, AI meta cleared). */
+export function filterPriceSuggestionsRespectingEdits(
+  suggestions = [],
+  priceOverrides = {},
+  priceSuggestionMeta = {},
+) {
+  return (Array.isArray(suggestions) ? suggestions : []).filter(item => {
+    if (!item?.variant_id || !item?.arm_id) return false;
+    const key = priceOverrideKey(item.variant_id, item.arm_id);
+    const raw = priceOverrides[key];
+    const hasOverride =
+      raw !== undefined && raw !== null && String(raw).trim() !== '';
+    const hasMeta =
+      priceSuggestionMeta[key] && typeof priceSuggestionMeta[key] === 'object';
+    if (hasOverride && !hasMeta) return false;
+    return true;
+  });
+}
+
+/** Same skip rule for local band patches keyed variant::arm. */
+export function filterPriceOverridePatch(
+  patch = {},
+  priceOverrides = {},
+  priceSuggestionMeta = {},
+) {
+  const out = {};
+  Object.entries(patch || {}).forEach(([key, value]) => {
+    const raw = priceOverrides[key];
+    const hasOverride =
+      raw !== undefined && raw !== null && String(raw).trim() !== '';
+    const hasMeta =
+      priceSuggestionMeta[key] && typeof priceSuggestionMeta[key] === 'object';
+    if (hasOverride && !hasMeta) return;
+    out[key] = value;
+  });
+  return out;
+}
+
+/**
  * The sentence explaining why a product is being suggested, if there is one.
  *
  * The opportunity list can be reordered and up to three of its products

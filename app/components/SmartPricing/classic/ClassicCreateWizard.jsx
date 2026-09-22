@@ -150,9 +150,13 @@ import {
   describeGuardrailLimitedSuggestions,
   normalizeAiPriceBand,
   applyPriceSuggestionsToOverrides,
+  armHasAiPrices,
   buildAiBandPriceOverrides,
   buildLocalPriceSuggestionMeta,
+  filterPriceOverridePatch,
+  filterPriceSuggestionsRespectingEdits,
   metaFromPriceSuggestions,
+  resolveAiSuggestTargetArms,
   resolveBandEdge,
   lookupPriceOverride,
   priceOverrideKey,
@@ -375,6 +379,7 @@ export default function ClassicCreateWizard({ onTitleChange }) {
     busy: false,
   });
   const aiSuggestRequestId = useRef(0);
+  const [aiSuggestAttempt, setAiSuggestAttempt] = useState(0);
   const productsLoadRequestId = useRef(0);
 
   const activeArmId = variations[activeArmIndex]?.id || 'control';
@@ -556,6 +561,8 @@ export default function ClassicCreateWizard({ onTitleChange }) {
       goalByPlan,
       plans,
       autoRound2,
+      priceSuggestionMeta,
+      aiSuggestAttempt,
     }),
     [
       experimentId,
@@ -576,6 +583,8 @@ export default function ClassicCreateWizard({ onTitleChange }) {
       goalByPlan,
       plans,
       autoRound2,
+      priceSuggestionMeta,
+      aiSuggestAttempt,
     ]
   );
 
@@ -800,6 +809,12 @@ export default function ClassicCreateWizard({ onTitleChange }) {
       }
       if (snapshot.priceOverrides && typeof snapshot.priceOverrides === 'object') {
         setPriceOverrides(snapshot.priceOverrides);
+      }
+      if (snapshot.priceSuggestionMeta && typeof snapshot.priceSuggestionMeta === 'object') {
+        setPriceSuggestionMeta(snapshot.priceSuggestionMeta);
+      }
+      if (Number.isFinite(Number(snapshot.aiSuggestAttempt))) {
+        setAiSuggestAttempt(Number(snapshot.aiSuggestAttempt));
       }
       if (snapshot.offerByArm && typeof snapshot.offerByArm === 'object') {
         setOfferByArm(snapshot.offerByArm);
@@ -1464,11 +1479,20 @@ export default function ClassicCreateWizard({ onTitleChange }) {
       const spreadOpts = { rows, targetArms, min, max, unit, maxChangePct };
       const localPatch = buildAiBandPriceOverrides(spreadOpts);
       if (!Object.keys(localPatch).length) return false;
-      setPriceOverrides(prev => ({ ...prev, ...localPatch }));
-      setPriceSuggestionMeta(prev => ({
-        ...prev,
-        ...buildLocalPriceSuggestionMeta(spreadOpts, 'local'),
-      }));
+      const fullMeta = buildLocalPriceSuggestionMeta(spreadOpts, 'local');
+      let applied = false;
+      setPriceOverrides(prev => {
+        const filtered = filterPriceOverridePatch(localPatch, prev, priceSuggestionMeta);
+        if (!Object.keys(filtered).length) return prev;
+        applied = true;
+        const metaPatch = {};
+        Object.keys(filtered).forEach(key => {
+          if (fullMeta[key]) metaPatch[key] = fullMeta[key];
+        });
+        setPriceSuggestionMeta(metaPrev => ({ ...metaPrev, ...metaPatch }));
+        return { ...prev, ...filtered };
+      });
+      if (!applied) return false;
       markArmsAiSuggested(targetArms.map(arm => arm.id));
       return true;
     },
@@ -1477,19 +1501,20 @@ export default function ClassicCreateWizard({ onTitleChange }) {
       aiMaxPct,
       shopGuardrails.max_price_change_percent,
       markArmsAiSuggested,
+      priceSuggestionMeta,
     ]
   );
 
   const applyLocalAiBandFallback = useCallback(
     ({ unit = 'percent', targetArmsOverride = null } = {}) => {
-      const testArms = variations.filter((row, i) => i > 0 && row.id !== 'control');
-      const aiArms = testArms.filter(arm => (pricingByArm[arm.id]?.priceMode || '') === 'ai');
       const targetArms =
         Array.isArray(targetArmsOverride) && targetArmsOverride.length
           ? targetArmsOverride
-          : aiArms.length
-            ? aiArms
-            : testArms;
+          : resolveAiSuggestTargetArms({
+              variations,
+              pricingByArm,
+              defaultPriceMode: priceMode,
+            });
       const rows = resolvePricingRows({
         opportunities,
         selectedIds,
@@ -1544,6 +1569,7 @@ export default function ClassicCreateWizard({ onTitleChange }) {
       aiMaxPct,
       variations,
       pricingByArm,
+      priceMode,
       opportunities,
       selectedIds,
       pickMode,
@@ -1561,19 +1587,11 @@ export default function ClassicCreateWizard({ onTitleChange }) {
         pickMode,
         maxSelection,
       });
-      const activeArm = variations[activeArmIndex];
-      const activeIsTestArm =
-        activeArm && activeArmIndex > 0 && activeArm.id && activeArm.id !== 'control';
-      const testArms = variations.filter((row, i) => i > 0 && row.id !== 'control');
-      const aiArms = testArms.filter(arm => (pricingByArm[arm.id]?.priceMode || '') === 'ai');
-      // The AI band UI is on the active tab. Pricing another arm leaves this
-      // table on "Suggest" even though Suggest ran — same rule as Bulk adjust.
-      const targetArms =
-        activeIsTestArm && priceMode === 'ai'
-          ? [activeArm]
-          : aiArms.length
-            ? aiArms
-            : testArms;
+      const targetArms = resolveAiSuggestTargetArms({
+        variations,
+        pricingByArm,
+        defaultPriceMode: priceMode,
+      });
       if (!rows.length || !targetArms.length) {
         setAiPriceMeta({
           source: null,
@@ -1631,6 +1649,15 @@ export default function ClassicCreateWizard({ onTitleChange }) {
       const fallbackMax = unit === 'amount' ? 5 : 20;
       const min = band.min ?? resolveBandEdge(aiMinPct, fallbackMin);
       const max = band.max ?? resolveBandEdge(aiMaxPct, fallbackMax);
+      const hadAiPrices = targetArms.some(arm =>
+        armHasAiPrices({ rows, armId: arm.id, priceOverrides }),
+      );
+      const regenerate = hadAiPrices;
+      let attempt = aiSuggestAttempt;
+      if (regenerate) {
+        attempt = aiSuggestAttempt + 1;
+        setAiSuggestAttempt(attempt);
+      }
       setAiPriceMeta({
         source: null,
         summary: 'Suggesting prices…',
@@ -1638,6 +1665,7 @@ export default function ClassicCreateWizard({ onTitleChange }) {
         busy: true,
       });
       let settled = false;
+      const metaForFilter = priceSuggestionMeta;
       try {
         const result = await suggestSmartPricingPrices(shopDomain, {
           variants: rows.map(row => ({
@@ -1668,13 +1696,20 @@ export default function ClassicCreateWizard({ onTitleChange }) {
           objective: primaryMetric || shopGuardrails.objective || 'revenue_per_visitor',
           guardrails: shopGuardrails,
           use_ai: true,
+          regenerate,
+          attempt,
         });
         if (requestId !== aiSuggestRequestId.current) return;
-        const suggestions = Array.isArray(result?.suggestions)
+        const rawSuggestions = Array.isArray(result?.suggestions)
           ? result.suggestions
           : Array.isArray(result?.data?.suggestions)
             ? result.data.suggestions
             : [];
+        const suggestions = filterPriceSuggestionsRespectingEdits(
+          rawSuggestions,
+          priceOverrides,
+          metaForFilter,
+        );
         if (!suggestions.length) {
           if (applyLocalAiBandFallback({ unit, targetArmsOverride: targetArms })) {
             const { status, detail } = composeAiSuggestBanner({
@@ -1696,10 +1731,8 @@ export default function ClassicCreateWizard({ onTitleChange }) {
         setPriceOverrides(prev => applyPriceSuggestionsToOverrides(prev, suggestions));
         const source = result?.source || result?.data?.source || 'deterministic';
         const pricingSource = source === 'openai' ? 'openai' : 'deterministic';
-        setPriceSuggestionMeta(prev => ({
-          ...prev,
-          ...metaFromPriceSuggestions(suggestions, pricingSource),
-        }));
+        const metaPatch = metaFromPriceSuggestions(suggestions, pricingSource);
+        setPriceSuggestionMeta(prev => ({ ...prev, ...metaPatch }));
         const baseSummary =
           result?.summary ||
           result?.data?.summary ||
@@ -1793,6 +1826,9 @@ export default function ClassicCreateWizard({ onTitleChange }) {
       paintLocalAiBandPrices,
       pricingByArm,
       priceMode,
+      priceOverrides,
+      priceSuggestionMeta,
+      aiSuggestAttempt,
       markArmsAiSuggested,
     ]
   );

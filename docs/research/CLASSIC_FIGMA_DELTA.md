@@ -31,7 +31,7 @@
 | Create Step 2 | `13:544` | `VariationsStepPanel.jsx` |
 | Create Step 3 (manual / AI / all products / modal variants) | `13:797`, `13:1495`, `13:2193`, `60:9176`, `13:3437` | `ProductsPricingStepPanel.jsx` + `ClassicProductPickerModal.jsx` |
 | Create Step 4 Audience Setup | `13:4071` / content `13:4072` | `AudienceSuccessStepPanel.jsx` |
-| Create Step 5 Review | `13:4501` | `ReviewLaunchStepPanel.jsx` |
+| Create Step 5 Review & launch | `13:4501` | `ReviewLaunchStepPanel.jsx` + `reviewLaunchOverview.js` (5-line summary per naming doc) |
 | Experiment Details / Overview | `13:4884` | `ClassicExperimentOverview.jsx` + `details/ClassicOverviewTab.jsx` |
 | Experiment Details / Audience | `245:350` | `details/ClassicAudienceTab.jsx` |
 | Experiment Details / Metrics | `245:609` | `details/ClassicMetricsTab.jsx` |
@@ -51,13 +51,13 @@ Page chrome alignment (2026-08-20):
 - In-page **← Experiments** is a flush-left breadcrumb with **16px** above and below (same as wizard **Back to experiments** / footer Back). Polarise 13 plain buttons use padding + a matching **negative margin**; Classic chrome zeros both so the arrow lines up with the title, tabs, cards, review Edit, and list footer. Continue uses `flex-direction: row-reverse` (Polarise 13 has no `Button__Content` wrapper).
 - List **New experiment** sits on the title row, not vertically centered against the subtitle. List banners use the same 32px inline inset as `.listPage`.
 
-Wizard step copy in code matches Figma steppers:
+Wizard step copy in code follows `CLASSIC_CREATE_STEPS` (Global naming doc):
 
-1. Setup — Name & type  
-2. Variations — Traffic split  
-3. Products — Pick & price  
-4. Audience — Choose Audience / Audience & success  
-5. Review — Launch  
+1. Basics — Set up your test  
+2. Traffic — Traffic & variations  
+3. Products & prices — Choose products & set test prices  
+4. Audience & goals — Audience & goals  
+5. Review & launch — five-line summary + section cards (`reviewLaunchOverview.js`)  
 
 ---
 

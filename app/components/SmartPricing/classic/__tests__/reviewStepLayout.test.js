@@ -103,6 +103,20 @@ function headingText(text) {
   );
 }
 
+describe('overview summary', () => {
+  it('shows the five Step 5 overview lines above the section cards', async () => {
+    await renderPanel({ name: 'Spring pricing', pickMode: 'manual', priceMode: 'ai' });
+    expect(container.textContent).toMatch(
+      /Test: Spring pricing — Price test · 42 products · Picked products · AI suggested prices/,
+    );
+    expect(container.textContent).toMatch(/Traffic: 60% of eligible visitors · Control 50% · Var A 50%/);
+    expect(container.textContent).toMatch(
+      /Results: Primary: Revenue per visitor · 90% confidence · 5,000 visitors\/variation/,
+    );
+    expect(container.textContent).toMatch(/Safety: Guardrail ON · Pause if Rev\/visitor drops >/);
+  });
+});
+
 describe('products card', () => {
   it('drops the product list preview', async () => {
     await renderPanel();
@@ -113,6 +127,19 @@ describe('products card', () => {
   it('reports the selected count instead', async () => {
     await renderPanel();
     expect(container.textContent).toMatch(/42 products/);
+  });
+
+  it('uses the Step 5 pricing labels on the products card badge', async () => {
+    await renderPanel({ priceMode: 'ai' });
+    expect(container.textContent).toMatch(/Pricing: AI suggested prices/);
+  });
+
+  it('shows bulk and manual pricing labels on the badge', async () => {
+    await renderPanel({ priceMode: 'bulk' });
+    expect(container.textContent).toMatch(/Pricing: Bulk adjusted prices/);
+
+    await renderPanel({ priceMode: 'manual' });
+    expect(container.textContent).toMatch(/Pricing: Manual prices/);
   });
 
   it('falls back to the plan count when no explicit count is passed', async () => {
@@ -184,7 +211,7 @@ describe('trimmed copy', () => {
   it('drops the redundant note that min sample comes from Stat settings', async () => {
     await renderPanel();
     expect(container.textContent).not.toMatch(/from Stat settings/i);
-    expect(container.textContent).toMatch(/5000 visitors/);
+    expect(container.textContent).toMatch(/5,000 visitors/);
   });
 });
 
@@ -268,6 +295,12 @@ describe('why launch is refusing', () => {
 });
 
 describe('offer tests', () => {
+  it('names the products section Products & offers', async () => {
+    await renderPanel({ experimentType: 'offer_test', plans: [] });
+    expect(headingText('Products & offers')).toBe(true);
+    expect(headingText('Products & prices')).toBe(false);
+  });
+
   it('does not promise prices on a step that sets offers', async () => {
     await renderPanel({ experimentType: 'offer_test', plans: [] });
     expect(container.textContent).toContain('Offers finalize when you continue');
@@ -323,28 +356,38 @@ describe('how the experiment will end', () => {
 });
 
 describe('banner order', () => {
-  it('puts a blocked launch above the timeline estimate', async () => {
-    // The estimate used to head the page, so a merchant met "about 3 weeks"
-    // before the reason the experiment could not start at all.
+  it('puts a blocked launch above the Step 5 overview', async () => {
     await renderPanel({ launchBlockedReason: 'Traffic split must total 100%.' });
     const text = container.textContent;
-    expect(text.indexOf('Not ready to launch')).toBeLessThan(
-      text.indexOf('Estimated collection window')
-    );
+    expect(text.indexOf('Not ready to launch')).toBeLessThan(text.indexOf('Test: Spring pricing'));
+    expect(text.indexOf('Not ready to launch')).toBeLessThan(text.indexOf('Basics'));
   });
 
-  it('puts checkout trouble above the timeline estimate', async () => {
+  it('puts checkout trouble above the Step 5 overview', async () => {
     await renderPanel({ checkoutReady: false, checkoutReadiness: { message: 'Fix setup.' } });
     const text = container.textContent;
-    expect(text.indexOf('Checkout is not ready')).toBeLessThan(
-      text.indexOf('Estimated collection window')
-    );
+    expect(text.indexOf('Checkout is not ready')).toBeLessThan(text.indexOf('Test: Spring pricing'));
   });
 
-  it('leads with the estimate when nothing is wrong', async () => {
+  it('leads with the overview when the timeline is on track', async () => {
     await renderPanel();
     const text = container.textContent;
-    expect(text.indexOf('Estimated collection window')).toBeLessThan(text.indexOf('Basics'));
+    expect(text.indexOf('Test: Spring pricing')).toBeLessThan(text.indexOf('Basics'));
+    expect(text).not.toContain('Estimated collection window');
+  });
+
+  it('shows the traffic warning before the overview when the estimate is not feasible', async () => {
+    await renderPanel({
+      significanceEstimate: {
+        durationFeasibility: 'not_feasible',
+        summary: 'Your 5,000-visitor minimum cannot be reached.',
+        method: '~8 visitors/day on the slowest product.',
+      },
+    });
+    const text = container.textContent;
+    expect(text.indexOf('Traffic may be too low for a reliable result')).toBeLessThan(
+      text.indexOf('Test: Spring pricing'),
+    );
   });
 
   /**

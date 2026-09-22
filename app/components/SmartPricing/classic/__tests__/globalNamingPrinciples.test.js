@@ -89,7 +89,11 @@ describe('global naming principles (PDF spot checks)', () => {
   });
 
   it('aligns create wizard step titles and review copy with the spec', () => {
-    expect(CLASSIC_CREATE_STEPS.every(step => step.description === '')).toBe(true);
+    expect(
+      CLASSIC_CREATE_STEPS.filter(step => step.id !== 'review').every(
+        step => step.description === '',
+      ),
+    ).toBe(true);
     expect(CLASSIC_CREATE_STEPS.map(step => step.title)).toEqual([
       'Set up your test',
       'Traffic & variations',
@@ -129,11 +133,26 @@ describe('global naming principles (PDF spot checks)', () => {
     expect(audience).not.toMatch(/minimum visitors per variation is reached/i);
     expect(audience).toMatch(/safety pause, not a winner call/i);
     expect(CLASSIC_CREATE_STEPS.find(step => step.id === 'audience')?.description).toBe('');
-    expect(CLASSIC_CREATE_STEPS.find(step => step.id === 'review')?.description).toBe('');
+    expect(CLASSIC_CREATE_STEPS.find(step => step.id === 'review')?.description).toBe(
+      'Check your settings before launching. You can pause or stop a test at any time.',
+    );
     const review = read('ReviewLaunchStepPanel.jsx');
     expect(review).toContain('Open Store setup');
     expect(review).toContain('Open Settings → Price locations');
     expect(review).not.toMatch(/Fix setup before launching/i);
+    expect(review).toContain('Traffic may be too low for a reliable result');
+    expect(review).toContain('Picked products');
+    expect(review).toContain("isOfferTest ? 'Products & offers' : 'Products & prices'");
+    expect(review).toContain('reviewOverviewLabel');
+    const overview = read('reviewLaunchOverview.js');
+    expect(overview).toContain('AI suggested prices');
+    expect(overview).toContain('REVIEW_OVERVIEW_LINE_ORDER');
+    expect(overview).toContain('formatReviewPricingModeLabel');
+    expect(overview).toContain('Mixed pricing per variation');
+    expect(review).toContain('showDurationBanner');
+    expect(productsPanel).toContain('Price band (min–max)');
+    expect(productsPanel).toContain('Pick specific products');
+    expect(productsPanel).toContain('How would you like to pick products?');
     const helpFaq = read('helpFaq.js');
     expect(helpFaq).toMatch(/term: 'Revenue guardrail'/);
     expect(helpFaq).toMatch(/term: 'Results settings'/);

@@ -451,6 +451,8 @@ async function suggestPrices({
   maxAmount = null,
   objective = 'revenue_per_visitor',
   useAi = true,
+  regenerate = false,
+  attempt = 0,
 } = {}) {
   const rows = normalizeVariantRows(variants);
   const testArms = (Array.isArray(arms) ? arms : []).filter(
@@ -599,9 +601,10 @@ How wide to make a product's range:
       },
       products: sent.map((r, index) => describeProductForModel(r, index)),
     }),
-    temperature: 0.25,
+    temperature: regenerate ? 0.55 : 0.25,
     maxTokens: estimateSuggestionTokens(sent.length),
   });
+  const varietyAttempt = regenerate ? Math.max(1, Number(attempt) || 1) : 0;
 
   const items = Array.isArray(payload?.bands) ? payload.bands : [];
   if (!items.length) {
@@ -640,6 +643,7 @@ How wide to make a product's range:
       lazySingleBand || (bandCounts[bandKey(normalized)] || 0) > 1;
     const band = mergeModelBandWithHeuristics(row, normalized, min, max, {
       duplicateBand,
+      varietyAttempt,
     });
 
     const scoreBoost = computeOpportunityScoreBoost(row);

@@ -150,7 +150,7 @@ describe('AI suggest bar layout', () => {
     await renderPanel({ activeArmIndex: 1, priceMode: 'ai', aiUnit: 'percent' });
 
     const label = [...container.querySelectorAll('span')].find(node =>
-      (node.textContent || '').includes('Band (min–max)')
+      (node.textContent || '').includes('Price band (min–max)')
     );
     expect(label).not.toBeNull();
 

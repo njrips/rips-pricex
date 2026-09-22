@@ -28,12 +28,20 @@ Install app
 Create (/app/experiments/new)
   1 Basics (name, hypothesis, type)
   2 Variations (arms / prices)
-  3 Products (manual / all / AI)
+  3 Products & prices (Pick specific products · All products · manual / bulk / AI pricing)
   4 Audience + success metric
-  5 Review
+  5 Review & launch
+       · Subtitle: check settings before launching (pause/stop anytime)
+       · Five-line summary: Test · Traffic · Audience · Results · Safety
+         (`reviewLaunchOverview.js` — matches Global naming doc Step 5)
+       · Section cards: Basics · Products & prices (or Products & offers) ·
+         Variations & traffic · Audience · Metrics & guardrail (Edit per section)
+       · Optional traffic banner (only when timeline is uncertain or underpowered;
+         on-track runs rely on the Results overview line instead)
+       · Traffic warning title: “Traffic may be too low for a reliable result”
        ├─ Fix setup → /app/setup
-       └─ Fix price surfaces → /app/settings?tab=price-surfaces&automap=1
-  → Save draft and/or Launch
+       └─ Fix price locations → /app/settings?tab=price-surfaces&automap=1
+  → Save draft and/or Launch test (Back to edit → previous step)
        → plan → price test
        → storefront assignment begins when running
 ```

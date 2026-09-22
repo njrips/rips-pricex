@@ -834,6 +834,8 @@ router.post(
       // The client has always sent use_ai; honouring it gives an operator a way
       // to ask for the deterministic spread without unsetting the API key.
       useAi: body.use_ai !== false && body.useAi !== false,
+      regenerate: body.regenerate === true || body.regenerate === 1,
+      attempt: Number(body.attempt) || 0,
     });
     return sendSuccess(res, HTTP_STATUS.OK, {
       ...result,

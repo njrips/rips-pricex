@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { Badge, Banner, Button } from '@shopify/polaris';
 import { formatSplitCountryAudienceLabel, resolveCountryLists } from './countrySelection';
 import {
@@ -23,15 +24,13 @@ import { IconControlBaseline } from './classicIcons';
 import { priceSurfacesUnmapped } from '../../../utils/checkoutReadinessClient';
 import SettingsInfoLink from '../../Settings/SettingsInfoLink';
 import TooltipWrapper from '../../shared/TooltipWrapper';
+import {
+  buildReviewOverviewLines,
+  resolveReviewPricingSummaryText,
+  REVIEW_OVERVIEW_LABELS,
+  REVIEW_OVERVIEW_LINE_ORDER,
+} from './reviewLaunchOverview';
 import styles from './SmartPricingClassic.module.css';
-
-function formatPriceModeLabel(mode, { bulkPercent = '10', bulkDirection = 'increase' } = {}) {
-  if (mode === 'bulk') {
-    return `Bulk ${bulkDirection === 'decrease' ? '−' : '+'}${bulkPercent}%`;
-  }
-  if (mode === 'ai') return 'AI suggested';
-  return 'Manual';
-}
 
 const TRAFFIC_TOO_LOW_BODY =
   'At your current traffic and number of variations, this test may take a long time to reach your minimum visitors per variation. To get a clearer result, try testing fewer products or fewer variations.';
@@ -126,24 +125,12 @@ export default function ReviewLaunchStepPanel({
     checkoutReadiness?.live_api_checked === true &&
     checkoutReadiness?.automatic_discount_available !== true;
 
-  const pricingLabel = (() => {
-    if (pricingByArm && typeof pricingByArm === 'object') {
-      const testArms = (variations || []).filter(
-        (arm, i) => i > 0 && arm?.id && arm.id !== 'control'
-      );
-      const modes = testArms.map(arm => {
-        const cfg = pricingByArm[arm.id] || {};
-        return formatPriceModeLabel(cfg.priceMode || priceMode, {
-          bulkPercent: cfg.bulkPercent ?? bulkPercent,
-          bulkDirection: cfg.bulkDirection || bulkDirection,
-        });
-      });
-      const unique = [...new Set(modes.filter(Boolean))];
-      if (unique.length === 1) return unique[0];
-      if (unique.length > 1) return 'Mixed per variation';
-    }
-    return formatPriceModeLabel(priceMode, { bulkPercent, bulkDirection });
-  })();
+  const pricingSummary = resolveReviewPricingSummaryText({
+    isOfferTest,
+    priceMode,
+    pricingByArm,
+    variations,
+  });
   const durationNotFeasible =
     significanceEstimate?.durationFeasibility === 'not_feasible' ||
     Number(estimatedDays) > PRACTICAL_TEST_MAX_DAYS;
@@ -162,6 +149,45 @@ export default function ReviewLaunchStepPanel({
         : estimatedDays
           ? 'Traffic may be too low for a reliable result'
           : 'Timeline needs measured product traffic';
+  // Naming doc Step 5: optional traffic warning at top; feasible timeline lives in Results/overview.
+  const showDurationBanner =
+    durationNotFeasible ||
+    !estimatedDays ||
+    Boolean(String(estimatedTimeDetail || '').trim() && !significanceEstimate?.summary);
+
+  const overviewLines = useMemo(
+    () =>
+      buildReviewOverviewLines({
+        name,
+        experimentType,
+        experimentTypeLabel,
+        selectedCount,
+        plans,
+        pickMode,
+        priceMode,
+        bulkPercent,
+        bulkDirection,
+        pricingByArm,
+        variations,
+        audience,
+        significanceEstimate,
+      }),
+    [
+      name,
+      experimentType,
+      experimentTypeLabel,
+      selectedCount,
+      plans,
+      pickMode,
+      priceMode,
+      bulkPercent,
+      bulkDirection,
+      pricingByArm,
+      variations,
+      audience,
+      significanceEstimate,
+    ],
+  );
 
   return (
     <div className={styles.reviewStack}>
@@ -238,33 +264,29 @@ export default function ReviewLaunchStepPanel({
         </Banner>
       ) : null}
 
-      <Banner
-        tone={durationNotFeasible || !estimatedDays ? 'warning' : 'info'}
-        title={durationTitle}
-      >
-        {/* The fallback used to spell out every input to the estimate -- traffic
-            allocation, slowest arm, product traffic, the planning proxy and how
-            live decisions differ -- in the banner above the summary it
-            introduces. The method belongs in the guide the Analysis row links
-            to. */}
-        <p>
-          {durationNotFeasible
-            ? TRAFFIC_TOO_LOW_BODY
-            : durationSummary ||
-              `From ${audience?.trafficAllocation ?? 100}% test traffic and the products you selected.`}
-        </p>
-        {/* The arithmetic behind the estimate, and the caveats on the traffic
-            it was built from. Worth reading once, not on the way to Launch. */}
-        {durationMethod ? (
-          <p className={styles.help}>
-            <TooltipWrapper content={durationMethod}>
-              <button type="button" className={styles.helpHint} aria-label={durationMethod}>
-                How this is worked out
-              </button>
-            </TooltipWrapper>
+      {showDurationBanner ? (
+        <Banner
+          tone={durationNotFeasible || !estimatedDays ? 'warning' : 'info'}
+          title={durationTitle}
+        >
+          <p>
+            {durationNotFeasible
+              ? TRAFFIC_TOO_LOW_BODY
+              : durationSummary ||
+                estimatedTimeDetail ||
+                `From ${audience?.trafficAllocation ?? 100}% test traffic and the products you selected.`}
           </p>
-        ) : null}
-      </Banner>
+          {durationMethod ? (
+            <p className={styles.help}>
+              <TooltipWrapper content={durationMethod}>
+                <button type="button" className={styles.helpHint} aria-label={durationMethod}>
+                  How this is worked out
+                </button>
+              </TooltipWrapper>
+            </p>
+          ) : null}
+        </Banner>
+      ) : null}
 
       {offerDiscountMissing ? (
         <Banner tone="info" title="Automatic discount will attach on launch">
@@ -281,6 +303,17 @@ export default function ReviewLaunchStepPanel({
           </div>
         </Banner>
       ) : null}
+
+      <section className={styles.reviewOverview} aria-label="Test summary">
+        <ul className={styles.reviewOverviewList}>
+          {REVIEW_OVERVIEW_LINE_ORDER.map(key => (
+            <li key={key}>
+              <span className={styles.reviewOverviewLabel}>{REVIEW_OVERVIEW_LABELS[key]}:</span>{' '}
+              {overviewLines[key]}
+            </li>
+          ))}
+        </ul>
+      </section>
 
       <section className={styles.reviewSection}>
         <div className={styles.reviewHead}>
@@ -311,8 +344,12 @@ export default function ReviewLaunchStepPanel({
 
       <section className={styles.reviewSection}>
         <div className={styles.reviewHead}>
-          <h2>Products & prices</h2>
-          <Button variant="plain" accessibilityLabel="Edit products" onClick={() => onEditStep(2)}>
+          <h2>{isOfferTest ? 'Products & offers' : 'Products & prices'}</h2>
+          <Button
+            variant="plain"
+            accessibilityLabel={isOfferTest ? 'Edit products and offers' : 'Edit products'}
+            onClick={() => onEditStep(2)}
+          >
             Edit
           </Button>
         </div>
@@ -320,7 +357,7 @@ export default function ReviewLaunchStepPanel({
           {/* The count leads: with the product list gone it is the fact this
               card exists to report. */}
           <Badge tone="info">{selectedCount || plans.length} products</Badge>
-          <Badge>{pickMode === 'all' ? 'Whole catalog' : 'Pick specific products'}</Badge>
+          <Badge>{pickMode === 'all' ? 'All products' : 'Picked products'}</Badge>
           <Badge>
             {isOfferTest
               ? `Offers: ${(variations || [])
@@ -328,7 +365,7 @@ export default function ReviewLaunchStepPanel({
                   .map(arm => formatOfferRule(offerByArm[arm.id]))
                   .filter(label => label && label !== 'No offer')
                   .join(' · ') || 'Set on Products'}`
-              : `Pricing: ${pricingLabel}`}
+              : `Pricing: ${pricingSummary}`}
           </Badge>
         </div>
         {/* This listed up to eight products with a thumbnail, base price and a
@@ -459,7 +496,7 @@ export default function ReviewLaunchStepPanel({
               <SettingsInfoLink hash="min-sample" label="Minimum visitors per variation" />
             </div>
             <p className={styles.kvValue}>
-              {parseMinSampleSize(audience?.minSampleSize)} visitors
+              {formatVisitorCount(parseMinSampleSize(audience?.minSampleSize))} visitors
             </p>
           </div>
           {significanceEstimate?.recommendedSampleSize ? (
@@ -470,7 +507,9 @@ export default function ReviewLaunchStepPanel({
               </div>
               <p className={styles.kvValue}>
                 {formatVisitorCount(significanceEstimate.recommendedSampleSize)} visitors
-                {significanceEstimate.powerRating === 'underpowered' ? ' · under min sample' : ''}
+                {significanceEstimate.powerRating === 'underpowered'
+                  ? ' · below minimum visitors'
+                  : ''}
               </p>
             </div>
           ) : null}

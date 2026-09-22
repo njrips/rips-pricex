@@ -267,7 +267,7 @@ function mergeModelBandWithHeuristics(
   modelBand,
   merchantLo,
   merchantHi,
-  { duplicateBand = false } = {}
+  { duplicateBand = false, varietyAttempt = 0 } = {}
 ) {
   const slice = resolveProductBandSlice(row, merchantLo, merchantHi);
   if (!modelBand || !Number.isFinite(modelBand.lo) || !Number.isFinite(modelBand.hi)) {
@@ -284,8 +284,11 @@ function mergeModelBandWithHeuristics(
   }
   const modelWidth = Math.max(0.8, modelBand.hi - modelBand.lo);
   const sig = productPricingSignature(row);
+  const attempt = Math.max(0, Number(varietyAttempt) || 0);
+  const varietyShift =
+    attempt > 0 ? (stableHash01(`${row.variant_id || ''}:attempt:${attempt}`) - 0.5) * 0.32 : 0;
   const room = Math.max(0, hi - lo - modelWidth);
-  let start = lo + room * clamp01(sig);
+  let start = lo + room * clamp01(sig + varietyShift);
   const heurMid = (slice.min + slice.max) / 2;
   const heurStart = heurMid - modelWidth / 2;
   start = start * 0.62 + heurStart * 0.38;

@@ -1111,9 +1111,9 @@ export default function ProductsPricingStepPanel({
           <div className={`${styles.bulkBar} ${styles.bulkBarFigma}`}>
             <TooltipWrapper
               content={aiBarTooltip}
-              accessibilityLabel="How AI suggestions use this band"
+              accessibilityLabel="How AI suggestions use this price band"
             >
-              <span className={styles.bulkBarLabel}>Band (min–max)</span>
+              <span className={styles.bulkBarLabel}>Price band (min–max)</span>
             </TooltipWrapper>
             <label className={styles.bulkField}>
               <span>{aiUnit === 'amount' ? 'min $' : 'min %'}</span>
@@ -1149,7 +1149,7 @@ export default function ProductsPricingStepPanel({
             <div
               className={`${styles.segment} ${styles.segmentInline} ${styles.bulkSegment}`}
               role="group"
-              aria-label="AI band unit"
+              aria-label="Price band unit"
             >
               <button
                 type="button"
