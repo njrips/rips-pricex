@@ -1,4 +1,7 @@
-import { formatPrimaryMetricLabel } from '../classicExperimentDetailsHelpers';
+import {
+  listSecondaryMetricsForDisplay,
+  secondaryMetricDisplayLabel,
+} from '../classicExperimentDetailsHelpers';
 import DetailFactCard from './DetailFactCard';
 import styles from '../SmartPricingClassic.module.css';
 
@@ -12,13 +15,7 @@ export default function ClassicMetricsTab({ metrics, onEdit }) {
     );
   }
 
-  const secondary =
-    Array.isArray(metrics.secondary) && metrics.secondary.length
-      ? metrics.secondary
-      : (metrics.secondaryEvents || []).map(eventName => ({
-          event_name: eventName,
-          label: formatPrimaryMetricLabel(eventName),
-        }));
+  const secondary = listSecondaryMetricsForDisplay(metrics);
 
   return (
     <div className={styles.detailStack}>
@@ -43,7 +40,7 @@ export default function ClassicMetricsTab({ metrics, onEdit }) {
                 key={item.catalog_id || item.event_name || index}
                 className={styles.detailChip}
               >
-                {item.label || formatPrimaryMetricLabel(item.event_name) || `Goal ${index + 1}`}
+                {secondaryMetricDisplayLabel(item, index)}
               </span>
             ))}
           </div>

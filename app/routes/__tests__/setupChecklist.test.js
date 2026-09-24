@@ -236,7 +236,7 @@ describe('Setup checklist', () => {
       await act(async () => {
         root.render(h(PolarisAppProvider, { i18n: {} }, h(RouterProvider, { router })));
       });
-      expect(surfaceBadge()).toBe('Checking…');
+      expect(text()).toContain('Loading store setup…');
       expect(text()).not.toContain('Product page not mapped');
     });
 

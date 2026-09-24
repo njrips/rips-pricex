@@ -74,6 +74,21 @@ function daysAgoIso(days) {
   return date.toISOString().slice(0, 10);
 }
 
+/** Unique Shopify products represented in SKU / opportunity rows. */
+function countUniqueCatalogProducts(rows = []) {
+  const keys = new Set();
+  (Array.isArray(rows) ? rows : []).forEach(row => {
+    const productId = normalizeProductGid(row?.product_id);
+    if (productId) {
+      keys.add(productId);
+      return;
+    }
+    const variantId = normalizeVariantGid(row?.variant_id);
+    if (variantId) keys.add(variantId);
+  });
+  return keys.size;
+}
+
 function isExcludedProductType(productType = '', tags = []) {
   const type = String(productType || '')
     .trim()
@@ -104,4 +119,5 @@ module.exports = {
   parseMoney,
   daysAgoIso,
   isExcludedProductType,
+  countUniqueCatalogProducts,
 };

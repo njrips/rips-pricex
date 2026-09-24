@@ -216,13 +216,27 @@ async function recordEventForTest(
 
   let product = productId;
   let variant = variantId;
-  if (!product || !variant) {
+  let nextPayload = payload && typeof payload === 'object' ? { ...payload } : {};
+  const needsPlanLookup =
+    !product ||
+    !variant ||
+    !nextPayload.product_title;
+  if (needsPlanLookup) {
     const { findInboxPlanByTestId, getInboxPlanById } = require('./smartPricingInboxStore');
     const plan =
       (await getInboxPlanById(shopDomain, resolvedPlanId).catch(() => null)) ||
       (await findInboxPlanByTestId(shopDomain, testId).catch(() => null));
     product = product || plan?.product_id || test?.target_id || null;
     variant = variant || plan?.variant_id || null;
+    if (!nextPayload.product_title) {
+      const title =
+        plan?.product_title ||
+        plan?.title ||
+        test?.name ||
+        test?.product_title ||
+        null;
+      if (title) nextPayload.product_title = title;
+    }
   }
 
   try {
@@ -234,7 +248,7 @@ async function recordEventForTest(
       variantId: variant,
       eventType,
       actor,
-      payload,
+      payload: nextPayload,
     });
   } catch (error) {
     // Callers treat event logging as fire-and-forget so a logging fault never

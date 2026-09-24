@@ -554,7 +554,9 @@ describe('classicExperimentListActions', () => {
     );
     expect(classicCreateStepIndex('audience')).toBe(3);
     expect(classicCreateStepIndex('nope')).toBeNull();
-    expect(resolveClassicDetailsTab('metrics')).toBe('Metrics');
+    expect(resolveClassicDetailsTab('metrics')).toBe('Settings');
+    expect(resolveClassicDetailsTab('activity')).toBe('History');
+    expect(resolveClassicDetailsTab('performance')).toBe('Overview');
     expect(resolveClassicDetailsTab('')).toBe('Overview');
     expect(resolveClassicDetailsTab('nope')).toBe('Overview');
   });

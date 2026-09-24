@@ -25,15 +25,16 @@ const {
 } = require('./catalogAnalyticsCrossCheckService');
 
 /**
- * How much of the catalog Smart Pricing loads in one snapshot.
+ * Safety ceiling when walking the whole active catalog from Shopify.
  *
- * One experiment covers up to 250 products, so stopping at 120 meant a shop
- * could not fill even a single experiment from its own catalog, and the rest
- * of the products were simply invisible -- not filtered with a reason, just
- * never fetched. Anything past this is reachable by searching, which queries
- * Shopify directly rather than this snapshot.
+ * The wizard loads every active product it can (minus ones held by other tests)
+ * so merchants can pick or search across the store, not just the first page.
+ * Override with SMART_PRICING_MAX_CATALOG_PRODUCTS for very large catalogs.
  */
-const DEFAULT_MAX_CATALOG_PRODUCTS = 250;
+const DEFAULT_MAX_CATALOG_PRODUCTS = (() => {
+  const parsed = Number.parseInt(process.env.SMART_PRICING_MAX_CATALOG_PRODUCTS || '', 10);
+  return Number.isFinite(parsed) && parsed >= 250 ? parsed : 10000;
+})();
 
 const DEFAULT_ASSUMED_MARGIN_PERCENT = 45;
 const DEFAULT_CONVERSION_RATE = 0.025;
@@ -251,31 +252,36 @@ async function fetchCatalogProducts(shopDomain, accessToken, options = {}) {
 
   const productMap = new Map();
   let currency = 'USD';
+  let truncated = false;
 
   for (const productQuery of queries) {
+    const remaining = Math.max(0, maxProducts - productMap.size);
+    if (!remaining) {
+      truncated = true;
+      break;
+    }
     const catalog = await shopifyService.fetchSmartPricingCatalog(shopDomain, accessToken, {
-      maxProducts,
+      maxProducts: remaining,
       productQuery,
     });
     currency = catalog.currency || currency;
+    if (catalog.truncated === true) truncated = true;
     (catalog.products || []).forEach(product => {
       if (!product?.id || productMap.has(product.id)) {
         return;
       }
       productMap.set(product.id, product);
     });
-    if (productMap.size >= maxProducts) {
+    if (truncated || productMap.size >= maxProducts) {
       break;
     }
   }
 
+  const products = Array.from(productMap.values()).slice(0, maxProducts);
   return {
-    products: Array.from(productMap.values()).slice(0, maxProducts),
+    products,
     currency,
-    // Hitting the cap means the shop has more products than we loaded. Saying
-    // so lets the picker admit it is showing part of the catalog instead of
-    // presenting a truncated list as the whole thing.
-    truncated: productMap.size >= maxProducts,
+    truncated: truncated || products.length >= maxProducts,
   };
 }
 

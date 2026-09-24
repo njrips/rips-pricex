@@ -24,7 +24,7 @@ export function useSmartPricingWinnerRollout(shopDomain) {
         setPreview({ plan, data });
         return data;
       } catch (err) {
-        setError(err.message || 'Could not preview winner rollout.');
+        setError(err.message || 'Could not preview Apply winner.');
         throw err;
       } finally {
         setPreviewLoadingPlanId(null);
@@ -59,10 +59,10 @@ export function useSmartPricingWinnerRollout(shopDomain) {
           createActivityEntry({
             id: 'winner_applied',
             kind: 'complete',
-            title: isOffer ? 'Test completed' : 'Winner rolled out',
+            title: 'Winner applied to catalog',
             detail: isOffer
-              ? 'Offer test finished — catalog prices were not changed'
-              : 'Winning price applied to Shopify',
+              ? 'Offer test finished — catalog prices were not changed.'
+              : 'This product’s winning variation was written to Shopify.',
             at: appliedAt,
             actor: current.owner_name || current.created_by_name || 'You',
           })

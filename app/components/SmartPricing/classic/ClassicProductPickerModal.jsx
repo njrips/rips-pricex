@@ -10,6 +10,14 @@ import {
   productSuggestionReason,
   splitTitleParts,
 } from './productsStepReadiness';
+import {
+  buildCatalogTruncatedHelp,
+  buildProductPickerEmptyMessage,
+  resolveCatalogLoadedProductCount,
+  resolveStoreCatalogProductCount,
+  buildStoreCatalogStatusText,
+  shouldShowCatalogTruncatedHelp,
+} from './productsStepCatalogCopy';
 import styles from './SmartPricingClassic.module.css';
 
 /**
@@ -96,6 +104,10 @@ export default function ClassicProductPickerModal({
    */
   onCatalogSearch = null,
   catalogSearching = false,
+  catalogSearchHint = null,
+  catalogTruncated = false,
+  catalogLoadedProductCount = null,
+  withheldByOtherTests = null,
   onClose,
 }) {
   const [sideSearch, setSideSearch] = useState('');
@@ -281,6 +293,44 @@ export default function ClassicProductPickerModal({
   const allVisibleSelected =
     visibleVariantIds.length > 0 && visibleVariantIds.every(id => isSelectedId(id));
 
+  const withheldCount = Number(withheldByOtherTests?.total) || 0;
+  const resolvedLoadedProductCount = useMemo(
+    () => resolveCatalogLoadedProductCount(catalogLoadedProductCount, opportunities),
+    [catalogLoadedProductCount, opportunities]
+  );
+  const availableProductCount = allGroups.length;
+  const catalogTruncatedHelp = buildCatalogTruncatedHelp({
+    catalogTruncated,
+    catalogLoadedProductCount: resolvedLoadedProductCount,
+  });
+  const showCatalogTruncatedHelp = shouldShowCatalogTruncatedHelp({
+    catalogTruncatedHelp,
+    availableProductCount,
+  });
+  const storeCatalogProductCount = resolveStoreCatalogProductCount({
+    catalogLoadedProductCount: resolvedLoadedProductCount,
+    availableProductCount,
+    withheldCount,
+    opportunities,
+  });
+  const storeCatalogStatusText = buildStoreCatalogStatusText({
+    storeProductCount: storeCatalogProductCount,
+    availableProductCount,
+    withheldCount,
+    catalogTruncated,
+  });
+  const pickerEmptyMessage = buildProductPickerEmptyMessage({
+    opportunities,
+    matchedCount: matched.length,
+    productSearch,
+    activeGroupValue: activeGroup.value,
+    withheldCount,
+    catalogTruncated,
+    catalogSearching,
+    hasRemoteSearch: Boolean(onCatalogSearch),
+    remoteSearchHint: catalogSearchHint,
+  });
+
   if (typeof document === 'undefined') return null;
 
   return createPortal(
@@ -301,6 +351,11 @@ export default function ClassicProductPickerModal({
             <p className={styles.subtitle} style={{ marginBottom: 0 }}>
               Filter on the left, pick products on the right.
             </p>
+            {storeCatalogStatusText ? (
+              <p className={styles.help} style={{ margin: '6px 0 0' }}>
+                {storeCatalogStatusText}
+              </p>
+            ) : null}
           </div>
           <Button onClick={onClose}>Close</Button>
         </div>
@@ -423,6 +478,11 @@ export default function ClassicProductPickerModal({
             {catalogSearching ? (
               <p className={styles.help}>Searching the rest of your catalog…</p>
             ) : null}
+            {showCatalogTruncatedHelp ? (
+              <p className={styles.help} style={{ marginTop: 0 }}>
+                {catalogTruncatedHelp}
+              </p>
+            ) : null}
             <div className={styles.modalProductList}>
               {products.map(group => {
                 const row = group.row;
@@ -463,7 +523,9 @@ export default function ClassicProductPickerModal({
                   </label>
                 );
               })}
-              {!products.length ? <p className={styles.help}>No products here.</p> : null}
+              {!products.length && pickerEmptyMessage ? (
+                <p className={styles.help}>{pickerEmptyMessage}</p>
+              ) : null}
               {hiddenByDisplayCap > 0 ? (
                 // The list used to stop at its cap without a word, so a
                 // merchant scrolling for a product simply never reached it.

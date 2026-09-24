@@ -31,9 +31,9 @@ import {
 import {
   isShopifyRedirectResponse,
   shouldRenderShopifyBoundaryHtml,
+  withCurrentEmbeddedSearch,
 } from "../utils/shopifyEmbeddedSearch";
 import { buildPricingPlansUrl } from "../utils/pricingPlansUrl";
-import { withCurrentEmbeddedSearch } from "../utils/shopifyEmbeddedSearch";
 import "../styles/classic-theme.css";
 
 function SupportLinkHandler() {

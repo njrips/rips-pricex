@@ -94,7 +94,7 @@ async function fetchShopMappings(settingsPath) {
 const PICK_HINT =
   'Open your storefront and click the price to capture its selector.';
 const AUTO_DETECT_HINT =
-  'Priceify checks your live shop and theme files to find prices automatically. Gaps use Pick on your storefront.';
+  'Try to find more price locations in your theme without changing your existing ones.';
 
 /** One header row per naming spec: status and selector count in the same label. */
 export function formatThemeDefaultsHeaderLabel(registryStatus) {
@@ -115,7 +115,7 @@ export function formatThemeDefaultsHeaderLabel(registryStatus) {
  * Actions column most of its width; one control that looks like its own state
  * says it once.
  */
-function PriceSurfaceRowToggle({ styles, enabled, rowNumber, onChange }) {
+function PriceSurfaceRowToggle({ styles, enabled, rowNumber: _rowNumber, onChange }) {
   return (
     <TooltipWrapper
       content={
@@ -208,7 +208,7 @@ function PriceSurfaceMappingRows({
               {index + 1}
             </div>
             <Select
-              label="Surface"
+              label="Page"
               labelHidden
               options={buildSurfaceOptions()}
               value={row.surface}
@@ -228,7 +228,7 @@ function PriceSurfaceMappingRows({
               />
             ) : (
               <Select
-                label="Role"
+                label="Price type"
                 labelHidden
                 options={buildRoleOptions()}
                 value={row.role}
@@ -238,7 +238,7 @@ function PriceSurfaceMappingRows({
             )}
             <div className={styles.priceSurfaceSelectorField}>
               <TextField
-                label="Selector"
+                label="Theme selector"
                 labelHidden
                 value={row.selector}
                 onChange={value => onUpdate(index, { selector: value })}
@@ -490,38 +490,41 @@ export default function PriceSurfaceMappingsPanel({
 
   // One save path for both the Save button and Auto-map's "Apply & save", so
   // the spinner timing and the confirmation are identical either way.
-  const persistShopMappings = async (rows, { autoMapTheme, flash, errorFallback } = {}) => {
-    setSavingShop(true);
-    setError('');
-    setNotice('');
-    setSaveFlash(null);
-    const startedAt = Date.now();
-    try {
-      const response = await apiPut(priceSurfaceSettingsPath(), {
-        mappings: rows,
-        ...(autoMapTheme ? { auto_map_theme: autoMapTheme } : {}),
-      });
-      const data = unwrapData(response);
-      const remaining = MIN_SAVE_SPINNER_MS - (Date.now() - startedAt);
-      if (remaining > 0) {
-        await new Promise(resolve => setTimeout(resolve, remaining));
+  const persistShopMappings = useCallback(
+    async (rows, { autoMapTheme, flash, errorFallback } = {}) => {
+      setSavingShop(true);
+      setError('');
+      setNotice('');
+      setSaveFlash(null);
+      const startedAt = Date.now();
+      try {
+        const response = await apiPut(priceSurfaceSettingsPath(), {
+          mappings: rows,
+          ...(autoMapTheme ? { auto_map_theme: autoMapTheme } : {}),
+        });
+        const data = unwrapData(response);
+        const remaining = MIN_SAVE_SPINNER_MS - (Date.now() - startedAt);
+        if (remaining > 0) {
+          await new Promise(resolve => setTimeout(resolve, remaining));
+        }
+        setShopMappings(normalizePriceSurfaceMappingsForEditor(data?.mappings || rows));
+        saveFlashTokenRef.current += 1;
+        setSaveFlash({ token: saveFlashTokenRef.current, message: flash || 'Saved' });
+        return true;
+      } catch (saveError) {
+        setError(
+          saveError?.message || errorFallback || 'Could not save shop price location mappings.'
+        );
+        return false;
+      } finally {
+        // Unconditional. Guarding this on an is-mounted ref is what left the
+        // button spinning: React 18 makes a setState after unmount a no-op, so
+        // the guard protected nothing and latched false under StrictMode.
+        setSavingShop(false);
       }
-      setShopMappings(normalizePriceSurfaceMappingsForEditor(data?.mappings || rows));
-      saveFlashTokenRef.current += 1;
-      setSaveFlash({ token: saveFlashTokenRef.current, message: flash || 'Saved' });
-      return true;
-    } catch (saveError) {
-      setError(
-        saveError?.message || errorFallback || 'Could not save shop price location mappings.'
-      );
-      return false;
-    } finally {
-      // Unconditional. Guarding this on an is-mounted ref is what left the
-      // button spinning: React 18 makes a setState after unmount a no-op, so
-      // the guard protected nothing and latched false under StrictMode.
-      setSavingShop(false);
-    }
-  };
+    },
+    [priceSurfaceSettingsPath]
+  );
 
   const saveShopDefaults = async () => {
     const rows = normalizePriceSurfaceMappingsForEditor(shopMappings);
@@ -710,7 +713,7 @@ export default function PriceSurfaceMappingsPanel({
       setAutoMapOpen(false);
       if (!save) {
         setNoticeTitle('Applied');
-        setNotice('Auto-map selectors applied to the editor. Save to persist them.');
+        setNotice('Auto-detect selectors applied to the editor. Save to persist them.');
         return true;
       }
       return persistShopMappings(normalized, {
@@ -720,7 +723,7 @@ export default function PriceSurfaceMappingsPanel({
               name: resolvedResult.theme.name || null,
             }
           : null,
-        flash: 'Auto-mapped selectors saved',
+        flash: 'Auto-detect selectors saved',
         errorFallback: 'Applied to the editor but the save failed. Try Save.',
       });
     },
@@ -744,7 +747,7 @@ export default function PriceSurfaceMappingsPanel({
       const result = unwrapData(response) || response;
       const surfaces = Array.isArray(result?.surfaces) ? result.surfaces : [];
       if (!surfaces.length) {
-        setError('Auto-map found no prices to map. Add a row and use Pick instead.');
+        setError('Auto-detect found no prices to map. Add a row and use Pick instead.');
         return;
       }
       const accepted = buildDefaultAcceptedSlots(surfaces);
@@ -772,13 +775,7 @@ export default function PriceSurfaceMappingsPanel({
     } finally {
       setAutoMapping(false);
     }
-  }, [
-    applyAutoMapToShop,
-    autoMapRequestToken,
-    priceSurfaceSettingsPath,
-    productPath,
-    storefrontPassword,
-  ]);
+  }, [applyAutoMapToShop, priceSurfaceSettingsPath, productPath, storefrontPassword]);
 
   useEffect(() => {
     const token = Number(autoMapRequestToken) || 0;
@@ -961,7 +958,7 @@ export default function PriceSurfaceMappingsPanel({
               disabled={loading || savingShop}
               onClick={runAutoMap}
             >
-              Scan storefront
+              Auto-detect prices
             </Button>
           </TooltipWrapper>
           <Button size="slim" loading={savingShop} onClick={saveShopDefaults} disabled={loading}>
@@ -972,7 +969,7 @@ export default function PriceSurfaceMappingsPanel({
       <Modal
         open={autoMapOpen}
         onClose={() => setAutoMapOpen(false)}
-        title="Storefront price scan"
+        title="Auto-detect prices"
         primaryAction={{
           content: autoMapPrimaryActionLabel(autoMapResult, acceptedMatchedCount),
           loading: savingShop,
@@ -1025,7 +1022,7 @@ export default function PriceSurfaceMappingsPanel({
               {autoMapShowTechnical ? 'Hide technical details' : 'Show technical details'}
             </Button>
             {autoMapResult?.theme_drift?.detected ? (
-              <Banner tone="warning" title="Theme changed since last Auto-map">
+              <Banner tone="warning" title="Theme changed since last Auto-detect">
                 <p>
                   {autoMapResult.theme_drift.message ||
                     'Your published theme looks different from the last mapped theme. Re-check selectors before saving.'}
@@ -1036,8 +1033,8 @@ export default function PriceSurfaceMappingsPanel({
               <Banner tone="critical" title="Storefront unlock issue">
                 <p>
                   {autoMapResult?.unlock?.reason === 'rate_limited'
-                    ? 'Shopify temporarily blocked password unlock attempts. Wait a few minutes, then retry Auto-map.'
-                    : 'Enter the Online Store password above, then retry Auto-map. Probes cannot verify selectors behind the password gate.'}
+                    ? 'Shopify temporarily blocked password unlock attempts. Wait a few minutes, then retry Auto-detect.'
+                    : 'Enter the Online Store password above, then retry Auto-detect. Probes cannot verify selectors behind the password gate.'}
                 </p>
               </Banner>
             ) : null}

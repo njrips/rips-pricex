@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router';
 import { Badge, Button, Modal } from '@shopify/polaris';
 import PageShell from '../../shared/PageShell';
+import ClassicPageLoader from '../../shared/ClassicPageLoader';
 import { ROUTES } from '../../../constants';
 import { apiPost } from '../../../services';
 import useClassicShopDomain from '../../../hooks/useClassicShopDomain';
@@ -14,19 +15,14 @@ import {
   ButtonIconPause,
   ButtonIconPlay,
   ButtonIconTrophy,
-  IconChart,
-  IconFlask,
   IconGear,
   IconOverview,
-  IconPerson,
   IconPulse,
-  IconTarget,
 } from './classicIcons';
 import ClassicOverviewTab from './details/ClassicOverviewTab';
+import ClassicOverviewContextStrip from './details/ClassicOverviewContextStrip';
 import ClassicPerformanceTab from './details/ClassicPerformanceTab';
 import ClassicVariationsTab from './details/ClassicVariationsTab';
-import ClassicAudienceTab from './details/ClassicAudienceTab';
-import ClassicMetricsTab from './details/ClassicMetricsTab';
 import ClassicActivityTab from './details/ClassicActivityTab';
 import ClassicSettingsTab from './details/ClassicSettingsTab';
 import ClassicProductDetailPanel from './details/ClassicProductDetailPanel';
@@ -45,6 +41,7 @@ import {
   canEditClassicAudienceMetrics,
   canEditClassicTestSetup,
   validateClassicAudienceUi,
+  resolveAudienceHistoryActivityTitle,
 } from './classicAudienceEdit';
 import { enrichExperimentsWithListAnalytics } from './classicExperimentListAnalytics';
 import { appendActivityToPlans, createActivityEntry } from './classicActivity';
@@ -74,11 +71,7 @@ function sleep(ms) {
 
 const TABS = [
   { id: 'Overview', icon: IconOverview },
-  { id: 'Performance', icon: IconChart },
-  { id: 'Variations', icon: IconFlask },
-  { id: 'Audience', icon: IconPerson },
-  { id: 'Metrics', icon: IconTarget },
-  { id: 'Activity', icon: IconPulse },
+  { id: 'History', icon: IconPulse },
   { id: 'Settings', icon: IconGear },
 ];
 
@@ -115,7 +108,6 @@ export default function ClassicExperimentOverview() {
     testId,
     analytics,
     kpis,
-    conversionRows,
     variationAverages,
     productPerformanceRows,
     rolloutRows,
@@ -220,8 +212,16 @@ export default function ClassicExperimentOverview() {
       const id = String(nextPlanId || '').trim();
       if (!id) return;
       const params = new URLSearchParams(searchParams);
-      if (!params.get('tab') || params.get('tab') === 'overview') {
-        params.set('tab', 'performance');
+      const tabParam = String(params.get('tab') || '')
+        .trim()
+        .toLowerCase();
+      const overviewTab =
+        !tabParam ||
+        tabParam === 'overview' ||
+        tabParam === 'performance' ||
+        tabParam === 'variations';
+      if (overviewTab) {
+        params.delete('tab');
       }
       params.set('product', id);
       setSearchParams(params, { replace: true });
@@ -309,7 +309,7 @@ export default function ClassicExperimentOverview() {
   /**
    * Records a rollout on the one plan it touched.
    *
-   * The Activity tab reads these logs, so a per-product rollout that skipped
+   * The History tab reads these logs, so a per-product rollout that skipped
    * them would leave no trace of the most consequential action in the app.
    */
   const stampRolloutOnPlan = async (testId, entry, patch = {}) => {
@@ -336,14 +336,13 @@ export default function ClassicExperimentOverview() {
         stopIfRunning: true,
       });
       const updated = result?.publish?.summary?.updated_count ?? 0;
+      const winnerLabel = row.decision?.winner?.label || 'Variation';
       await stampRolloutOnPlan(
         row.testId,
         {
           kind: 'complete',
-          title: 'Winning price applied',
-          detail: row.decision?.winner?.label
-            ? `${row.decision.winner.label} written to Shopify`
-            : 'Winner written to Shopify',
+          title: 'Winner applied to catalog',
+          detail: `Applied winner "${winnerLabel}" for "${row.productTitle}". Catalog price updated.`,
         },
         { status: 'applied', winner_applied_at: new Date().toISOString() }
       );
@@ -370,8 +369,10 @@ export default function ClassicExperimentOverview() {
         row.testId,
         {
           kind: 'complete',
-          title: result?.control_retained ? 'Finished on control price' : 'Finished on winning offer',
-          detail: 'No catalog price was changed',
+          title: result?.control_retained ? 'Kept catalog price' : 'Test completed',
+          detail: result?.control_retained
+            ? 'Control won for this product — the catalog price was left unchanged.'
+            : 'No catalog price was changed.',
         },
         { status: 'completed' }
       );
@@ -398,10 +399,17 @@ export default function ClassicExperimentOverview() {
           {
             kind: 'complete',
             title:
-              entry.action === 'apply_price'
-                ? 'Winning price applied'
-                : 'Finished without a price change',
-            detail: 'Applied with the rest of the ready products',
+              applied.length > 1
+                ? entry.action === 'apply_price'
+                  ? 'Winners applied in bulk'
+                  : 'Kept catalog price'
+                : entry.action === 'apply_price'
+                  ? 'Winner applied to catalog'
+                  : 'Kept catalog price',
+            detail:
+              applied.length > 1
+                ? `${applied.length} products updated in one action.`
+                : 'Applied with the rest of the ready products.',
           },
           entry.action === 'apply_price'
             ? { status: 'applied', winner_applied_at: new Date().toISOString() }
@@ -448,7 +456,7 @@ export default function ClassicExperimentOverview() {
           {
             kind: 'paused',
             title: 'Test paused',
-            detail: 'Traffic assignment stopped',
+            detail: 'Traffic assignment stopped.',
           },
           { status: 'paused' },
           { skipSettled: true, onlyTestIds: succeeded }
@@ -494,8 +502,8 @@ export default function ClassicExperimentOverview() {
           experimentPlans,
           {
             kind: 'stopped',
-            title: 'Test stopped',
-            detail: 'Ended by you — no longer collecting results',
+            title: 'Stopped test',
+            detail: 'Traffic assignment stopped.',
           },
           { status: CLASSIC_STOPPED_PLAN_STATUS },
           { skipSettled: true, onlyTestIds: succeeded }
@@ -564,7 +572,7 @@ export default function ClassicExperimentOverview() {
           {
             kind: 'resumed',
             title: 'Test resumed',
-            detail: 'Traffic assignment started again',
+            detail: 'Traffic assignment resumed.',
           },
           { status: 'running' },
           { skipSettled: true }
@@ -758,17 +766,17 @@ export default function ClassicExperimentOverview() {
           {
             id: 'winner_applied',
             kind: 'complete',
-            title: isOfferTest ? 'Test completed' : 'Winning price applied',
+            title: 'Winner applied to catalog',
             detail: isOfferTest
-              ? 'Offer test finished — catalog prices were not changed'
-              : 'This product’s winning variation was written to Shopify',
+              ? 'Offer test finished — catalog prices were not changed.'
+              : 'This product’s winning variation was written to Shopify.',
             at: appliedAt,
           }
         )
       );
       setWinnerModalOpen(false);
       clearPreview();
-      showSuccess('Winner rolled out to Shopify.');
+      showSuccess('Winner applied to catalog.');
       refresh();
     } catch (err) {
       showError(err, 'Could not apply winner.');
@@ -820,18 +828,13 @@ export default function ClassicExperimentOverview() {
         }),
         createActivityEntry({
           kind: 'updated',
-          title:
-            editFocus === 'guardrail'
-              ? 'Revenue guardrail updated'
-              : editFocus === 'metrics'
-                ? 'Metrics updated'
-                : 'Audience updated',
+          title: resolveAudienceHistoryActivityTitle(editFocus, editSeed, audienceState),
           detail:
             editFocus === 'guardrail'
-              ? 'Revenue per visitor pause threshold changed'
+              ? 'Revenue per visitor guardrail settings changed.'
               : editFocus === 'metrics'
-              ? 'Primary metric, secondary goals, or guardrails changed'
-              : 'Targeting, traffic, or sample size changed',
+                ? 'Primary metric or secondary goals changed.'
+                : 'Segment, devices, sources, countries, or traffic allocation changed.',
           actor: activityActor,
         })
       );
@@ -865,7 +868,15 @@ export default function ClassicExperimentOverview() {
     }
   };
 
-  if (!loading && !plan) {
+  if (loading) {
+    return (
+      <PageShell>
+        <ClassicPageLoader label="Loading test…" />
+      </PageShell>
+    );
+  }
+
+  if (!plan) {
     return (
       <PageShell message={message || 'Test not found.'} messageType="error">
         <div className={styles.listPage}>
@@ -914,12 +925,15 @@ export default function ClassicExperimentOverview() {
                   {statusLabel(status, isOfferTest ? 'offer_test' : 'price_test')}
                 </Badge>
               </div>
-              <p className={styles.overviewHypothesis}>
-                {plan?.hypothesis ||
-                  plan?.metadata?.hypothesis ||
-                  experiment?.hypothesis ||
-                  (isOfferTest ? 'Offer test overview.' : 'Price test overview.')}
-              </p>
+              {String(
+                plan?.hypothesis || plan?.metadata?.hypothesis || experiment?.hypothesis || '',
+              ).trim() ? (
+                <p className={styles.overviewHypothesis}>
+                  {plan?.hypothesis ||
+                    plan?.metadata?.hypothesis ||
+                    experiment?.hypothesis}
+                </p>
+              ) : null}
               <div className={styles.overviewMeta}>
                 <span>Owner · {plan?.owner_name || plan?.created_by_name || 'You'}</span>
                 <span>Type · {isOfferTest ? 'Offer test' : 'Price test'}</span>
@@ -930,6 +944,12 @@ export default function ClassicExperimentOverview() {
                   </span>
                 ) : null}
               </div>
+              {!isDraft && (isRunning || isPaused) && !canEditSetup ? (
+                <p className={styles.help} style={{ marginTop: 8 }}>
+                  After the minimum visitors per variation is reached, you can pause variations but
+                  not edit test settings.
+                </p>
+              ) : null}
             </div>
           <div className={styles.overviewActions}>
             {isDraft ? (
@@ -989,7 +1009,7 @@ export default function ClassicExperimentOverview() {
                       previewLoadingPlanId === (leftoverWinnerPlan?.id || plan?.id)
                     }
                   >
-                    Roll out winner
+                    Apply winner
                   </Button>
                 )}
               </>
@@ -1083,14 +1103,6 @@ export default function ClassicExperimentOverview() {
           className={styles.overviewTabPanel}
         >
           {tab === 'Overview' ? (
-            <ClassicOverviewTab
-              kpis={kpis}
-              conversionRows={conversionRows}
-              analyticsLoading={analyticsLoading}
-              isOfferTest={isOfferTest}
-            />
-          ) : null}
-          {tab === 'Performance' ? (
             selectedProductId ? (
               <ClassicProductDetailPanel
                 shopDomain={shopDomain}
@@ -1102,66 +1114,72 @@ export default function ClassicExperimentOverview() {
                 onChanged={refresh}
               />
             ) : (
-              <ClassicPerformanceTab
-                analytics={analytics}
-                analyticsLoading={analyticsLoading}
-                currency={currency}
-                variationAverages={variationAverages}
-                productPerformanceRows={productPerformanceRows}
-                rolloutRows={rolloutRows}
-                variations={variations}
-                isOfferTest={isOfferTest}
-                onApplyProduct={handleApplyProduct}
-                onFinishProduct={handleFinishProduct}
-                onApplyAllReady={handleApplyAllReady}
-                onOpenProduct={openProduct}
-                rolloutBusyTestId={rolloutBusyTestId}
-                rolloutApplyingAll={rolloutApplyingAll}
-              />
+              <div className={styles.detailStack}>
+                <ClassicOverviewContextStrip
+                  isOfferTest={isOfferTest}
+                  productCount={experimentPlans?.length || 0}
+                  primaryMetric={kpis.primaryMetric}
+                  trafficAllocation={kpis.trafficAllocation}
+                  isRunning={isRunning}
+                  isPaused={isPaused}
+                  isEnded={isEnded}
+                  isDraft={isDraft}
+                  statusBusy={busyAction === 'pause' || busyAction === 'resume'}
+                  onPause={isRunning ? handlePause : null}
+                  onResume={isPaused ? handleResume : null}
+                />
+                <ClassicVariationsTab
+                  variations={variations}
+                  currency={currency}
+                  shopDomain={shopDomain}
+                  testId={testId}
+                  isOfferTest={isOfferTest}
+                  inboxPlans={experimentPlans}
+                  onOpenProduct={openProduct}
+                  overviewMode
+                  primaryMetric={kpis.primaryMetric}
+                />
+                <ClassicPerformanceTab
+                  analytics={analytics}
+                  analyticsLoading={analyticsLoading}
+                  currency={currency}
+                  variationAverages={variationAverages}
+                  productPerformanceRows={productPerformanceRows}
+                  rolloutRows={rolloutRows}
+                  variations={variations}
+                  isOfferTest={isOfferTest}
+                  onApplyProduct={handleApplyProduct}
+                  onFinishProduct={handleFinishProduct}
+                  onApplyAllReady={handleApplyAllReady}
+                  onOpenProduct={openProduct}
+                  rolloutBusyTestId={rolloutBusyTestId}
+                  rolloutApplyingAll={rolloutApplyingAll}
+                  metrics={metrics}
+                  plan={plan}
+                  overviewMode
+                />
+                <ClassicOverviewTab
+                  kpis={kpis}
+                  analyticsLoading={analyticsLoading}
+                  currency={currency}
+                />
+              </div>
             )
           ) : null}
-          {tab === 'Variations' ? (
-            selectedProductId ? (
-              <ClassicProductDetailPanel
-                shopDomain={shopDomain}
-                planId={selectedProductId}
-                row={selectedProductRow}
-                sharedTest={Boolean(selectedProductRow?.sharedTest)}
-                currency={currency}
-                onClose={closeProduct}
-                onChanged={refresh}
-              />
-            ) : (
-              <ClassicVariationsTab
-                variations={variations}
-                currency={currency}
-                shopDomain={shopDomain}
-                testId={testId}
-                isOfferTest={isOfferTest}
-                inboxPlans={experimentPlans}
-                onOpenProduct={openProduct}
-              />
-            )
-          ) : null}
-          {tab === 'Audience' ? (
-            <ClassicAudienceTab
-              audience={audience}
-              onEdit={() => openAudienceMetricsEditor('audience')}
-            />
-          ) : null}
-          {tab === 'Metrics' ? (
-            <ClassicMetricsTab
-              metrics={metrics}
-              onEdit={() => openAudienceMetricsEditor('metrics')}
-            />
-          ) : null}
-          {tab === 'Activity' ? <ClassicActivityTab activity={activity} /> : null}
+          {tab === 'History' ? <ClassicActivityTab activity={activity} /> : null}
           {tab === 'Settings' ? (
             <ClassicSettingsTab
               settings={settings}
               audience={audience}
               metrics={metrics}
               onEditMetrics={() => openAudienceMetricsEditor('guardrail')}
+              onEditAudience={() => openAudienceMetricsEditor('audience')}
+              onChangeMetric={() => openAudienceMetricsEditor('metrics')}
+              onAdjustTraffic={() =>
+                navigate(buildClassicWizardResumePath(resumeId, 'variations'))
+              }
+              onViewHistory={() => selectTab('History')}
+              onViewTestsList={() => navigate(ROUTES.appSmartPricing(shopDomain))}
             />
           ) : null}
         </div>

@@ -261,7 +261,8 @@ describe('revenue guardrail switch', () => {
     await renderPanel();
     expect(container.textContent).toMatch(/about 100 visitors/i);
     expect(container.textContent).not.toMatch(/minimum visitors per variation is reached/i);
-    expect(container.textContent).toMatch(/safety pause, not a winner call/i);
+    expect(container.textContent).toMatch(/This is a safety net/i);
+    expect(container.textContent).toMatch(/does not declare a winner/i);
     expect(container.textContent).toMatch(/Products & prices, not while the test runs/i);
   });
 });

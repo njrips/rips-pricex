@@ -143,6 +143,22 @@ export const rpxApi = {
       method: "POST",
       body: JSON.stringify(guardrails),
     }),
+  getGlobalAssets: (ctx: ApiTarget) =>
+    api<{
+      global_assets?: {
+        css?: string;
+        js?: string;
+        css_enabled?: boolean;
+        js_enabled?: boolean;
+        updated_at?: string | null;
+      };
+      limits?: { max_css_chars?: number; max_js_chars?: number };
+    }>(ctx, "/settings/global-assets"),
+  saveGlobalAssets: (ctx: ApiTarget, globalAssets: unknown) =>
+    api(ctx, "/settings/global-assets", {
+      method: "PUT",
+      body: JSON.stringify({ global_assets: globalAssets }),
+    }),
   settingsInstallation: (ctx: ApiTarget) =>
     api<{
       success?: boolean;

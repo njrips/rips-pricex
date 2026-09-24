@@ -5,24 +5,23 @@ export const CLASSIC_ACTIVITY_LOG_MAX = 40;
 export const ACTIVITY_KIND_META = {
   created: { label: 'Created', group: 'lifecycle' },
   started: { label: 'Launched', group: 'lifecycle' },
-  linked: { label: 'Linked', group: 'lifecycle' },
-  queued: { label: 'Queued', group: 'lifecycle' },
+  linked: { label: 'Launched', group: 'lifecycle' },
+  queued: { label: 'Lifecycle', group: 'lifecycle' },
   paused: { label: 'Paused', group: 'lifecycle' },
+  stopped: { label: 'Stopped', group: 'lifecycle' },
   resumed: { label: 'Resumed', group: 'lifecycle' },
-  archived: { label: 'Archived', group: 'lifecycle' },
-  restored: { label: 'Restored', group: 'lifecycle' },
-  updated: { label: 'Updated', group: 'changes' },
-  qa: { label: 'Self-QA', group: 'qa' },
+  archived: { label: 'Lifecycle', group: 'lifecycle' },
+  restored: { label: 'Lifecycle', group: 'lifecycle' },
+  updated: { label: 'Settings changed', group: 'lifecycle' },
+  qa: { label: 'Lifecycle', group: 'lifecycle' },
   guardrail: { label: 'Guardrail', group: 'guardrail' },
-  winner_ready: { label: 'Result', group: 'lifecycle' },
-  complete: { label: 'Completed', group: 'lifecycle' },
+  winner_ready: { label: 'Winner applied', group: 'lifecycle' },
+  complete: { label: 'Winner applied', group: 'lifecycle' },
 };
 
 export const ACTIVITY_FILTERS = [
   { id: 'all', label: 'All' },
   { id: 'lifecycle', label: 'Lifecycle' },
-  { id: 'changes', label: 'Changes' },
-  { id: 'qa', label: 'Self-QA' },
   { id: 'guardrail', label: 'Guardrails' },
 ];
 
@@ -50,10 +49,16 @@ export function activityKindTone(item = {}) {
     if (status === 'pass' || status === 'passed' || status === 'success') return 'success';
     return 'warning';
   }
-  if (kind === 'complete' || kind === 'winner_ready' || kind === 'started' || kind === 'resumed') {
+  if (
+    kind === 'complete' ||
+    kind === 'winner_ready' ||
+    kind === 'started' ||
+    kind === 'resumed' ||
+    kind === 'created'
+  ) {
     return 'success';
   }
-  if (kind === 'paused' || kind === 'archived') return 'warning';
+  if (kind === 'paused' || kind === 'archived' || kind === 'stopped') return 'warning';
   if (kind === 'updated') return 'info';
   return 'neutral';
 }

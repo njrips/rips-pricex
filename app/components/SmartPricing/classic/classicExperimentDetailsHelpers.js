@@ -1,5 +1,6 @@
 import { resolveCountryLists } from './countrySelection';
 import { ensureRevenueGuardrailRows } from './revenueGuardrail';
+import { rollupExperimentRevenueGuardrail } from './classicRevenueGuardrailOverview';
 import { collectActivityLogs, formatActivityRelative, mergeActivityTimeline } from './classicActivity';
 import { getPlanProductTitle, normalizePlanStatus } from './classicExperimentHelpers';
 import { formatOfferRule, isOfferExperimentType } from './offerSelection';
@@ -24,6 +25,27 @@ export function formatPrimaryMetricLabel(metric) {
     .filter(Boolean)
     .map(part => part.charAt(0).toUpperCase() + part.slice(1))
     .join(' ');
+}
+
+/** Secondary goal rows from buildMetricsSummary, or event names when only those were stored. */
+export function listSecondaryMetricsForDisplay(metrics) {
+  if (Array.isArray(metrics?.secondary) && metrics.secondary.length) {
+    return metrics.secondary;
+  }
+  return (metrics?.secondaryEvents || []).map(eventName => ({
+    event_name: eventName,
+    label: formatPrimaryMetricLabel(eventName),
+  }));
+}
+
+export function secondaryMetricDisplayLabel(item, index = 0) {
+  if (item === null || item === undefined) return '—';
+  if (typeof item === 'string') return formatPrimaryMetricLabel(item);
+  const explicit = String(item.label || '').trim();
+  if (explicit) return explicit;
+  const fromEvent = formatPrimaryMetricLabel(item.event_name);
+  if (fromEvent && fromEvent !== 'Primary metric') return fromEvent;
+  return `Goal ${index + 1}`;
 }
 
 export function formatAudienceSegmentLabel(segment) {
@@ -77,10 +99,25 @@ export function formatActivityStamp(value) {
   }
 }
 
-export function formatActivityMeta(item, now = Date.now()) {
-  const when = formatActivityRelative(item?.at, now) || formatActivityStamp(item?.at);
-  const actor = String(item?.actor || '').trim();
-  if (actor && when) return `${actor} · ${when}`;
+export function formatActivityActorName(actor) {
+  const raw = String(actor || '').trim();
+  const key = raw.toLowerCase();
+  if (raw.includes(' ') && !/[_-]/.test(raw)) return raw;
+  if (!key || key === 'merchant' || key === 'you') return 'You';
+  if (key === 'guardrail') return 'Guardrail';
+  if (key === 'system') return 'System';
+  if (key === 'auto_winner') return 'Auto winner';
+  return key
+    .split(/[_-]+/)
+    .filter(Boolean)
+    .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+}
+
+export function formatActivityMeta(item) {
+  const when = formatActivityStamp(item?.at);
+  const actor = formatActivityActorName(item?.actor);
+  if (actor && when) return `${actor} — ${when}`;
   return actor || when;
 }
 
@@ -178,6 +215,12 @@ export function buildOverviewKpis({ analytics = null, plan = null, experiment = 
       ? (Number(conversions) / Number(visitors)) * 100
       : null);
 
+  const overallRevenuePerVisitor =
+    summary.revenue_per_visitor ??
+    summary.overall_revenue_per_visitor ??
+    plan?.analytics?.revenue_per_visitor ??
+    null;
+
   const sequential = significance.sequential === true || significance.method === 'msprt';
   const significant =
     significance.sampleReady === false
@@ -216,6 +259,12 @@ export function buildOverviewKpis({ analytics = null, plan = null, experiment = 
     overallRate:
       overallRate !== null && overallRate !== undefined && Number.isFinite(Number(overallRate))
         ? Number(overallRate)
+        : null,
+    overallRevenuePerVisitor:
+      overallRevenuePerVisitor !== null &&
+      overallRevenuePerVisitor !== undefined &&
+      Number.isFinite(Number(overallRevenuePerVisitor))
+        ? Number(overallRevenuePerVisitor)
         : null,
     significant,
     primaryMetric,
@@ -258,6 +307,92 @@ export function formatProductDecisionLabel(plan = {}, { isOffer = false } = {}) 
   if (status === 'running' || status === 'active') return 'Running';
   if (status === 'paused' || status === 'stopped') return 'Paused';
   return '';
+}
+
+/** Merchant status column on Product performance by variation (Global naming doc). */
+export function formatProductStatusLabel({
+  planStatus = '',
+  rolloutState = null,
+  rolloutDetail = '',
+} = {}) {
+  const detail = String(rolloutDetail || '').toLowerCase();
+  if (detail.includes('guardrail') || detail.includes('revenue drop')) {
+    return 'Excluded by guardrail';
+  }
+  const state = String(rolloutState || '').trim();
+  if (state === 'ready_challenger' || state === 'ready_control') return 'Ready';
+  if (state === 'blocked') {
+    return detail.includes('guardrail') ? 'Excluded by guardrail' : 'Needs attention';
+  }
+  const status = String(planStatus || '')
+    .trim()
+    .toLowerCase();
+  if (status === 'paused' || status === 'stopped') return 'Paused';
+  if (status === 'applied') return 'Ready';
+  if (state === 'collecting' || status === 'running' || status === 'active') return 'Running';
+  return 'Running';
+}
+
+/** Decision column copy: Winner: Control / Variation A / Needs more data. */
+export function formatProductDecisionOutcome({ rolloutDecision = null, planStatus = '' } = {}) {
+  const decision = rolloutDecision;
+  if (!decision) {
+    const status = String(planStatus || '')
+      .trim()
+      .toLowerCase();
+    if (status === 'applied') return 'Winner applied';
+    if (status === 'completed') return 'Winner: Control';
+    return 'Needs more data';
+  }
+  const state = String(decision.state || '').trim();
+  if (state === 'ready_control') return 'Winner: Control';
+  if (state === 'ready_challenger') {
+    const raw = String(decision.winner?.label || decision.winner?.arm_label || '').trim();
+    if (!raw) return 'Needs more data';
+    if (/control/i.test(raw)) return 'Winner: Control';
+    return raw.startsWith('Winner:') ? raw : `Winner: ${raw}`;
+  }
+  if (state === 'applied') return 'Winner applied';
+  if (state === 'collecting' || state === 'blocked') return 'Needs more data';
+  return 'Needs more data';
+}
+
+export function resolveProductWinningArmId(rolloutDecision = null, planArms = []) {
+  if (!rolloutDecision) return null;
+  const state = String(rolloutDecision.state || '').trim();
+  const arms = Array.isArray(planArms) ? planArms : [];
+  if (state === 'ready_control') {
+    const control = arms.find(isControlArm) || arms[0];
+    return control?.id || null;
+  }
+  if (state === 'ready_challenger') {
+    const id = decisionWinnerArmId(rolloutDecision);
+    if (id) return id;
+    const label = String(rolloutDecision.winner?.label || '').trim();
+    const match = arms.find(arm => String(arm.label || '') === label);
+    return match?.id || null;
+  }
+  return null;
+}
+
+function decisionWinnerArmId(decision) {
+  const winner = decision?.winner;
+  if (!winner) return null;
+  return winner.arm_id || winner.armId || winner.variant_id || null;
+}
+
+export function findRolloutRowForProduct(performanceRow, rolloutRows = []) {
+  const rows = Array.isArray(rolloutRows) ? rolloutRows : [];
+  const testId = String(performanceRow?.testId || '').trim();
+  if (testId) {
+    const hit = rows.find(row => String(row.testId || '') === testId);
+    if (hit) return hit;
+  }
+  const planId = String(performanceRow?.planId || '').trim();
+  if (planId) {
+    return rows.find(row => String(row.planId || '') === planId) || null;
+  }
+  return null;
 }
 
 export function buildConversionRows({ analytics = null, plan = null } = {}) {
@@ -1201,6 +1336,58 @@ export function buildProductRolloutRows({ plans = [], analyticsByTestId = {} } =
   });
 }
 
+/** Merchant-facing bulk apply CTA (Overview product table + rollout panel). */
+export function formatApplyAllReadyLabel(count = 0) {
+  const n = Number(count);
+  if (!Number.isFinite(n) || n <= 0) return 'Apply ready products';
+  return n === 1 ? 'Apply 1 ready product' : `Apply ${n} ready products`;
+}
+
+/** Map test id → rollout queue rank for product table sorting. */
+export function buildRolloutSortRankByTestId(rolloutRows = []) {
+  const map = new Map();
+  (Array.isArray(rolloutRows) ? rolloutRows : []).forEach(row => {
+    const id = String(row?.testId || '').trim();
+    if (!id) return;
+    const state = String(row?.state || row?.decision?.state || 'collecting').trim();
+    const idx = ROLLOUT_STATE_ORDER.indexOf(state);
+    map.set(id, idx >= 0 ? idx : ROLLOUT_STATE_ORDER.indexOf('collecting'));
+  });
+  return map;
+}
+
+/** One-line merchant label for bulk-apply confirmation lists. */
+export function formatRolloutProductShortLabel(row = {}) {
+  const title = String(row?.productTitle || row?.title || 'Product').trim();
+  const variant = String(row?.variantTitle || '').trim();
+  if (variant && variant !== title && !title.toLowerCase().includes(variant.toLowerCase())) {
+    return `${title} · ${variant}`;
+  }
+  return title || 'Product';
+}
+
+/** Ready rows that bulk apply will touch, in rollout queue order. */
+export function listActionableRolloutProducts(rows = [], summary = null) {
+  const ids = summary?.actionableTestIds;
+  const idList = Array.isArray(ids) ? ids.map(id => String(id || '').trim()).filter(Boolean) : [];
+  if (!idList.length) return [];
+  const byTestId = new Map();
+  (Array.isArray(rows) ? rows : []).forEach(row => {
+    const testId = String(row?.testId || '').trim();
+    if (!testId || !row.decision?.can_apply && !row.decision?.can_finish) return;
+    byTestId.set(testId, row);
+  });
+  return idList
+    .map(testId => byTestId.get(testId))
+    .filter(Boolean)
+    .map(row => ({
+      testId: row.testId,
+      label: formatRolloutProductShortLabel(row),
+      imageUrl: row.imageUrl || null,
+      willWritePrice: row.decision?.can_apply === true,
+    }));
+}
+
 /** Counts by state plus the ids a bulk apply would act on. */
 export function summarizeRolloutRows(rows = []) {
   const list = Array.isArray(rows) ? rows : [];
@@ -1237,9 +1424,13 @@ export function filterSortProductPerformance(rows = [], options = {}) {
   const query = String(options.query || '')
     .trim()
     .toLowerCase();
-  const sort = String(options.sort || 'title')
+  const sort = String(options.sort || 'ready_first')
     .trim()
     .toLowerCase();
+  const rolloutRankByTestId =
+    options.rolloutRankByTestId instanceof Map
+      ? options.rolloutRankByTestId
+      : buildRolloutSortRankByTestId(options.rolloutRows);
   const filtered = (Array.isArray(rows) ? rows : []).filter(row => {
     if (!query) return true;
     const hay =
@@ -1258,7 +1449,20 @@ export function filterSortProductPerformance(rows = [], options = {}) {
     return desc ? right - left : left - right;
   };
 
+  const rolloutRank = row => {
+    const id = String(row?.testId || '').trim();
+    if (id && rolloutRankByTestId.has(id)) return rolloutRankByTestId.get(id);
+    return ROLLOUT_STATE_ORDER.indexOf('collecting');
+  };
+
   filtered.sort((a, b) => {
+    if (sort === 'ready_first') {
+      const byReady = rolloutRank(a) - rolloutRank(b);
+      if (byReady) return byReady;
+      return String(a?.title || '').localeCompare(String(b?.title || ''), undefined, {
+        sensitivity: 'base',
+      });
+    }
     if (sort === 'visitors_desc') {
       const byVisitors = cmpNum(a.sort_visitors, b.sort_visitors, true);
       return byVisitors || String(a.title || '').localeCompare(String(b.title || ''));
@@ -1432,9 +1636,15 @@ export function mergeExperimentAnalytics(analyticsByTestId = {}, primary = null)
 
   const significant = allSampleReady && significantCount === entries.length;
 
+  const revenue_guardrail = rollupExperimentRevenueGuardrail(
+    Object.fromEntries(entries),
+    primary
+  );
+
   return {
     ...(primary || {}),
     currency,
+    revenue_guardrail,
     arms: arms.length ? arms : primary?.arms || [],
     winner_arm_id: winnerArmId,
     summary: {
@@ -1697,13 +1907,23 @@ export function buildActivityTimeline({
   }
   const startedAt = test?.started_at || test?.startedAt;
   if (startedAt) {
+    const trafficPct =
+      test?.traffic_allocation_percent ??
+      test?.traffic_percent ??
+      plan?.metadata?.traffic_allocation_percent ??
+      plan?.audience?.traffic_allocation_percent;
+    const launchDetail = Number.isFinite(Number(trafficPct))
+      ? `Traffic allocation set to ${trafficPct}%. All visitors in your audience segment can enter this test.`
+      : plan?.test_id || test?.id
+        ? `Test ${plan?.test_id || test.id}`
+        : '';
     items.push({
       id: 'started',
       at: startedAt,
       title: 'Launched test',
       kind: 'started',
       actor,
-      detail: plan?.test_id || test?.id ? `Test ${plan?.test_id || test.id}` : '',
+      detail: launchDetail,
     });
   } else if (
     plan?.test_id &&
@@ -1712,10 +1932,10 @@ export function buildActivityTimeline({
     items.push({
       id: 'linked',
       at: plan?.updated_at || plan?.created_at || new Date().toISOString(),
-      title: 'Linked to live price test',
+      title: 'Launched test',
       kind: 'linked',
       actor,
-      detail: `Test ${plan.test_id}`,
+      detail: plan?.test_id ? `Test ${plan.test_id}` : '',
     });
   }
 
@@ -1747,21 +1967,38 @@ export function buildActivityTimeline({
     plan?.experiment_type || plan?.metadata?.experiment_type || test?.type
   );
 
-  const guardrailBreach = test?.guardrail_config;
-  if (guardrailBreach?.breached_at) {
-    const observed = Number(guardrailBreach.observed_drop_percent);
-    const limit = Number(guardrailBreach.max_revenue_drop_percent);
+  const guardrailSeen = new Set();
+  const pushGuardrailBreach = (config, idSuffix = '') => {
+    if (!config?.breached_at) return;
+    const key = `${config.breached_at}:${idSuffix}`;
+    if (guardrailSeen.has(key)) return;
+    guardrailSeen.add(key);
+    const observed = Number(config.observed_drop_percent);
+    const limit = Number(config.max_revenue_drop_percent);
     items.push({
-      id: 'revenue_guardrail',
-      at: guardrailBreach.breached_at,
-      title: 'Paused by revenue guardrail',
+      id: `revenue_guardrail${idSuffix}`,
+      at: config.breached_at,
+      title: 'Stopped by guardrail',
       kind: 'guardrail',
-      actor,
+      actor: 'Guardrail',
       detail:
         Number.isFinite(observed) && Number.isFinite(limit)
-          ? `Revenue per visitor dropped ${observed}% vs control (limit ${limit}%)`
-          : 'A variation dropped past the shop revenue limit versus control',
+          ? `Revenue per visitor dropped ${observed.toFixed(1)}% vs control (limit ${limit}%). Traffic assignment stopped.`
+          : 'A variation dropped past the revenue limit versus control. Traffic assignment stopped.',
     });
+  };
+
+  pushGuardrailBreach(test?.guardrail_config, '');
+  const rail = analytics?.revenue_guardrail;
+  if (rail?.breached_at) {
+    pushGuardrailBreach(
+      {
+        breached_at: rail.breached_at,
+        observed_drop_percent: rail.observed_drop_percent,
+        max_revenue_drop_percent: rail.threshold_percent ?? rail.max_revenue_drop_percent,
+      },
+      '_analytics'
+    );
   }
 
   const planStatus = String(plan?.status || '')
@@ -1771,7 +2008,7 @@ export function buildActivityTimeline({
     items.push({
       id: 'winner_applied',
       at: plan.winner_applied_at || plan.updated_at,
-      title: isOffer ? 'Test completed' : 'Winning price applied',
+      title: 'Winner applied to catalog',
       kind: 'complete',
       actor,
       detail: isOffer
@@ -1802,7 +2039,7 @@ export function buildActivityTimeline({
       actor,
       detail: isOffer
         ? 'Leading variation identified'
-        : 'Automatic catalog write did not finish — use Roll out winner for this product',
+        : 'Automatic catalog write did not finish — use Apply winner for this product',
     });
   } else if (test?.status === 'stopped' || test?.status === 'paused' || planStatus === 'paused') {
     const pausedAt = test?.stopped_at || test?.updated_at || plan?.updated_at || null;
@@ -1813,7 +2050,7 @@ export function buildActivityTimeline({
         title: 'Test paused',
         kind: 'paused',
         actor,
-        detail: 'Traffic assignment stopped',
+        detail: 'Traffic assignment stopped.',
       });
     }
   }
@@ -1895,6 +2132,8 @@ export function buildSettingsSummary(plan = null, test = null, shopGuardrails = 
     testStatus: test?.status || plan?.status || null,
     testId: plan?.test_id || test?.id || null,
     planId: plan?.id || null,
+    createdAt: plan?.created_at || test?.created_at || null,
+    startedAt: test?.started_at || test?.startedAt || plan?.started_at || null,
     scenarioPreset: plan?.scenario_preset || plan?.metadata?.scenario_preset || null,
     maxParallelTests: hasParallelCap ? maxParallel : null,
     maxPriceChangePercent: guardrails.max_price_change_percent ?? null,

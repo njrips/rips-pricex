@@ -2,7 +2,13 @@ import { useState } from 'react';
 import { Button } from '@shopify/polaris';
 import SettingsInfoLink from '../../../Settings/SettingsInfoLink';
 import { IconChevron, IconShield } from '../classicIcons';
-import { formatAudienceFactValue } from '../classicExperimentDetailsHelpers';
+import {
+  formatAudienceFactValue,
+  listSecondaryMetricsForDisplay,
+  secondaryMetricDisplayLabel,
+} from '../classicExperimentDetailsHelpers';
+import { formatSplitCountryAudienceLabel, resolveCountryLists } from '../countrySelection';
+import { formatRunningTestStatusLabel } from '../classicOverviewLayout';
 import {
   ensureRevenueGuardrailRows,
   MIN_VISITORS_FOR_REVENUE_GUARDRAIL,
@@ -16,9 +22,18 @@ import styles from '../SmartPricingClassic.module.css';
  * The value sits in a column next to its label rather than against the far edge
  * of the card, so a stack of these reads as one list instead of two.
  */
-function SettingRow({ label, value, note = null, infoHash = null, infoLabel = null }) {
+function SettingRow({
+  label,
+  value,
+  note = null,
+  infoHash = null,
+  infoLabel = null,
+  multilineValue = false,
+}) {
   return (
-    <div className={styles.settingsRow}>
+    <div
+      className={`${styles.settingsRow} ${multilineValue ? styles.settingsRowMultiline : ''}`.trim()}
+    >
       <span className={styles.settingsRowLabel}>
         {label}
         {infoHash ? <SettingsInfoLink hash={infoHash} label={infoLabel || label} /> : null}
@@ -44,11 +59,31 @@ function hasAny(...values) {
   return values.some(value => value !== null && value !== undefined && value !== '');
 }
 
+function mapSettingsStatusLabel(testStatus) {
+  const key = String(testStatus || '')
+    .trim()
+    .toLowerCase();
+  if (key === 'running') return 'Active';
+  if (key === 'paused' || key === 'stopped') return key === 'paused' ? 'Paused' : 'Stopped';
+  if (key === 'draft' || key === 'queued') return titleCase(key);
+  return formatRunningTestStatusLabel({
+    isRunning: key === 'running',
+    isPaused: key === 'paused',
+    isEnded: ['completed', 'applied', 'winner_ready', 'archived', 'finished'].includes(key),
+    isDraft: key === 'draft',
+  });
+}
+
 export default function ClassicSettingsTab({
   settings,
   audience = null,
   metrics = null,
   onEditMetrics = null,
+  onEditAudience = null,
+  onChangeMetric = null,
+  onAdjustTraffic = null,
+  onViewHistory = null,
+  onViewTestsList = null,
 }) {
   const [technicalOpen, setTechnicalOpen] = useState(false);
 
@@ -103,98 +138,132 @@ export default function ClassicSettingsTab({
   );
   const hasLaunchExtras = hasAny(settings.scenarioPreset, settings.canaryDays);
 
+  const trafficAllocation =
+    audience?.trafficAllocation ?? settings.trafficRampPercent ?? null;
+  const deviceFallback =
+    audience?.device && String(audience.device).toLowerCase() !== 'all'
+      ? formatAudienceFactValue([audience.device], 'All devices')
+      : 'All devices';
+  const secondaryItems = listSecondaryMetricsForDisplay(metrics);
+
   return (
     <div className={styles.detailStack}>
-      {/* The four answers a merchant opens this tab for. Everything that is
-          reference material rather than a decision moved into the disclosure at
-          the bottom, so these are no longer buried among identifiers and shop
-          defaults. */}
-      <div className={styles.detailCardGrid}>
-        <DetailFactCard label="Status" value={titleCase(settings.testStatus)} />
-        <DetailFactCard
-          label="Auto-stop"
-          value={settings.autoStopEnabled ? 'On' : 'Off'}
-          note={
-            settings.autoStopEnabled
-              ? isOffer
-                ? 'Each product ends on its own sequential call. Catalog prices are not changed.'
-                : 'Each product is decided on its own. A winning variation writes that Shopify price; a control win leaves the catalog unchanged. Other products keep running.'
-              : 'Products keep collecting until you end them.'
-          }
-        />
-        <DetailFactCard
-          label={isOffer ? 'Offer application' : 'Price application'}
-          value={
-            settings.priceApplicationMethod === 'checkout_discount_function'
-              ? 'Checkout discount'
-              : titleCase(settings.priceApplicationMethod)
-          }
-          note={
-            settings.priceApplicationMethod === 'checkout_discount_function'
-              ? 'The winning discount is applied at checkout.'
-              : 'Test prices are shown on the storefront and charged at checkout.'
-          }
-        />
-        <DetailFactCard
-          label="Traffic ramp"
-          value={percentOrDash(settings.trafficRampPercent)}
-          note="Share of eligible visitors entering the split."
-        />
+      <div className={styles.statCard}>
+        <h3 className={styles.panelTitle}>Status & traffic</h3>
+        <div className={styles.settingsRows}>
+          <SettingRow
+            label="Status"
+            value={mapSettingsStatusLabel(settings.testStatus)}
+            note="Controls whether new visitors can enter this test."
+          />
+          <SettingRow
+            label="Traffic allocation"
+            value={percentOrDash(trafficAllocation)}
+            note="Percentage of eligible visitors who may enter this test."
+          />
+        </div>
+        {onAdjustTraffic ? (
+          <Button variant="plain" onClick={onAdjustTraffic}>
+            Adjust traffic
+          </Button>
+        ) : null}
       </div>
 
-      {/* One place for everything that decides the outcome. These were split
-          across a "Traffic sources" card and a separate guardrail card, and the
-          analysis row crammed method, lift and confidence into one string. */}
+      {audience ? (
+        <div className={styles.statCard}>
+          <h3 className={styles.panelTitle}>Audience & targeting</h3>
+          <div className={styles.detailCardGrid}>
+            <DetailFactCard
+              label="Segment"
+              value={audience.segmentLabel || 'All visitors'}
+              action={onEditAudience ? 'Edit targeting' : null}
+              onAction={onEditAudience}
+            />
+            <DetailFactCard
+              label="Devices"
+              value={formatAudienceFactValue(audience.devices, deviceFallback)}
+              action={onEditAudience ? 'Edit' : null}
+              actionLabel="Edit devices"
+              onAction={onEditAudience}
+            />
+            <DetailFactCard
+              label="Traffic sources"
+              value={formatAudienceFactValue(audience.sources, sourceFallback)}
+              action={onEditAudience ? 'Edit' : null}
+              actionLabel="Edit traffic sources"
+              onAction={onEditAudience}
+            />
+            <DetailFactCard
+              label="Countries"
+              value={(() => {
+                const lists = resolveCountryLists(audience);
+                return formatSplitCountryAudienceLabel(
+                  lists.includeCountries,
+                  lists.excludeCountries
+                );
+              })()}
+              action={onEditAudience ? 'Edit' : null}
+              actionLabel="Edit countries"
+              onAction={onEditAudience}
+            />
+          </div>
+          <p className={`${styles.help} ${styles.settingsFootnote}`}>
+            Only visitors who match these filters can enter the test.
+          </p>
+        </div>
+      ) : null}
+
       <div className={styles.statCard}>
         <div className={styles.reviewHead}>
-          <div className={`${styles.titleWithInfo} ${styles.panelHeadingGroup}`}>
-            <h3 className={styles.panelTitle}>How a winner is decided</h3>
-            <SettingsInfoLink hash="sequential" label="Sequential testing" />
-          </div>
-          {onEditMetrics ? (
-            <Button
-              variant="plain"
-              accessibilityLabel="Edit revenue guardrail"
-              onClick={onEditMetrics}
-            >
-              Edit guardrail
-            </Button>
+          <h3 className={styles.panelTitle}>Metrics & guardrail</h3>
+          {onChangeMetric ? (
+            <div className={styles.variationPreviewRow}>
+              <Button variant="plain" onClick={onChangeMetric}>
+                Change metric
+              </Button>
+            </div>
           ) : null}
         </div>
         <div className={styles.settingsRows}>
           <SettingRow
-            label="Method"
+            label="Primary success metric"
+            value={metrics?.primaryMetricLabel || '—'}
+            note="Choose one metric to optimise for this test."
+          />
+          <SettingRow
+            label="Secondary metrics (optional)"
+            multilineValue={secondaryItems.length > 0}
             value={
-              metrics?.analysisMethod === 'frequentist'
-                ? 'Fixed-horizon'
-                : 'Sequential, with your review'
-            }
-            note={
-              metrics?.analysisMethod === 'frequentist'
-                ? null
-                : 'Evidence is re-checked as data arrives. No price changes without your approval.'
+              secondaryItems.length ? (
+                <div className={styles.detailChipRow}>
+                  {secondaryItems.map((item, index) => (
+                    <span
+                      key={item.catalog_id || item.event_name || index}
+                      className={styles.detailChip}
+                    >
+                      {secondaryMetricDisplayLabel(item, index)}
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                'None'
+              )
             }
           />
           <SettingRow
             label="Confidence level"
             value={percentOrDash(metrics?.confidenceLevel)}
+            note="Set in App settings → Results settings."
             infoHash="confidence"
             infoLabel="Confidence level"
           />
           <SettingRow
             label="Minimum visitors per variation"
             value={minSample ? Number(minSample).toLocaleString() : '—'}
-            note="Set once for the whole shop, in Results settings."
+            note="Set in App settings → Results settings."
             infoHash="min-sample"
             infoLabel="Minimum visitors"
           />
-          {metrics?.mdePercent ? (
-            <SettingRow
-              label="Lift reference"
-              value={`${metrics.mdePercent}% relative`}
-              note="Used to plan how much traffic a test needs, not to call the winner."
-            />
-          ) : null}
         </div>
 
         {guardrails.map(row => {
@@ -240,37 +309,12 @@ export default function ClassicSettingsTab({
             </div>
           );
         })}
+        {onEditMetrics ? (
+          <Button variant="plain" accessibilityLabel="Edit guardrail" onClick={onEditMetrics}>
+            Edit guardrail
+          </Button>
+        ) : null}
       </div>
-
-      {/* Renamed from "Traffic sources & exclusions", which had grown to hold
-          sample sizes and analysis methods too. Countries moved out entirely:
-          the Audience tab shows them and is where they are edited. */}
-      {audience ? (
-        <div className={styles.statCard}>
-          <h3 className={styles.panelTitle}>Who is counted</h3>
-          <div className={styles.settingsRows}>
-            <SettingRow
-              label={`Traffic sources (${audience.sourceMode || 'include'})`}
-              value={formatAudienceFactValue(audience.sources, sourceFallback)}
-            />
-            {/* Plain text, not status badges: these sit between "Traffic
-                sources" and "Inherit shop defaults", and a green pill among
-                them reads as an alert rather than a neutral fact. */}
-            <SettingRow label="Exclude bots" value={audience.excludeBots ? 'On' : 'Off'} />
-            <SettingRow
-              label="Exclude internal IPs"
-              value={audience.excludeInternalIps ? 'On' : 'Off'}
-            />
-            <SettingRow
-              label="Inherit shop defaults"
-              value={audience.inheritDefaults ? 'Yes' : 'No'}
-            />
-          </div>
-          <p className={`${styles.help} ${styles.settingsFootnote}`}>
-            Segment, devices, and countries are on the Audience tab.
-          </p>
-        </div>
-      ) : null}
 
       {/* Reference material, folded away. Identifiers always exist, so the
           disclosure always has something in it. */}
@@ -284,6 +328,31 @@ export default function ClassicSettingsTab({
           <IconChevron size={16} up={technicalOpen} />
         </summary>
         <div className={styles.advancedBody}>
+          <div className={styles.settingsDisclosureGroup}>
+            <div className={styles.sectionLabel}>Launch behaviour</div>
+            <div className={styles.settingsRows}>
+              <SettingRow
+                label="Auto-stop"
+                value={settings.autoStopEnabled ? 'On' : 'Off'}
+              />
+              <SettingRow
+                label={isOffer ? 'Offer application' : 'Price application'}
+                value={
+                  settings.priceApplicationMethod === 'checkout_discount_function'
+                    ? 'Checkout discount'
+                    : titleCase(settings.priceApplicationMethod)
+                }
+              />
+              <SettingRow
+                label="Analysis method"
+                value={
+                  metrics?.analysisMethod === 'frequentist'
+                    ? 'Fixed-horizon'
+                    : 'Sequential, with your review'
+                }
+              />
+            </div>
+          </div>
           {hasTrafficPlan ? (
             <div className={styles.settingsDisclosureGroup}>
               <div className={styles.sectionLabel}>Traffic plan</div>
@@ -369,6 +438,24 @@ export default function ClassicSettingsTab({
             </div>
           ) : null}
 
+          {onViewHistory || onViewTestsList ? (
+            <div className={styles.settingsDisclosureGroup}>
+              <div className={styles.sectionLabel}>Links</div>
+              <div className={`${styles.settingsRows} ${styles.variationPreviewRow}`}>
+                {onViewHistory ? (
+                  <Button variant="plain" onClick={onViewHistory}>
+                    View test history
+                  </Button>
+                ) : null}
+                {onViewTestsList ? (
+                  <Button variant="plain" onClick={onViewTestsList}>
+                    View test in Tests list
+                  </Button>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+
           <div className={styles.settingsDisclosureGroup}>
             <div className={styles.sectionLabel}>Identifiers</div>
             <p className={styles.help}>Quote these when contacting support.</p>
@@ -381,6 +468,18 @@ export default function ClassicSettingsTab({
                 label="Test ID"
                 value={<span className={styles.monoValue}>{settings.testId || '—'}</span>}
               />
+              {settings.createdAt ? (
+                <SettingRow
+                  label="Created date"
+                  value={String(settings.createdAt).slice(0, 10)}
+                />
+              ) : null}
+              {settings.startedAt ? (
+                <SettingRow
+                  label="Started date"
+                  value={String(settings.startedAt).slice(0, 10)}
+                />
+              ) : null}
             </div>
           </div>
         </div>

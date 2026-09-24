@@ -194,7 +194,7 @@ export const CLASSIC_SOURCE_TO_RULES = {
   Direct: ['direct'],
   Search: ['organic_search', 'paid_search'],
   Social: ['social'],
-  Email: ['email'],
+  Email: ['email', 'sms'],
   'Paid ads': ['paid'],
   Referral: ['referral'],
 };
@@ -675,8 +675,19 @@ export function mapClassicDevicesToEngine(devices = []) {
   return [...set];
 }
 
+/** True when every Classic traffic pill is selected (same as “no source restriction”). */
+export function classicSourcesIncludeAllOptions(sources = []) {
+  const selected = new Set(
+    (Array.isArray(sources) ? sources : []).map(value => String(value || '').trim())
+  );
+  return CLASSIC_SOURCE_OPTIONS.every(option => selected.has(option));
+}
+
 /** Expand Classic source pills into Test Wizard rule values. */
 export function expandClassicSources(sources = []) {
+  if (classicSourcesIncludeAllOptions(sources)) {
+    return [];
+  }
   const out = [];
   const seen = new Set();
   for (const raw of Array.isArray(sources) ? sources : []) {

@@ -282,20 +282,22 @@ export function getClassicExperimentResumeId(experiment) {
   return getPlanExperimentId(rep) || experiment?.id || rep?.id || '';
 }
 
-export const CLASSIC_DETAILS_TABS = [
-  'Overview',
-  'Performance',
-  'Variations',
-  'Audience',
-  'Metrics',
-  'Activity',
-  'Settings',
-];
+export const CLASSIC_DETAILS_TABS = ['Overview', 'History', 'Settings'];
+
+/** Deep links from the old seven-tab layout (Global naming doc). */
+const CLASSIC_DETAILS_TAB_ALIASES = {
+  performance: 'Overview',
+  variations: 'Overview',
+  audience: 'Settings',
+  metrics: 'Settings',
+  activity: 'History',
+};
 
 export function resolveClassicDetailsTab(raw) {
   const key = String(raw || '')
     .trim()
     .toLowerCase();
+  if (CLASSIC_DETAILS_TAB_ALIASES[key]) return CLASSIC_DETAILS_TAB_ALIASES[key];
   return CLASSIC_DETAILS_TABS.find(id => id.toLowerCase() === key) || 'Overview';
 }
 

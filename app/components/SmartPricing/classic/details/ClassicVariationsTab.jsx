@@ -28,6 +28,10 @@ import {
 } from '../classicExperimentDetailsHelpers';
 import { createPreviewSessionId } from '../../../../utils/previewUrl';
 import { formatTrafficPercent } from '../variationsStepHelpers';
+import {
+  buildTrafficSplitSummary,
+  resolveArmPerformanceBadge,
+} from '../classicOverviewLayout';
 import useExclusivePreviewBusy from '../useExclusivePreviewBusy';
 import { useKeyedState } from '../../../../hooks/useKeyedState';
 import {
@@ -367,6 +371,8 @@ function armPreviewUrl(
 
 function VariationCard({
   arm,
+  allArms = [],
+  primaryMetric = 'revenue_per_visitor',
   currency,
   shopDomain,
   fallbackTestId,
@@ -426,10 +432,7 @@ function VariationCard({
   }, []);
 
   useEffect(() => {
-    if (!isQrOpen) {
-      setQrBox(null);
-      return undefined;
-    }
+    if (!isQrOpen) return undefined;
     syncQrBox();
     window.addEventListener('resize', syncQrBox);
     window.addEventListener('scroll', syncQrBox, true);
@@ -597,13 +600,24 @@ function VariationCard({
       </div>
     ) : null;
 
+  const displayTitle = arm.isControl ? 'Control – current price' : arm.label;
+  const perfBadge = resolveArmPerformanceBadge(arm, allArms, { primaryMetric });
+
   return (
     <>
     <div className={`${styles.statCard} ${styles.variationArmCard}`}>
       <div className={styles.reviewHead}>
         <h3 className={styles.panelTitle}>
-          {arm.label}
-          {arm.isControl ? <span className={styles.controlBadge}>Control</span> : null}
+          {displayTitle}
+          {perfBadge ? (
+            <span
+              className={
+                perfBadge.tone === 'critical' ? styles.trapBadge : styles.winnerBadge
+              }
+            >
+              {perfBadge.label}
+            </span>
+          ) : null}
           {arm.isWinner ? (
             <span className={styles.winnerBadge}>
               <IconTrophy size={10} /> Winner
@@ -648,7 +662,7 @@ function VariationCard({
           and conversion only, so a variation that converted less but earned
           more per visitor looked like a straight loss. */}
       <div className={styles.selectionBar}>
-        <span>Revenue / visitor</span>
+        <span>Revenue per visitor</span>
         <strong>{formatMetricMoney(arm.revenuePerVisitor, currency)}</strong>
       </div>
 
@@ -1176,6 +1190,8 @@ export default function ClassicVariationsTab({
   isOfferTest = false,
   inboxPlans = [],
   onOpenProduct,
+  overviewMode = false,
+  primaryMetric = 'revenue_per_visitor',
 }) {
   const { previewBusyKey, beginPreview, endPreview } = useExclusivePreviewBusy();
   // Any other preview action takes over the row, so the QR panel closes and
@@ -1202,6 +1218,8 @@ export default function ClassicVariationsTab({
     );
   }
 
+  const trafficSplitLine = buildTrafficSplitSummary(variations);
+
   return (
     <div className={styles.detailStack} aria-busy={Boolean(previewBusyKey) || undefined}>
       <div className={styles.variationArmGrid}>
@@ -1209,6 +1227,8 @@ export default function ClassicVariationsTab({
           <VariationCard
             key={arm.id}
             arm={arm}
+            allArms={variations}
+            primaryMetric={primaryMetric}
             currency={currency}
             shopDomain={shopDomain}
             fallbackTestId={testId}
@@ -1223,20 +1243,27 @@ export default function ClassicVariationsTab({
           />
         ))}
       </div>
+      {trafficSplitLine ? (
+        <p className={styles.help} style={{ marginTop: 0 }}>
+          {trafficSplitLine}
+        </p>
+      ) : null}
 
-      <VariationsProductsTable
-        variations={variations}
-        currency={currency}
-        shopDomain={shopDomain}
-        fallbackTestId={testId}
-        resetKey={resetKey}
-        previewBusyKey={previewBusyKey}
-        beginPreview={beginPreview}
-        endPreview={endPreview}
-        isOfferTest={isOfferTest}
-        inboxPlans={inboxPlans}
-        onOpenProduct={onOpenProduct}
-      />
+      {overviewMode ? null : (
+        <VariationsProductsTable
+          variations={variations}
+          currency={currency}
+          shopDomain={shopDomain}
+          fallbackTestId={testId}
+          resetKey={resetKey}
+          previewBusyKey={previewBusyKey}
+          beginPreview={beginPreview}
+          endPreview={endPreview}
+          isOfferTest={isOfferTest}
+          inboxPlans={inboxPlans}
+          onOpenProduct={onOpenProduct}
+        />
+      )}
     </div>
   );
 }

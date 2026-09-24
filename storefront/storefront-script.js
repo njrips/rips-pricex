@@ -2495,14 +2495,75 @@
     return parts.length > 1 ? parts[1].toUpperCase() : '';
   }
 
+  var TRAFFIC_SOURCE_COOKIE = 'ab_test_traffic_source';
+
+  function normalizeTrafficHost(raw) {
+    return String(raw || '')
+      .trim()
+      .toLowerCase()
+      .replace(/^www\./, '');
+  }
+
+  /** Same-shop navigation should not overwrite first-touch attribution. */
+  function isInternalShopReferrer(referrerUrl) {
+    if (!referrerUrl) return false;
+    try {
+      var refHost = normalizeTrafficHost(new URL(referrerUrl).hostname);
+      var pageHost = normalizeTrafficHost(window.location.hostname);
+      if (refHost && refHost === pageHost) return true;
+      var shopRaw = String(CONFIG.shopDomain || window.Shopify?.shop || '')
+        .trim()
+        .toLowerCase();
+      if (shopRaw) {
+        var shopHost = normalizeTrafficHost(shopRaw.replace(/^https?:\/\//, '').split('/')[0]);
+        if (shopHost && refHost === shopHost) return true;
+        if (shopHost.indexOf('.myshopify.com') !== -1) {
+          var slug = shopHost.replace('.myshopify.com', '');
+          if (refHost === slug + '.myshopify.com') return true;
+        }
+      }
+      return false;
+    } catch (_eInternalRef) {
+      return false;
+    }
+  }
+
+  function pageHasFreshAttributionSignals(params) {
+    if (!params) return false;
+    if (params.get('utm_source') || params.get('utm_medium') || params.get('utm_campaign')) {
+      return true;
+    }
+    return !!(
+      params.get('gclid') ||
+      params.get('dclid') ||
+      params.get('msclkid') ||
+      params.get('wbraid') ||
+      params.get('gbraid')
+    );
+  }
+
   /**
-   * Detect traffic source from UTM params and referrer
+   * Classify traffic from the current page URL and referrer (no session stickiness).
+   * @param {URLSearchParams} params
+   * @param {string} referrer
+   * @param {{ ignoreReferrer?: boolean }} [options]
    */
-  function getTrafficSource() {
-    const params = new URLSearchParams(window.location.search);
+  function classifyTrafficSourceFromSignals(params, referrer, options) {
+    options = options || {};
+    const ignoreReferrer = !!options.ignoreReferrer;
     const utmSource = (params.get('utm_source') || '').toLowerCase();
     const utmMedium = (params.get('utm_medium') || '').toLowerCase();
-    const referrer = (document.referrer || '').toLowerCase();
+    const refLower = ignoreReferrer ? '' : String(referrer || '').toLowerCase();
+
+    if (
+      params.get('gclid') ||
+      params.get('dclid') ||
+      params.get('msclkid') ||
+      params.get('wbraid') ||
+      params.get('gbraid')
+    ) {
+      return 'paid_search';
+    }
 
     if (utmMedium === 'sms') return 'sms';
     if (utmMedium === 'email') return 'email';
@@ -2515,22 +2576,27 @@
       ['cpc', 'ppc', 'paid', 'cpv', 'cpm'].some(function (m) {
         return utmMedium.indexOf(m) !== -1;
       })
-    )
+    ) {
       return 'paid_search';
-    if (utmSource.indexOf('google') !== -1 || referrer.indexOf('google.') !== -1) return 'google';
-    if (utmSource.indexOf('facebook') !== -1 || referrer.indexOf('facebook.') !== -1)
+    }
+    if (utmSource.indexOf('google') !== -1 || refLower.indexOf('google.') !== -1) return 'google';
+    if (utmSource.indexOf('facebook') !== -1 || refLower.indexOf('facebook.') !== -1) {
       return 'facebook';
-    if (utmSource.indexOf('instagram') !== -1 || referrer.indexOf('instagram.') !== -1)
+    }
+    if (utmSource.indexOf('instagram') !== -1 || refLower.indexOf('instagram.') !== -1) {
       return 'instagram';
-    if (utmSource.indexOf('tiktok') !== -1 || referrer.indexOf('tiktok.') !== -1) return 'tiktok';
+    }
+    if (utmSource.indexOf('tiktok') !== -1 || refLower.indexOf('tiktok.') !== -1) return 'tiktok';
     if (
       utmSource.indexOf('twitter') !== -1 ||
-      referrer.indexOf('twitter.') !== -1 ||
-      referrer.indexOf('x.com') !== -1
-    )
+      refLower.indexOf('twitter.') !== -1 ||
+      refLower.indexOf('x.com') !== -1
+    ) {
       return 'twitter';
-    if (utmSource.indexOf('youtube') !== -1 || referrer.indexOf('youtube.') !== -1)
+    }
+    if (utmSource.indexOf('youtube') !== -1 || refLower.indexOf('youtube.') !== -1) {
       return 'youtube';
+    }
     if (
       [
         'facebook',
@@ -2542,23 +2608,57 @@
         'youtube',
         'reddit',
       ].some(function (s) {
-        return utmSource.indexOf(s) !== -1 || referrer.indexOf(s) !== -1;
+        return utmSource.indexOf(s) !== -1 || refLower.indexOf(s) !== -1;
       })
-    )
+    ) {
       return 'organic_social';
+    }
 
-    if (!referrer) return 'direct';
+    if (!refLower) return 'direct';
     try {
-      const refHost = new URL(referrer).hostname.toLowerCase();
+      const refHost = new URL(refLower).hostname.toLowerCase();
       const searchEngines = ['google', 'bing', 'yahoo', 'duckduckgo', 'baidu', 'yandex'];
       if (
         searchEngines.some(function (e) {
           return refHost.indexOf(e) !== -1;
         })
-      )
+      ) {
         return 'organic_search';
+      }
     } catch (e) {}
     return 'referral';
+  }
+
+  /**
+   * First-touch traffic source for audience targeting (sticky for the cookie lifetime).
+   */
+  function getTrafficSource() {
+    const params = new URLSearchParams(window.location.search);
+    const referrer = document.referrer || '';
+    const internalRef = isInternalShopReferrer(referrer);
+    const stored = getCookie(TRAFFIC_SOURCE_COOKIE);
+
+    if (pageHasFreshAttributionSignals(params)) {
+      const fresh = classifyTrafficSourceFromSignals(params, referrer);
+      setCookie(TRAFFIC_SOURCE_COOKIE, fresh, CONFIG.cookieExpiry);
+      return fresh;
+    }
+
+    if (internalRef) {
+      if (stored) return stored;
+      const fallback = classifyTrafficSourceFromSignals(params, '', { ignoreReferrer: true });
+      if (fallback !== 'direct') {
+        setCookie(TRAFFIC_SOURCE_COOKIE, fallback, CONFIG.cookieExpiry);
+      }
+      return stored || fallback;
+    }
+
+    const detected = classifyTrafficSourceFromSignals(params, referrer);
+    if (detected === 'direct' && stored) {
+      return stored;
+    }
+    setCookie(TRAFFIC_SOURCE_COOKIE, detected, CONFIG.cookieExpiry);
+    return detected;
   }
 
   /**
@@ -15266,6 +15366,69 @@
   };
   window.ABTestTracker = api;
   window.RipX = api;
+
+  function normalizeMerchantCssSnippet(raw) {
+    var css = String(raw || '')
+      .trim()
+      .replace(/^<style[^>]*>/i, '')
+      .replace(/<\/style>\s*$/i, '');
+    return css.trim();
+  }
+
+  function normalizeMerchantJsSnippet(raw) {
+    var js = String(raw || '')
+      .trim()
+      .replace(/^<script[^>]*>/i, '')
+      .replace(/<\/script>\s*$/i, '');
+    return js.trim();
+  }
+
+  function applyShopGlobalCustomCss() {
+    var assets = CONFIG.globalCustomAssets;
+    if (!assets || assets.css_enabled === false) return;
+    var css = normalizeMerchantCssSnippet(assets.css);
+    if (!css) return;
+    var styleId = 'ripx-shop-global-css';
+    var el = document.getElementById(styleId);
+    if (!el) {
+      el = document.createElement('style');
+      el.id = styleId;
+      el.setAttribute('data-ripx', 'global-css');
+      (document.head || document.documentElement).appendChild(el);
+    }
+    if (el.textContent !== css) {
+      el.textContent = css;
+    }
+  }
+
+  function runShopGlobalCustomJs() {
+    var assets = CONFIG.globalCustomAssets;
+    if (!assets || assets.js_enabled === false) return;
+    var js = normalizeMerchantJsSnippet(assets.js);
+    if (!js) return;
+    try {
+      var fn = new Function('window', 'document', 'Shopify', 'RipX', 'location', js);
+      fn(window, document, window.Shopify, window.RipX, window.location);
+    } catch (eGlobalJs) {
+      try {
+        if (typeof console !== 'undefined' && console.warn) {
+          console.warn('[RipX] Global custom JavaScript failed:', eGlobalJs);
+        }
+      } catch (_eLogGlobalJs) {}
+    }
+  }
+
+  function scheduleShopGlobalCustomAssets() {
+    applyShopGlobalCustomCss();
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', runShopGlobalCustomJs, { once: true });
+    } else {
+      runShopGlobalCustomJs();
+    }
+  }
+
+  scheduleShopGlobalCustomAssets();
+
   try {
     ripxTrace('S0', 'RipX storefront boot', {
       version: SCRIPT_VERSION,

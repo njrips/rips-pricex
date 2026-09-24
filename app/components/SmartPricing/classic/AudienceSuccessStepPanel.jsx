@@ -273,7 +273,7 @@ export default function AudienceSuccessStepPanel({
           disabled={disabled}
         />
         <p className={styles.help}>
-          {trafficAllocation}% of eligible visitors will enter the test.
+          {trafficAllocation}% of eligible visitors will enter this test.
           {durationNotFeasible
             ? ' Current traffic does not support a practical 2–8 week test; Review shows the traffic needed.'
             : planningWindow
@@ -285,7 +285,7 @@ export default function AudienceSuccessStepPanel({
           significanceEstimate.recommendedSampleSize &&
           significanceEstimate.earliestDays !== significanceEstimate.days &&
           minimumSampleWindow
-            ? ` Your minimum sample has an estimated ${minimumSampleWindow} collection window.`
+            ? ` Minimum visitors per variation has an estimated ${minimumSampleWindow} collection window.`
             : ''}
         </p>
       </div>
@@ -616,10 +616,11 @@ export default function AudienceSuccessStepPanel({
               </span>
             </div>
             <p className={styles.guardrailHint} id="revenue-guardrail-help">
-              A safety pause, not a winner call — it limits how long a losing variation keeps
-              running. This test owns the threshold ({MIN_REVENUE_DROP_PERCENT}%–
-              {effectiveRevenueDropMax}%; default {DEFAULT_MAX_REVENUE_DROP_PERCENT}%). Max price
-              change and margin floors are checked on Products & prices, not while the test runs.
+              This is a safety net. It does not declare a winner; it only prevents a bad
+              variation from running for too long. This test owns the threshold (
+              {MIN_REVENUE_DROP_PERCENT}%–{effectiveRevenueDropMax}%; default{' '}
+              {DEFAULT_MAX_REVENUE_DROP_PERCENT}%). Max price change and margin floors are checked
+              on Products & prices, not while the test runs.
             </p>
           </>
         ) : (

@@ -113,6 +113,12 @@ router.post(
       reason: 'merchant_pause',
     }).catch(() => null);
     const updated = await getTestById(req.params.id, req.shopDomain);
+    const { recordEventForTest } = require('../models/smartPricingProductEventStore');
+    await recordEventForTest(req.shopDomain, req.params.id, 'stopped', {
+      actor: 'merchant',
+      test: updated,
+      payload: { reason: 'merchant_pause' },
+    }).catch(() => null);
     res.json({ test: updated });
   })
 );
@@ -139,6 +145,12 @@ router.post(
       reason: 'merchant_finish',
     }).catch(() => null);
     const updated = await getTestById(req.params.id, req.shopDomain);
+    const { recordEventForTest } = require('../models/smartPricingProductEventStore');
+    await recordEventForTest(req.shopDomain, req.params.id, 'stopped', {
+      actor: 'merchant',
+      test: updated,
+      payload: { reason: 'merchant_finish' },
+    }).catch(() => null);
     res.json({ test: updated });
   })
 );

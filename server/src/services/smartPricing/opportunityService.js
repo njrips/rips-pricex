@@ -6,7 +6,11 @@ const logger = require('../../utils/logger');
 const { getShopSession } = require('../../models/shopSession');
 const { buildCatalogMetricsSnapshot } = require('./catalogMetricsService');
 const { scoreSkuRows, buildFilterCounts } = require('./opportunityScoringService');
-const { normalizeShopDomain, normalizeVariantGid } = require('./smartPricingCatalogUtils');
+const {
+  normalizeShopDomain,
+  normalizeVariantGid,
+  countUniqueCatalogProducts,
+} = require('./smartPricingCatalogUtils');
 const {
   readOpportunityCache,
   writeOpportunityCache,
@@ -255,6 +259,12 @@ async function withholdEnrolledProducts(shopDomain, opportunities = []) {
   const kept = [];
   let live = 0;
   let paused = 0;
+  const withheldProducts = new Set();
+  const productKey = row => {
+    const pid = String(row?.product_id || '').trim();
+    if (pid) return pid;
+    return String(row?.variant_id || '').trim();
+  };
   rows.forEach(row => {
     const hold = findHold(enrollment, {
       variantId: row?.variant_id,
@@ -266,6 +276,8 @@ async function withholdEnrolledProducts(shopDomain, opportunities = []) {
     }
     if (hold.live) live += 1;
     else paused += 1;
+    const key = productKey(row);
+    if (key) withheldProducts.add(key);
     if (!testNames.has(hold.test_id)) {
       testNames.set(hold.test_id, { test_id: hold.test_id, name: hold.test_name, live: hold.live });
     }
@@ -273,7 +285,12 @@ async function withholdEnrolledProducts(shopDomain, opportunities = []) {
 
   return {
     opportunities: kept,
-    withheld: { live, paused, total: live + paused, tests: [...testNames.values()] },
+    withheld: {
+      live,
+      paused,
+      total: withheldProducts.size,
+      tests: [...testNames.values()],
+    },
   };
 }
 
@@ -299,6 +316,8 @@ function buildListPayload(opportunities, meta = {}) {
     summary: {
       eligible_count: meta.eligible_count ?? opportunities.length,
       catalog_product_count: meta.catalog_product_count ?? null,
+      store_product_count: meta.store_product_count ?? meta.catalog_product_count ?? null,
+      available_product_count: meta.available_product_count ?? null,
       catalog_truncated: Boolean(meta.catalog_truncated),
       catalog_max_products: meta.catalog_max_products ?? null,
       sku_count: meta.sku_count ?? null,
@@ -533,6 +552,13 @@ async function listOpportunities({
   // freely selectable in the next test you created that day.
   const held = await withholdEnrolledProducts(shopDomain, catalogPayload.opportunities || []);
   const opportunities = applyFilters(held.opportunities, { filter, search });
+  const storeProductCount = Number(catalogPayload.catalog_product_count) || 0;
+  const availableProductCount = countUniqueCatalogProducts(opportunities);
+  const withheldProductCount = Number(held.withheld?.total) || 0;
+  const reconciledStoreCount = Math.max(
+    storeProductCount,
+    availableProductCount + withheldProductCount
+  );
   return buildListPayload(opportunities, {
     withheld_by_other_tests: held.withheld,
     generated_at: catalogPayload.generated_at,
@@ -541,7 +567,9 @@ async function listOpportunities({
     ai_summary: catalogPayload.ai_summary,
     ai_source: catalogPayload.ai_source,
     eligible_count: catalogPayload.eligible_count,
-    catalog_product_count: catalogPayload.catalog_product_count,
+    catalog_product_count: reconciledStoreCount || catalogPayload.catalog_product_count,
+    store_product_count: reconciledStoreCount || catalogPayload.catalog_product_count,
+    available_product_count: availableProductCount,
     catalog_truncated: Boolean(catalogPayload.catalog_truncated),
     catalog_max_products: catalogPayload.catalog_max_products ?? null,
     sku_count: catalogPayload.sku_count,

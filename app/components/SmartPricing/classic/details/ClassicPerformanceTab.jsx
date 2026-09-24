@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { Banner, Button, Select, TextField } from '@shopify/polaris';
 import { useKeyedState } from '../../../../hooks/useKeyedState';
 import { formatCurrency } from '../../smartPricingConstants';
@@ -7,14 +7,27 @@ import {
   VARIATION_PRODUCTS_PAGE_SIZE,
   VARIATION_PRODUCTS_PAGE_SIZES,
   filterSortProductPerformance,
+  formatApplyAllReadyLabel,
+  findRolloutRowForProduct,
   formatMetricMoney,
   formatNumber,
+  formatProductDecisionOutcome,
+  formatProductStatusLabel,
   formatRate,
   paginateVariationProducts,
+  resolveProductWinningArmId,
+  summarizeRolloutRows,
 } from '../classicExperimentDetailsHelpers';
 import { IconTrophy } from '../classicIcons';
 import { TooltipWrapper } from '../../../shared';
+import ClassicApplyAllReadyConfirmModal from './ClassicApplyAllReadyConfirmModal';
 import ClassicRolloutReadinessPanel from './ClassicRolloutReadinessPanel';
+import {
+  formatGuardrailMonitoringMessage,
+  formatGuardrailStopMessage,
+  isRevenueGuardrailArmed,
+  shouldShowGuardrailStopBanner,
+} from '../classicRevenueGuardrailOverview';
 import styles from '../SmartPricingClassic.module.css';
 
 /**
@@ -132,6 +145,9 @@ export default function ClassicPerformanceTab({
   onOpenProduct,
   rolloutBusyTestId = null,
   rolloutApplyingAll = false,
+  overviewMode = false,
+  metrics = null,
+  plan = null,
 }) {
   const arms = Array.isArray(analytics?.arms) ? analytics.arms : [];
   const averages = Array.isArray(variationAverages) ? variationAverages : [];
@@ -151,18 +167,31 @@ export default function ClassicPerformanceTab({
     analytics?.test_count ?? ''
   }`;
   const [query, setQuery] = useKeyedState(productViewKey, '');
-  const [sort, setSort] = useKeyedState(productViewKey, 'title');
+  const [sort, setSort] = useKeyedState(productViewKey, 'ready_first');
   const [page, setPage] = useKeyedState(productViewKey, 1);
   const [pageSize, setPageSize] = useKeyedState(productViewKey, VARIATION_PRODUCTS_PAGE_SIZE);
+  const [confirmApplyAllReady, setConfirmApplyAllReady] = useState(false);
 
   const filteredProducts = useMemo(
     () =>
       filterSortProductPerformance(productPerformanceRows, {
         query,
         sort,
+        rolloutRows,
       }),
-    [productPerformanceRows, query, sort]
+    [productPerformanceRows, query, sort, rolloutRows]
   );
+
+  const rolloutByTestId = useMemo(() => {
+    const map = new Map();
+    (Array.isArray(rolloutRows) ? rolloutRows : []).forEach(row => {
+      const id = String(row.testId || '').trim();
+      if (id) map.set(id, row);
+    });
+    return map;
+  }, [rolloutRows]);
+
+  const rolloutSummary = useMemo(() => summarizeRolloutRows(rolloutRows), [rolloutRows]);
 
   // Clamped for us, so every reader below goes through pageData.page.
   const pageData = useMemo(
@@ -181,7 +210,7 @@ export default function ClassicPerformanceTab({
   if (!arms.length && !averages.length && !productPerformanceRows.length) {
     return (
       <div className={styles.statCard}>
-        <h3 className={styles.panelTitle}>Performance</h3>
+        <h3 className={styles.panelTitle}>Product performance by variation</h3>
         <p className={styles.help}>
           Live arm analytics appear once this test is launched and collecting visitors.
         </p>
@@ -195,6 +224,9 @@ export default function ClassicPerformanceTab({
   const sharedNote = productPerformanceRows.some(row => row.sharedTest);
 
   const revenueRail = analytics?.revenue_guardrail;
+  const guardrailArmed = isRevenueGuardrailArmed(metrics, plan);
+  const showGuardrailStop = shouldShowGuardrailStopBanner(revenueRail, guardrailArmed);
+  const guardrailMonitoring = formatGuardrailMonitoringMessage(revenueRail);
   const significance = analytics?.significance;
   const evidenceValidated = significance?.evidenceValidated === true;
   // The split check rides on significance, but older payloads carried it at the
@@ -218,7 +250,7 @@ export default function ClassicPerformanceTab({
             Visitors did not reach the variations in the proportions this test asked for
             {Number.isFinite(Number(srmPValue)) ? ` (p = ${Number(srmPValue)})` : ''}. That usually
             means bot traffic, a tracking problem, or a caching layer serving one variation more
-            often. Until it is resolved the variations are not comparable, so winner rollout is
+            often. Until it is resolved the variations are not comparable, so Apply winner is
             blocked and no price will be written automatically.
           </p>
         </Banner>
@@ -230,19 +262,20 @@ export default function ClassicPerformanceTab({
             {Math.max(0, Math.floor(Number(significance.collectionDays) || 0))} of{' '}
             {Number(significance.outcomeMaturityDays) || 14} days. A price is not written
             automatically until the test covers two full weekly cycles, so a single strong week
-            cannot decide a catalog price. You can still roll out the winner manually.
+            cannot decide a catalog price. You can still apply the winner manually.
           </p>
         </Banner>
       ) : null}
       {analytics?.significance?.sampleReady === false &&
       Number(analytics?.significance?.minSampleSize) > 0 ? (
-        <Banner tone="info" title="Waiting for minimum sample size">
+        <Banner tone="info" title="Waiting for minimum visitors per variation">
           <p>
             {analytics.significance.message ||
               `Results are not called until each variation reaches ${analytics.significance.minSampleSize} visitors.`}
           </p>
         </Banner>
-      ) : analytics?.significance?.sequential &&
+      ) : !overviewMode &&
+        analytics?.significance?.sequential &&
         analytics?.significance?.significant !== true &&
         analytics?.significance?.controlWin !== true &&
         analytics?.significance?.sampleReady !== false ? (
@@ -250,8 +283,8 @@ export default function ClassicPerformanceTab({
           <p>
             {!evidenceValidated
               ? isConversionFamily
-                ? 'Conversion results are confirmed against an exact boundary before any price is written automatically. Until that boundary is crossed the reading here is directional, so review it before rolling out a winner.'
-                : 'Revenue per visitor is measured with an order-value variance approximation, so this metric always needs manual review before a price is rolled out.'
+                ? 'Conversion results are confirmed against an exact boundary before any price is written automatically. Until that boundary is crossed the reading here is directional, so review it before you apply a winner.'
+                : 'Revenue per visitor is measured with an order-value variance approximation, so this metric always needs manual review before you apply a winner to the catalog.'
               : analytics.significance.message ||
                 'Always-valid conversion testing decides each product on its own. A winning variation can be written to that product’s Shopify price; a control win leaves that catalog price unchanged.'}
             {Number(analytics.significance.recommendedSampleSize) > 0
@@ -260,31 +293,28 @@ export default function ClassicPerformanceTab({
           </p>
         </Banner>
       ) : null}
-      {revenueRail?.breached || revenueRail?.enforced ? (
-        <Banner tone="warning" title="Paused by revenue guardrail">
-          <p>
-            Revenue per visitor dropped {revenueRail.observed_drop_percent}% vs control (limit{' '}
-            {revenueRail.threshold_percent}%). Traffic assignment stopped.
-          </p>
+      {!overviewMode && showGuardrailStop ? (
+        <Banner tone="warning" title="Stopped by guardrail">
+          <p>{formatGuardrailStopMessage(revenueRail)}</p>
         </Banner>
-      ) : revenueRail?.ready && Number.isFinite(Number(revenueRail.observed_drop_percent)) ? (
-        <p className={styles.help}>
-          Largest revenue drop vs control: {revenueRail.observed_drop_percent}% (limit{' '}
-          {revenueRail.threshold_percent}%).
-        </p>
       ) : null}
-      {/* Products finish at different times, so what to do next comes before the
-          experiment-wide averages. */}
-      <ClassicRolloutReadinessPanel
-        rows={rolloutRows}
-        currency={resolvedCurrency}
-        onApplyProduct={onApplyProduct}
-        onFinishProduct={onFinishProduct}
-        onApplyAllReady={onApplyAllReady}
-        onOpenProduct={onOpenProduct}
-        busyTestId={rolloutBusyTestId}
-        applyingAll={rolloutApplyingAll}
-      />
+      {!overviewMode && !showGuardrailStop && guardrailArmed && guardrailMonitoring ? (
+        <p className={styles.help}>{guardrailMonitoring}</p>
+      ) : null}
+      {overviewMode ? null : (
+        <ClassicRolloutReadinessPanel
+          rows={rolloutRows}
+          currency={resolvedCurrency}
+          onApplyProduct={onApplyProduct}
+          onFinishProduct={onFinishProduct}
+          onApplyAllReady={onApplyAllReady}
+          onOpenProduct={onOpenProduct}
+          busyTestId={rolloutBusyTestId}
+          applyingAll={rolloutApplyingAll}
+        />
+      )}
+      {overviewMode ? null : (
+      <>
       <div className={styles.statCard}>
         <div className={styles.reviewHead}>
           <h3 className={styles.panelTitle}>Average performance by variation</h3>
@@ -414,18 +444,33 @@ export default function ClassicPerformanceTab({
           </div>
         </div>
       ) : null}
+      </>
+      )}
 
       <div className={`${styles.statCard} ${styles.variationsProductsPanel}`}>
         <div className={styles.variationProductBlockHead}>
           <div>
             <h3 className={styles.panelTitle}>Product performance by variation</h3>
             <p className={styles.help} style={{ margin: 0 }}>
-              {filteredProducts.length} product{filteredProducts.length === 1 ? '' : 's'}
+              See how each product is performing and apply winners to your catalog.
+              {filteredProducts.length
+                ? ` ${filteredProducts.length} product${filteredProducts.length === 1 ? '' : 's'}.`
+                : ''}
               {sharedNote
-                ? ' · some SKUs share a test — live metrics are test-level, not SKU-attributed'
+                ? ' Some SKUs share a test — live metrics are test-level, not SKU-attributed.'
                 : ''}
             </p>
           </div>
+          {overviewMode && rolloutSummary.actionableTestIds.length > 0 && onApplyAllReady ? (
+            <Button
+              variant="primary"
+              loading={rolloutApplyingAll}
+              disabled={Boolean(rolloutBusyTestId)}
+              onClick={() => setConfirmApplyAllReady(true)}
+            >
+              {formatApplyAllReadyLabel(rolloutSummary.actionableTestIds.length)}
+            </Button>
+          ) : null}
         </div>
 
         <div className={styles.variationsProductsToolbar}>
@@ -452,6 +497,7 @@ export default function ClassicPerformanceTab({
                 setPage(1);
               }}
               options={[
+                { label: 'Ready first', value: 'ready_first' },
                 { label: 'Name A–Z', value: 'title' },
                 { label: 'Visitors (high → low)', value: 'visitors_desc' },
                 { label: 'Conversion (high → low)', value: 'conversion_desc' },
@@ -481,26 +527,58 @@ export default function ClassicPerformanceTab({
             <thead>
               <tr>
                 <th scope="col">Product</th>
+                <th scope="col">Status</th>
                 <th scope="col">Decision</th>
                 {armColumns.map(arm => (
-                  <th key={arm.id} scope="col" className={styles.variationsPriceCol}>
-                    {arm.label}
-                    {arm.isControl ? ' · Ctrl' : ''}
+                  <th
+                    key={arm.id}
+                    scope="col"
+                    className={`${styles.variationsPriceCol} ${styles.variationsArmMetricHeader}`}
+                  >
+                    {arm.isControl ? 'Control' : arm.label}
+                    <span className={styles.variationsArmMetricSub}>Revenue per visitor</span>
                   </th>
                 ))}
+                <th scope="col">Apply winner</th>
               </tr>
             </thead>
             <tbody>
               {!pageData.items.length ? (
                 <tr>
-                  <td colSpan={armColumns.length + 2}>
+                  <td colSpan={armColumns.length + 4}>
                     <p className={styles.help}>
                       {query.trim() ? 'No products match that search.' : 'No products to show.'}
                     </p>
                   </td>
                 </tr>
               ) : (
-                pageData.items.map(row => (
+                pageData.items.map(row => {
+                  const rollout =
+                    findRolloutRowForProduct(row, rolloutRows) ||
+                    (row.testId ? rolloutByTestId.get(String(row.testId)) : null);
+                  const rolloutDecision = rollout?.decision || null;
+                  const statusLabel = formatProductStatusLabel({
+                    planStatus: row.status,
+                    rolloutState: rollout?.state,
+                    rolloutDetail: rolloutDecision?.detail,
+                  });
+                  const decisionLabel = formatProductDecisionOutcome({
+                    rolloutDecision,
+                    planStatus: row.status,
+                  });
+                  const winningArmId = resolveProductWinningArmId(
+                    rolloutDecision,
+                    armColumns.map(arm => ({ id: arm.id, label: arm.label, role: arm.role }))
+                  );
+                  const statusTone =
+                    statusLabel === 'Excluded by guardrail'
+                      ? styles.trapBadge
+                      : statusLabel === 'Ready'
+                        ? styles.winnerBadge
+                        : statusLabel === 'Needs attention'
+                          ? styles.trapBadge
+                          : null;
+                  return (
                   <tr key={row.key} className={styles.productPriceRow}>
                     <td>
                       <div className={styles.productMeta}>
@@ -530,7 +608,14 @@ export default function ClassicPerformanceTab({
                       </div>
                     </td>
                     <td>
-                      <div className={styles.productName}>{row.decisionLabel || '—'}</div>
+                      {statusTone ? (
+                        <span className={statusTone}>{statusLabel}</span>
+                      ) : (
+                        <span className={styles.productName}>{statusLabel}</span>
+                      )}
+                    </td>
+                    <td>
+                      <div className={styles.productName}>{decisionLabel}</div>
                       {row.sharedTest ? (
                         <div className={styles.productSub}>
                           Shared test — stop/re-run at test level
@@ -539,33 +624,73 @@ export default function ClassicPerformanceTab({
                     </td>
                     {armColumns.map(arm => {
                       const metrics = row.metricsByArmId?.[String(arm.id)] || null;
+                      const isWinnerCell =
+                        winningArmId && String(winningArmId) === String(arm.id);
                       return (
-                        <td key={`${row.key}:${arm.id}`} className={styles.variationsPriceCol}>
+                        <td
+                          key={`${row.key}:${arm.id}`}
+                          className={`${styles.variationsPriceCol} ${
+                            isWinnerCell ? styles.variationMetricWinner : ''
+                          }`}
+                        >
                           <div className={styles.productName}>
-                            {formatRate(metrics?.conversion_rate)}
-                          </div>
-                          <div className={styles.productSub}>
-                            {formatNumber(metrics?.visitors)} vis ·{' '}
                             {formatMetricMoney(
                               metrics?.revenue_per_visitor,
                               row.currency || resolvedCurrency
-                            )}{' '}
-                            rev/visitor
+                            )}
                           </div>
                           <div className={styles.productSub}>
-                            {isOfferTest
-                              ? arm.isControl || arm.role === 'control'
-                                ? 'No offer'
-                                : formatOfferRule(arm.offer, row.currency || resolvedCurrency)
-                              : metrics?.price !== null && metrics?.price !== undefined
-                                ? formatCurrency(metrics.price, row.currency || resolvedCurrency)
-                                : '—'}
+                            {formatRate(metrics?.conversion_rate)} conversion ·{' '}
+                            {formatNumber(metrics?.visitors)} visitors
                           </div>
+                          {!isOfferTest &&
+                          metrics?.price !== null &&
+                          metrics?.price !== undefined ? (
+                            <div className={styles.productSub}>
+                              Test price{' '}
+                              {formatCurrency(metrics.price, row.currency || resolvedCurrency)}
+                            </div>
+                          ) : null}
+                          {isOfferTest && !(arm.isControl || arm.role === 'control') ? (
+                            <div className={styles.productSub}>
+                              {formatOfferRule(arm.offer, row.currency || resolvedCurrency)}
+                            </div>
+                          ) : null}
                         </td>
                       );
                     })}
+                    <td>
+                      {rolloutDecision?.can_apply && rollout && onApplyProduct ? (
+                        <Button
+                          size="slim"
+                          loading={rolloutBusyTestId === rollout.testId}
+                          disabled={
+                            Boolean(rolloutBusyTestId) &&
+                            rolloutBusyTestId !== rollout.testId
+                          }
+                          onClick={() => onApplyProduct(rollout)}
+                        >
+                          Apply winner
+                        </Button>
+                      ) : rolloutDecision?.can_finish && rollout && onFinishProduct ? (
+                        <Button
+                          size="slim"
+                          loading={rolloutBusyTestId === rollout.testId}
+                          disabled={
+                            Boolean(rolloutBusyTestId) &&
+                            rolloutBusyTestId !== rollout.testId
+                          }
+                          onClick={() => onFinishProduct(rollout)}
+                        >
+                          Apply winner
+                        </Button>
+                      ) : (
+                        <span className={styles.help}>—</span>
+                      )}
+                    </td>
                   </tr>
-                ))
+                  );
+                })
               )}
             </tbody>
           </table>
@@ -603,6 +728,17 @@ export default function ClassicPerformanceTab({
           </div>
         )}
       </div>
+
+      {overviewMode && onApplyAllReady ? (
+        <ClassicApplyAllReadyConfirmModal
+          open={confirmApplyAllReady}
+          summary={rolloutSummary}
+          rolloutRows={rolloutRows}
+          applyingAll={rolloutApplyingAll}
+          onClose={() => setConfirmApplyAllReady(false)}
+          onConfirm={onApplyAllReady}
+        />
+      ) : null}
     </div>
   );
 }

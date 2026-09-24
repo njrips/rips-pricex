@@ -88,8 +88,8 @@ export default function SettingsStatSettingsPanel({
       </div>
 
       <p className={styles.help}>
-        Sample size decides when analysis can start; confidence decides when Priceify may call a
-        winner. Both apply to new tests from now on.
+        Sample size decides when analysis can start; confidence decides when a winner can be
+        called. Both apply to every new test you launch.
       </p>
     </div>
   );

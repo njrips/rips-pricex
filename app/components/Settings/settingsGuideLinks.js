@@ -17,6 +17,7 @@ export const ADMIN_DOCS_HASHES = [
   'ai-price',
   'offers',
   'price-surfaces',
+  'global-snippets',
 ];
 
 function ownerWindow() {

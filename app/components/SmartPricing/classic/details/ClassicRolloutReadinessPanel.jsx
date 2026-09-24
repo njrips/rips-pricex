@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Badge, Banner, Button, Modal } from '@shopify/polaris';
+import { Badge, Banner, Button } from '@shopify/polaris';
 import useClassicShopDomain from '../../../../hooks/useClassicShopDomain';
 import { saveSmartPricingGuardrails } from '../../../../services/smartPricingApi';
 import { formatCurrency } from '../../smartPricingConstants';
@@ -7,9 +7,11 @@ import {
   formatMetricMoney,
   formatNumber,
   formatRate,
+  formatApplyAllReadyLabel,
   summarizeRolloutRows,
 } from '../classicExperimentDetailsHelpers';
 import { IconTrophy } from '../classicIcons';
+import ClassicApplyAllReadyConfirmModal from './ClassicApplyAllReadyConfirmModal';
 import styles from '../SmartPricingClassic.module.css';
 
 const STATE_BADGE = {
@@ -291,7 +293,7 @@ export default function ClassicRolloutReadinessPanel({
     <div className={`${styles.statCard} ${styles.rolloutPanel}`}>
       <div className={styles.reviewHead}>
         <div>
-          <h3 className={styles.panelTitle}>Rollout readiness</h3>
+          <h3 className={styles.panelTitle}>Ready to apply winners</h3>
           <span className={styles.productSub}>
             {summary.readyCount > 0
               ? `${summary.readyCount} of ${summary.total} products have reached a decision. The rest keep running.`
@@ -305,7 +307,7 @@ export default function ClassicRolloutReadinessPanel({
             disabled={Boolean(busyTestId)}
             onClick={() => setConfirmBulk(true)}
           >
-            {`Apply all ready (${summary.actionableTestIds.length})`}
+            {formatApplyAllReadyLabel(summary.actionableTestIds.length)}
           </Button>
         ) : null}
       </div>
@@ -414,50 +416,14 @@ export default function ClassicRolloutReadinessPanel({
         </Button>
       ) : null}
 
-      {/* Bulk apply writes live catalog prices, so it asks first and says
-          exactly how many of them are price changes. */}
-      {confirmBulk ? (
-        <Modal
-          open
-          onClose={() => setConfirmBulk(false)}
-          title={`Apply ${summary.actionableTestIds.length} ready products?`}
-          primaryAction={{
-            content: 'Apply them',
-            loading: applyingAll,
-            onAction: () => {
-              setConfirmBulk(false);
-              onApplyAllReady?.(summary.actionableTestIds);
-            },
-          }}
-          secondaryActions={[{ content: 'Cancel', onAction: () => setConfirmBulk(false) }]}
-        >
-          <Modal.Section>
-            <p className={styles.help}>
-              {summary.priceWriteCount > 0
-                ? `${summary.priceWriteCount} product${summary.priceWriteCount === 1 ? '' : 's'} will have a new price written to your Shopify catalog and stop testing.`
-                : 'No catalog prices will change.'}
-              {summary.actionableTestIds.length - summary.priceWriteCount > 0
-                ? ` ${summary.actionableTestIds.length - summary.priceWriteCount} will finish on the price they already have.`
-                : ''}
-            </p>
-            <p className={styles.help}>
-              Products still collecting are left running, and anything flagged for attention is
-              skipped. Each product is applied on its own, so a failure on one does not stop the
-              others.
-            </p>
-            {summary.directionalPriceWriteCount > 0 ? (
-              <Banner tone="warning">
-                {summary.directionalPriceWriteCount === 1
-                  ? 'One of these prices is ahead on directional evidence only.'
-                  : `${summary.directionalPriceWriteCount} of these prices are ahead on directional evidence only.`}{' '}
-                Their confidence is calculated from an estimate that can read higher than the
-                result deserves, which is why Priceify will not apply them on its own. Open a
-                product to see which.
-              </Banner>
-            ) : null}
-          </Modal.Section>
-        </Modal>
-      ) : null}
+      <ClassicApplyAllReadyConfirmModal
+        open={confirmBulk}
+        summary={summary}
+        rolloutRows={rows}
+        applyingAll={applyingAll}
+        onClose={() => setConfirmBulk(false)}
+        onConfirm={onApplyAllReady}
+      />
 
       <ProductDetailModal
         row={openRow}

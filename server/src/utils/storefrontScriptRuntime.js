@@ -4,7 +4,7 @@
  */
 
 /** Bump when embedded runtime config or script contract changes. Keep ?v= in sync: extensions/ripspricex-theme/blocks/ripspricex-app-embed.liquid. */
-const SCRIPT_VERSION = '1.0.64';
+const SCRIPT_VERSION = '1.0.65';
 
 /**
  * DB/API may use "pricing"; storefront logic expects "price".
@@ -221,6 +221,10 @@ function buildStorefrontRuntimeConfig(
   const appUrl = resolvePublicAppUrl(req);
   const shopMappings = normalizePriceSurfaceMappings(priceSurfaceRegistry.shopMappings);
   const runtimeSource = String(options.runtimeSource || 'unknown').trim() || 'unknown';
+  const globalCustomAssets =
+    options.globalCustomAssets && typeof options.globalCustomAssets === 'object'
+      ? options.globalCustomAssets
+      : null;
 
   return {
     apiUrl: `${appUrl}/api`,
@@ -239,6 +243,7 @@ function buildStorefrontRuntimeConfig(
       version: 1,
       shopMappings,
     },
+    ...(globalCustomAssets ? { globalCustomAssets } : {}),
   };
 }
 

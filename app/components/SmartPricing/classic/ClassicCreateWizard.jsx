@@ -5,6 +5,7 @@ import { shopDesignFromGuardrails, stampStatisticalFields } from './sampleSizePo
 import { useNavigate, useSearchParams } from 'react-router';
 import { Banner, Button } from '@shopify/polaris';
 import PageShell from '../../shared/PageShell';
+import ClassicPageLoader from '../../shared/ClassicPageLoader';
 import { ROUTES } from '../../../constants';
 import { apiGet } from '../../../services';
 import useClassicShopDomain from '../../../hooks/useClassicShopDomain';
@@ -58,6 +59,28 @@ function draftServerFailureMessage(saved) {
     return `${reason || 'The server would not accept this draft'}. It is still saved in this browser, but it will not reach your other devices.`;
   }
   return 'Saved in this browser only — we could not reach the server. Use Save draft to make it available on your other devices.';
+}
+
+/** Default AI pricing knobs for new non-control variation arms in the create wizard. */
+function seedDefaultPricingByArm(prev, variations) {
+  if (!Array.isArray(variations) || !variations.length) return prev;
+  let changed = false;
+  const next = { ...prev };
+  variations.forEach((arm, index) => {
+    if (index === 0 || arm.id === 'control') return;
+    if (next[arm.id]?.priceMode) return;
+    changed = true;
+    next[arm.id] = {
+      bulkPercent: '10',
+      bulkDirection: 'increase',
+      aiMinPct: '10',
+      aiMaxPct: '20',
+      aiUnit: 'percent',
+      priceMode: 'ai',
+      ...(next[arm.id] || {}),
+    };
+  });
+  return changed ? next : prev;
 }
 
 /**
@@ -251,7 +274,8 @@ async function fetchCatalog(shopDomain) {
     // `ai_pick` only returns recommended rows — empty when AI ranking fails or none are tagged.
     const data = await getSmartPricingOpportunities(shopDomain, {
       filter: 'all',
-      refresh: false,
+      // Rebuild the snapshot so enrollment withholding and catalog paging stay current.
+      refresh: true,
     });
     const rows = Array.isArray(data?.opportunities) ? data.opportunities : [];
     if (data?.error && !rows.length) {
@@ -268,6 +292,8 @@ async function fetchCatalog(shopDomain) {
       // to present that part as the whole catalog, so the rest of the shop's
       // products looked like they did not exist.
       catalogTruncated: Boolean(data?.summary?.catalog_truncated),
+      catalogLoadedProductCount:
+        data?.summary?.store_product_count ?? data?.summary?.catalog_product_count ?? null,
       error: '',
     };
   } catch (err) {
@@ -276,6 +302,7 @@ async function fetchCatalog(shopDomain) {
       defaults: [],
       withheld: null,
       catalogTruncated: false,
+      catalogLoadedProductCount: null,
       error: formatCatalogLoadError(err),
     };
   }
@@ -306,6 +333,8 @@ export default function ClassicCreateWizard({ onTitleChange }) {
   const [message, setMessage] = useState('');
   const [messageType, setMessageType] = useState('error');
   const [busy, setBusy] = useState(false);
+  /** Full-page loader while Launch test runs, then while routing to test details. */
+  const [launchPhase, setLaunchPhase] = useState('');
   const [savingDraft, setSavingDraft] = useState(false);
   // Stable on SSR + first client paint; a real id appears once the draft has been
   // read after mount, so server and client markup agree.
@@ -351,7 +380,10 @@ export default function ClassicCreateWizard({ onTitleChange }) {
   const [withheldByOtherTests, setWithheldByOtherTests] = useState(null);
   /** True when the shop has more products than one catalog snapshot loads. */
   const [catalogTruncated, setCatalogTruncated] = useState(false);
+  const [catalogLoadedProductCount, setCatalogLoadedProductCount] = useState(null);
   const [catalogSearching, setCatalogSearching] = useState(false);
+  /** Last whole-catalog search from the product picker (`empty` | `found` | `error`). */
+  const [catalogSearchHint, setCatalogSearchHint] = useState(null);
   const [selectedIds, setSelectedIds] = useState([]);
   const [maxSelection] = useState(CLASSIC_MAX_PRODUCT_SELECTION);
   const [pickMode, setPickMode] = useState('manual');
@@ -498,26 +530,15 @@ export default function ClassicCreateWizard({ onTitleChange }) {
   } = useSmartPricingCheckoutReadiness(shopDomain);
   const isOfferTest = isOfferExperimentType(experimentType);
   useEffect(() => {
-    if (isOfferTest || resumeId) return;
-    setPricingByArm(prev => {
-      let changed = false;
-      const next = { ...prev };
-      variations.forEach((arm, index) => {
-        if (index === 0 || arm.id === 'control') return;
-        if (next[arm.id]?.priceMode) return;
-        changed = true;
-        next[arm.id] = {
-          bulkPercent: '10',
-          bulkDirection: 'increase',
-          aiMinPct: '10',
-          aiMaxPct: '20',
-          aiUnit: 'percent',
-          priceMode: 'ai',
-          ...(next[arm.id] || {}),
-        };
-      });
-      return changed ? next : prev;
+    if (isOfferTest || resumeId) return undefined;
+    let cancelled = false;
+    void Promise.resolve().then(() => {
+      if (cancelled) return;
+      setPricingByArm(prev => seedDefaultPricingByArm(prev, variations));
     });
+    return () => {
+      cancelled = true;
+    };
   }, [variations, isOfferTest, resumeId]);
   const launchCheckoutReady = isOfferTest ? offerCheckoutReady : checkoutReady;
   const experimentTypeLabel =
@@ -844,7 +865,7 @@ export default function ClassicCreateWizard({ onTitleChange }) {
       if (Array.isArray(snapshot.plans)) setPlans(snapshot.plans);
       if (typeof snapshot.autoRound2 === 'boolean') setAutoRound2(snapshot.autoRound2);
     },
-    [urlStep, setStep]
+    [urlStep, setStep, experimentType]
   );
 
   // The draft this URL names, if this browser still holds it. Looked up by id
@@ -1052,7 +1073,15 @@ export default function ClassicCreateWizard({ onTitleChange }) {
   }, [pickMode]);
 
   const applyCatalog = useCallback(
-    ({ requestId, rows, defaults, withheld, catalogTruncated: truncated, error }) => {
+    ({
+      requestId,
+      rows,
+      defaults,
+      withheld,
+      catalogTruncated: truncated,
+      catalogLoadedProductCount: loadedProductCount,
+      error,
+    }) => {
       if (productsLoadRequestId.current !== requestId) return;
       if (error) {
         setProductsLoadError(error);
@@ -1060,6 +1089,11 @@ export default function ClassicCreateWizard({ onTitleChange }) {
         setOpportunities(rows);
         setWithheldByOtherTests(withheld || null);
         setCatalogTruncated(Boolean(truncated));
+        setCatalogLoadedProductCount(
+          loadedProductCount !== null && loadedProductCount !== undefined
+            ? Number(loadedProductCount)
+            : null
+        );
         setProductsLoadError('');
         setSelectedIds(prev => {
           let next = prev;
@@ -1098,21 +1132,42 @@ export default function ClassicCreateWizard({ onTitleChange }) {
       const q = String(query || '').trim();
       if (!q) return;
       setCatalogSearching(true);
+      setCatalogSearchHint(null);
       try {
         const data = await getSmartPricingOpportunities(shopDomain, {
           filter: 'all',
           productSearch: q,
         });
         const found = Array.isArray(data?.opportunities) ? data.opportunities : [];
-        if (!found.length) return;
+        const summary = data?.summary && typeof data.summary === 'object' ? data.summary : {};
+        const nextStoreCount = Number(
+          summary.store_product_count ?? summary.catalog_product_count
+        );
+        if (Number.isFinite(nextStoreCount) && nextStoreCount > 0) {
+          setCatalogLoadedProductCount(prev =>
+            Math.max(Number(prev) || 0, nextStoreCount)
+          );
+        }
+        if (summary.withheld_by_other_tests) {
+          setWithheldByOtherTests(summary.withheld_by_other_tests);
+        }
+        if (!found.length) {
+          setCatalogSearchHint({ query: q, status: 'empty' });
+          return;
+        }
+        let addedCount = 0;
         setOpportunities(prev => {
           const seen = new Set(prev.map(row => String(row.variant_id || '')));
           const added = found.filter(row => row.variant_id && !seen.has(String(row.variant_id)));
+          addedCount = added.length;
           return added.length ? [...prev, ...added] : prev;
         });
+        setCatalogSearchHint({
+          query: q,
+          status: addedCount > 0 ? 'found' : 'empty',
+        });
       } catch {
-        // A failed lookup leaves the merchant with the catalog they already
-        // have, which is the same place they were before searching.
+        setCatalogSearchHint({ query: q, status: 'error' });
       } finally {
         setCatalogSearching(false);
       }
@@ -1823,7 +1878,6 @@ export default function ClassicCreateWizard({ onTitleChange }) {
       shopGuardrails,
       shopGuardrailsReady,
       applyLocalAiBandFallback,
-      paintLocalAiBandPrices,
       pricingByArm,
       priceMode,
       priceOverrides,
@@ -2175,7 +2229,8 @@ export default function ClassicCreateWizard({ onTitleChange }) {
       }
       try {
         setBusy(true);
-        const result = await launchMany(enriched);
+        setLaunchPhase('launching');
+        await launchMany(enriched);
         // Stop autosave before clearing, or a debounced write still in flight
         // would put the draft straight back after the experiment went live.
         autosaveSuspended.current = true;
@@ -2183,10 +2238,15 @@ export default function ClassicCreateWizard({ onTitleChange }) {
         // surviving server draft would sit under Drafts alongside the live test
         // it turned into.
         await forgetWizardDraftEverywhere(shopDomain, experimentId);
-        setMessageType('success');
-        setMessage(`Launched ${result.launched} test${result.launched === 1 ? '' : 's'}.`);
-        navigate(ROUTES.appSmartPricing(shopDomain));
+        const detailPlanId = enriched.find(plan => plan?.id)?.id || null;
+        setLaunchPhase('opening');
+        if (detailPlanId) {
+          navigate(ROUTES.appSmartPricingPlan(shopDomain, detailPlanId));
+        } else {
+          navigate(ROUTES.appSmartPricing(shopDomain));
+        }
       } catch (err) {
+        setLaunchPhase('');
         setMessageType('error');
         const detailText = Array.isArray(err?.details)
           ? err.details
@@ -2377,6 +2437,23 @@ export default function ClassicCreateWizard({ onTitleChange }) {
     step >= FIRST_STEP_AFTER_TYPE_CHOSEN &&
     priceSurfacesUnmapped(checkoutReadiness);
 
+  // SSR and the first paint must match (hydration tests + no loader flash in HTML).
+  // Full-page loading only after the client has taken over and defaults are still fetching.
+  const wizardBootstrapping = hydrated && (!draftHydrated || !shopGuardrailsReady);
+  const launchLoaderLabel =
+    launchPhase === 'launching'
+      ? 'Launching test…'
+      : launchPhase === 'opening'
+        ? 'Opening test…'
+        : '';
+  if (wizardBootstrapping || launchLoaderLabel) {
+    return (
+      <PageShell>
+        <ClassicPageLoader label={launchLoaderLabel || 'Loading…'} />
+      </PageShell>
+    );
+  }
+
   return (
     <PageShell message={message} messageType={messageType} onCloseMessage={() => setMessage('')}>
       <ClassicWizardShell
@@ -2496,8 +2573,11 @@ export default function ClassicCreateWizard({ onTitleChange }) {
             opportunities={opportunities}
             withheldByOtherTests={withheldByOtherTests}
             catalogTruncated={catalogTruncated}
-            onCatalogSearch={catalogTruncated ? searchCatalog : null}
+            catalogLoadedProductCount={catalogLoadedProductCount}
+            onCatalogSearch={searchCatalog}
             catalogSearching={catalogSearching}
+            catalogSearchHint={catalogSearchHint}
+            onClearCatalogSearchHint={() => setCatalogSearchHint(null)}
             selectedIds={selectedIds}
             onSelectedIdsChange={setSelectedIds}
             maxSelection={maxSelection}

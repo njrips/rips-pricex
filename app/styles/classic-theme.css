@@ -26,6 +26,20 @@ h2.ripx-classic-sans,
   box-sizing: border-box;
 }
 
+.rpx-page-loader {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 16px;
+  box-sizing: border-box;
+  background: rgba(241, 241, 241, 0.72);
+  backdrop-filter: blur(1px);
+  pointer-events: auto;
+}
+
 /* Global route transition loader (NavMenu + in-app navigate) */
 .rpx-route-loading {
   position: fixed;

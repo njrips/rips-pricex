@@ -220,6 +220,11 @@ export default function ClassicExperimentRowActions({
       const guardrailsPayload = await getSmartPricingGuardrails(shopDomain).catch(() => ({}));
       await launchMany(enrichInboxPlansForLaunch(toLaunch, guardrailsPayload));
       await persistInboxPlansNow(shopDomain, readInboxPlans(shopDomain)).catch(() => null);
+      const detailPlanId = toLaunch.find(plan => plan?.id)?.id || experiment?.representative?.id;
+      if (detailPlanId) {
+        navigate(ROUTES.appSmartPricingPlan(shopDomain, detailPlanId));
+        return;
+      }
       notify('success', 'Test launched.');
       await refreshList({ preferLocalIds: planIds, quiet: true });
     });
@@ -239,7 +244,7 @@ export default function ClassicExperimentRowActions({
       const pauseEntry = createActivityEntry({
         kind: 'paused',
         title: 'Test paused',
-        detail: 'Traffic assignment stopped',
+        detail: 'Traffic assignment stopped.',
         actor: experiment?.representative?.owner_name || experiment?.representative?.created_by_name || 'You',
       });
       await patchExperimentPlans(
@@ -279,8 +284,8 @@ export default function ClassicExperimentRowActions({
       }
       const stopEntry = createActivityEntry({
         kind: 'stopped',
-        title: 'Test stopped',
-        detail: 'Ended by you — no longer collecting results',
+        title: 'Stopped test',
+        detail: 'Traffic assignment stopped.',
         actor:
           experiment?.representative?.owner_name ||
           experiment?.representative?.created_by_name ||
@@ -339,7 +344,7 @@ export default function ClassicExperimentRowActions({
       const resumeEntry = createActivityEntry({
         kind: 'resumed',
         title: 'Test resumed',
-        detail: 'Traffic assignment started again',
+        detail: 'Traffic assignment resumed.',
         actor: experiment?.representative?.owner_name || experiment?.representative?.created_by_name || 'You',
       });
       await patchExperimentPlans(

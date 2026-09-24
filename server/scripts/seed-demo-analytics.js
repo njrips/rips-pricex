@@ -14,6 +14,8 @@
  *   --visitors=N   visitors per variation for a full-length test (default 3000)
  *   --tests=N      only seed the first N running tests
  *   --shop=DOMAIN  restrict to one shop
+ *   --type=TYPE    only seed tests of this type (e.g. price, offer)
+ *   --winner-arm=N force arm index N to win (0=control, 1=variation 1, …)
  *   --srm=N        give N tests a broken traffic split (default 0)
  *   --stamp-floors write the sample/conversion floors onto seeded tests so the
  *                  readiness and winner gates engage (default off)
@@ -35,7 +37,17 @@ const SEED_TAG = 'demo-analytics';
 const SEED_FLOOR_MARKER = 'demo_seed_floors';
 
 function parseArgs(argv) {
-  const args = { visitors: 3000, tests: null, shop: null, srm: 0, clear: false, dryRun: false, stampFloors: false };
+  const args = {
+    visitors: 3000,
+    tests: null,
+    shop: null,
+    testType: null,
+    winnerArm: null,
+    srm: 0,
+    clear: false,
+    dryRun: false,
+    stampFloors: false,
+  };
   for (const raw of argv.slice(2)) {
     const [key, value] = raw.replace(/^--/, '').split('=');
     if (key === 'clear') args.clear = true;
@@ -44,6 +56,11 @@ function parseArgs(argv) {
     else if (key === 'visitors') args.visitors = Math.max(50, Number(value) || 3000);
     else if (key === 'tests') args.tests = Math.max(1, Number(value) || 1);
     else if (key === 'shop') args.shop = String(value || '').trim().toLowerCase();
+    else if (key === 'type') args.testType = String(value || '').trim().toLowerCase();
+    else if (key === 'winner-arm') {
+      const n = Number(value);
+      args.winnerArm = Number.isFinite(n) ? Math.max(0, Math.floor(n)) : null;
+    }
     else if (key === 'srm') args.srm = Math.max(0, Number(value) || 0);
   }
   return args;
@@ -71,7 +88,19 @@ function makeRandom(seedText) {
  * Rotate a clear winner so neighbouring products do not all tell the same
  * story: control, variation 1, then variation 2 when the test has three arms.
  */
-function pickWinner(index, armCount) {
+function pickWinner(index, armCount, forcedWinnerArm = null) {
+  if (forcedWinnerArm !== null && forcedWinnerArm !== undefined) {
+    const winnerArm = Math.min(Math.max(0, forcedWinnerArm), Math.max(0, armCount - 1));
+    const key =
+      winnerArm === 0
+        ? 'control_wins'
+        : winnerArm === 1
+          ? 'variant_1_wins'
+          : winnerArm === 2
+            ? 'variant_2_wins'
+            : `variant_${winnerArm}_wins`;
+    return { key, winnerArm };
+  }
   // Cycle over the arms the test actually has. A fixed modulo 3 gave two-arm
   // tests control, variation 1, variation 1: the back-to-back repetition this
   // is meant to avoid, and it handed variation 1 twice control's share of wins.
@@ -137,15 +166,26 @@ function resolveArmPrices(test, catalogPrice, random) {
  * counts this script seeds and the winner gates actually resolve. Revenue per
  * visitor still turns on price, which resolveArmPrices supplies per arm.
  */
-function resolveArmRates(armCount, winnerArm, random) {
+function resolveArmRates(armCount, winnerArm, random, armPrices = []) {
   const baseRate = 0.022 + random() * 0.006;
-  return Array.from({ length: armCount }, (_, index) => {
+  const rates = Array.from({ length: armCount }, (_, index) => {
     if (winnerArm === 0) {
       return index === 0 ? baseRate * 2.1 : baseRate;
     }
     if (index === winnerArm) return baseRate * 2.2;
     return baseRate;
   });
+  // When the primary metric is revenue-based, conversion lift alone may not beat
+  // a higher control price — nudge the designated winner until its RPV leads.
+  if (winnerArm > 0 && armPrices.length === armCount) {
+    const rpv = index => rates[index] * (Number(armPrices[index]) || 1);
+    let guard = 0;
+    while (guard < 12 && rpv(winnerArm) <= Math.max(...rates.map((_, i) => (i === winnerArm ? 0 : rpv(i))))) {
+      rates[winnerArm] *= 1.15;
+      guard += 1;
+    }
+  }
+  return rates;
 }
 
 function multinomialSplit(total, weights, random) {
@@ -186,6 +226,10 @@ async function loadRunningTests(pool, args) {
     params.push(args.shop);
     where += ` AND LOWER(TRIM(t.shop_domain)) = $${params.length}`;
   }
+  if (args.testType) {
+    params.push(args.testType);
+    where += ` AND LOWER(TRIM(t.type)) = $${params.length}`;
+  }
   let limit = '';
   if (args.tests) {
     params.push(args.tests);
@@ -209,11 +253,11 @@ function buildTestData(test, args, index) {
   const variants = Array.isArray(test.variants) ? test.variants : [];
   if (variants.length < 2) return null;
 
-  const picked = pickWinner(index, variants.length);
+  const picked = pickWinner(index, variants.length, args.winnerArm);
   const scenario = picked.key;
   const catalogPrice = firstNumber(test.catalog_price);
   const armPrices = resolveArmPrices(test, catalogPrice, random);
-  const armRates = resolveArmRates(variants.length, picked.winnerArm, random);
+  const armRates = resolveArmRates(variants.length, picked.winnerArm, random, armPrices);
 
   const startedAt = new Date(test.started_at || test.created_at || Date.now()).getTime();
   const now = Date.now();

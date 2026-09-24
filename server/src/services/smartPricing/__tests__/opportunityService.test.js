@@ -407,10 +407,34 @@ describe('products another price test is holding', () => {
     ]);
   });
 
+  it('counts withheld products, not every variant row', async () => {
+    buildCatalogMetricsSnapshot.mockResolvedValueOnce({
+      ...SNAPSHOT,
+      sku_count: 3,
+      sku_rows: [
+        ...SNAPSHOT.sku_rows,
+        {
+          ...SNAPSHOT.sku_rows[0],
+          variant_id: 'gid://shopify/ProductVariant/12',
+          title: 'Hoodie — L',
+          sku: 'HD-L',
+        },
+      ],
+    });
+    hold('gid://shopify/ProductVariant/11');
+    hold('gid://shopify/ProductVariant/12');
+    const result = await listOpportunities({ shopDomain: 'demo.myshopify.com' });
+
+    expect(result.summary.withheld_by_other_tests.total).toBe(1);
+    expect(result.summary.withheld_by_other_tests.live).toBe(2);
+  });
+
   it('reports nothing withheld for a shop with no live tests', async () => {
     const result = await listOpportunities({ shopDomain: 'demo.myshopify.com' });
     expect(result.summary.withheld_by_other_tests).toMatchObject({ total: 0, tests: [] });
     expect(result.opportunities).toHaveLength(2);
+    expect(result.summary.store_product_count).toBe(2);
+    expect(result.summary.available_product_count).toBe(2);
   });
 
   it('still lists the catalog when enrollment cannot be resolved', async () => {

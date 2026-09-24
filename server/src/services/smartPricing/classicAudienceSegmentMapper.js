@@ -9,7 +9,7 @@ const CLASSIC_SOURCE_TO_RULES = {
   Direct: ['direct'],
   Search: ['organic_search', 'paid_search'],
   Social: ['social'],
-  Email: ['email'],
+  Email: ['email', 'sms'],
   'Paid ads': ['paid'],
   Referral: ['referral'],
 };
@@ -58,7 +58,19 @@ function mapClassicDevicesToEngine(devices = []) {
   return [...set];
 }
 
+const CLASSIC_SOURCE_OPTIONS = ['Direct', 'Search', 'Social', 'Email', 'Paid ads', 'Referral'];
+
+function classicSourcesIncludeAllOptions(sources = []) {
+  const selected = new Set(
+    (Array.isArray(sources) ? sources : []).map(value => String(value || '').trim())
+  );
+  return CLASSIC_SOURCE_OPTIONS.every(option => selected.has(option));
+}
+
 function expandClassicSources(sources = []) {
+  if (classicSourcesIncludeAllOptions(sources)) {
+    return [];
+  }
   const out = [];
   const seen = new Set();
   for (const raw of Array.isArray(sources) ? sources : []) {

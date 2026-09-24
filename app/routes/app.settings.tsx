@@ -4,16 +4,22 @@ import type { AppOutletContext } from '../lib/api.client';
 import { rpxApi } from '../lib/api.client';
 import { getShopDomain } from '../services/api';
 import SettingsStatSettingsPanel from '../components/Settings/sections/SettingsStatSettingsPanel';
+import SettingsGlobalAssetsPanel from '../components/Settings/sections/SettingsGlobalAssetsPanel';
+import {
+  validateGlobalCssSnippet,
+  validateGlobalJavascriptSnippet,
+} from '../utils/merchantStorefrontSnippets';
 import { StoreSettingsPriceSurfacesSection } from '../components/Settings/sections/StoreSettingsPriceSurfacesSection';
 import SettingsPlanPanel, {
   usePlanBillingState,
 } from '../components/Settings/sections/SettingsPlanPanel';
 import ClassicAdminShell from '../components/SmartPricing/classic/ClassicAdminShell';
+import ClassicPageLoader from '../components/shared/ClassicPageLoader';
 import { useKeyedState } from '../hooks/useKeyedState';
 import { withCurrentEmbeddedSearch } from '../utils/shopifyEmbeddedSearch';
 import styles from '../components/SmartPricing/classic/SmartPricingClassic.module.css';
 
-type TabId = 'plan' | 'stats' | 'price-surfaces';
+type TabId = 'plan' | 'stats' | 'price-surfaces' | 'global-assets';
 
 const TABS: { id: TabId; label: string; title: string; subtitle: string }[] = [
   {
@@ -35,6 +41,12 @@ const TABS: { id: TabId; label: string; title: string; subtitle: string }[] = [
     title: 'Theme price selectors',
     subtitle: 'Tell Priceify where prices appear on your theme so tests can safely update them.',
   },
+  {
+    id: 'global-assets',
+    label: 'Global JS/CSS',
+    title: 'Global JS/CSS',
+    subtitle: '',
+  },
 ];
 
 function normalizeTab(raw: string | null): TabId {
@@ -44,6 +56,14 @@ function normalizeTab(raw: string | null): TabId {
   if (value === 'plan' || value === 'billing') return 'plan';
   if (value === 'price-surfaces' || value === 'price_surfaces' || value === 'surfaces') {
     return 'price-surfaces';
+  }
+  if (
+    value === 'global-assets' ||
+    value === 'global_assets' ||
+    value === 'global-js-css' ||
+    value === 'global'
+  ) {
+    return 'global-assets';
   }
   // Default when opening Settings without ?tab= — keep merchants on Results settings.
   // 'guardrails' is the tab's former name and still arrives from saved links.
@@ -74,6 +94,15 @@ export default function SettingsPage() {
   const [error, setError] = useKeyedState<TabId, string | null>(tab, null);
   const [saving, setSaving] = useState(false);
   const [guardrailsLoading, setGuardrailsLoading] = useKeyedState(target, true);
+  const [globalAssetsLoading, setGlobalAssetsLoading] = useKeyedState(target, true);
+  const [globalCss, setGlobalCss] = useState('');
+  const [globalJs, setGlobalJs] = useState('');
+  const [globalCssEnabled, setGlobalCssEnabled] = useState(true);
+  const [globalJsEnabled, setGlobalJsEnabled] = useState(true);
+  const [globalAssetLimits, setGlobalAssetLimits] = useState<{
+    max_css_chars?: number;
+    max_js_chars?: number;
+  }>({});
 
   const activeMeta = useMemo(() => TABS.find(item => item.id === tab) || TABS[1], [tab]);
 
@@ -92,6 +121,8 @@ export default function SettingsPage() {
     if (raw === 'billing') canonical = 'plan';
     else if (raw === 'guardrails') canonical = 'stats';
     else if (raw === 'price_surfaces' || raw === 'surfaces') canonical = 'price-surfaces';
+    else if (raw === 'global_assets' || raw === 'global-js-css' || raw === 'global')
+      canonical = 'global-assets';
     if (!canonical || canonical === raw) return;
     setSearchParams(
       prev => {
@@ -137,6 +168,32 @@ export default function SettingsPage() {
     };
   }, [target, setGuardrailsLoading]);
 
+  useEffect(() => {
+    let cancelled = false;
+    rpxApi
+      .getGlobalAssets(target)
+      .then((data: unknown) => {
+        if (cancelled) return;
+        const root = data as {
+          global_assets?: Record<string, unknown>;
+          limits?: { max_css_chars?: number; max_js_chars?: number };
+        };
+        const assets = (root?.global_assets || {}) as Record<string, unknown>;
+        if (typeof assets.css === 'string') setGlobalCss(assets.css);
+        if (typeof assets.js === 'string') setGlobalJs(assets.js);
+        if (assets.css_enabled != null) setGlobalCssEnabled(assets.css_enabled !== false);
+        if (assets.js_enabled != null) setGlobalJsEnabled(assets.js_enabled !== false);
+        if (root?.limits) setGlobalAssetLimits(root.limits);
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setGlobalAssetsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [target, setGlobalAssetsLoading]);
+
   const setTab = useCallback(
     (next: TabId) => {
       const params = new URLSearchParams(searchParams);
@@ -146,6 +203,42 @@ export default function SettingsPage() {
     },
     [searchParams, setSearchParams]
   );
+
+  const saveGlobalAssets = async () => {
+    setMessage(null);
+    setError(null);
+    if (globalJsEnabled && globalJs.trim()) {
+      const jsCheck = validateGlobalJavascriptSnippet(globalJs);
+      if (!jsCheck.valid) {
+        setError(jsCheck.error || 'Fix JavaScript errors before saving.');
+        return;
+      }
+    }
+    if (globalCssEnabled && globalCss.trim()) {
+      const cssCheck = validateGlobalCssSnippet(globalCss);
+      if (!cssCheck.valid) {
+        setError(cssCheck.error || 'Fix CSS errors before saving.');
+        return;
+      }
+    }
+    setSaving(true);
+    try {
+      const result = (await rpxApi.saveGlobalAssets(target, {
+        css: globalCss,
+        js: globalJs,
+        css_enabled: globalCssEnabled,
+        js_enabled: globalJsEnabled,
+      })) as { global_assets?: Record<string, unknown> };
+      const assets = (result?.global_assets || {}) as Record<string, unknown>;
+      if (typeof assets.css === 'string') setGlobalCss(assets.css);
+      if (typeof assets.js === 'string') setGlobalJs(assets.js);
+      setMessage('Saved.');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Save failed');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const saveStatSettings = async () => {
     setMessage(null);
@@ -209,7 +302,15 @@ export default function SettingsPage() {
             busyLabel: saving ? 'Saving…' : 'Loading…',
             disabled: guardrailsLoading,
           }
-        : null;
+        : tab === 'global-assets'
+          ? {
+              label: 'Save global snippets',
+              onClick: () => void saveGlobalAssets(),
+              busy: saving || globalAssetsLoading,
+              busyLabel: saving ? 'Saving…' : 'Loading…',
+              disabled: globalAssetsLoading,
+            }
+          : null;
 
   const footerSecondary =
     tab === 'plan' && planState.needsSetup && !planState.loading
@@ -224,6 +325,11 @@ export default function SettingsPage() {
           }
         : undefined;
 
+  const settingsBootstrapping =
+    (tab === 'stats' && guardrailsLoading) ||
+    (tab === 'plan' && planState.loading) ||
+    (tab === 'global-assets' && globalAssetsLoading);
+
   return (
     <ClassicAdminShell
       titleBar="App settings"
@@ -236,9 +342,22 @@ export default function SettingsPage() {
       footerPrimary={footerPrimary}
       footerSecondary={footerSecondary}
     >
-      {tab === 'plan' ? <SettingsPlanPanel ctx={ctx} planState={planState} /> : null}
+      {settingsBootstrapping ? (
+        <ClassicPageLoader
+          label={
+            tab === 'plan'
+              ? 'Loading plan & usage…'
+              : tab === 'global-assets'
+                ? 'Loading global snippets…'
+                : 'Loading results settings…'
+          }
+        />
+      ) : null}
+      {!settingsBootstrapping && tab === 'plan' ? (
+        <SettingsPlanPanel ctx={ctx} planState={planState} />
+      ) : null}
 
-      {tab === 'stats' ? (
+      {!settingsBootstrapping && tab === 'stats' ? (
         <SettingsStatSettingsPanel
           loading={guardrailsLoading}
           saving={saving}
@@ -251,16 +370,36 @@ export default function SettingsPage() {
         />
       ) : null}
 
-      {tab === 'price-surfaces' ? (
+      {!settingsBootstrapping && tab === 'price-surfaces' ? (
         <StoreSettingsPriceSurfacesSection
           shopDomain={shopDomain}
           autoMapRequestToken={autoMapToken}
         />
       ) : null}
 
-      <p className={styles.help} style={{ marginTop: 20 }}>
-        <Link to={withCurrentEmbeddedSearch(searchParams, '/app/help')}>Get support</Link>
-      </p>
+      {!settingsBootstrapping && tab === 'global-assets' ? (
+        <SettingsGlobalAssetsPanel
+          loading={globalAssetsLoading}
+          saving={saving}
+          message={message}
+          error={error}
+          css={globalCss}
+          js={globalJs}
+          cssEnabled={globalCssEnabled}
+          jsEnabled={globalJsEnabled}
+          onCss={setGlobalCss}
+          onJs={setGlobalJs}
+          onCssEnabled={setGlobalCssEnabled}
+          onJsEnabled={setGlobalJsEnabled}
+          limits={globalAssetLimits}
+        />
+      ) : null}
+
+      {!settingsBootstrapping ? (
+        <p className={styles.help} style={{ marginTop: 20 }}>
+          <Link to={withCurrentEmbeddedSearch(searchParams, '/app/help')}>Get support</Link>
+        </p>
+      ) : null}
     </ClassicAdminShell>
   );
 }

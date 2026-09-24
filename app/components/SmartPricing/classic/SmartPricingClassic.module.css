@@ -427,6 +427,11 @@ button.stepItem {
   transform: translateY(0);
 }
 
+/* Stroke rocket — undo Polaris Icon default fill so paths stay outline-only. */
+.launchBtn :global(.Polaris-Icon__Svg) {
+  fill: none;
+}
+
 /* The rocket leans into the launch on hover. */
 .launchBtn :global(.Polaris-Button__Icon svg) {
   transition: transform 140ms ease;
@@ -2081,6 +2086,35 @@ button.stepItem {
   display: block;
 }
 
+.bulkApplyProductList {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.bulkApplyProductRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.bulkApplyProductName {
+  font-size: 13px;
+  font-weight: var(--classic-fw-medium);
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 1;
+}
+
 .expandSpacer {
   width: 22px;
   height: 22px;
@@ -2996,6 +3030,11 @@ button.stepItem {
 }
 
 
+.variationMetricWinner {
+  background: rgba(63, 177, 113, 0.12);
+  border-radius: 4px;
+}
+
 /* Product rows: white. Accordion variant rows: separate wash. */
 .table tbody tr.productPriceRow > td {
   background: var(--classic-table-row, #ffffff);
@@ -3640,6 +3679,25 @@ button.stepItem {
   border-radius: 6px;
 }
 
+/* Control / variation columns: same header type as Product/Status; metric on line 2. */
+.variationsProductsTableScroll .table th.variationsArmMetricHeader {
+  text-align: left;
+  white-space: normal;
+  vertical-align: bottom;
+  min-width: 92px;
+}
+
+.variationsArmMetricSub {
+  display: block;
+  margin-top: 4px;
+  font-size: 9px;
+  font-weight: var(--classic-fw-regular);
+  color: var(--classic-muted);
+  line-height: 1.2;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
 .variationsProductsTableScroll .table th:first-child,
 .variationsProductsTableScroll .table td:first-child {
   position: sticky;
@@ -3824,6 +3882,13 @@ button.stepItem {
 
 .overviewTabActive svg {
   color: var(--classic-ink);
+}
+
+.overviewContextStatus {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
 }
 
 .winnerBadge {
@@ -5904,6 +5969,10 @@ button.stepItem {
   grid-template-columns: minmax(0, 184px) minmax(0, 1fr);
   gap: 2px 16px;
   align-items: baseline;
+}
+
+.settingsRowMultiline {
+  align-items: start;
 }
 
 .settingsRowLabel {

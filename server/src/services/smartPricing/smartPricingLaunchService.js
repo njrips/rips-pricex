@@ -187,13 +187,26 @@ async function launchSmartPricingPlanAsTest(
 
   if (started && test?.id) {
     const { recordEventForTest } = require('../../models/smartPricingProductEventStore');
+    const audience =
+      plan?.audience && typeof plan.audience === 'object' ? plan.audience : plan?.metadata?.audience;
+    const trafficAllocation =
+      audience?.traffic_allocation ??
+      audience?.trafficAllocation ??
+      plan?.metadata?.traffic_allocation_percent ??
+      null;
     await recordEventForTest(shopDomain, test.id, 'launched', {
       actor: 'merchant',
       test: startedTest,
       planId,
       productId: plan?.product_id || null,
       variantId: plan?.variant_id || null,
-      payload: { auto_start: true },
+      payload: {
+        auto_start: true,
+        ...(Number.isFinite(Number(trafficAllocation))
+          ? { traffic_allocation_percent: Number(trafficAllocation) }
+          : {}),
+        product_title: plan?.product_title || plan?.title || null,
+      },
     }).catch(() => null);
   }
 

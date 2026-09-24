@@ -41,11 +41,11 @@ describe('classic activity log', () => {
       createActivityEntry({
         id: 'updated_1',
         kind: 'updated',
-        title: 'Audience updated',
+        title: 'Audience targeting changed',
         at: '2026-08-21T09:00:00.000Z',
       })
     );
-    expect(next[0].metadata.activity_log[0].title).toBe('Audience updated');
+    expect(next[0].metadata.activity_log[0].title).toBe('Audience targeting changed');
     expect(next[1].metadata.audience_ui.segment).toBe('all_visitors');
     expect(next[1].metadata.activity_log).toHaveLength(1);
   });
@@ -80,11 +80,11 @@ describe('classic activity log', () => {
   it('filters by group and counts chips', () => {
     const items = [
       { kind: 'started', title: 'Launched' },
-      { kind: 'updated', title: 'Audience updated' },
+      { kind: 'updated', title: 'Audience targeting changed' },
       { kind: 'qa', title: 'Self-QA passed' },
     ];
-    expect(filterActivityItems(items, 'changes')).toHaveLength(1);
-    expect(activityFilterCounts(items)).toMatchObject({ all: 3, lifecycle: 1, changes: 1, qa: 1 });
+    expect(filterActivityItems(items, 'lifecycle')).toHaveLength(3);
+    expect(activityFilterCounts(items)).toMatchObject({ all: 3, lifecycle: 3 });
   });
 
   it('maps kind tones for the timeline dots', () => {
@@ -163,7 +163,7 @@ describe('buildActivityTimeline log merge', () => {
             {
               id: 'updated_1',
               kind: 'updated',
-              title: 'Audience updated',
+              title: 'Audience targeting changed',
               at: '2026-08-21T00:00:00.000Z',
               actor: 'You',
               detail: 'Targeting changed',
@@ -172,7 +172,7 @@ describe('buildActivityTimeline log merge', () => {
         },
       },
     });
-    expect(items.find(item => item.kind === 'updated')?.title).toBe('Audience updated');
+    expect(items.find(item => item.kind === 'updated')?.title).toBe('Audience targeting changed');
     expect(items.find(item => item.kind === 'archived')?.title).toBe('Test archived');
     expect(items.find(item => item.kind === 'created')?.title).toBe('Created test');
   });

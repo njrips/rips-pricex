@@ -749,9 +749,10 @@ class ShopifyService {
       let cursor = null;
       let currency = 'USD';
       let pages = 0;
-      const pageSize = Math.min(Math.max(maxProducts, 1), 100);
+      let truncated = false;
+      const pageSize = Math.min(100, Math.max(maxProducts, 1));
 
-      while (rows.length < maxProducts && pages < 8) {
+      while (rows.length < maxProducts) {
         pages += 1;
         const response = await client.request(query, {
           variables: {
@@ -796,12 +797,17 @@ class ShopifyService {
             })),
           });
         });
-        if (!connection?.pageInfo?.hasNextPage || rows.length >= maxProducts) {
+        const hasNextPage = connection?.pageInfo?.hasNextPage === true;
+        if (!hasNextPage) {
+          break;
+        }
+        if (rows.length >= maxProducts) {
+          truncated = true;
           break;
         }
         cursor = connection.pageInfo.endCursor;
       }
-      return { products: rows, currency };
+      return { products: rows, currency, truncated };
     };
 
     try {

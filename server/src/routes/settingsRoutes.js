@@ -740,4 +740,54 @@ router.post(
   })
 );
 
+/**
+ * GET /api/settings/global-assets
+ */
+router.get(
+  '/global-assets',
+  asyncHandler(async (req, res) => {
+    const shopDomain = resolveShopDomain(req);
+    if (!shopDomain || shopDomain.includes('@')) {
+      return sendError(res, 401, 'Shop domain required');
+    }
+    const { getShopGlobalAssets, MAX_GLOBAL_CSS_CHARS, MAX_GLOBAL_JS_CHARS } = require('../services/shopGlobalAssetsService');
+    const global_assets = await getShopGlobalAssets(shopDomain);
+    return sendSuccess(res, HTTP_STATUS.OK, {
+      global_assets,
+      limits: {
+        max_css_chars: MAX_GLOBAL_CSS_CHARS,
+        max_js_chars: MAX_GLOBAL_JS_CHARS,
+      },
+    });
+  })
+);
+
+/**
+ * PUT /api/settings/global-assets
+ */
+router.put(
+  '/global-assets',
+  asyncHandler(async (req, res) => {
+    const shopDomain = resolveShopDomain(req);
+    if (!shopDomain || shopDomain.includes('@')) {
+      return sendError(res, 401, 'Shop domain required');
+    }
+    const { saveShopGlobalAssets, MAX_GLOBAL_CSS_CHARS, MAX_GLOBAL_JS_CHARS } = require('../services/shopGlobalAssetsService');
+    const body = req.body && typeof req.body === 'object' ? req.body : {};
+    const patch = body.global_assets && typeof body.global_assets === 'object' ? body.global_assets : body;
+    try {
+      const global_assets = await saveShopGlobalAssets(shopDomain, patch);
+      return sendSuccess(res, HTTP_STATUS.OK, {
+        global_assets,
+        limits: {
+          max_css_chars: MAX_GLOBAL_CSS_CHARS,
+          max_js_chars: MAX_GLOBAL_JS_CHARS,
+        },
+      });
+    } catch (err) {
+      return sendError(res, 400, err.message || 'Could not save global assets');
+    }
+  })
+);
+
 module.exports = router;

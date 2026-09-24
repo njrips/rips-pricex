@@ -42,7 +42,7 @@ export default function PlanWelcomePage() {
               onClick: () => navigate('/app/setup'),
             }
           : {
-              label: 'Open Plan',
+              label: 'Plan & usage',
               onClick: () => navigate('/app/settings?tab=plan'),
             }
       }

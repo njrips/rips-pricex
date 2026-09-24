@@ -20,7 +20,11 @@ import {
   collectExperimentTestIds,
   conversionBarWidth,
   filterSortProductPerformance,
+  formatApplyAllReadyLabel,
+  formatRolloutProductShortLabel,
+  listActionableRolloutProducts,
   filterSortVariationProducts,
+  summarizeRolloutRows,
   formatMetricMoney,
   formatPrimaryMetricLabel,
   formatAudienceSegmentLabel,
@@ -58,13 +62,22 @@ describe('classicExperimentDetailsHelpers', () => {
     expect(formatAudienceFactValue(undefined, 'All devices')).toBe('All devices');
   });
 
-  it('formats activity meta as actor · timestamp', () => {
+  it('formats activity meta as actor — absolute timestamp', () => {
+    const line = formatActivityMeta({
+      actor: 'Maya Chen',
+      at: '2026-07-12T09:14:00.000Z',
+    });
+    expect(line).toMatch(/^Maya Chen — /);
+    expect(line).not.toMatch(/\d+m ago$/);
+  });
+
+  it('labels guardrail actor for history meta lines', () => {
     expect(
       formatActivityMeta({
-        actor: 'Maya Chen',
+        actor: 'guardrail',
         at: '2026-07-12T09:14:00.000Z',
       })
-    ).toMatch(/^Maya Chen · /);
+    ).toMatch(/^Guardrail — /);
   });
 
   it('groups activity items by calendar day', () => {
@@ -1171,5 +1184,60 @@ describe('classicExperimentDetailsHelpers', () => {
       null
     );
     expect(merged.significance.outcomesMatured).toBe(false);
+  });
+
+  it('formats bulk apply button copy', () => {
+    expect(formatApplyAllReadyLabel(0)).toBe('Apply ready products');
+    expect(formatApplyAllReadyLabel(1)).toBe('Apply 1 ready product');
+    expect(formatApplyAllReadyLabel(3)).toBe('Apply 3 ready products');
+  });
+
+  it('lists actionable rollout products for bulk confirm modals', () => {
+    const rows = [
+      {
+        testId: 't1',
+        productTitle: 'Alpha Tee',
+        imageUrl: 'https://cdn.example/a.jpg',
+        decision: { can_apply: true },
+      },
+      {
+        testId: 't2',
+        productTitle: 'Beta Hoodie',
+        variantTitle: 'Large',
+        decision: { can_finish: true },
+      },
+      { testId: 't3', productTitle: 'Still running', decision: { can_apply: false } },
+    ];
+    const summary = summarizeRolloutRows(rows);
+    expect(listActionableRolloutProducts(rows, summary)).toEqual([
+      {
+        testId: 't1',
+        label: 'Alpha Tee',
+        imageUrl: 'https://cdn.example/a.jpg',
+        willWritePrice: true,
+      },
+      {
+        testId: 't2',
+        label: 'Beta Hoodie · Large',
+        imageUrl: null,
+        willWritePrice: false,
+      },
+    ]);
+    expect(formatRolloutProductShortLabel({ productTitle: 'Solo' })).toBe('Solo');
+  });
+
+  it('sorts product performance with ready rows first by default', () => {
+    const rows = [
+      { testId: 't1', title: 'Zebra', sort_visitors: 10 },
+      { testId: 't2', title: 'Alpha', sort_visitors: 5 },
+      { testId: 't3', title: 'Beta', sort_visitors: 1 },
+    ];
+    const rolloutRows = [
+      { testId: 't1', state: 'collecting' },
+      { testId: 't2', state: 'ready_challenger' },
+      { testId: 't3', state: 'ready_control' },
+    ];
+    const sorted = filterSortProductPerformance(rows, { rolloutRows });
+    expect(sorted.map(row => row.testId)).toEqual(['t2', 't3', 't1']);
   });
 });

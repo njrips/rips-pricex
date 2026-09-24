@@ -60,16 +60,25 @@ async function serveScript(req, res) {
   let activeTests = [];
   let goalMetricDefinitions = [];
   let shopPriceSurfaceMappings = [];
+  let globalCustomAssets = null;
   try {
     if (shop) {
-      const [tests, goals, surfaces] = await Promise.all([
+      const {
+        getShopGlobalAssets,
+        globalAssetsForStorefrontRuntime,
+      } = require('../services/shopGlobalAssetsService');
+      const [tests, goals, surfaces, globalAssets] = await Promise.all([
         getActiveTestsForStorefront(shop),
         listGoalMetricDefinitions(shop).catch(() => []),
         getShopPriceSurfaceMappings(shop).catch(() => []),
+        getShopGlobalAssets(shop).catch(() => null),
       ]);
       activeTests = (tests || []).filter((t) => isStorefrontEmbeddedTestType(t.type));
       goalMetricDefinitions = goals || [];
       shopPriceSurfaceMappings = surfaces || [];
+      if (globalAssets) {
+        globalCustomAssets = globalAssetsForStorefrontRuntime(globalAssets);
+      }
     }
   } catch (err) {
     logger.warn('active tests load failed', { message: err.message });
@@ -85,6 +94,7 @@ async function serveScript(req, res) {
       { shopMappings: shopPriceSurfaceMappings },
       {
         runtimeSource: 'ripspricex-track',
+        globalCustomAssets,
       }
     );
   } catch (err) {

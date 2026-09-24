@@ -354,3 +354,39 @@ export function applyAudienceUiToPlans(
     };
   });
 }
+
+function revenueGuardrailUiRow(state = {}) {
+  const rows = ensureRevenueGuardrailRows(state?.guardrails);
+  return rows.find(row => row.id === 'revenue') || rows[0] || null;
+}
+
+function audienceTargetingFingerprint(state = {}) {
+  const lists = resolveCountryLists(state);
+  return JSON.stringify({
+    segment: state?.segment,
+    devices: state?.devices,
+    sources: state?.sources,
+    deviceMode: state?.deviceMode,
+    sourceMode: state?.sourceMode,
+    includeCountries: lists.includeCountries,
+    excludeCountries: lists.excludeCountries,
+  });
+}
+
+/** History tab title when audience/metrics/guardrail settings are saved on a running test. */
+export function resolveAudienceHistoryActivityTitle(editFocus, prev = {}, next = {}) {
+  const focus = String(editFocus || 'audience').trim();
+  if (focus === 'metrics') return 'Primary metric changed';
+  if (focus === 'guardrail') {
+    const prevRow = revenueGuardrailUiRow(prev);
+    const nextRow = revenueGuardrailUiRow(next);
+    const prevOn = prevRow?.on !== false;
+    const nextOn = nextRow?.on !== false;
+    if (prevOn !== nextOn) return nextOn ? 'Guardrail turned on' : 'Guardrail turned off';
+    return 'Guardrail threshold changed';
+  }
+  const trafficChanged = Number(prev.trafficAllocation) !== Number(next.trafficAllocation);
+  const targetingChanged = audienceTargetingFingerprint(prev) !== audienceTargetingFingerprint(next);
+  if (trafficChanged && !targetingChanged) return 'Traffic allocation changed';
+  return 'Audience targeting changed';
+}

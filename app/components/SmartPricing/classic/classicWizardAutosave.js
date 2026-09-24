@@ -7,11 +7,7 @@
  * address and restores, while "Create experiment" still opens clean.
  */
 
-import {
-  CLASSIC_CREATE_STEPS,
-  classicCreateStepId,
-  getClassicCreateSteps,
-} from './classicCreateSteps';
+import { classicCreateStepId, getClassicCreateSteps } from './classicCreateSteps';
 
 /** Fields whose presence means the merchant put something into the wizard. */
 function hasListValue(value) {

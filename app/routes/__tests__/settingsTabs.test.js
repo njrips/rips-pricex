@@ -25,6 +25,9 @@ vi.mock('../../lib/api.client', () => ({
   rpxApi: {
     getGuardrails: () => Promise.resolve({ guardrails: {} }),
     saveGuardrails: () => Promise.resolve({ guardrails: {} }),
+    getGlobalAssets: () =>
+      Promise.resolve({ global_assets: { css: '', js: '', css_enabled: true, js_enabled: true } }),
+    saveGlobalAssets: () => Promise.resolve({ global_assets: {} }),
   },
 }));
 
@@ -51,6 +54,10 @@ vi.mock('../../components/Settings/sections/SettingsStatSettingsPanel', () => ({
 
 vi.mock('../../components/Settings/sections/StoreSettingsPriceSurfacesSection', () => ({
   StoreSettingsPriceSurfacesSection: () => h('div', null, 'price surfaces panel'),
+}));
+
+vi.mock('../../components/Settings/sections/SettingsGlobalAssetsPanel', () => ({
+  default: () => h('div', null, 'global assets panel'),
 }));
 
 let container;
@@ -112,12 +119,13 @@ describe('Settings tabs', () => {
     expect(container.textContent).not.toContain('Installation');
   });
 
-  it('still offers the three tabs that own real settings', async () => {
+  it('still offers the settings tabs that own real configuration', async () => {
     await render('/app/settings');
     const labels = tabLabels();
     expect(labels).toContain('Plan & usage');
     expect(labels).toContain('Results settings');
     expect(labels).toContain('Price locations');
+    expect(labels).toContain('Global JS/CSS');
   });
 
   it('uses Theme price selectors as the in-tab page title while the tab stays Price locations', async () => {

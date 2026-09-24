@@ -1,6 +1,6 @@
 import { useEffect, useMemo } from 'react';
 import { TitleBar } from '@shopify/app-bridge-react';
-import { Link, useNavigate, useOutletContext } from 'react-router';
+import { useNavigate, useOutletContext } from 'react-router';
 import { Banner, Box } from '@shopify/polaris';
 import ClassicExperimentsList from '../components/SmartPricing/classic/ClassicExperimentsList';
 import { useKeyedState } from '../hooks/useKeyedState';
@@ -64,7 +64,7 @@ export default function ExperimentsHome() {
             }}
             secondaryAction={{ content: 'View plans', onAction: upgrade }}
           >
-            <p>Finish setup to start a test.</p>
+            <p>Finish setup to start your first test.</p>
           </Banner>
         </Box>
       ) : launchSummary.anyReady === false ? (

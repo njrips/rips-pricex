@@ -4,7 +4,7 @@ export const DOCS_HERO = {
   eyebrow: 'Guides',
   title: 'How Priceify tests stay safe and statistically valid.',
   subtitle:
-    'Settings holds two choices — confidence level and minimum sample size. Everything else runs on a fixed limit, and each guide below says what that limit is and where you meet it. Info icons in Admin open the matching section here.',
+    'Settings holds two choices — confidence level and minimum visitors per variation. Everything else runs on a fixed limit, and each guide below says what that limit is and where you meet it. Info icons in Admin open the matching section here.',
 };
 
 export const DOCS_FAQ_SECTION = {
@@ -43,7 +43,7 @@ export const DOCS_NAV_CARDS = [
     href: '#enforced',
     label: 'Guide 03',
     title: 'What stops a test',
-    body: 'The revenue-per-visitor pause, and the traffic-split fault that blocks a rollout.',
+    body: 'The revenue-per-visitor pause, and the traffic-split fault that blocks Apply winner.',
   },
   {
     href: '#ai-pricing',
@@ -87,7 +87,7 @@ export const DOCS_GROUPS = [
   {
     id: 'enforced',
     eyebrow: 'ENFORCEMENT',
-    title: 'What pauses a test, and what blocks a rollout.',
+    title: 'What pauses a test, and what blocks Apply winner.',
     tone: 'deep',
   },
   {
@@ -110,15 +110,15 @@ export const DOCS_SECTIONS = [
     group: 'price-safety',
     title: 'What you set, and what is fixed',
     summary:
-      'Settings holds two choices: confidence level and minimum sample size per variation. Everything else that shapes a test is either fixed at a value you cannot edit, or set on the test itself rather than shop-wide. This section is the map of which is which.',
+      'Settings holds two choices: confidence level and minimum visitors per variation. Everything else that shapes a test is either fixed at a value you cannot edit, or set on the test itself rather than shop-wide. This section is the map of which is which.',
     facts: [
-      { label: 'Shop-wide and editable', value: 'Confidence level, minimum sample size' },
+      { label: 'Shop-wide and editable', value: 'Confidence level, minimum visitors per variation' },
       { label: 'Set per test', value: 'Revenue guardrail, traffic, audience, goals' },
       { label: 'Fixed, not editable', value: 'The price and planning limits below' },
       { label: 'Stamped at launch', value: 'All of them' },
     ],
     paragraphs: [
-      'Two settings are yours to choose, both under Settings → Results settings, and both apply to every test you launch: the confidence level a result must reach before a winner is called, and the minimum sample size each variation must reach before anything is calculated at all.',
+      'Two settings are yours to choose, both under Settings → Results settings, and both apply to every test you launch: the confidence level a result must reach before a winner is called, and the minimum visitors per variation each arm must reach before anything is calculated at all.',
       'A third group is set on the test rather than the shop, because the right answer differs from test to test. The revenue-per-visitor guardrail, the share of traffic the test takes, who is eligible for it, and which metric it optimises are all chosen on the Create steps and editable on the test afterwards.',
       'Everything else runs on a fixed value. Max price change caps how far a test price may move, a cost floor keeps suggestions above margin, and the planner works from a 10% target lift and 80% power. None of these are fields any more, and each guide below says what the value is. The one you can still move is max price change: the Products step offers to raise it in one click when the band you typed needs more room. Two smaller defaults work the same way and are mentioned where they matter — first-round candidate prices are seeded on the "recommended" spread, and a finished round may queue one follow-up draft, up to three rounds per product.',
       'All of it is stamped onto the test at launch. A running test keeps the values it started with, so changing a setting later never rewrites the statistics of a test already collecting data — and never moves the bar underneath one. The exception is a follow-up round, which is a new test you review and launch, so it picks up whatever is current at that point.',
@@ -226,7 +226,7 @@ export const DOCS_SECTIONS = [
       { label: 'Acts as', value: 'The second gate, after the sample floors' },
     ],
     paragraphs: [
-      'The two settings act in sequence rather than independently. The minimum sample size decides when a result may be calculated at all; the confidence level decides when the calculated result is strong enough to call a winner. Neither one alone will produce a decision.',
+      'The two settings act in sequence rather than independently. Minimum visitors per variation decides when a result may be calculated at all; the confidence level decides when the calculated result is strong enough to call a winner. Neither one alone will produce a decision.',
       'Confidence is a false-winner budget. At 90% you accept roughly a 1-in-10 chance that a variation is called the winner when it was really no better than the control; at 95% that becomes about 1-in-20. The protection is not free: for the same real lift, 95% needs meaningfully more traffic and more orders, so tests take longer and fewer of them reach a decision. For price testing, 90% is usually the better trade, because a wrong call is reversible — you can revert the price — while a test that never finishes teaches you nothing.',
       'Internally the setting is stored as confidence (0.90), and the maths uses its complement as the significance level, alpha (0.10). At 95% the alpha is 0.05. When a test has more than one challenger, that alpha is divided across the challenger-versus-control comparisons, so a three-variation test demands stronger evidence per comparison than a two-variation test. Running several variations therefore costs traffic; it does not quietly raise your false-winner risk.',
       'The percentage shown on a running test is not this setting. It is the current strength of evidence, calculated as one minus the p-value of the sequential test, and it moves as orders arrive. So a test set to 90% may read 62% one day and 91% the next. The setting is the line that reading has to cross. Until the sample floors are met, no reading is shown at all: the test reports what it is still waiting for instead of a percentage, because a confidence figure drawn from a handful of orders is not merely imprecise, it is wrong.',
@@ -277,11 +277,11 @@ export const DOCS_SECTIONS = [
       { label: 'Measured on', value: 'The variation with the fewest orders' },
     ],
     paragraphs: [
-      'No winner is called until every variation has reached this many conversions, however many visitors it has seen. It sits alongside minimum sample: a result needs both the visitors and the conversions.',
+      'No winner is called until every variation has reached this many conversions, however many visitors it has seen. It sits alongside minimum visitors per variation: a result needs both the visitors and the conversions.',
       'Visitors are the wrong unit for the decision. A price test compares conversion rates and revenue per visitor, and both are driven by order counts. 5,000 visitors per variation sounds substantial, but at a 0.4% conversion rate that is 20 orders — and at 20 orders a +40% lift can appear and then vanish as the test continues. That is regression toward the mean, not a price effect.',
       'The floor is also what makes the statistics valid rather than merely tidy. The confidence figure comes from a normal approximation whose variance estimate needs a minimum number of conversions per arm; below roughly 10 the number is not conservative, it is wrong. Priceify therefore refuses to read a result under 10 conversions per variation under any circumstances, and sits its own floor at 100.',
       'This is not a substitute for planning. The required sample still comes from the product’s conversion rate, the target lift, your confidence level, and power — a flat conversion count cannot replace that calculation. The floor exists to stop an early sequential call from being made on a handful of orders.',
-      'It sits at 100, which is what 5,000 visitors produces at the 2% baseline the planner assumes, so it and the default minimum sample describe the same test. Review folds this floor into its timeline: when conversions take longer to accumulate than visitors, the collection window is quoted from the conversion floor and says so. There is no field for it in Results settings, because it is a validity floor rather than a preference — a result read below it would be wrong rather than merely early. It is stamped onto each test at launch alongside the minimum sample size.',
+      'It sits at 100, which is what 5,000 visitors produces at the 2% baseline the planner assumes, so it and the default minimum visitors per variation describe the same test. Review folds this floor into its timeline: when conversions take longer to accumulate than visitors, the collection window is quoted from the conversion floor and says so. There is no field for it in Results settings, because it is a validity floor rather than a preference — a result read below it would be wrong rather than merely early. It is stamped onto each test at launch alongside the minimum visitors per variation from Results settings.',
     ],
   },
   {
@@ -328,7 +328,7 @@ export const DOCS_SECTIONS = [
       'Classic tests can be read at any time. A fixed-horizon p-value cannot: checking it repeatedly and stopping at the first good-looking moment inflates false positives well past the stated confidence. Priceify therefore reads results with a sequential boundary, which is built to be looked at continuously without that penalty.',
       'Two layers do the work. The directional layer is a mixture-SPRT and covers every metric, including revenue per visitor. It estimates variance from running totals, and value metrics use an average-order-value proxy rather than order-level spread, so it is evidence to weigh rather than a decision to act on unattended.',
       'The confirming layer applies to conversion rate only, and it is exact. Randomised assignment means that if both prices convert equally, any given order came from the challenger with a probability fixed by the traffic split alone — the store’s actual conversion rate drops out of the arithmetic. That turns the order stream into a known coin, so the boundary needs no variance estimate, no normal approximation, and no minimum sample for its own validity.',
-      'After the minimum sample and conversion floors, review each product’s evidence, traffic quality, effect size, and guardrail status. Roll out winner stays available on the directional read, so manual winner review per product is what releases anything the exact layer has not confirmed. Automatic catalog writes wait for that confirmation as well.',
+      'After the minimum sample and conversion floors, review each product’s evidence, traffic quality, effect size, and guardrail status. Apply winner stays available on the directional read, so manual winner review per product is what releases anything the exact layer has not confirmed. Automatic catalog writes wait for that confirmation as well.',
     ],
   },
   {
@@ -350,17 +350,17 @@ export const DOCS_SECTIONS = [
       'Revenue-per-visitor results never auto-apply. Their spread depends on order values, which vary far more than a yes-or-no conversion, and Priceify measures that spread with a proxy. A proxy is enough to inform your judgement and not enough to authorise an unattended price change.',
       'Each product decides on its own. One SKU reaching a verdict writes only that SKU’s price; its siblings keep running until their own evidence arrives. A control win ends that product with the catalog price untouched.',
       'Once all of that holds, a review window still runs before anything is written — three days, counted from the moment the product reached a decision and you were emailed about it. Applying a product yourself at any point during the window cancels the automatic write for it.',
-      'Automatic writes are off, and Priceify deliberately offers no way to switch them on: a price written to your catalog without a person looking at it is not a default worth making one click away. A store that wants them runs with them enabled at the account level. If yours is one, the Performance tab says so and names the date of the next write, and that same banner carries the switch to turn them off — which leaves every finished product waiting for you to apply it, and takes nothing already written back.',
+      'Automatic writes are off, and Priceify deliberately offers no way to switch them on: a price written to your catalog without a person looking at it is not a default worth making one click away. A store that wants them runs with them enabled at the account level. If yours is one, the Overview tab says so and names the date of the next write, and that same banner carries the switch to turn them off — which leaves every finished product waiting for you to apply it, and takes nothing already written back.',
     ],
   },
   {
     id: 'rollout-queue',
     group: 'statistics',
-    title: 'Rollout queue and ready-to-apply alerts',
+    title: 'Product performance and ready-to-apply alerts',
     summary:
-      'A test covering ten products is ten independent tests that finish at different times. The Performance tab opens with one row per product, ordered by what needs you, so you can apply a finished product without ending the rest of the test.',
+      'A test covering ten products is ten independent tests that finish at different times. The Overview tab shows Product performance by variation so you can apply a finished product without ending the rest of the test.',
     facts: [
-      { label: 'Where', value: 'Test → Performance tab' },
+      { label: 'Where', value: 'Test → Overview tab' },
       { label: 'Granularity', value: 'One row per product' },
       { label: 'Actions', value: 'Apply a row, or apply all ready' },
       { label: 'Never offered', value: 'Products the revenue guardrail stopped' },
@@ -368,9 +368,9 @@ export const DOCS_SECTIONS = [
     ],
     paragraphs: [
       'A test covering ten products is ten independent tests. They almost never finish together: a high-traffic SKU can have a confirmed winner in a fortnight while a slower one is still weeks from its sample floor, and a third may be better off on its control price. Ending the whole test to act on the first is a false choice, and waiting for the slowest one costs you the lift you have already measured.',
-      'The Performance tab therefore opens with a rollout queue: one row per product, ordered by what needs you rather than alphabetically. Products you can act on come first, then anything blocked by a traffic-split fault, then everything still collecting — with the ones nearest their floors ahead of the ones that just started. Each row names the price move, why the product is in that state, and how far along it is; opening a row shows the per-variation numbers and the evidence behind the call.',
+      'The Overview tab therefore includes Product performance by variation: one row per product with status, decision, and per-variation metrics. Use Apply winner when a product is ready, or Apply ready products when several are ready at once. Each row shows why the product is in that state; opening a product shows the per-variation numbers and the evidence behind the call.',
       'Apply on a row writes that one product’s price and stops that one test. Apply all ready does the same for every finished product in one action, skipping anything still collecting or blocked, and reports separately on any that failed. A control win or a winning offer has no catalog price to write, so those rows finish the product instead. Either way the rest of the test keeps running.',
-      'A product the revenue guardrail stopped is never offered for rollout. The guardrail fires because a variation lost money against control, so applying that price would act on the exact reading the guardrail rejected. Those rows say what the drop was and against which limit, and they stay on their original price — nothing was written to your catalog.',
+      'A product the revenue guardrail stopped never gets Apply winner on its row. The guardrail fires because a variation lost money against control, so applying that price would act on the exact reading the guardrail rejected. Those rows say what the drop was and against which limit, and they stay on their original price — nothing was written to your catalog.',
       'You are emailed the first time each product reaches a decision, at your store’s Shopify contact address. Products that cross over together are batched into one message, and each product is only ever mentioned once, so a slow-finishing test does not turn into a mailing list. If a message cannot be sent the products stay queued for the next attempt rather than being silently dropped.',
     ],
   },
@@ -391,7 +391,7 @@ export const DOCS_SECTIONS = [
       'A price test can lose money while it runs. This is the rule that limits how much. Once each variation has around 100 visitors — enough for the comparison to mean anything at all — Priceify compares each challenger’s revenue per visitor to control’s, and if a challenger is down by more than your threshold, it pauses the test and stops assigning shoppers to it. Nothing was written to your catalog, so the pause costs you the test rather than a price.',
       'The threshold belongs to the test, not the shop. You set it on the Audience step anywhere from 3% to 50%, and it starts at 10%. There is no shop-wide ceiling above it: a test that wants to tolerate a 40% drop while it learns can, and a running test keeps the figure it launched with. Tightening it makes a test more likely to stop early on ordinary variance; loosening it buys the test room at the cost of revenue you can measure.',
       'This is a safety pause, not a verdict. It reads the observed point estimate rather than a significance boundary, which is exactly what you want from a circuit breaker and exactly what you should not treat as evidence that the price is worse. A paused test can be resumed once you have looked at it.',
-      'A product the guardrail stopped is never offered for rollout. The guardrail fired because that variation lost money against control, so applying its price would be acting on the reading the guardrail rejected. Those rows say what the drop was and against which limit, and the product stays on its original price.',
+      'A product the guardrail stopped never gets Apply winner on its row. The guardrail fired because that variation lost money against control, so applying its price would be acting on the reading the guardrail rejected. Those rows say what the drop was and against which limit, and the product stays on its original price.',
       'It is the only operational guardrail on the Audience step. The limits on how far a price may move, and the cost floor beneath it, are separate checks that run when prices are built rather than while the test runs.',
     ],
   },
@@ -400,17 +400,17 @@ export const DOCS_SECTIONS = [
     group: 'enforced',
     title: 'Traffic split checks',
     summary:
-      'Priceify continuously checks that visitors actually reached the variations in the proportions you set. A sample ratio mismatch is a data fault rather than a close result, so it blocks winner rollout instead of merely warning you.',
+      'Priceify continuously checks that visitors actually reached the variations in the proportions you set. A sample ratio mismatch is a data fault rather than a close result, so it blocks Apply winner instead of merely warning you.',
     facts: [
       { label: 'Test', value: 'Chi-square against your allocation' },
       { label: 'Threshold', value: 'p < 0.001' },
-      { label: 'Effect', value: 'Blocks rollout and automatic writes' },
+      { label: 'Effect', value: 'Blocks Apply winner and automatic writes' },
       { label: 'Common causes', value: 'Bots, page caching, early assignment' },
     ],
     paragraphs: [
       'Every result assumes visitors reached the variations in the proportions you set. Priceify checks that assumption continuously with a chi-square test against your allocation and flags a sample ratio mismatch when the observed split is more skewed than chance can explain, at the industry-standard threshold of p < 0.001.',
       'A mismatch is a data fault, not a close result. Common causes are bot traffic landing on one variation, a page cache serving one price more often, or assignment firing before the visitor is counted. Whatever the cause, the two groups are no longer comparable, so the lift between them is not measuring price.',
-      'This is why a mismatch blocks rather than warns. Winner rollout is refused and no price is written automatically until the split is healthy. It also invalidates the exact conversion boundary specifically, because that boundary’s null is your designed split — if the real split is not the designed one, the test is answering the wrong question.',
+      'This is why a mismatch blocks rather than warns. Apply winner is blocked and no price is written automatically until the split is healthy. It also invalidates the exact conversion boundary specifically, because that boundary’s null is your designed split — if the real split is not the designed one, the test is answering the wrong question.',
     ],
   },
   {
@@ -428,7 +428,7 @@ export const DOCS_SECTIONS = [
     paragraphs: [
       'A finished round tells you something about the product’s price sensitivity, and the useful next question is usually narrower than the first one: if +10% won, is +15% better still? Priceify therefore queues a follow-up test for a product that finished a round, seeded from what that round measured.',
       'It arrives as a draft, and nothing about it is automatic beyond the drafting. It appears on your tests list for you to open, adjust the prices in, and launch — or delete. No price reaches your catalog because a round rolled over, and no traffic is assigned to a follow-up you have not launched.',
-      'Because a follow-up is a new test rather than a continuation, it takes the confidence level and minimum sample size in force when you launch it, not the ones its parent ran with. What it does inherit is what the parent measured about the product — its conversion rate and baseline — since those are observations rather than preferences.',
+      'Because a follow-up is a new test rather than a continuation, it takes the confidence level and minimum visitors per variation in force when you launch it, not the ones its parent ran with. What it does inherit is what the parent measured about the product — its conversion rate and baseline — since those are observations rather than preferences.',
       'Each product may go three rounds. The cap is there because iterating on a price forever is a way of eventually finding a winner by chance rather than by effect, and because a product whose third round is still inconclusive is telling you its price is not the lever.',
     ],
   },
@@ -437,7 +437,7 @@ export const DOCS_SECTIONS = [
     group: 'price-surfaces',
     title: 'Price locations',
     summary:
-      'A table of rows, each saying where one price appears: a surface, which price it is, and the CSS selector that finds it. A running test repaints exactly these and nothing else. Auto-map fills the table from your theme; Pick lets you click the price on your live storefront instead.',
+      'A table of rows, each saying where one price appears: a page, which price type it is, and the theme selector that finds it. A running test repaints exactly these and nothing else. Auto-detect prices fills the table from your theme; Pick on site lets you click the price on your live storefront instead.',
     facts: [
       { label: 'Where', value: 'Settings \u2192 Price locations' },
       { label: 'Applies to', value: 'Every price test on the shop' },
@@ -447,11 +447,28 @@ export const DOCS_SECTIONS = [
     paragraphs: [
       'Each row has three parts. Surface is where on the store the price appears \u2014 product page, collection page, cart, search results, home page, recommendations, quick view, any page, or one specific URL. Role is which price on that surface: the regular price, the struck-through compare-at price, a unit price, and so on. Selector is the CSS selector that finds that price in your theme\u2019s markup. Save applies the table to every price test on the shop; a test already running picks it up on the next page view.',
       'Only the product page regular price is genuinely required. Every other surface is optional, and leaving one unmapped means Priceify does not touch prices there \u2014 it does not guess. That is the safe default, but it does mean a shopper can see the test price on the product page and the catalog price on a collection card, so map the surfaces where your prices are visible together.',
-      'Start with Auto-map. It reads your theme\u2019s price templates, verifies each candidate against your live storefront, and saves automatically when the product-page regular price and theme confidence pass checks. Otherwise you review matched rows, save, and use Pick for gaps. Selectors are never invented: anything not found on a real page stays unmatched. Pick is for custom sections, app blocks, or bundle widgets \u2014 click the price in preview to capture a selector.',
+      'Start with Auto-detect prices. It reads your theme\u2019s price templates, verifies each candidate against your live storefront, and saves automatically when the product-page regular price and theme confidence pass checks. Otherwise you review matched rows, save, and use Pick on site for gaps. Selectors are never invented: anything not found on a real page stays unmatched. Pick is for custom sections, app blocks, or bundle widgets \u2014 click the price in preview to capture a selector.',
       'Specific URL is for a page that is not a page type. Surfaces are otherwise recognised from the path, so /products/ is a product page and /collections/ a collection page, but a hand-built landing page has no such signature: every /pages/ URL looks alike. Choosing Specific URL replaces the Role column with a page URL box, and that row then applies on that page only. Paste the URL from your address bar; the query string is ignored, so a link carrying campaign parameters still matches, and so does the same page in another language.',
       'A Specific URL row is deliberately narrow. It cannot stand in for the product page \u2014 the readiness check still reports the product page as unmapped until a product page row exists \u2014 and it is pinned to the regular price, because a page is not a kind of price. Two rows may share a selector as long as they name different pages, which is what lets one theme class serve several landing pages.',
       'A row is only as good as its selector. Priceify writes the price text into the node the selector finds, so a selector that matches a whole price block rather than the amount inside it can flatten the surrounding markup; the painter resolves down to the amount where it can. It also refuses to paint a compare-at node from a regular-price row, so a struck-through price is never quietly rewritten as the live one. If a row\u2019s selector may not target a price at all, the table says so under the table rather than waiting for you to find out on the storefront.',
       'Themes change. A theme update, or switching theme entirely, can rename the classes these selectors depend on, and a stale selector paints nothing rather than painting something wrong. Re-run Auto-detect prices after a theme change and check Store setup readiness, which reports a missing product page price location as a blocking gap.',
+    ],
+  },
+  {
+    id: 'global-snippets',
+    group: 'price-surfaces',
+    title: 'Global JS/CSS',
+    summary:
+      'Plain CSS and JavaScript—the same shape as visual editor rules—run on every storefront page. Errors are checked when you save.',
+    facts: [
+      { label: 'Where', value: 'Settings \u2192 Global JS/CSS' },
+      { label: 'JavaScript', value: 'window, document, Shopify, RipX, location' },
+      { label: 'CSS', value: 'Injected in the document head' },
+    ],
+    paragraphs: [
+      'Use the same snippet bodies you would in the visual editor: CSS selectors and declarations, or JavaScript statements—not full HTML script or style tags (those are stripped if pasted).',
+      'JavaScript is compiled before save; fix any syntax error shown under the field. CSS checks for balanced braces.',
+      'Turn a snippet off with Enabled without deleting it. Empty snippets do nothing on the storefront.',
     ],
   },
   {
@@ -477,11 +494,11 @@ export const DOCS_SECTIONS = [
 export const DOCS_FAQ = [
   {
     q: 'Do Settings changes affect a running test?',
-    a: 'No. Every value a test is judged against is stamped on it at launch. Change confidence or minimum sample size in Settings and the next test you launch picks them up; the revenue guardrail lives on the test itself, so edit it there.',
+    a: 'No. Every value a test is judged against is stamped on it at launch. Change confidence or minimum visitors per variation in Settings and the next test you launch picks them up; the revenue guardrail lives on the test itself, so edit it there.',
   },
   {
     q: 'Where did the guardrail settings go?',
-    a: 'Settings now holds two choices: confidence level and minimum sample size per variation. Max price change, min margin, assumed COGS, target lift, and power still apply, but at fixed values you no longer set — each guide above says what the value is. The revenue guardrail moved onto the test, on the Audience step, because the right figure differs from test to test.',
+    a: 'Settings now holds two choices: confidence level and minimum visitors per variation. Max price change, min margin, assumed COGS, target lift, and power still apply, but at fixed values you no longer set — each guide above says what the value is. The revenue guardrail moved onto the test, on the Audience step, because the right figure differs from test to test.',
   },
   {
     q: 'Why is profit per visitor no longer a metric?',
@@ -497,7 +514,7 @@ export const DOCS_FAQ = [
   },
   {
     q: 'Does Suggest change my catalog price?',
-    a: 'No. It only fills higher test-variation prices in the wizard. Control stays at the catalog price. A Shopify catalog price changes only after you review the result and explicitly roll out that product’s winning variation.',
+    a: 'No. It only fills higher test-variation prices in the wizard. Control stays at the catalog price. A Shopify catalog price changes only after you review the result and explicitly apply that product’s winning variation.',
   },
   {
     q: 'Can Suggest propose a discount?',

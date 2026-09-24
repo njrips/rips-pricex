@@ -74,6 +74,6 @@ export const CLASSIC_CREATE_STEPS = [
     label: 'Review & launch',
     title: 'Review & launch',
     description:
-      'Check your settings before launching. You can pause or stop a test at any time.',
+      'Check your settings before launching. You can pause or stop a test at any time. After the minimum visitors per variation is reached, you can pause variations but not edit test settings.',
   },
 ];

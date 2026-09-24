@@ -96,28 +96,28 @@ const METRICS = {
 };
 
 describe('ClassicSettingsTab', () => {
-  it('leads with how the experiment runs and how it will be decided', async () => {
+  it('leads with status, traffic, audience, and metrics per the naming doc', async () => {
     await render({ settings: SETTINGS, audience: AUDIENCE, metrics: METRICS });
     const visible = visibleText();
-    expect(visible).toContain('Status');
-    expect(visible).toContain('Running');
-    expect(visible).toContain('Auto-stop');
-    expect(visible).toContain('Price application');
-    expect(visible).toContain('Traffic ramp');
-    expect(visible).toContain('How a winner is decided');
+    expect(visible).toContain('Status & traffic');
+    expect(visible).toContain('Active');
+    expect(visible).toContain('Traffic allocation');
+    expect(visible).toContain('Audience & targeting');
+    expect(visible).toContain('Metrics & guardrail');
     expect(visible).toContain('Confidence level');
     expect(visible).toContain('Minimum visitors per variation');
     expect(visible).toContain('5,000');
+    const details = container.querySelector('details');
+    expect(details.textContent).toContain('Auto-stop');
+    expect(details.textContent).toContain('Price application');
   });
 
-  it('splits the analysis method, confidence and lift into separate rows', async () => {
+  it('keeps analysis method in reference while confidence stays visible', async () => {
     await render({ settings: SETTINGS, audience: AUDIENCE, metrics: METRICS });
     const visible = visibleText();
-    // These used to be concatenated into a single unreadable value.
-    expect(visible).toContain('Sequential, with your review');
     expect(visible).toContain('90%');
-    expect(visible).toContain('Lift reference');
-    expect(visible).not.toContain('Sequential directional evidence · manual winner review');
+    expect(visibleText()).not.toContain('Sequential directional evidence · manual winner review');
+    expect(container.querySelector('details').textContent).toContain('Sequential, with your review');
   });
 
   it('keeps reference material and identifiers folded away until asked for', async () => {
@@ -135,10 +135,12 @@ describe('ClassicSettingsTab', () => {
     expect(visibleText()).not.toContain('Traffic evidence');
   });
 
-  it('does not repeat countries, which the Audience tab owns and edits', async () => {
+  it('shows audience targeting blocks with the doc helper text', async () => {
     await render({ settings: SETTINGS, audience: AUDIENCE, metrics: METRICS });
-    expect(text()).not.toContain('Countries');
-    expect(text()).toContain('Segment, devices, and countries are on the Audience tab.');
+    expect(text()).toContain('Audience & targeting');
+    expect(text()).toContain('Segment');
+    expect(text()).toContain('Countries');
+    expect(text()).toContain('Only visitors who match these filters can enter the test.');
   });
 
   it('shows the revenue guardrail with a way to change it', async () => {
@@ -165,10 +167,9 @@ describe('ClassicSettingsTab', () => {
       audience: AUDIENCE,
       metrics: METRICS,
     });
-    const visible = visibleText();
-    expect(visible).toContain('Offer application');
-    expect(visible).toContain('Checkout discount');
-    expect(visible).toContain('Catalog prices are not changed.');
+    const details = container.querySelector('details');
+    expect(details.textContent).toContain('Offer application');
+    expect(details.textContent).toContain('Checkout discount');
   });
 
   it('omits sections it has no data for rather than showing empty rows', async () => {
@@ -177,7 +178,7 @@ describe('ClassicSettingsTab', () => {
       audience: null,
       metrics: null,
     });
-    expect(text()).not.toContain('Who is counted');
+    expect(text()).not.toContain('Audience & targeting');
     expect(text()).not.toContain('Cost of goods');
     expect(text()).not.toContain('Shop defaults at launch');
     expect(text()).not.toContain('Traffic plan');
@@ -188,5 +189,23 @@ describe('ClassicSettingsTab', () => {
   it('explains itself before the plan is saved', async () => {
     await render({ settings: null });
     expect(text()).toContain('Launch settings will appear after the plan is saved.');
+  });
+
+  it('shows secondary metric labels instead of object placeholders', async () => {
+    await render({
+      settings: SETTINGS,
+      audience: AUDIENCE,
+      metrics: {
+        ...METRICS,
+        primaryMetricLabel: 'Revenue per visitor',
+        secondary: [
+          { event_name: 'add_to_cart', label: 'Add to cart' },
+          { event_name: 'page_view', label: 'Page view' },
+        ],
+      },
+    });
+    expect(visibleText()).toContain('Add to cart');
+    expect(visibleText()).toContain('Page view');
+    expect(visibleText()).not.toContain('[object Object]');
   });
 });

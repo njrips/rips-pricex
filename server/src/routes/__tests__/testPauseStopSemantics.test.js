@@ -20,10 +20,11 @@ const ROUTES = path.join(__dirname, '..', 'testLifecycleRoutes.js');
 
 let statusUpdates;
 let syncCalls;
+let eventCalls;
 /** Whether the shop has a paid plan, as the real middleware would find it. */
 let entitled;
 
-function loadRouter() {
+function installModuleStubs() {
   const stubs = {
     '../models/test': {
       getTestById: async id => ({
@@ -60,22 +61,35 @@ function loadRouter() {
     },
   };
 
+  const eventStoreStub = {
+    recordEventForTest: async (...args) => {
+      eventCalls.push(args);
+      return null;
+    },
+  };
+
   const original = Module._load;
   Module._load = function load(request, parent, isMain) {
     if (stubs[request]) return stubs[request];
+    if (String(request || '').includes('smartPricingProductEventStore')) {
+      return eventStoreStub;
+    }
     return original.call(this, request, parent, isMain);
   };
-  try {
-    delete require.cache[require.resolve(ROUTES)];
-    return require(ROUTES);
-  } finally {
-    Module._load = original;
-  }
+  delete require.cache[require.resolve(ROUTES)];
+  const router = require(ROUTES);
+  return {
+    router,
+    restore() {
+      Module._load = original;
+    },
+  };
 }
 
 /** Drive one route's handler chain directly rather than standing up a server. */
 async function post(routePath, id = 'test-1', method = 'post') {
-  const router = loadRouter();
+  const { router, restore } = installModuleStubs();
+  try {
   const layer = router.stack.find(
     entry => entry.route?.path === routePath && entry.route?.methods?.[method]
   );
@@ -108,11 +122,15 @@ async function post(routePath, id = 'test-1', method = 'post') {
     if (!advanced) break;
   }
   return { status, payload };
+  } finally {
+    restore();
+  }
 }
 
 beforeEach(() => {
   statusUpdates = [];
   syncCalls = [];
+  eventCalls = [];
   entitled = true;
 });
 
@@ -130,6 +148,14 @@ describe('pausing an experiment', () => {
 
     assert.deepEqual(syncCalls, [{ id: 'test-1', reason: 'merchant_pause' }]);
   });
+
+  it('logs a durable pause event for Test history', async () => {
+    await post('/:id/pause');
+
+    assert.equal(eventCalls.length, 1);
+    assert.equal(eventCalls[0][2], 'stopped');
+    assert.equal(eventCalls[0][3]?.payload?.reason, 'merchant_pause');
+  });
 });
 
 describe('stopping an experiment', () => {
@@ -146,6 +172,14 @@ describe('stopping an experiment', () => {
     await post('/:id/stop');
 
     assert.deepEqual(syncCalls, [{ id: 'test-1', reason: 'merchant_finish' }]);
+  });
+
+  it('logs a durable stop event for Test history', async () => {
+    await post('/:id/stop');
+
+    assert.equal(eventCalls.length, 1);
+    assert.equal(eventCalls[0][2], 'stopped');
+    assert.equal(eventCalls[0][3]?.payload?.reason, 'merchant_finish');
   });
 });
 

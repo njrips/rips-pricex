@@ -141,4 +141,14 @@ describe('the launch button', () => {
     expect(button.getAttribute('aria-label')).toMatch(/Checkout is not ready/);
     expect(button.disabled || button.getAttribute('aria-disabled') === 'true').toBe(true);
   });
+
+  it('renders a Polaris-compatible stroke rocket in the icon slot', async () => {
+    await renderShell({ continueLabel: 'Launch test' });
+    const svg = primaryButton().querySelector('.Polaris-Icon__Svg');
+    expect(svg).toBeTruthy();
+    expect(svg.getAttribute('viewBox')).toBe('0 0 20 20');
+    for (const node of svg.querySelectorAll('path, circle')) {
+      expect(node.getAttribute('fill')).toBe('none');
+    }
+  });
 });

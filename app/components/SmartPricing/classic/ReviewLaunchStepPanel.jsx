@@ -234,7 +234,7 @@ export default function ReviewLaunchStepPanel({
       ) : null}
 
       {launchBlockedReason ? (
-        <Banner tone="critical" title="Not ready to launch">
+        <Banner tone="critical" title="Not ready to launch tests yet">
           <p>{launchBlockedReason}</p>
         </Banner>
       ) : null}
@@ -472,6 +472,9 @@ export default function ReviewLaunchStepPanel({
             </p>
           </div>
         </div>
+        <p className={styles.help} style={{ marginTop: 8 }}>
+          Only visitors who match these filters can enter the test.
+        </p>
       </section>
 
       <section className={styles.reviewSection}>

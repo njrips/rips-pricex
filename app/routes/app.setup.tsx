@@ -19,6 +19,7 @@ import {
 } from '../utils/checkoutReadinessClient';
 import TooltipWrapper from '../components/shared/TooltipWrapper';
 import ClassicAdminShell from '../components/SmartPricing/classic/ClassicAdminShell';
+import ClassicPageLoader from '../components/shared/ClassicPageLoader';
 import styles from '../components/SmartPricing/classic/SmartPricingClassic.module.css';
 
 type EmbedView = 'checking' | 'enabled' | 'disabled' | 'unknown';
@@ -261,6 +262,8 @@ export default function SetupPage() {
           ? 'Checkout ready — unlock Create under Settings → Plan'
           : launchSummary.title;
 
+  const setupBootstrapping = readinessBusy && launchSummary.anyReady == null;
+
   return (
     <ClassicAdminShell
       titleBar="Store setup"
@@ -302,6 +305,12 @@ export default function SetupPage() {
             : undefined
       }
     >
+      {setupBootstrapping ? <ClassicPageLoader label="Loading store setup…" /> : null}
+      {!setupBootstrapping ? (
+        <>
+      <p className={styles.help} style={{ marginTop: 0, marginBottom: 16 }}>
+        Complete the steps below to connect Priceify to your theme and checkout.
+      </p>
       <div style={{ marginBottom: 20 }}>
         <Banner
           tone={
@@ -464,7 +473,7 @@ export default function SetupPage() {
               variant="primary"
               onClick={() => navigate('/app/settings?tab=price-surfaces&automap=1')}
             >
-              Scan storefront
+              Auto-detect prices
             </Button>
             <Button onClick={() => navigate('/app/settings?tab=price-surfaces')}>
               Edit price locations
@@ -489,6 +498,8 @@ export default function SetupPage() {
         <Link to="/app/settings?tab=price-surfaces">Price locations</Link> ·{' '}
         <Link to={withCurrentEmbeddedSearch(searchParams, '/app/help')}>Get support</Link>
       </p>
+        </>
+      ) : null}
     </ClassicAdminShell>
   );
 }

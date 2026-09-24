@@ -32,6 +32,18 @@ import {
   splitTitleParts,
 } from './productsStepReadiness';
 import {
+  buildAllProductsSelectionCountLabel,
+  buildCatalogTruncatedHelp,
+  buildManualSelectionCountLabel,
+  buildProductsStepEmptyMessage,
+  buildWithheldDetail,
+  countCatalogProducts,
+  resolveCatalogLoadedProductCount,
+  resolveStoreCatalogProductCount,
+  buildStoreCatalogStatusText,
+  shouldShowCatalogTruncatedHelp,
+} from './productsStepCatalogCopy';
+import {
   ButtonIconSearch,
   IconBoxes,
   IconCheck,
@@ -156,12 +168,15 @@ export default function ProductsPricingStepPanel({
    * this list is part of the catalog rather than all of it.
    */
   catalogTruncated = false,
+  catalogLoadedProductCount = null,
   /**
    * Look up products the snapshot did not load, for a catalog too big to load
    * in one go. Null when the whole catalog is already here.
    */
   onCatalogSearch = null,
   catalogSearching = false,
+  catalogSearchHint = null,
+  onClearCatalogSearchHint = null,
   selectedIds = [],
   onSelectedIdsChange,
   maxSelection = 20,
@@ -223,10 +238,15 @@ export default function ProductsPricingStepPanel({
     [selectedIds]
   );
 
-  const catalogProductCount = useMemo(() => {
-    const keys = new Set((opportunities || []).map(productGroupKey));
-    return keys.size || (opportunities || []).length;
-  }, [opportunities]);
+  const availableProductCount = useMemo(
+    () => countCatalogProducts(opportunities),
+    [opportunities]
+  );
+  const loadedCatalogProductCount = useMemo(
+    () => resolveCatalogLoadedProductCount(catalogLoadedProductCount, opportunities),
+    [catalogLoadedProductCount, opportunities]
+  );
+  const catalogProductCount = availableProductCount;
 
   const selectedProductCount = useMemo(() => {
     const keys = new Set();
@@ -778,35 +798,49 @@ export default function ProductsPricingStepPanel({
     );
   };
 
-  const selectionTotal =
-    pickMode === 'all'
-      ? Math.min(catalogProductCount, maxSelection) || catalogProductCount
-      : catalogProductCount || maxSelection;
   // Both modes stop at the cap, and both used to do it in silence: "All
   // products" quietly priced the first N and Select all just went grey. If the
   // catalog is bigger than one experiment holds, the step has to say so.
-  const productsOverCap = catalogProductCount > maxSelection;
-  const productsLeftOut = productsOverCap ? catalogProductCount - maxSelection : 0;
+  const productsOverCap = availableProductCount > maxSelection;
+  const productsLeftOut = productsOverCap ? availableProductCount - maxSelection : 0;
   const withheldCount = Number(withheldByOtherTests?.total) || 0;
-  const withheldTestNames = (withheldByOtherTests?.tests || [])
-    .slice(0, 2)
-    .map(row => row?.name)
-    .filter(Boolean)
-    .join(', ');
-  // The count is the part a merchant scanning the step needs; which tests hold
-  // the products, and what frees them, only matters once they ask. A per-product
-  // test name runs to a full product title, so two of them printed inline turned
-  // a footnote into a paragraph.
-  const withheldSummary = `${withheldCount} product${withheldCount === 1 ? '' : 's'} not shown`;
-  // "another test", not "another price test": a running offer test holds its
-  // product just as hard, because a discount lands on top of whatever price
-  // the other test is setting. Naming the wrong kind sent merchants looking
-  // through their price tests for a product an offer test was holding.
-  const withheldDetail = `${withheldSummary}: ${
-    withheldCount === 1 ? 'it is' : 'they are'
-  } in another test${
-    withheldTestNames ? ` (${withheldTestNames})` : ''
-  }. End that test to reuse ${withheldCount === 1 ? 'it' : 'them'} here.`;
+  const withheldDetail = buildWithheldDetail(withheldByOtherTests);
+  const catalogTruncatedHelp = buildCatalogTruncatedHelp({
+    catalogTruncated,
+    catalogLoadedProductCount: loadedCatalogProductCount,
+  });
+  const selectionCountLabel =
+    pickMode === 'manual'
+      ? buildManualSelectionCountLabel(selectedProductCount, availableProductCount)
+      : buildAllProductsSelectionCountLabel({
+          availableProductCount,
+          maxSelection,
+        });
+  const showCatalogTruncatedHelp = shouldShowCatalogTruncatedHelp({
+    catalogTruncatedHelp,
+    availableProductCount,
+    loading,
+    loadError,
+  });
+  const productsStepEmptyMessage = buildProductsStepEmptyMessage({
+    loading,
+    loadError,
+    availableProductCount,
+    withheldCount,
+    catalogTruncated,
+  });
+  const storeCatalogProductCount = resolveStoreCatalogProductCount({
+    catalogLoadedProductCount,
+    availableProductCount,
+    withheldCount,
+    opportunities,
+  });
+  const storeCatalogStatusText = buildStoreCatalogStatusText({
+    storeProductCount: storeCatalogProductCount,
+    availableProductCount,
+    withheldCount,
+    catalogTruncated,
+  });
   // A dollar band moves in cents, a percent band in whole points.
   const aiBandStep = aiUnit === 'amount' ? 0.01 : 1;
   const aiBandNumberProps = {
@@ -900,14 +934,29 @@ export default function ProductsPricingStepPanel({
             <div className={styles.selectionCardCount} aria-live="polite">
               {loadError
                 ? 'Catalog unavailable'
-                : loading && !catalogProductCount
+                : loading && !availableProductCount && !loadedCatalogProductCount
                   ? 'Loading catalog…'
-                  : pickMode === 'manual'
-                    ? `${selectedProductCount} of ${selectionTotal} products`
-                    : productsOverCap
-                      ? `First ${maxSelection} of ${catalogProductCount} products`
-                      : `All ${catalogProductCount || opportunities.length || 0} products`}
+                  : selectionCountLabel}
             </div>
+            {!loading && !loadError && storeCatalogStatusText ? (
+              <p className={styles.help} style={{ margin: '4px 0 0' }}>
+                {storeCatalogStatusText}
+                {withheldCount > 0 ? (
+                  <>
+                    {' '}
+                    <TooltipWrapper content={withheldDetail}>
+                      <button
+                        type="button"
+                        className={styles.helpHint}
+                        aria-label={withheldDetail}
+                      >
+                        Details
+                      </button>
+                    </TooltipWrapper>
+                  </>
+                ) : null}
+              </p>
+            ) : null}
             {pickMode === 'manual' ? (
               <div className={styles.selectionBarActions}>
                 {/* No Select all here: "All products" above is that choice,
@@ -938,43 +987,26 @@ export default function ProductsPricingStepPanel({
         ) : null}
       </div>
 
-      {pickMode === 'manual' && !loading && !loadError && !opportunities.length ? (
-        <p className={styles.help}>No catalog products loaded yet.</p>
+      {pickMode === 'manual' && productsStepEmptyMessage ? (
+        <p className={styles.help}>{productsStepEmptyMessage}</p>
       ) : null}
 
       {productsOverCap && !loading && !loadError ? (
         <p className={styles.help}>
           One test covers up to {maxSelection} products, so {productsLeftOut} of your{' '}
-          {catalogProductCount} are left out. Run a second test for the rest.
+          {availableProductCount} available here are left out. Run a second test for the rest.
         </p>
       ) : null}
 
       {/* A big catalog is loaded in part. Saying which part beats letting a
           merchant conclude their other products cannot be tested at all. */}
-      {catalogTruncated && !loading && !loadError ? (
-        <p className={styles.help}>
-          Showing the first {catalogProductCount} products of your catalog. Search in Browse
-          products to find any of the rest.
-        </p>
+      {showCatalogTruncatedHelp ? (
+        <p className={styles.help}>{catalogTruncatedHelp}</p>
       ) : null}
 
       {/* Products another test is pricing are not in this list at all, because
           two tests over one product is two answers to what it costs. Saying so
           beats letting the merchant hunt for a product that never appears. */}
-      {withheldCount > 0 && !loading && !loadError ? (
-        <p className={styles.help}>
-          <TooltipWrapper content={withheldDetail}>
-            {/* A button, not a span: the reason has to be reachable by keyboard
-                and not only by hovering a mouse. The accessible name carries
-                the whole sentence, so nothing here is hover-only. */}
-            <button type="button" className={styles.helpHint} aria-label={withheldDetail}>
-              {withheldSummary}
-            </button>
-          </TooltipWrapper>
-        </p>
-      ) : null}
-
-
       <hr className={styles.productsDivider} />
 
       {continueHint ? <p className={styles.productsContinueHint}>{continueHint}</p> : null}
@@ -1027,6 +1059,9 @@ export default function ProductsPricingStepPanel({
           that can actually take a new price is selected. */}
       {!isControlArm ? (
         <>
+      <p className={styles.help} style={{ marginTop: 0, marginBottom: 12 }}>
+        For each variation, choose how you&rsquo;d like Priceify to set prices.
+      </p>
       <LabelWithInfo hash="ai-price" label="AI price suggestions">
         How would you like to set prices?
       </LabelWithInfo>
@@ -1427,11 +1462,18 @@ export default function ProductsPricingStepPanel({
           opportunities={opportunities}
           onCatalogSearch={onCatalogSearch}
           catalogSearching={catalogSearching}
+          catalogSearchHint={catalogSearchHint}
+          catalogTruncated={catalogTruncated}
+          catalogLoadedProductCount={loadedCatalogProductCount}
+          withheldByOtherTests={withheldByOtherTests}
           collectionOptions={collectionOptions}
           selectedIds={selectedIds}
           onSelectedIdsChange={onSelectedIdsChange}
           maxSelection={maxSelection}
-          onClose={() => setPickerOpen(false)}
+          onClose={() => {
+            setPickerOpen(false);
+            onClearCatalogSearchHint?.();
+          }}
         />
       ) : null}
     </div>

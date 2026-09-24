@@ -110,11 +110,24 @@ async function stopSmartPricingProduct({ testId, shopDomain, reason = 'merchant_
     reason: reason === 'guardrail_breach' ? 'guardrail_breach' : 'merchant_stop_product',
   }).catch(() => null);
 
-  await recordEventForTest(shopDomain, testId, 'stopped', {
-    actor: reason === 'guardrail_breach' ? 'guardrail' : 'merchant',
-    test: stopped || test,
-    payload: { reason },
-  }).catch(() => null);
+  await recordEventForTest(
+    shopDomain,
+    testId,
+    reason === 'guardrail_breach' ? 'guardrail_stopped' : 'stopped',
+    {
+      actor: reason === 'guardrail_breach' ? 'guardrail' : 'merchant',
+      test: stopped || test,
+      payload: {
+        reason,
+        ...(reason === 'guardrail_breach' && test?.guardrail_config
+          ? {
+              observed_drop_percent: test.guardrail_config.observed_drop_percent,
+              threshold_percent: test.guardrail_config.max_revenue_drop_percent,
+            }
+          : {}),
+      },
+    }
+  ).catch(() => null);
 
   return {
     test: stopped || (await getTestById(testId, shopDomain)),

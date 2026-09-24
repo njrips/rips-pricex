@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
-import { Badge, Button, Spinner, TextField } from '@shopify/polaris';
+import { Badge, Button, TextField } from '@shopify/polaris';
 import PageShell from '../../shared/PageShell';
+import ClassicPageLoader from '../../shared/ClassicPageLoader';
 import { ROUTES } from '../../../constants';
 import useClassicShopDomain from '../../../hooks/useClassicShopDomain';
 import { useKeyedState } from '../../../hooks/useKeyedState';
@@ -347,6 +348,14 @@ export default function ClassicExperimentsList() {
                     ? 'Updating tests…'
                     : 'Loading tests…';
 
+  if (loading || gridBusy) {
+    return (
+      <PageShell message={message} messageType={messageType} onCloseMessage={() => setMessage('')}>
+        <ClassicPageLoader label={gridBusy ? gridBusyLabel : 'Loading tests…'} />
+      </PageShell>
+    );
+  }
+
   return (
     <PageShell message={message} messageType={messageType} onCloseMessage={() => setMessage('')}>
       <div className={styles.listPage}>
@@ -455,13 +464,7 @@ export default function ClassicExperimentsList() {
           </div>
         </div>
 
-        <div className={styles.expTableWrap} aria-busy={loading || Boolean(gridBusy)}>
-          {loading || gridBusy ? (
-            <div className={styles.expTableBusy} role="status" aria-live="polite">
-              <Spinner size="small" />
-              <span>{gridBusy ? gridBusyLabel : 'Loading tests…'}</span>
-            </div>
-          ) : null}
+        <div className={styles.expTableWrap}>
           <table className={styles.table}>
             <thead>
               <tr>

@@ -4,7 +4,6 @@
 
 import { classicAudienceToSegments } from '../targeting/smartPricingAudienceHelpers';
 import { stampStatisticalFields } from './sampleSizePolicy';
-import { isOfferExperimentType } from './offerSelection';
 import { ensureRevenueGuardrailRows, revenueGuardrailGoalConfig } from './revenueGuardrail';
 
 /**
@@ -450,7 +449,7 @@ export function enrichInboxPlansForLaunch(plans = [], shopGuardrails = {}) {
   });
 }
 
-export function formatClassicStatusLabel(status, experimentType) {
+export function formatClassicStatusLabel(status, _experimentType) {
   const key = String(status || '')
     .trim()
     .toLowerCase();

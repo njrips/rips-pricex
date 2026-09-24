@@ -27,11 +27,8 @@ export default function ClassicActivityTab({ activity }) {
   if (!items.length) {
     return (
       <div className={styles.statCard}>
-        <h3 className={styles.panelTitle}>Activity history</h3>
-        <p className={styles.help}>
-          Launch, pause, resume, Self-QA, audience changes, guardrail stops, and per-product
-          winner decisions will appear here as the test progresses.
-        </p>
+        <h3 className={styles.panelTitle}>Test history</h3>
+        <p className={styles.help}>Log of guardrail events and test changes.</p>
       </div>
     );
   }
@@ -40,16 +37,17 @@ export default function ClassicActivityTab({ activity }) {
     <div className={styles.statCard}>
       <div className={styles.activityHead}>
         <div>
-          <h3 className={styles.panelTitle}>Activity history</h3>
+          <h3 className={styles.panelTitle}>Test history</h3>
+          <p className={styles.help}>Log of guardrail events and test changes.</p>
           <p className={styles.help}>
             {counts.all} event{counts.all === 1 ? '' : 's'}
-            {counts.qa ? ` · ${counts.qa} Self-QA` : ''}
-            {counts.changes ? ` · ${counts.changes} change${counts.changes === 1 ? '' : 's'}` : ''}
+            {counts.lifecycle ? ` · ${counts.lifecycle} lifecycle` : ''}
+            {counts.guardrail ? ` · ${counts.guardrail} guardrail` : ''}
           </p>
         </div>
       </div>
       {filters.length > 1 ? (
-        <div className={`${styles.pillRow} ${styles.activityFilterRow}`} role="group" aria-label="Activity filters">
+        <div className={`${styles.pillRow} ${styles.activityFilterRow}`} role="group" aria-label="History filters">
           {filters.map(row => {
             const active = filter === row.id;
             const count = counts[row.id] || 0;

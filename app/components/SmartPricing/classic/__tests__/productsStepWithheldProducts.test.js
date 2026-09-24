@@ -87,10 +87,10 @@ async function renderPanel(props = {}) {
   });
 }
 
-/** The hint the count hangs off, whose accessible name holds the detail. */
+/** Tooltip trigger for why products are in other tests. */
 const withheldHint = () =>
-  Array.from(container.querySelectorAll('button')).find(node =>
-    /not shown/.test(node.textContent || '')
+  Array.from(container.querySelectorAll('button')).find(
+    node => String(node.textContent || '').trim() === 'Details'
   );
 
 describe('products held by another test', () => {
@@ -104,7 +104,7 @@ describe('products held by another test', () => {
       },
     });
 
-    expect(container.textContent).toContain('4 products not shown');
+    expect(container.textContent).toContain('4 in other tests');
     // The long part is not printed on the step.
     expect(container.textContent).not.toContain('Summer pricing');
     expect(container.textContent).not.toContain('in another test');
@@ -141,7 +141,7 @@ describe('products held by another test', () => {
       withheldByOtherTests: { total: 1, live: 1, paused: 0, tests: [] },
     });
 
-    expect(container.textContent).toContain('1 product not shown');
+    expect(container.textContent).toContain('1 in other tests');
     expect(withheldHint().getAttribute('aria-label')).toContain('it is in another test');
   });
 
@@ -175,12 +175,12 @@ describe('products held by another test', () => {
 
   it('stays quiet when nothing was withheld', async () => {
     await renderPanel({ withheldByOtherTests: { total: 0, live: 0, paused: 0, tests: [] } });
-    expect(container.textContent).not.toContain('not shown');
+    expect(container.textContent).not.toContain('in other tests');
   });
 
   it('stays quiet when the catalog never reported it', async () => {
     await renderPanel();
-    expect(container.textContent).not.toContain('not shown');
+    expect(container.textContent).not.toContain('in other tests');
   });
 
   it('does not claim anything while the catalog is still loading', async () => {
@@ -190,6 +190,6 @@ describe('products held by another test', () => {
       opportunities: [],
       withheldByOtherTests: { total: 3, live: 3, paused: 0, tests: [] },
     });
-    expect(container.textContent).not.toContain('not shown');
+    expect(container.textContent).not.toContain('in other tests');
   });
 });

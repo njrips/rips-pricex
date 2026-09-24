@@ -175,7 +175,7 @@ describe('the page is only the mapping table', () => {
   it('keeps the three actions worth having', async () => {
     await render();
     expect(buttonNamed('Add location')).toBeTruthy();
-    expect(buttonNamed('Scan storefront')).toBeTruthy();
+    expect(buttonNamed('Auto-detect prices')).toBeTruthy();
     expect(buttonNamed('Save')).toBeTruthy();
     // Auto-map fills the table, so the other theme helpers were redundant.
     expect(buttonNamed('Suggest from theme')).toBeFalsy();
@@ -581,7 +581,7 @@ describe('saving', () => {
     expect(savedBodies[0]?.mappings?.some(row => row.selector === '.price-item--regular')).toBe(
       true
     );
-    expect(text()).toMatch(/Theme prices mapped|verified price location|Auto-mapped selectors saved/i);
+    expect(text()).toMatch(/Theme prices mapped|verified price location|Auto-detect selectors saved/i);
   });
 
   it('reports a bad URL row instead of saving it', async () => {

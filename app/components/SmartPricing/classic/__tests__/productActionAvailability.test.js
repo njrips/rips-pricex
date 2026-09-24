@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   resolveProductActionAvailability,
   mapServerEventToActivity,
+  resolveProductEventTitle,
   mergeServerAndLegacyActivity,
   PRODUCT_EVENT_LABELS,
 } from '../productActionAvailability';
@@ -134,6 +135,50 @@ describe('resolveProductActionAvailability', () => {
     });
     expect(actions.canRerun).toBe(false);
     expect(actions.reasons.rerun).toMatch(/already queued/i);
+  });
+});
+
+describe('resolveProductEventTitle', () => {
+  it('maps merchant pause stops to Test paused', () => {
+    expect(
+      resolveProductEventTitle({
+        event_type: 'stopped',
+        payload: { reason: 'merchant_pause' },
+      })
+    ).toBe('Test paused');
+  });
+
+  it('maps merchant finish stops to Stopped test', () => {
+    expect(
+      resolveProductEventTitle({
+        event_type: 'stopped',
+        payload: { reason: 'merchant_finish' },
+      })
+    ).toBe(PRODUCT_EVENT_LABELS.stopped);
+    const row = mapServerEventToActivity({
+      event_type: 'stopped',
+      actor: 'merchant',
+      created_at: '2026-09-02T12:00:00.000Z',
+      payload: { reason: 'merchant_finish' },
+    });
+    expect(row.kind).toBe('stopped');
+    expect(row.actor).toBe('You');
+  });
+
+  it('maps per-product guardrail stops to Guardrail excluded product', () => {
+    expect(
+      resolveProductEventTitle({
+        event_type: 'guardrail_stopped',
+        payload: { product_title: 'Gift Card' },
+      })
+    ).toBe('Guardrail excluded product');
+    const row = mapServerEventToActivity({
+      event_type: 'guardrail_stopped',
+      actor: 'guardrail',
+      created_at: '2026-09-02T12:00:00.000Z',
+      payload: { product_title: 'Gift Card' },
+    });
+    expect(row.detail).toMatch(/Guardrail excluded "Gift Card"/);
   });
 });
 

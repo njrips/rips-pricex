@@ -3,15 +3,15 @@
  */
 
 export const PRODUCT_EVENT_LABELS = Object.freeze({
-  launched: 'Launched',
-  stopped: 'Stopped',
-  resumed: 'Resumed',
-  winner_applied: 'Price applied to Shopify',
+  launched: 'Launched test',
+  stopped: 'Stopped test',
+  resumed: 'Test resumed',
+  winner_applied: 'Winner applied to catalog',
   reverted: 'Price reverted',
   finished_control: 'Kept catalog price',
   rerun_queued: 'Re-run queued',
   guardrail_stopped: 'Stopped by guardrail',
-  auto_applied: 'Auto-applied winning price',
+  auto_applied: 'Winner applied to catalog',
 });
 
 /**
@@ -100,11 +100,46 @@ export function resolveProductActionAvailability({
   };
 }
 
-export function mapServerEventToActivity(event) {
-  if (!event) return null;
+function productTitleFromEventPayload(payload = {}) {
+  return String(payload.product_title || payload.productTitle || '').trim();
+}
+
+export function resolveProductEventTitle(event) {
+  if (!event?.event_type) return '';
+  const type = String(event.event_type).trim().toLowerCase();
+  const payload = event?.payload && typeof event.payload === 'object' ? event.payload : {};
+  const reason = String(payload.reason || '')
+    .trim()
+    .toLowerCase();
+  const productTitle = productTitleFromEventPayload(payload);
+  if (type === 'guardrail_stopped') {
+    return productTitle ? 'Guardrail excluded product' : PRODUCT_EVENT_LABELS.guardrail_stopped;
+  }
+  if (type === 'stopped') {
+    if (reason === 'merchant_pause') return 'Test paused';
+    if (reason === 'guardrail_breach') {
+      return productTitle ? 'Guardrail excluded product' : 'Stopped by guardrail';
+    }
+    return PRODUCT_EVENT_LABELS.stopped;
+  }
+  return PRODUCT_EVENT_LABELS[type] || event.event_type;
+}
+
+function resolveServerActivityKind(event) {
+  const type = String(event?.event_type || '')
+    .trim()
+    .toLowerCase();
+  const payload = event?.payload && typeof event.payload === 'object' ? event.payload : {};
+  const reason = String(payload.reason || '')
+    .trim()
+    .toLowerCase();
+  if (type === 'stopped') {
+    if (reason === 'merchant_pause') return 'paused';
+    if (reason === 'guardrail_breach') return 'guardrail';
+    return 'stopped';
+  }
   const kindMap = {
     launched: 'started',
-    stopped: 'paused',
     resumed: 'resumed',
     winner_applied: 'complete',
     auto_applied: 'complete',
@@ -113,12 +148,27 @@ export function mapServerEventToActivity(event) {
     rerun_queued: 'queued',
     guardrail_stopped: 'guardrail',
   };
+  return kindMap[type] || 'updated';
+}
+
+function resolveServerActivityActor(event) {
+  const key = String(event?.actor || 'system')
+    .trim()
+    .toLowerCase();
+  if (key === 'guardrail') return 'guardrail';
+  if (key === 'merchant') return 'You';
+  if (key === 'auto_winner') return 'Auto winner';
+  return event?.actor || 'system';
+}
+
+export function mapServerEventToActivity(event) {
+  if (!event) return null;
   return {
     id: event.id || `server:${event.event_type}:${event.created_at}`,
     at: event.created_at,
-    title: PRODUCT_EVENT_LABELS[event.event_type] || event.event_type,
-    kind: kindMap[event.event_type] || 'updated',
-    actor: event.actor || 'system',
+    title: resolveProductEventTitle(event),
+    kind: resolveServerActivityKind(event),
+    actor: resolveServerActivityActor(event),
     detail: formatEventDetail(event),
     status: event.event_type,
     source: 'server',
@@ -131,6 +181,16 @@ export function mapServerEventToActivity(event) {
 function formatEventDetail(event) {
   const payload = event?.payload && typeof event.payload === 'object' ? event.payload : {};
   if (event.event_type === 'winner_applied' || event.event_type === 'auto_applied') {
+    const product = payload.product_title || payload.productTitle || '';
+    const winner =
+      payload.winner_variant_name ||
+      payload.winnerVariantName ||
+      payload.winner_label ||
+      payload.winnerLabel ||
+      'Variation';
+    if (product) {
+      return `Applied winner "${winner}" for "${product}". Catalog price updated.`;
+    }
     const n = payload.updated_count;
     return Number.isFinite(Number(n))
       ? `${n} Shopify price${Number(n) === 1 ? '' : 's'} updated`
@@ -148,9 +208,47 @@ function formatEventDetail(event) {
       : null;
   }
   if (event.event_type === 'guardrail_stopped') {
-    return Number.isFinite(Number(payload.observed_drop_percent))
-      ? `Revenue drop ${payload.observed_drop_percent}% exceeded ${payload.threshold_percent}%`
-      : null;
+    const product = productTitleFromEventPayload(payload);
+    if (product) {
+      return `Guardrail excluded "${product}" from the test. Revenue per visitor fell below the safety limit.`;
+    }
+    const observed = Number(payload.observed_drop_percent);
+    const limit = Number(payload.threshold_percent);
+    const detail =
+      Number.isFinite(observed) && Number.isFinite(limit)
+        ? `Revenue per visitor dropped ${observed.toFixed(1)}% vs control (limit ${limit}%). Traffic assignment stopped.`
+        : null;
+    return detail || payload.reason || null;
+  }
+  if (event.event_type === 'launched') {
+    const pct = payload.traffic_allocation_percent ?? payload.traffic_percent;
+    if (Number.isFinite(Number(pct))) {
+      return `Traffic allocation set to ${pct}%. All visitors in your audience segment can enter this test.`;
+    }
+  }
+  if (event.event_type === 'stopped') {
+    const reason = String(payload.reason || '').toLowerCase();
+    if (reason === 'merchant_pause') return 'Traffic assignment stopped.';
+    if (reason === 'merchant_finish' || reason === 'merchant_stop_product') {
+      return 'Traffic assignment stopped.';
+    }
+    if (reason === 'guardrail_breach') {
+      const product = productTitleFromEventPayload(payload);
+      if (product) {
+        return `Guardrail excluded "${product}" from the test. Revenue per visitor fell below the safety limit.`;
+      }
+    }
+    return payload.reason || 'Traffic assignment stopped.';
+  }
+  if (event.event_type === 'finished_control') {
+    const product = payload.product_title || payload.productTitle || '';
+    if (product) {
+      return `Control won for "${product}" — the catalog price was left unchanged.`;
+    }
+    return 'Control won — the catalog price was left unchanged.';
+  }
+  if (event.event_type === 'resumed') {
+    return payload.reason || 'Traffic assignment resumed.';
   }
   return payload.note || payload.reason || null;
 }

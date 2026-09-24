@@ -69,7 +69,7 @@ describe('Priceify guides content', () => {
     const rolloutCopy = rolloutQueue.paragraphs.join(' ');
     assert.match(rolloutCopy, /one row per product/i);
     assert.match(rolloutCopy, /rest of the test keeps running/i);
-    assert.match(rolloutCopy, /revenue guardrail stopped is never offered for rollout/i);
+    assert.match(rolloutCopy, /revenue guardrail stopped never gets Apply winner on its row/i);
     assert.match(rolloutCopy, /only ever mentioned once/i);
     assert.ok(DOCS_FAQ.length >= 3);
     const groupIds = new Set(DOCS_GROUPS.map((group) => group.id));
@@ -197,7 +197,7 @@ describe('Priceify guides content', () => {
     // a merchant to a field that no longer exists.
     const settingsMap = copyOf('how-settings-work');
     assert.match(settingsMap, /confidence level/i);
-    assert.match(settingsMap, /minimum sample size/i);
+    assert.match(settingsMap, /minimum visitors per variation/i);
     assert.match(settingsMap, /fixed/i);
 
     // The revenue guardrail was documented twice, in two groups, with two

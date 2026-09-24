@@ -198,29 +198,29 @@ export function IconShield({ size = 14 }) {
   );
 }
 
+/** Launch CTA — 20×20 like Polaris icons so Admin `Icon` slot sizing/cropping stays correct. */
 export function IconRocket({ size = 16, className, ...rest }) {
+  const sizeProps = className ? {} : { width: size, height: size };
   return (
     <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
+      viewBox="0 0 20 20"
       fill="none"
       className={className}
       aria-hidden
+      {...sizeProps}
       {...rest}
     >
       <path
-        d="M14 4c3.5 0 6 2.5 6 6-4.5 5-9 7.5-13 8.5L5.5 17 7 14.5C8 10.5 10.5 6 14 4Z"
-        stroke="currentColor"
-        strokeWidth="1.6"
+        d="M11.667 3.333c2.917 0 5 2.083 5 5-3.75 4.167-7.5 6.25-10.833 7.083L4.583 14.167 5.833 12.083C6.667 8.75 8.75 5 11.667 3.333Z"
+        {...strokeProps}
+        strokeWidth="1.333"
         strokeLinejoin="round"
       />
-      <circle cx="14.5" cy="9.5" r="1.4" stroke="currentColor" strokeWidth="1.4" />
+      <circle cx="12.083" cy="7.917" r="1.167" {...strokeProps} strokeWidth="1.167" />
       <path
-        d="M8 16.5 5 19M10 18l-1.5 2.5"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinecap="round"
+        d="M6.667 13.75 4.167 15.833M8.333 15l-1.25 2.083"
+        {...strokeProps}
+        strokeWidth="1.25"
       />
     </svg>
   );

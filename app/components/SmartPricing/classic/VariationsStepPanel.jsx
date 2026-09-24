@@ -298,7 +298,7 @@ export default function VariationsStepPanel({
                 value={row.description}
                 onChange={value => updateRow(index, { description: value })}
                 autoComplete="off"
-                placeholder="Describe what's different"
+                placeholder="Describe what's different (optional)"
               />
             ) : null}
             <div className={styles.sliderRow}>

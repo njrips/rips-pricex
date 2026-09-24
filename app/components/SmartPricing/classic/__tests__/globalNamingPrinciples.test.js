@@ -62,8 +62,14 @@ describe('global naming principles (PDF spot checks)', () => {
     expect(setup).toContain('1. Theme connection');
     expect(setup).toContain('2. Checkout pricing functions');
     expect(setup).toContain('3. Price locations on your site');
-    expect(setup).toContain('Scan storefront');
+    expect(setup).toContain('Auto-detect prices');
     expect(setup).toContain('Edit price locations');
+    expect(setup).toContain(
+      'Complete the steps below to connect Priceify to your theme and checkout.',
+    );
+    const priceSurfaces = read('../../TestWizard/PriceSurfaceMappingsPanel.jsx');
+    expect(priceSurfaces).toContain('Auto-detect prices');
+    expect(priceSurfaces).not.toMatch(/Scan storefront|Storefront price scan/);
   });
 
   it('aligns public setup vocabulary with Store setup cards', () => {
@@ -125,16 +131,20 @@ describe('global naming principles (PDF spot checks)', () => {
     expect(productsPanel).not.toMatch(/>\s*Change \(optional\)\s*</);
     expect(productsPanel).toContain('Base price');
     expect(variations).toContain('If you pause a variation');
-    expect(variations).not.toMatch(/Describe what's different \(optional\)/);
+    expect(variations).toContain("Describe what's different (optional)");
     expect(wizard).toContain("backLabel={step === 4 ? 'Back to edit' : 'Back'}");
     expect(wizard).toContain("'Launch test'");
     const audience = read('AudienceSuccessStepPanel.jsx');
     expect(audience).toContain('MIN_VISITORS_FOR_REVENUE_GUARDRAIL');
     expect(audience).not.toMatch(/minimum visitors per variation is reached/i);
-    expect(audience).toMatch(/safety pause, not a winner call/i);
+    expect(audience).toMatch(/This is a safety net/i);
+    expect(audience).toMatch(/does not declare a winner/i);
     expect(CLASSIC_CREATE_STEPS.find(step => step.id === 'audience')?.description).toBe('');
-    expect(CLASSIC_CREATE_STEPS.find(step => step.id === 'review')?.description).toBe(
+    expect(CLASSIC_CREATE_STEPS.find(step => step.id === 'review')?.description).toContain(
       'Check your settings before launching. You can pause or stop a test at any time.',
+    );
+    expect(CLASSIC_CREATE_STEPS.find(step => step.id === 'review')?.description).toContain(
+      'pause variations but not edit test settings',
     );
     const review = read('ReviewLaunchStepPanel.jsx');
     expect(review).toContain('Open Store setup');
@@ -153,10 +163,66 @@ describe('global naming principles (PDF spot checks)', () => {
     expect(productsPanel).toContain('Price band (min–max)');
     expect(productsPanel).toContain('Pick specific products');
     expect(productsPanel).toContain('How would you like to pick products?');
+    expect(productsPanel).toContain('For each variation, choose how you');
     const helpFaq = read('helpFaq.js');
     expect(helpFaq).toMatch(/term: 'Revenue guardrail'/);
     expect(helpFaq).toMatch(/term: 'Results settings'/);
     expect(helpFaq).toMatch(/Where is the revenue guardrail\?/);
+  });
+
+  it('structures the running-test Overview tab per the spec', () => {
+    const overview = read('ClassicExperimentOverview.jsx');
+    expect(overview).toMatch(
+      /After the minimum visitors per variation is reached, you can pause variations but\s+not edit test settings/,
+    );
+    expect(overview).toContain('ClassicOverviewContextStrip');
+    expect(overview).toContain('overviewMode');
+    const totals = read('details/ClassicOverviewTab.jsx');
+    expect(totals).toContain('Test totals');
+    const layout = read('classicOverviewLayout.js');
+    expect(layout).toContain('buildOverviewContextLine');
+    const helpers = read('classicExperimentDetailsHelpers.js');
+    expect(helpers).toContain('formatProductStatusLabel');
+    expect(helpers).toContain('formatProductDecisionOutcome');
+    const perf = read('details/ClassicPerformanceTab.jsx');
+    expect(perf).toContain('Apply winner');
+    expect(perf).toContain('formatApplyAllReadyLabel');
+    expect(perf).toContain('Product performance by variation');
+    expect(perf).toMatch(/overviewMode \? null : \(\s*<ClassicRolloutReadinessPanel/s);
+    const rolloutPanel = read('details/ClassicRolloutReadinessPanel.jsx');
+    expect(rolloutPanel).toContain('Ready to apply winners');
+    expect(rolloutPanel).not.toMatch(/Rollout readiness/);
+    expect(perf).toContain(
+      'See how each product is performing and apply winners to your catalog.',
+    );
+  });
+
+  it('uses the three test detail tabs from the spec', () => {
+    const overview = read('ClassicExperimentOverview.jsx');
+    const tabs = read('classicExperimentListActions.js');
+    expect(tabs).toContain("export const CLASSIC_DETAILS_TABS = ['Overview', 'History', 'Settings']");
+    expect(overview).toMatch(/\{ id: 'Overview'/);
+    expect(overview).toMatch(/\{ id: 'History'/);
+    expect(overview).toMatch(/\{ id: 'Settings'/);
+    expect(overview).not.toMatch(/\{ id: 'Performance'/);
+    expect(overview).not.toMatch(/\{ id: 'Activity'/);
+  });
+
+  it('structures the running-test Settings tab per the spec', () => {
+    const settingsTab = read('details/ClassicSettingsTab.jsx');
+    expect(settingsTab).toContain('Status & traffic');
+    expect(settingsTab).toContain('Audience & targeting');
+    expect(settingsTab).toContain('Metrics & guardrail');
+    expect(settingsTab).toContain('View test history');
+    expect(settingsTab).toContain('View test in Tests list');
+    const history = read('details/ClassicActivityTab.jsx');
+    expect(history).toContain('Test history');
+    expect(history).toContain('Log of guardrail events and test changes.');
+    const activity = read('classicActivity.js');
+    expect(activity).toContain("label: 'Guardrails'");
+    const events = read('productActionAvailability.js');
+    expect(events).toContain('Winner applied to catalog');
+    expect(events).toContain('Stopped by guardrail');
   });
 
   it('uses Results settings field labels from the spec', () => {
@@ -167,5 +233,7 @@ describe('global naming principles (PDF spot checks)', () => {
     expect(settingsPage).toContain('These settings apply to every new test you launch.');
     expect(panel).toContain('When Priceify can call a winner.');
     expect(panel).toMatch(/80% \(faster, less strict\)/);
+    expect(panel).toContain('Both apply to every new test you launch.');
+    expect(panel.replace(/\s+/g, ' ')).toContain('when a winner can be called');
   });
 });

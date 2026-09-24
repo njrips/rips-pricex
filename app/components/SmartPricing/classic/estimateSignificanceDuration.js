@@ -267,7 +267,7 @@ export function estimateSignificanceDuration({
   if (!perSku.length || missingTraffic) {
     const zeroAllocation = slowestVariationPercent <= 0;
     const unavailableDetail = zeroAllocation
-      ? 'At least one variation has 0% traffic, so it can never reach the minimum sample. Give every variation a positive allocation.'
+      ? 'At least one variation has 0% traffic, so it can never reach the minimum visitors per variation. Give every variation a positive allocation.'
       : 'A reliable timeline is unavailable because one or more selected products lack visitor data. The estimate needs measured visitors/day for every selected product.';
     return {
       days: null,
@@ -343,7 +343,7 @@ export function estimateSignificanceDuration({
         }.`;
 
   const targetNote = !recommended
-    ? ' A powered target-lift reference is unavailable until this product has a qualified conversion baseline; the collection window above covers only your selected minimum sample.'
+    ? ' A powered target-lift reference is unavailable until this product has a qualified conversion baseline; the collection window above covers only your minimum visitors per variation.'
     : recommended > sample
       ? ` The fixed-horizon planning reference for a ${mdePercent}% relative conversion lift at ${confidenceLevel}% family-wise confidence / ${power}% power is ${formatVisitorCount(recommended)} visitors/variation${
           practical

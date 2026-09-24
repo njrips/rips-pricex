@@ -12,6 +12,7 @@ import {
   parseMinSampleSize,
   resolveMinSampleSize,
   validateClassicAudienceUi,
+  resolveAudienceHistoryActivityTitle,
 } from '../classicAudienceEdit';
 import {
   GOAL_METRIC_OPTIONS,
@@ -346,5 +347,23 @@ describe('profit per visitor, after it stopped being offered', () => {
 
   it('falls back to revenue for a metric that never existed', () => {
     expect(normalizePrimaryMetric('vibes_per_visitor')).toBe('revenue_per_visitor');
+  });
+});
+
+describe('resolveAudienceHistoryActivityTitle', () => {
+  it('names traffic-only saves separately from targeting', () => {
+    const prev = { trafficAllocation: 50, segment: 'all_visitors', devices: ['all'] };
+    const next = { ...prev, trafficAllocation: 60 };
+    expect(resolveAudienceHistoryActivityTitle('audience', prev, next)).toBe(
+      'Traffic allocation changed'
+    );
+  });
+
+  it('names guardrail on/off toggles', () => {
+    const prev = { guardrails: [{ id: 'revenue', on: true, threshold: 10 }] };
+    const next = { guardrails: [{ id: 'revenue', on: false, threshold: 10 }] };
+    expect(resolveAudienceHistoryActivityTitle('guardrail', prev, next)).toBe(
+      'Guardrail turned off'
+    );
   });
 });

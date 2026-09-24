@@ -196,7 +196,9 @@ describe('products step selection area', () => {
     }));
     await renderPanel({ opportunities: rows, maxSelection: 10 });
 
-    expect(container.textContent).toMatch(/up to 10 products, so 2 of your 12 are left out/i);
+    expect(container.textContent).toMatch(
+      /up to 10 products, so 2 of your 12 available here are left out/i,
+    );
   });
 
   it('does not claim to include everything when all-products mode is clipped', async () => {
@@ -232,7 +234,7 @@ describe('products step selection area', () => {
 
   it('says nothing loaded rather than showing an empty grid', async () => {
     await renderPanel({ opportunities: [] });
-    expect(container.textContent).toMatch(/No catalog products loaded yet/i);
+    expect(container.textContent).toMatch(/No active products found in your catalog/i);
   });
 
   it('drops the dead search box from all-products mode', async () => {

@@ -1,0 +1,1526 @@
+﻿________________
+
+
+Global naming principles
+* Use “Test” instead of “Experiment” everywhere (“Price test”, “Offer test”, “New test”, “Tests dashboard”).
+* Keep CRO language where it helps: Revenue per visitor, Confidence, Lift.
+* Talk in Products / Collections and Prices / Offers, not generic “campaigns”.
+________________
+
+
+Navigation & top level
+Left‑hand app nav (inside Shopify):
+* Create → New test
+* Setup → Store setup
+* Settings → App settings
+* Help → Help & docs
+Main top‑level page title when you open the app:
+* Tests
+Subheading:
+* “Run price and offer tests to grow revenue per visitor.”
+Primary CTA:
+* New test
+________________
+
+
+Tests dashboard (Experiments list)
+Page title:
+Tests
+Intro copy (optional, under title):
+* “Launch price tests in minutes. See which prices grow revenue per visitor.”
+Tiles:
+* Running tests
+* Visitors this month
+* Winning tests
+Table columns:
+* Test
+* Status
+* Primary metric
+* Visitors
+* Lift
+* Confidence
+* Actions[ppl-ai-file-upload.s3.amazonaws]
+Status values:
+* Draft
+* Running
+* Paused
+* Finished
+Filters:
+* Filter label: Status
+* Options: All, Draft, Running, Paused, Finished
+Row actions menu:
+* View results
+* Edit test
+* Duplicate
+* Archive
+Locked banner (when plan or setup not ready):
+* Title: Create is locked
+* Body: “Finish setup to start your first test.”
+* Primary button: Open setup
+* Secondary link: View plans
+________________
+
+
+Setup screen (Store setup)
+Page title:
+Store setup
+Subheading:
+* “Check these three items once to get your store ready for testing.”
+Readiness banner
+* Green: Ready to launch price tests
+* Grey (if not ready): Not ready to launch tests yet
+Optional helper text:
+* “Complete the steps below to connect Priceify to your theme and checkout.”
+Card 1 – Theme connection (Theme app embed)
+Card title:
+* Theme connection
+Status pill:
+* Enabled / Not enabled
+Body copy (enabled):
+* “Priceify is installed in your live theme. No action needed.”
+Body copy (not enabled):
+* “Enable the Priceify app embed in your Online Store theme to start testing prices.”
+Button (if you ever need one):
+* Open theme settings
+Card 2 – Checkout pricing functions (Checkout functions)
+Card title:
+* Checkout pricing functions
+List items:
+* “Dynamic cart prices (for price tests)”
+* “Checkout discounts (for offer tests)”
+Status pill:
+* Enabled / Not enabled
+Button:
+* Refresh status
+Helper text:
+* “These functions let Priceify update prices in the cart and checkout during a test.”
+Card 3 – Price locations (Theme price selectors)
+Card title:
+* Price locations on your site
+Status text:
+* “The product page price is mapped, which is all a price test needs. Other locations are optional.”
+Mapping count:
+* “22 price locations mapped”
+Buttons:
+* Auto‑detect prices
+* Edit price locations
+________________
+
+
+Settings – Tabs
+Rename the three tabs in App settings to be clearer:
+1. Plan & usage (current Plan tab)
+2. Results settings (current Stat settings tab)
+3. Price locations (current Price surfaces tab)[ppl-ai-file-upload.s3.amazonaws]
+________________
+
+
+Settings – Plan & usage tab
+Header:
+* Plan & usage
+Top banner:
+* Green: Ready to launch tests
+* Copy: “Your plan is active. You can create and run price and offer tests.”
+Section 1 – Current plan:
+* Title: Current plan
+* Fields:
+   * “Plan” → keep value (e.g. dev – ACTIVE)
+   * “Shop” → store URL
+* Buttons:
+   * Manage plan (opens your own billing/plan page)
+   * Refresh status
+Section 2 – What your plan includes:
+* Title: What your plan includes
+* Bullets:
+   * “Create and run price tests”
+   * “Create and run offer tests”
+   * “Track revenue per visitor and test confidence”
+(When you later add visitor‑based tiers, you can expand this section with “Up to X tested visitors per month”.)
+________________
+
+
+Settings – Results settings tab (Stats)
+Tab title:
+Results settings[ppl-ai-file-upload.s3.amazonaws]
+Intro copy:
+* “Control how strict Priceify should be before calling a winner, and how many visitors each variation must see.”
+Field 1 – Confidence level:
+* Label: Confidence level
+* Helper: “How sure the maths must be before calling a winner.”
+Dropdown options (example):
+* 80% (faster, less strict)
+* 90% (recommended)
+* 95% (safer, more strict)
+Field 2 – Minimum visitors per variation:
+* Label: Minimum visitors per variation
+* Helper: “Visitors each variation must reach before results are calculated.”
+* Default value: 5000
+Short note under both:
+* “Sample size decides when analysis can start; confidence decides when a winner can be called. Both apply to every new test.”
+Save button:
+* Save results settings
+________________
+
+
+Settings – Price locations tab (Price surfaces)
+Tab title:
+Price locations
+Page title inside tab:
+* Theme price selectors
+Intro sentence:
+* “Tell Priceify where prices appear on your theme so tests can safely update them.”[ppl-ai-file-upload.s3.amazonaws]
+Toggle group at top:
+* Left label: Use theme defaults
+* Status text: “Shop defaults active (22 selectors found)”
+Table columns:
+* Page (was Surface)
+* Price type (was Role)
+* Theme selector (was Selector)
+* Actions
+Examples:
+* Page: “Product page”
+* Price type: “Regular price” / “Compare‑at price” / “Cart line price”
+* Theme selector: .price-item--regular
+Row toggle:
+* Label visually aligned with row; tooltip: “Include this price in tests.”
+“Pick” button:
+* Label: Pick on site
+* Tooltip: “Click this and then choose the price on your storefront. We’ll capture the selector.”
+Bottom buttons:
+* Left: Add location
+* Middle: Auto‑detect prices
+* Right: Save
+“Add location” dialog:
+* Fields:
+   * Page type (dropdown: Product page, Collection page, Cart, Search results, Home page, Other)
+   * Price type (dropdown: Regular price, Compare‑at price, Cart line price, Other)
+   * Theme selector (text input with hint: “CSS selector, e.g. .price-item--regular”)
+________________
+
+
+New test wizard – Step labels
+Across the top of the wizard:
+1. Basics
+2. Traffic
+3. Products & prices
+4. Audience & goals
+5. Review & launch
+________________
+
+
+Step 1 – Basics (Set up your test)
+Page title:
+* Set up your test
+Fields:
+* Test name
+Placeholder: “e.g. Growth plan – £39 price test”
+* Optional: hypothesis
+Placeholder: “If we change… then… because…” Helper (subtle): “Optional, for your notes only.”
+* Test type Cards:
+   * Price test
+Description: “Compare different price points for the same product.”
+   * Offer test
+Description: “Show a sale price with the original price crossed out.”
+CTA buttons at bottom:
+      * Left: Cancel
+      * Right: Continue
+________________
+
+
+Step 2 – Traffic (Build your variations)
+Page title:
+      * Traffic & variations
+Section 1 – How much traffic enters this test:
+      * Label: Traffic allocation
+      * Helper: “What percentage of eligible visitors should enter this test?”
+      * Slider: 0–100% with live value label (e.g. “50% of eligible visitors will see this test”).
+Section 2 – Split traffic between variations:
+Intro text:
+      * “Split test traffic between your current price (control) and up to 4 price variations.”
+For each variation row:
+      * Control row:
+      * Header: Control – current price
+      * Description: “Keeps your current catalog price.”
+      * Traffic slider or numeric field, depending on your UI.
+      * Variation rows:
+      * Name input: Variation A, Variation B, etc.
+      * Description placeholder: “Describe what’s different (optional).”
+      * Traffic slider / numeric traffic input.
+Button:
+      * Add variation (up to 4 total)
+Helper note at bottom:
+      * “If you pause a variation, its traffic will be automatically redistributed to the remaining variations.”
+________________
+
+
+Step 3 – Products & prices
+Page title:
+      * Choose products & set test prices[ppl-ai-file-upload.s3.amazonaws]
+Section 1 – Which products to include:
+Label:
+      * How would you like to pick products?
+Options:
+      * Pick specific products
+      * Description: “Choose individual products or collections.”
+      * All products
+      * Description: “Include every product in your catalog.”
+Button:
+      * Browse products
+Section 2 – Set test prices:
+Intro:
+      * “For each variation, choose how you’d like Priceify to set prices.”
+Mode selector (ordered by importance):
+      1. AI suggested (recommended)
+“Let Priceify suggest prices within your min–max band.”
+      2. Bulk adjust
+“Increase or decrease prices for all selected products by a % or fixed amount.”
+      3. Set manually
+“Set each test price yourself.”
+Table columns (per product):
+         * Product
+         * Base price
+         * Test price – Variation A
+         * Test price – Variation B
+         * Test price – Variation C (if present)
+         * etc.
+________________
+
+
+Step 4 – Audience & goals
+Page title:
+         * Audience & goals[ppl-ai-file-upload.s3.amazonaws]
+Section 1 – Audience:
+Sub‑sections:
+         * Device type – Desktop, Mobile, Tablet
+         * Traffic source – Direct, Search, Social, Email, Paid ads, Referral
+         * Audience segment – All visitors, New visitors, Returning visitors
+         * Countries – Include / Exclude picker
+Helper text:
+         * “Only visitors who match these filters can enter the test.”
+Section 2 – Success metrics:
+Primary metric:
+         * Label: Primary success metric
+         * Options:
+         * Revenue per visitor (recommended)
+         * Conversion rate
+         * Average order value
+Helper: “Choose one metric to optimise for this test.”
+Secondary metrics (optional):
+         * Label: Secondary metrics (optional)
+         * Same option set, plus checkboxes.
+Section 3 – Revenue guardrail:
+Label:
+         * Revenue guardrail
+Toggle:
+         * On / Off
+Copy when On:
+         * “Pause this test if revenue per visitor for any variation drops more than [10] % below the control, after the minimum visitors per variation is reached.”
+Helper:
+         * “This is a safety net. It doesn’t declare a winner; it only prevents a bad variation from running for too long.”
+________________
+
+
+Step 5 – Review & launch
+Page title:
+         * Review & launch
+Intro:
+         * “Check your settings before launching. You can pause or stop a test at any time.”
+Traffic warning (if underpowered):
+         * Title: Traffic may be too low for a reliable result
+         * Body: “At your current traffic levels and number of variations, this test may take a long time to reach your minimum visitors per variation. To get a clearer result, try testing fewer products or fewer variations.”
+Sections:
+         * Basics
+         * Products & prices
+         * Variations & traffic
+         * Audience
+         * Metrics & guardrail
+Buttons:
+         * Left: Back to edit
+         * Right: Launch test
+Once launched and minimum visitors reached, editing copy in the UI (outside this screen) should reflect your rule:
+         * “After the minimum visitors per variation is reached, you can pause variations but not edit test settings.”
+________________
+
+
+Mini‑glossary for the team
+To keep everyone naming things the same way:
+         * Test – A single price or offer comparison you run in Priceify.
+         * Price test – Changes the actual price shown to shoppers, without a crossed‑out original.
+         * Offer test – Shows a sale price with the original price crossed out.
+         * Control – The current price your store already uses.
+         * Variation – A different price or offer you’re testing against control.
+         * Revenue per visitor – Revenue generated divided by number of visitors who saw the test.
+         * Confidence – How sure the maths is that one variation is better than another.
+         * Minimum visitors per variation – The number of visitors each variation must see before results are calculated.
+         * Price locations – The pages where prices appear (product, collection, cart, search, home).
+         * Theme selector – The CSS selector Priceify uses to find a price on your theme.[ppl-ai-file-upload.s3.amazonaws]
+Great – here’s the screen‑by‑screen spec you can hand straight to design/dev.
+For each screen I’ve used:
+         * Current label → what’s in your mock now
+         * New label → what I recommend
+         * Helper / description → helper text, tooltip, or short explanatory copy
+________________
+
+
+1. Tests dashboard (Experiments-Dashboard-8.jpg)
+This is the main landing page inside the app.[ppl-ai-file-upload.s3.amazonaws]
+Area
+	Current label
+	New label
+	Helper / description
+	Page title
+	Experiments
+	Tests
+	“Run price and offer tests to grow revenue per visitor.” (subheading under title)
+	Primary CTA
+	New experiment
+	New test
+	Button that opens step 1 of the wizard.
+	Metric tile 1
+	Running now
+	Running tests
+	“Number of tests currently running.” (tooltip)
+	Metric tile 2
+	Visitors this month
+	Visitors this month
+	“Visitors who have entered any Priceify test this month.” (tooltip)
+	Metric tile 3
+	Winning experiments
+	Winning tests
+	“Tests that have reached your minimum visitors and have a clear winner.” (tooltip)
+	Filter tabs
+	All / Running / Drafts / Paused / Completed / Archived
+	All / Running / Drafts / Paused / Finished
+	Keep “All” as default. “Finished” covers what was “Completed/Archived”.
+	Table column
+	Experiment
+	Test
+	Name of the test.
+	Table column
+	Status
+	Status
+	Values: Draft, Running, Paused, Finished.
+	Table column
+	Primary metric
+	Primary metric
+	e.g. “Revenue per visitor”.
+	Table column
+	Visitors
+	Visitors
+	“Visitors who entered this test.” (tooltip)
+	Table column
+	Lift
+	Lift
+	“Revenue per visitor uplift vs control.” (tooltip)
+	Table column
+	Confidence
+	Confidence
+	“How sure the maths is that the winner is better than control.” (tooltip)
+	Table column
+	Actions
+	Actions
+	Kebab menu.
+	Row action
+	View
+	View results
+	Opens results page/modal.
+	Row action
+	Edit
+	Edit test
+	Only allowed while test is Draft or before min visitors reached.
+	Row action
+	Duplicate
+	Duplicate
+	Creates a new Draft with same setup.
+	Row action
+	Archive
+	Archive
+	Hides from main list; moves to Finished tab.
+	Banner title (locked)
+	Create is locked
+	Create is locked
+	Keep title.
+	Banner body
+	This shop needs an active Smart Pricing plan...
+	Finish setup to start a test.
+	Neutral message.
+	Banner primary button
+	Open Plan
+	Open setup
+	Takes user to Setup screen.
+	Banner secondary
+	Upgrade
+	View plans
+	Takes user to plan/usage settings.
+	________________
+
+
+2. Store setup (Setup-5.jpg)
+One‑time setup page.[ppl-ai-file-upload.s3.amazonaws]
+Area
+	Current label
+	New label
+	Helper / description
+	Page title
+	Setup
+	Store setup
+	“Check these three items once to get your store ready for testing.”
+	Top banner (ready)
+	Ready to launch price and offer tests
+	Ready to launch tests
+	“Your store is connected. You can create and run price and offer tests.”
+	Top banner (not ready)
+	n/a
+	Not ready to launch tests yet
+	“Complete the steps below to connect Priceify to your theme and checkout.”
+	Card 1 title
+	Theme app embed
+	Theme connection
+	
+
+	Card 1 status
+	Already enabled in your live theme…
+	Priceify is installed in your live theme. No action needed.
+	When enabled.
+	Card 1 alt text
+	Alternative install: add the script…
+	(Remove)
+	No manual path for now.
+	Card 2 title
+	Checkout functions
+	Checkout pricing functions
+	
+
+	Card 2 body row 1
+	Cart transform (price tests)
+	Dynamic cart prices (for price tests)
+	
+
+	Card 2 body row 2
+	Checkout discount (offer tests)
+	Checkout discounts (for offer tests)
+	
+
+	Card 2 button
+	Re-check checkout functions
+	Refresh status
+	“Re‑run the checks to confirm your checkout is ready.” (tooltip)
+	Card 3 title
+	Theme price selectors
+	Price locations on your site
+	
+
+	Card 3 status text
+	The product page price is mapped…
+	The product page price is mapped, which is all a price test needs. Other locations are optional.
+	
+
+	Card 3 button 1
+	Auto-map price surfaces
+	Auto‑detect prices
+	“Try to find common price locations in your theme automatically.”
+	Card 3 button 2
+	Open Price surfaces
+	Edit price locations
+	Opens the Price locations tab in Settings.
+	Footer links
+	Plan / Price surfaces / Get support
+	Plan & usage / Price locations / Get support
+	Update Plan link to new tab name.
+	________________
+
+
+3. Settings – tabs
+Applies wherever these three tabs appear.[ppl-ai-file-upload.s3.amazonaws][ppl-ai-file-upload.s3.amazonaws][ppl-ai-file-upload.s3.amazonaws]
+Current tab
+	New tab
+	Helper / description
+	Plan
+	Plan & usage
+	Billing and visitor limits.
+	Stat settings
+	Results settings
+	Confidence and minimum visitors.
+	Price surfaces
+	Price locations
+	Where prices appear on your theme.
+	________________
+
+
+4. Settings – Plan & usage tab (Settings-Plan-9.jpg)
+[ppl-ai-file-upload.s3.amazonaws]
+Area
+	Current label
+	New label
+	Helper / description
+	Page title
+	Plan & entitlement
+	Plan & usage
+	
+
+	Top banner
+	Ready to launch price and offer tests
+	Ready to launch tests
+	“Your plan is active. You can create and run price and offer tests.”
+	Section title
+	Plan status
+	Current plan
+	
+
+	Field
+	Plan: dev – ACTIVE
+	Plan: dev – ACTIVE
+	Keep value and format.
+	Field
+	Shop: splitter-plus…
+	Shop: splitter-plus…
+	Label in bold.
+	Button
+	Manage plan
+	Manage plan
+	Opens your own billing/plan page.
+	Button
+	Refresh status
+	Refresh status
+	“Check your plan status again.” (tooltip)
+	Section title
+	What unlocks
+	What your plan includes
+	
+
+	Bullet 1
+	Create experiment wizard
+	Create and run price tests
+	
+
+	Bullet 2
+	Launch price tests (cart transform)
+	Create and run offer tests
+	
+
+	Bullet 3
+	Launch offer tests…
+	Track revenue per visitor and test confidence
+	Can adjust once pricing tiers exist.
+	Button
+	Create experiment
+	New test
+	Starts step 1 of wizard.
+	Button
+	Open Setup checklist
+	Open setup checklist
+	Takes user to Store setup page.
+	________________
+
+
+5. Settings – Results settings tab (Settings-Stat-Settings-6.jpg)
+[ppl-ai-file-upload.s3.amazonaws]
+Area
+	Current label
+	New label
+	Helper / description
+	Page title
+	Stat settings
+	Results settings
+	“These settings apply to every new test you launch.”
+	Subtitle
+	When a test may be called…
+	When Priceify can call a winner
+	
+
+	Field label
+	Confidence level
+	Confidence level
+	Keep term.
+	Field value
+	90% (recommended)
+	90% (recommended)
+	Default. Options can be 80 / 90 / 95.
+	Helper text
+	How sure the maths…
+	How sure the maths must be before calling a winner.
+	
+
+	Field label
+	Minimum sample size per variation
+	Minimum visitors per variation
+	Friendlier wording.
+	Helper text
+	Visitors each variation…
+	Visitors each variation must reach before results are calculated.
+	
+
+	Note paragraph
+	Sample size decides…
+	Sample size decides when analysis can start; confidence decides when Priceify may call a winner. Both apply to new tests from now on.
+	
+
+	Button
+	Save stat settings
+	Save results settings
+	
+
+	________________
+
+
+6. Settings – Price locations tab (Settings-Price-Surfaces-7.jpg)
+[ppl-ai-file-upload.s3.amazonaws]
+Area
+	Current label
+	New label
+	Helper / description
+	Tab title
+	Price surfaces
+	Price locations
+	
+
+	Page header
+	Theme price selectors
+	Theme price selectors
+	Keep.
+	Subheading
+	Tell Pricify where each price shows…
+	Tell Priceify where prices appear on your theme so tests can safely update them.
+	
+
+	Toggle group label
+	Shop theme price selectors / Shop defaults active
+	Use theme defaults – Shop defaults active (22 selectors found)
+	Wrap into one row; value count is dynamic.
+	Table column
+	Surface
+	Page
+	Page type where price appears.
+	Table column
+	Role
+	Price type
+	e.g. Regular price, Compare‑at price, Cart line price.
+	Table column
+	Selector
+	Theme selector
+	CSS selector.
+	Table column
+	Actions
+	Actions
+	
+
+	Row toggle
+	n/a
+	Include in tests
+	Tooltip: “Turn off if you don’t want Priceify to change this price.”
+	Button
+	Pick
+	Pick on site
+	Tooltip: “Open your storefront and click the price to capture its selector.”
+	Button under table
+	Add row
+	Add location
+	Opens dialog to add custom page/price/selector.
+	Button under table
+	Auto-map prices
+	Auto‑detect prices
+	Tooltip: “Try to find more price locations in your theme without changing your existing ones.”
+	Button under table
+	Save
+	Save
+	Saves mappings.
+	________________
+
+
+7. New test – Step 1 (Basics, Step-1-4.jpg)
+[ppl-ai-file-upload.s3.amazonaws]
+Area
+	Current label
+	New label
+	Helper / description
+	Wizard step name
+	Basics – Name & type
+	Basics
+	
+
+	Page title
+	Set up your experiment
+	Set up your test
+	
+
+	Field label
+	Experiment name
+	Test name
+	
+
+	Placeholder
+	e.g. Growth plan — $39 price test
+	e.g. Growth plan – £39 price test
+	Localise currency if needed.
+	Field label
+	Hypothesis
+	Optional: hypothesis
+	
+
+	Placeholder
+	If we change… then… because…
+	Keep
+	Optional field.
+	Helper text
+	What do you expect to happen…
+	Optional, for your notes only.
+	
+
+	Field label
+	Experiment type
+	Test type
+	
+
+	Card label 1
+	Price test
+	Price test
+	Description: “Compare different price points for the same product.”
+	Card label 2
+	Offer test
+	Offer test
+	Description: “Show a sale price with the original price crossed out.”
+	Buttons
+	Cancel / Continue
+	Cancel / Continue
+	Keep labels.
+	________________
+
+
+8. New test – Step 2 (Variations / traffic, Step-2-3.jpg)
+[ppl-ai-file-upload.s3.amazonaws]
+Area
+	Current label
+	New label
+	Helper / description
+	Wizard step name
+	Variations – Traffic split
+	Traffic
+	
+
+	Page title
+	Build your variations
+	Traffic & variations
+	
+
+	Section label
+	Traffic allocation
+	Traffic allocation
+	Helper: “What percentage of eligible visitors should enter this test?”
+	Top slider label
+	100% matching visitors enter…
+	[X]% of eligible visitors will enter this test.
+	Slider value displayed inline.
+	Button
+	Split equally
+	Split evenly
+	Redistribute traffic across all active variations.
+	Control card heading
+	CONTROL
+	Control – current price
+	Description: “Keeps your current catalog price.”
+	Control price label
+	Current price
+	Current price
+	
+
+	Control traffic label
+	TRAFFIC
+	Traffic
+	Slider with % field.
+	Variation card heading
+	VARIATION A/B
+	Variation A / Variation B / Variation C / Variation D
+	
+
+	Variation label
+	Variation A
+	Variation A
+	Editable name.
+	Description field
+	Describe what’s different (optional)
+	Describe what’s different (optional)
+	Keep.
+	Traffic label
+	TRAFFIC
+	Traffic
+	Slider / numeric.
+	Button
+	Add variation
+	Add variation
+	Limit to 4 total variations (including control).
+	Note
+	n/a
+	If you pause a variation, its traffic is automatically redistributed to the remaining variations.
+	Small helper text below list.
+	________________
+
+
+9. New test – Step 3 (Products & pricing, Step-3.-2.jpg)
+[ppl-ai-file-upload.s3.amazonaws]
+Area
+	Current label
+	New label
+	Helper / description
+	Wizard step name
+	Products – Pick & price
+	Products & prices
+	
+
+	Page title
+	Choose products & pricing
+	Choose products & set test prices
+	
+
+	Section label
+	How would you like to pick products?
+	How would you like to pick products?
+	Keep.
+	Option 1
+	Pick manually
+	Pick specific products
+	“Choose individual products or collections.”
+	Option 2
+	All products
+	All products
+	“Include every product in your catalog.”
+	Product counter
+	0 of 4 products
+	0 of X products selected
+	Copy can stay dynamic.
+	Link
+	Clear
+	Clear selection
+	
+
+	Button
+	Browse products
+	Browse products
+	Keep.
+	Section label
+	Set prices for
+	Set test prices
+	
+
+	Variation tabs
+	Variation A / Variation B
+	Variation A / Variation B / …
+	
+
+	Secondary label
+	Control keeps your current catalog prices…
+	Control keeps your current catalog prices, so there’s nothing to set for it.
+	
+
+	Section “How would you like to price them?”
+	How would you like to price them?
+	How would you like to set prices?
+	
+
+	Option 1
+	Manual
+	AI suggested (recommended)
+	“Let Priceify suggest prices within your min–max band.”
+	Option 2
+	AI suggested
+	Bulk adjust
+	“Increase or decrease prices for all selected products by a % or fixed amount.”
+	Option 3
+	Bulk adjust
+	Set manually
+	“Set each test price yourself.”
+	Filter bar
+	Filter selected products… / All categories
+	Filter selected products… / All categories
+	Keep.
+	Table column
+	Product
+	Product
+	
+
+	Table column
+	BASE
+	Base price
+	
+
+	Table column
+	TEST PRICE
+	Test price – [Variation name]
+	e.g. “Test price – Variation A”.
+	Table column
+	Δ %
+	Change (optional)
+	“Difference vs base price.” (tooltip)
+	________________
+
+
+10. New test – Step 4 (Audience & success, Step-5-10.jpg)
+[ppl-ai-file-upload.s3.amazonaws]
+Area
+	Current label
+	New label
+	Helper / description
+	Wizard step name
+	Audience – Choose audience…
+	Audience & goals
+	
+
+	Page title
+	Audience & success
+	Audience & goals
+	
+
+	Section title
+	Audience
+	Audience
+	
+
+	Subsection
+	Device type
+	Device type
+	Desktop, Mobile, Tablet.
+	Subsection
+	Traffic source
+	Traffic source
+	Direct, Search, Social, Email, Paid ads, Referral.
+	Subsection
+	Audience segment
+	Audience segment
+	All visitors, New visitors, Returning visitors.
+	Subsection
+	Countries
+	Countries
+	Include / Exclude toggle.
+	Audience helper
+	n/a
+	Only visitors who match these filters can enter the test.
+	
+
+	Section title
+	Metrics
+	Success metrics
+	
+
+	Primary metric label
+	Primary success metric
+	Primary success metric
+	Helper: “Choose one metric to optimise for this test.”
+	Primary options
+	Revenue per visitor / Conversion rate / etc.
+	Revenue per visitor (recommended), Conversion rate, Average order value
+	Limit to these three.
+	Secondary metrics label
+	Secondary metrics
+	Secondary metrics (optional)
+	Same option set, multiple select.
+	Section title
+	Revenue guardrail
+	Revenue guardrail
+	
+
+	Guardrail toggle
+	Revenue per visitor
+	Pause this test if revenue per visitor for any variation drops more than [ppl-ai-file-upload.s3.amazonaws]% vs control, after the minimum visitors per variation is reached.
+	Explain clearly, value editable.
+	________________
+
+
+11. New test – Step 5 (Review & launch, Step-4.jpg)
+[ppl-ai-file-upload.s3.amazonaws]
+Area
+	Current label
+	New label
+	Helper / description
+	Wizard step name
+	Review – Launch
+	Review & launch
+	
+
+	Page title
+	Review & launch
+	Review & launch
+	
+
+	Subtitle
+	A quick summary…
+	Check your settings before launching. You can pause or stop a test at any time.
+	
+
+	Warning banner title
+	Traffic does not support a practical test
+	Traffic may be too low for a reliable result
+	
+
+	Warning banner body
+	Your 5,000‑visitor minimum…
+	At your current traffic and number of variations, this test may take a long time to reach your minimum visitors per variation. To get a clearer result, try testing fewer products or fewer variations.
+	
+
+	Section titles
+	Basics / Products / Variations / Audience / Metrics
+	Basics / Products & prices / Variations & traffic / Audience / Metrics & guardrail
+	Adjust wording.
+	Buttons
+	Back / Launch experiment
+	Back to edit / Launch test
+	“Launch test” is clearer than “experiment”.
+	________________
+
+
+If you’d like, next step I can:
+         * Turn this into a single markdown/Google‑doc‑style table grouped by screen (for sharing with designers), or
+         * Help you write in‑app tooltips and empty‑state messages consistent with this naming.
+________________
+
+
+Review Step 5
+
+Here’s a concise dev‑ready template for the new Review & launch page, based on that overview style.
+________________
+
+
+1. Page structure
+Route: tests/:testId/review (Step 5)
+Layout:
+         * Title: Review & launch
+         * Optional warning card at top (traffic / stats).
+         * Summary block with 5 lines:
+         * Test
+         * Traffic
+         * Audience
+         * Results
+         * Safety
+         * Bottom buttons:
+         * Left: Back to edit
+         * Right: Launch test
+________________
+
+
+2. Data model needed
+Assuming you already have a Test object built from steps 1–4, the review page needs:
+type TestType = 'price' | 'offer';
+
+
+type PricingMode = 'ai_suggested' | 'bulk_adjust' | 'manual';
+
+
+type AudienceSegment = 'all' | 'new' | 'returning';
+
+
+type DeviceType = 'desktop' | 'mobile' | 'tablet';
+
+
+type TrafficSource =
+  | 'direct'
+  | 'search'
+  | 'social'
+  | 'email'
+  | 'paid_ads'
+  | 'referral';
+
+
+type PrimaryMetric = 'revenue_per_visitor' | 'conversion_rate' | 'aov';
+
+
+interface Variation {
+  id: string;
+  name: string;            // "Control", "Variation A", etc.
+  isControl: boolean;
+  trafficPercent: number;  // 0–100
+}
+
+
+interface GuardrailSettings {
+  enabled: boolean;
+  metric: 'revenue_per_visitor';
+  thresholdPercent: number;      // e.g. 10 (% drop vs control)
+  minVisitorsPerVariation: number; // e.g. 1000
+}
+
+
+interface TestReviewData {
+  id: string;
+  name: string;                    // "Growth Plan"
+  type: TestType;                  // 'price' or 'offer'
+  productsCount: number;           // 7
+  productsScope: 'picked' | 'all'; // "Pick specific products" vs "All products"
+  pricingMode: PricingMode;        // 'ai_suggested' / 'bulk_adjust' / 'manual'
+
+
+  trafficAllocationPercent: number; // e.g. 100
+  variations: Variation[];          // includes control + variants
+
+
+  audienceSegment: AudienceSegment;     // 'all' / 'new' / 'returning'
+  devices: DeviceType[];                // e.g. ['desktop', 'mobile', 'tablet']
+  sources: TrafficSource[];             // e.g. ['direct', 'search', 'social', 'email', 'paid_ads', 'referral']
+  countriesMode: 'all' | 'include' | 'exclude';
+  countries: string[];                  // ISO codes when include/exclude
+
+
+  primaryMetric: PrimaryMetric;         // e.g. 'revenue_per_visitor'
+  confidenceLevelPercent: number;       // e.g. 90
+  minimumVisitorsPerVariation: number;  // e.g. 5000
+
+
+  guardrail: GuardrailSettings;
+}
+________________
+
+
+3. Text generation rules
+3.1 Test line
+Format:
+Test: {name} — {typeLabel} · {productsText} · {pricingText}
+Type label:
+         * price → "Price test"
+         * offer → "Offer test"
+Products text:
+         * If productsScope === 'all' →
+"{productsCount} products · All products"
+         * If productsScope === 'picked' →
+"{productsCount} products · Picked products"
+Pricing text:
+            * ai_suggested → "AI suggested prices"
+            * bulk_adjust → "Bulk adjusted prices"
+            * manual → "Manual prices"
+3.2 Traffic line
+Format:
+Traffic: {trafficAllocationPercent}% of eligible visitors · {variationSummary}
+Variation summary:
+Take variations array and join control + non‑controls:
+            * Control first:
+"Control {trafficPercent}%"
+            * Each variation:
+"Var A {trafficPercent}%", "Var B {trafficPercent}%", etc.
+Implementation example:
+const control = variations.find(v => v.isControl);
+const others = variations.filter(v => !v.isControl);
+
+
+const variationSummary = [
+  control ? `Control ${control.trafficPercent}%` : null,
+  ...others.map(v => `${v.name} ${v.trafficPercent}%`),
+]
+  .filter(Boolean)
+  .join(' · ');
+Result example:
+Traffic: 100% of eligible visitors · Control 34% · Var A 33% · Var B 33%
+3.3 Audience line
+Format:
+Audience: {visitorsText} · {devicesText} · {sourcesText} · {countriesText}
+Visitors text:
+               * audienceSegment === 'all' → "All visitors"
+               * new → "New visitors"
+               * returning → "Returning visitors"
+Devices text:
+               * If all three in array → "All devices"
+               * Otherwise join enabled ones, e.g. "Desktop & Mobile" / "Mobile only".
+Sources text:
+               * If all sources selected → "All sources"
+               * Otherwise join, e.g. "Search & Email".
+You can map TrafficSource → labels:
+               * direct → "Direct"
+               * search → "Search"
+               * social → "Social"
+               * email → "Email"
+               * paid_ads → "Paid ads"
+               * referral → "Referral"
+Countries text:
+               * countriesMode === 'all' → "All countries"
+               * include → "Include: {countryList}"
+               * exclude → "Exclude: {countryList}"
+Where countryList is “UK” / “US, CA” etc.
+Example:
+Audience: All visitors · All devices · All sources · All countries
+3.4 Results line
+Format:
+Results: Primary: {primaryLabel} · {confidenceLevelPercent}% confidence · {minimumVisitorsPerVariation} visitors/variation
+Primary label:
+               * revenue_per_visitor → "Revenue per visitor"
+               * conversion_rate → "Conversion rate"
+               * aov → "Average order value"
+Example:
+Results: Primary: Revenue per visitor · 90% confidence · 5,000 visitors/variation
+3.5 Safety line
+Format when guardrail ON:
+Safety: Guardrail ON · Pause if Rev/visitor drops >{thresholdPercent}% vs control, after {minVisitorsPerVariation} visitors/variation
+Use guardrail.thresholdPercent and guardrail.minVisitorsPerVariation.
+Format when guardrail OFF:
+Safety: Guardrail OFF
+Example:
+Safety: Guardrail ON · Pause if Rev/visitor drops >10% vs control, after 1,000 visitors/variation
+(or whatever default you set).
+________________
+
+
+4. Buttons and behaviour
+Bottom actions:
+               * Back to edit
+               * Navigates to Step 4 (Audience & goals) or to the last step the user visited.
+               * Keeps current test draft; no changes made on review page itself.
+               * Launch test
+               * Sends POST /tests/:testId/launch or similar.
+               * Locks editing according to your rule (e.g. after minimum visitors reached, only pause variations, no config edits).
+Optional:
+               * Disable “Launch test” if validation fails (e.g. traffic split ≠ 100% or no products selected), and show a short inline message instead of extra text.
+________________
+
+
+This template should give the dev everything needed: data structure, mapping rules, and exactly how the overview text should change based on the test’s settings.
+
+
+________________
+________________
+
+
+1. Tabs & navigation for a running test
+Context: When a user opens a specific test (Example Price Test / Example Offer Test).
+New tab set
+               * Overview
+               * History
+               * Settings
+Removed / merged tabs
+               * Performance → folded into Overview.
+               * Variations → folded into Overview.
+               * Audience → folded into Settings.
+               * Metrics → folded into Settings.
+               * Activity → renamed to History and refined.
+Header area (unchanged structurally, updated content)
+At the top of the test detail page:
+               * Title: [Test name] (e.g. “Example Price Test”).
+               * Status pill near title: Running, Paused, or Finished.
+               * Meta line under title:
+               * Owner — You
+               * Type — Price test / Offer test
+               * Started — [date]
+               * Top‑right actions:
+               * Edit test (goes back into the wizard).
+               * Pause / Resume (depending on current status).
+               * Stop (end test; no new visitors enter).
+________________
+
+
+2. Overview tab – “Variations & performance”
+This becomes the primary working surface while a test is running.[ppl-ai-file-upload.s3.amazonaws][ppl-ai-file-upload.s3.amazonaws]
+Overview layout
+Sections from top to bottom:
+               1. Header strip (context + status)
+Reiterates key parameters in one line.
+                  * Example:
+                  * Price test · 24 products · Primary metric: Revenue per visitor · Traffic allocation: 50%
+                  * Status toggle in the top‑right:
+                  * Label: Status
+                  * Values: Active / Paused (clickable, mirrors Pause/Resume).
+                  2. Variations summary (top cards)
+Replaces old “Overview” cards and the separate “Variations” tab.[ppl-ai-file-upload.s3.amazonaws][ppl-ai-file-upload.s3.amazonaws] For each arm (Control, Variation A, Variation B, etc.) show a card:
+                     * Title:
+                     * Control: Control – current price
+                     * Var A/B: Variation A, Variation B
+                     * Metrics on card:
+                     * Visitors
+                     * Conversion rate
+                     * Revenue per visitor
+                     * Status badge (small):
+                     * Leading (green) when this variation currently has the best performance against the primary metric.
+                     * Underperforming (red) when significantly below control.
+                     * Traffic split summary line below cards:
+                     * Traffic split: Control 34% · Var A 33% · Var B 33%
+                     3. Purpose: show at a glance which variation is winning and how traffic is divided.
+                     4. Product performance by variation (main table)
+This replaces the products table previously shown under the variances and takes over the “Performance” tab’s role.[ppl-ai-file-upload.s3.amazonaws]
+                        * Section title: Product performance by variation
+                        * Optional helper line: See how each product is performing and apply winners to your catalog.
+                        5. Columns:
+                        * Product
+(Name, handle, and/or variants)
+                        * Status
+                           * Ready
+                           * Needs attention
+                           * Excluded by guardrail
+                           * Running / Paused
+                           * Decision
+                           * Winner: Control
+                           * Winner: Variation A
+                           * Winner: Variation B
+                           * Needs more data
+                           * Control metrics
+                           * Revenue per visitor
+                           * Conversion rate (optional)
+                           * Variation A metrics
+                           * Revenue per visitor
+                           * Conversion rate
+                           * Variation B metrics
+                           * Revenue per visitor
+                           * Conversion rate
+                           * Apply winner (action)
+                           6. Row colouring:
+                           * If a clear winning variation exists for that product:
+                           * Use a soft green background or a green badge on that variation’s metrics cell.
+                           * If control is best:
+                           * Badge: Winner: Control.
+                           * If excluded by guardrail:
+                           * Status badge in red: Excluded by guardrail.
+                           7. Apply winner button:
+                           * Label in each applicable row: Apply winner
+                           * Enabled only when:
+                           * A winner has been determined for that product (Control or a variation).
+                           * Global guardrail and minimum visitors conditions are satisfied.
+                           * Behaviour:
+                           * Sets the product’s catalog price to the winning variation’s price.
+                           * Does not alter other products or tests.
+                           8. Bulk apply:
+                           * Optional button above table: Apply all ready winners
+                           * Enabled only when at least one product has status Ready with a decided winner.
+                           * Applies winners across all ready products in one action.
+                           9. Test totals (optional bottom section)
+A compact summary that reuses existing metrics from the old Overview.[ppl-ai-file-upload.s3.amazonaws]
+                              * Title: Test totals
+                              * Metrics:
+                              * Total visitors
+                              * Total conversions
+                              * Overall conversion rate
+                              * Overall revenue per visitor
+                              * Traffic allocation (% of eligible visitors entering test)
+________________
+
+
+3. Settings tab – configuration for a running test
+Settings now becomes the place for how the test runs (status, traffic, audience, metrics & guardrail).[ppl-ai-file-upload.s3.amazonaws][ppl-ai-file-upload.s3.amazonaws][ppl-ai-file-upload.s3.amazonaws]
+Sections inside Settings
+                              1. Status & traffic
+                              * Block: Status
+                              * Value: Active, Paused, or Stopped
+                              * Short helper: “Controls whether new visitors can enter this test.”
+                              * Block: Traffic allocation
+                              * Value: e.g. 50%
+                              * Helper: “Percentage of eligible visitors who may enter this test.”
+                              * Link/button: Adjust traffic (opens a dialog mirroring the Traffic step).
+                              2. Audience & targeting
+This absorbs the old Audience tab content.[ppl-ai-file-upload.s3.amazonaws]
+                                 * Block: Segment
+                                 * Value: All visitors / New visitors / Returning visitors
+                                 * Action link: Edit targeting
+                                 * Block: Devices
+                                 * Value: e.g. Desktop, Mobile, Tablet
+                                 * Action link: Edit
+                                 * Block: Traffic sources
+                                 * Value: e.g. Direct, Search, Social, Email, Paid ads, Referral
+                                 * Action link: Edit
+                                 * Block: Countries
+                                 * Value:
+                                 * All countries or
+                                 * Include: [countries list] or Exclude: [countries list]
+                                 * Action link: Edit
+                                 3. Helper text under this section:
+                                 * Only visitors who match these filters can enter the test.
+                                 4. Metrics & guardrail
+This section absorbs the old Metrics tab labels and the guardrail controls.[ppl-ai-file-upload.s3.amazonaws][ppl-ai-file-upload.s3.amazonaws][ppl-ai-file-upload.s3.amazonaws]
+                                    * Block: Primary success metric
+                                    * Value: Revenue per visitor (recommended) / Conversion rate / Average order value
+                                    * Action link: Change metric
+                                    * Block: Secondary metrics (optional)
+                                    * Values: list of any active secondary metrics (e.g. Checkout completion).
+                                    * Action link: Edit metrics
+                                    * Block: Confidence level
+                                    * Value: e.g. 90% (set in App settings → Results settings)
+                                    * Read‑only (global setting).
+                                    * Block: Minimum visitors per variation
+                                    * Value: e.g. 5,000 (set in App settings → Results settings)
+                                    * Read‑only (global setting).
+                                    * Block: Revenue guardrail
+                                    * Toggle: On / Off
+                                    * Helper text when On:
+Pauses this test if revenue per visitor for any variation drops more than 10% vs control, once each variation has about 100 visitors.
+                                    * Action link: Edit guardrail (opens guardrail settings dialog).
+                                       5. Reference & identifiers
+                                       * Block: Reference
+                                       * Test ID
+                                       * Created date
+                                       * Started date
+                                       * Block: Links
+                                       * Link: View test history (to History tab)
+                                       * Link: View test in Tests list
+________________
+
+
+4. History tab – “Test history”
+This is the renamed and refined Activity tab.[ppl-ai-file-upload.s3.amazonaws]
+Naming
+                                       * Tab label: History
+                                       * Page title: Test history
+                                       * Subtitle: Log of guardrail events and test changes.
+Filters
+                                       * Filter chips at top:
+                                       * All (default)
+                                       * Lifecycle (created, launched, paused, resumed, stopped, winners applied)
+                                       * Guardrails (guardrail stops, exclusions, threshold changes)
+Event row contents
+Each row includes:
+                                       1. Icon: coloured dot (green/ yellow/ red) indicating type.
+                                       2. Title (bold), examples:
+                                       * Stopped by guardrail
+                                       * Test paused
+                                       * Test resumed
+                                       * Launched test
+                                       * Created test
+                                       * Guardrail excluded product
+                                       * Winner applied to catalog
+                                       3. Meta line: “actor — date, time”, e.g.
+                                       * You — Sep 3, 2026, 11:25 AM
+                                       * Guardrail — Sep 3, 2026, 11:25 AM
+                                       4. Detail text:
+                                       * Guardrail stop example:
+Revenue per visitor dropped 34.1% vs control (limit 10%). Traffic assignment stopped.
+                                       * Product exclusion example:
+Guardrail excluded “Gift Card” from the test. Revenue per visitor fell below the safety limit.
+                                       * Test launch example:
+Traffic allocation set to 50%. All visitors in your audience segment can enter this test.
+                                       * Winner applied example:
+Applied winner “Variation B” for “Gift Card”. Catalog price updated.
+                                          5. Badge at right indicating event type:
+                                          * Guardrail / Paused / Launched / Created / Winner applied / Settings changed.
+Event types to log
+                                          * Lifecycle:
+                                          * Created test
+                                          * Launched test
+                                          * Paused test
+                                          * Resumed test
+                                          * Stopped test
+                                          * Winner applied (single product)
+                                          * Winners applied in bulk
+                                          * Guardrail:
+                                          * Guardrail paused test (global)
+                                          * Guardrail resumed test (if applicable)
+                                          * Guardrail excluded product(s)
+                                          * Guardrail threshold changed
+                                          * Settings changes:
+                                          * Audience targeting changed
+                                          * Traffic allocation changed
+                                          * Primary metric changed
+                                          * Guardrail turned ON/OFF
+________________
+
+
+5. Old → new mapping (for dev)
+To make implementation clear:
+                                          * Tabs
+                                          * Old: Overview, Performance, Variations, Audience, Metrics, Activity, Settings
+                                          * New: Overview, History, Settings
+                                          * Overview (new)
+                                          * Includes:
+                                          * Old Overview metrics (visitors, lift, confidence, totals).
+                                          * Old Variations top cards (per‑arm stats).
+                                          * Old Performance “Product performance by variation” table.
+                                          * Adds:
+                                          * Status toggle (Active/Paused).
+                                          * Apply winner buttons per product + optional bulk apply.
+                                          * Settings (new)
+                                          * Includes:
+                                          * Old Settings content (status, auto‑stop, traffic ramp, guardrail summary, etc.).
+                                          * Old Audience content (segment, devices, sources, countries).
+                                          * Old Metrics content (primary metric, secondary metrics).
+                                          * Read‑only global Results settings (confidence, min visitors per variation).
+                                          * History (new)
+                                          * Renames: Activity → History.
+                                          * Keeps: event list and basic layout.
+                                          * Refines: event titles, badges, and filters as specified above.

@@ -349,7 +349,8 @@ class ABTestEngine {
       // If a test is tightened to mobile-only, a previously assigned desktop visitor must stop seeing it.
       const existingAssignment = await getTestAssignment(testId, userId, shopDomain);
       if (existingAssignment) {
-        if (!this.isUserEligible(test, context)) {
+        const stickyContext = { ...context, _skip_traffic_source_recheck: true };
+        if (!this.isUserEligible(test, stickyContext)) {
           return null;
         }
         return this._buildAssignmentResponseFromExisting(test, existingAssignment);
@@ -659,6 +660,7 @@ class ABTestEngine {
       const testContext = { ...context, ...(contextOverrides[testId] || {}) };
       const existingAssignment = assignmentsMap.get(testId);
       if (existingAssignment) {
+        testContext._skip_traffic_source_recheck = true;
         if (!this.isUserEligible(test, testContext)) {
           continue;
         }
@@ -1050,18 +1052,22 @@ class ABTestEngine {
       }
     }
 
-    // Advanced targeting: traffic source (include/exclude rules or legacy single value)
-    const trafficSourceRules = segments.traffic_source_rules;
-    if (Array.isArray(trafficSourceRules) && trafficSourceRules.length > 0) {
-      const ruleMatch = matchesTrafficSourceRules(trafficSourceRules, context.traffic_source);
-      if (ruleMatch === false) {
-        return false;
-      }
-    } else {
-      const trafficSource = (segments.traffic_source || 'all').toLowerCase();
-      if (trafficSource !== 'all' && context.traffic_source) {
-        if (!matchesLegacyTrafficSource(trafficSource, context.traffic_source)) {
+    // Advanced targeting: traffic source (include/exclude rules or legacy single value).
+    // After first assignment, traffic source is not re-checked so in-store navigation
+    // cannot drop a bucketed visitor when attribution is first-touch on the client.
+    if (!context._skip_traffic_source_recheck) {
+      const trafficSourceRules = segments.traffic_source_rules;
+      if (Array.isArray(trafficSourceRules) && trafficSourceRules.length > 0) {
+        const ruleMatch = matchesTrafficSourceRules(trafficSourceRules, context.traffic_source);
+        if (ruleMatch === false) {
           return false;
+        }
+      } else {
+        const trafficSource = (segments.traffic_source || 'all').toLowerCase();
+        if (trafficSource !== 'all' && context.traffic_source) {
+          if (!matchesLegacyTrafficSource(trafficSource, context.traffic_source)) {
+            return false;
+          }
         }
       }
     }

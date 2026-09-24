@@ -8,6 +8,14 @@ describe('classicAudienceSegmentMapper', () => {
     expect(normalizePrimaryMetric('paid_conversion_rate')).toBe('conversion_rate');
   });
 
+  it('omits traffic_source_rules when every Classic source pill is selected', () => {
+    const segs = classicAudienceToSegments({
+      sources: ['Direct', 'Search', 'Social', 'Email', 'Paid ads', 'Referral'],
+      sourceMode: 'include',
+    });
+    expect(segs.traffic_source_rules).toBeUndefined();
+  });
+
   it('maps exclude sources and traffic ramp', () => {
     const segs = classicAudienceToSegments({
       segment: 'new_visitors',
