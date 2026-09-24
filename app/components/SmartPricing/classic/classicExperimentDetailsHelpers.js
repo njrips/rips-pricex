@@ -309,28 +309,101 @@ export function formatProductDecisionLabel(plan = {}, { isOffer = false } = {}) 
   return '';
 }
 
+function formatProductAppliedStatusLabel(isOffer) {
+  return isOffer ? 'Completed' : 'Applied';
+}
+
+function formatProductFinishedStatusLabel(isOffer) {
+  return isOffer ? 'Completed' : 'Kept catalog';
+}
+
 /** Merchant status column on Product performance by variation (Global naming doc). */
 export function formatProductStatusLabel({
   planStatus = '',
   rolloutState = null,
   rolloutDetail = '',
+  isOffer = false,
 } = {}) {
   const detail = String(rolloutDetail || '').toLowerCase();
   if (detail.includes('guardrail') || detail.includes('revenue drop')) {
     return 'Excluded by guardrail';
   }
-  const state = String(rolloutState || '').trim();
-  if (state === 'ready_challenger' || state === 'ready_control') return 'Ready';
-  if (state === 'blocked') {
-    return detail.includes('guardrail') ? 'Excluded by guardrail' : 'Needs attention';
-  }
+
   const status = String(planStatus || '')
     .trim()
     .toLowerCase();
   if (status === 'paused' || status === 'stopped') return 'Paused';
-  if (status === 'applied') return 'Ready';
+  // Plan status wins when analytics lag behind a successful apply/finish.
+  if (status === 'applied') return formatProductAppliedStatusLabel(isOffer);
+  if (status === 'completed' || status === 'complete' || status === 'ended') {
+    return formatProductFinishedStatusLabel(isOffer);
+  }
+
+  const state = String(rolloutState || '').trim();
+  if (state === 'applied') return formatProductAppliedStatusLabel(isOffer);
+  if (state === 'ready_challenger' || state === 'ready_control') return 'Ready';
+  if (state === 'blocked') {
+    return detail.includes('guardrail') ? 'Excluded by guardrail' : 'Needs attention';
+  }
   if (state === 'collecting' || status === 'running' || status === 'active') return 'Running';
   return 'Running';
+}
+
+/** Badge variant for Product performance → Status column (null = plain text). */
+export function productPerformanceStatusBadgeVariant(statusLabel) {
+  switch (String(statusLabel || '').trim()) {
+    case 'Excluded by guardrail':
+    case 'Needs attention':
+      return 'attention';
+    case 'Ready':
+      return 'ready';
+    case 'Applied':
+    case 'Completed':
+    case 'Kept catalog':
+      return 'applied';
+    default:
+      return null;
+  }
+}
+
+/**
+ * Rollout queue Status column — same labels as the performance table, but
+ * keeps queue-specific ready copy (e.g. “Keep price” for control-ready rows).
+ */
+export function productRolloutQueueStatusBadge(row, { isOffer = false } = {}) {
+  if (row?.loading) {
+    return { tone: null, label: 'Loading' };
+  }
+  const label = formatProductStatusLabel({
+    planStatus: row?.planStatus,
+    rolloutState: row?.state,
+    rolloutDetail: row?.decision?.detail,
+    isOffer,
+  });
+  const variant = productPerformanceStatusBadgeVariant(label);
+  if (variant === 'applied') {
+    return { tone: 'success', label };
+  }
+  if (variant === 'attention') {
+    return { tone: 'critical', label };
+  }
+  const state = String(row?.state || '').trim();
+  if (state === 'ready_control') {
+    return { tone: 'info', label: 'Keep price' };
+  }
+  if (state === 'ready_challenger') {
+    return { tone: 'success', label: 'Ready' };
+  }
+  if (state === 'blocked') {
+    return { tone: 'critical', label: 'Needs attention' };
+  }
+  if (state === 'collecting') {
+    return { tone: null, label: 'Collecting' };
+  }
+  if (variant === 'ready') {
+    return { tone: 'success', label };
+  }
+  return { tone: null, label: label || 'Collecting' };
 }
 
 /** Decision column copy: Winner: Control / Variation A / Needs more data. */
@@ -357,22 +430,44 @@ export function formatProductDecisionOutcome({ rolloutDecision = null, planStatu
   return 'Needs more data';
 }
 
-export function resolveProductWinningArmId(rolloutDecision = null, planArms = []) {
-  if (!rolloutDecision) return null;
-  const state = String(rolloutDecision.state || '').trim();
+export function resolveProductWinningArmId(
+  rolloutDecision = null,
+  planArms = [],
+  { winnerArmId = null } = {}
+) {
   const arms = Array.isArray(planArms) ? planArms : [];
+  const matchArmId = id => {
+    if (id === null || id === undefined || String(id).trim() === '') return null;
+    const key = String(id);
+    return arms.some(arm => String(arm.id) === key) ? key : null;
+  };
+
+  if (!rolloutDecision) {
+    return matchArmId(winnerArmId);
+  }
+  const state = String(rolloutDecision.state || '').trim();
   if (state === 'ready_control') {
     const control = arms.find(isControlArm) || arms[0];
     return control?.id || null;
   }
   if (state === 'ready_challenger') {
     const id = decisionWinnerArmId(rolloutDecision);
-    if (id) return id;
+    if (id) return matchArmId(id) || id;
     const label = String(rolloutDecision.winner?.label || '').trim();
     const match = arms.find(arm => String(arm.label || '') === label);
     return match?.id || null;
   }
-  return null;
+  if (state === 'applied') {
+    const fromDecision = decisionWinnerArmId(rolloutDecision);
+    if (fromDecision) return matchArmId(fromDecision) || fromDecision;
+    const fromAnalytics = matchArmId(winnerArmId);
+    if (fromAnalytics) return fromAnalytics;
+    if (String(rolloutDecision.reason || '').includes('control')) {
+      const control = arms.find(isControlArm) || arms[0];
+      return control?.id || null;
+    }
+  }
+  return matchArmId(winnerArmId);
 }
 
 function decisionWinnerArmId(decision) {
@@ -1264,7 +1359,7 @@ const ROLLOUT_STATE_TONE = Object.freeze({
   ready_control: 'info',
   blocked: 'critical',
   collecting: 'subdued',
-  applied: 'subdued',
+  applied: 'success',
 });
 
 /**
@@ -1308,9 +1403,13 @@ export function buildProductRolloutRows({ plans = [], analyticsByTestId = {} } =
         imageUrl: plan.image_url || null,
         currency: payload?.currency || plan.currency || 'USD',
         loading: !payload,
+        planStatus: String(plan?.status || '')
+          .trim()
+          .toLowerCase() || null,
         state,
         tone: ROLLOUT_STATE_TONE[state] || 'subdued',
         decision,
+        winnerArmId: payload?.winner_arm_id || null,
         arms: Array.isArray(payload?.arms) ? payload.arms : [],
         significance: payload?.significance || null,
         summary: payload?.summary || null,

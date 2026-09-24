@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   formatProductDecisionOutcome,
   formatProductStatusLabel,
+  productPerformanceStatusBadgeVariant,
+  productRolloutQueueStatusBadge,
   resolveProductWinningArmId,
 } from '../classicExperimentDetailsHelpers';
 
@@ -18,6 +20,39 @@ describe('product performance labels (naming doc)', () => {
       })
     ).toBe('Excluded by guardrail');
     expect(formatProductStatusLabel({ planStatus: 'paused' })).toBe('Paused');
+    expect(formatProductStatusLabel({ rolloutState: 'applied' })).toBe('Applied');
+    expect(formatProductStatusLabel({ planStatus: 'applied' })).toBe('Applied');
+    expect(formatProductStatusLabel({ planStatus: 'applied', isOffer: true })).toBe('Completed');
+    expect(formatProductStatusLabel({ planStatus: 'completed' })).toBe('Kept catalog');
+    expect(
+      formatProductStatusLabel({
+        planStatus: 'applied',
+        rolloutState: 'ready_challenger',
+      })
+    ).toBe('Applied');
+  });
+
+  it('maps Applied status to its own badge variant (not Ready green)', () => {
+    expect(productPerformanceStatusBadgeVariant('Ready')).toBe('ready');
+    expect(productPerformanceStatusBadgeVariant('Applied')).toBe('applied');
+    expect(productPerformanceStatusBadgeVariant('Completed')).toBe('applied');
+    expect(productPerformanceStatusBadgeVariant('Kept catalog')).toBe('applied');
+    expect(productPerformanceStatusBadgeVariant('Running')).toBe(null);
+  });
+
+  it('aligns rollout queue badges with performance table terminal states', () => {
+    expect(
+      productRolloutQueueStatusBadge(
+        { state: 'applied', planStatus: 'applied', loading: false },
+        { isOffer: false }
+      )
+    ).toEqual({ tone: 'success', label: 'Applied' });
+    expect(
+      productRolloutQueueStatusBadge(
+        { state: 'ready_control', planStatus: 'running', loading: false },
+        { isOffer: false }
+      )
+    ).toEqual({ tone: 'info', label: 'Keep price' });
   });
 
   it('maps rollout decisions to Decision column values', () => {
@@ -35,6 +70,10 @@ describe('product performance labels (naming doc)', () => {
     expect(formatProductDecisionOutcome({ rolloutDecision: { state: 'collecting' } })).toBe(
       'Needs more data'
     );
+    expect(formatProductDecisionOutcome({ rolloutDecision: { state: 'applied' } })).toBe(
+      'Winner applied'
+    );
+    expect(formatProductDecisionOutcome({ planStatus: 'applied' })).toBe('Winner applied');
   });
 
   it('resolves the winning arm for metric cell highlight', () => {
@@ -46,5 +85,8 @@ describe('product performance labels (naming doc)', () => {
       resolveProductWinningArmId({ state: 'ready_challenger', winner: { arm_id: 'a' } }, arms)
     ).toBe('a');
     expect(resolveProductWinningArmId({ state: 'ready_control' }, arms)).toBe('c');
+    expect(
+      resolveProductWinningArmId({ state: 'applied' }, arms, { winnerArmId: 'a' })
+    ).toBe('a');
   });
 });

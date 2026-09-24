@@ -8,19 +8,12 @@ import {
   formatNumber,
   formatRate,
   formatApplyAllReadyLabel,
+  productRolloutQueueStatusBadge,
   summarizeRolloutRows,
 } from '../classicExperimentDetailsHelpers';
 import { IconTrophy } from '../classicIcons';
 import ClassicApplyAllReadyConfirmModal from './ClassicApplyAllReadyConfirmModal';
 import styles from '../SmartPricingClassic.module.css';
-
-const STATE_BADGE = {
-  ready_challenger: { tone: 'success', label: 'Ready' },
-  ready_control: { tone: 'info', label: 'Keep price' },
-  blocked: { tone: 'critical', label: 'Needs attention' },
-  collecting: { tone: null, label: 'Collecting' },
-  applied: { tone: 'success', label: 'Applied' },
-};
 
 const LOADING_BADGE = { tone: null, label: 'Loading' };
 
@@ -261,6 +254,7 @@ function AutoApplyNotice({ applyAt }) {
 export default function ClassicRolloutReadinessPanel({
   rows = [],
   currency = 'USD',
+  isOfferTest = false,
   onApplyProduct,
   onFinishProduct,
   onApplyAllReady,
@@ -337,7 +331,7 @@ export default function ClassicRolloutReadinessPanel({
             {visibleRows.map(row => {
               const badge = row.loading
                 ? LOADING_BADGE
-                : STATE_BADGE[row.state] || STATE_BADGE.collecting;
+                : productRolloutQueueStatusBadge(row, { isOffer: isOfferTest });
               const rowCurrency = row.currency || currency;
               const busy = busyTestId === row.testId;
               const autoAt = row.decision?.auto?.apply_at;

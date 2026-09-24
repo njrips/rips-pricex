@@ -13,6 +13,7 @@ import {
   formatNumber,
   formatProductDecisionOutcome,
   formatProductStatusLabel,
+  productPerformanceStatusBadgeVariant,
   formatRate,
   paginateVariationProducts,
   resolveProductWinningArmId,
@@ -305,6 +306,7 @@ export default function ClassicPerformanceTab({
         <ClassicRolloutReadinessPanel
           rows={rolloutRows}
           currency={resolvedCurrency}
+          isOfferTest={isOfferTest}
           onApplyProduct={onApplyProduct}
           onFinishProduct={onFinishProduct}
           onApplyAllReady={onApplyAllReady}
@@ -561,6 +563,7 @@ export default function ClassicPerformanceTab({
                     planStatus: row.status,
                     rolloutState: rollout?.state,
                     rolloutDetail: rolloutDecision?.detail,
+                    isOffer: isOfferTest,
                   });
                   const decisionLabel = formatProductDecisionOutcome({
                     rolloutDecision,
@@ -568,15 +571,17 @@ export default function ClassicPerformanceTab({
                   });
                   const winningArmId = resolveProductWinningArmId(
                     rolloutDecision,
-                    armColumns.map(arm => ({ id: arm.id, label: arm.label, role: arm.role }))
+                    armColumns.map(arm => ({ id: arm.id, label: arm.label, role: arm.role })),
+                    { winnerArmId: rollout?.winnerArmId || null }
                   );
+                  const statusBadgeVariant = productPerformanceStatusBadgeVariant(statusLabel);
                   const statusTone =
-                    statusLabel === 'Excluded by guardrail'
+                    statusBadgeVariant === 'attention'
                       ? styles.trapBadge
-                      : statusLabel === 'Ready'
+                      : statusBadgeVariant === 'ready'
                         ? styles.winnerBadge
-                        : statusLabel === 'Needs attention'
-                          ? styles.trapBadge
+                        : statusBadgeVariant === 'applied'
+                          ? styles.appliedBadge
                           : null;
                   return (
                   <tr key={row.key} className={styles.productPriceRow}>
