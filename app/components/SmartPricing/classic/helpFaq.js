@@ -30,7 +30,7 @@ export const HELP_GLOSSARY_TERMS = [
   {
     term: 'Revenue guardrail',
     definition:
-      'Per-test limit on revenue-per-visitor drop vs control. After about 100 visitors per variation, Priceify pauses the test if a variation falls more than your threshold below control.',
+      'Per-test limit on revenue-per-visitor drop vs control, checked for each product on its own. After about 100 visitors per variation, Priceify stops testing a product if any of its variations falls more than your threshold below that product’s control. The other products keep running.',
   },
   {
     term: 'Results settings',

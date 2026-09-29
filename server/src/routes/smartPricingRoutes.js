@@ -836,6 +836,8 @@ router.post(
       useAi: body.use_ai !== false && body.useAi !== false,
       regenerate: body.regenerate === true || body.regenerate === 1,
       attempt: Number(body.attempt) || 0,
+      // Priced across every arm in `arms`, returned for these only.
+      targetArmIds: Array.isArray(body.target_arm_ids) ? body.target_arm_ids : null,
     });
     return sendSuccess(res, HTTP_STATUS.OK, {
       ...result,

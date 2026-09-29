@@ -33,7 +33,7 @@ describe('classicOverviewLayout', () => {
         { id: 'c', isControl: true, label: 'Control', allocation: 34 },
         { id: 'a', label: 'Variation A', allocation: 33 },
       ])
-    ).toMatch(/Control 34\.0%/);
+    ).toMatch(/Control 34%/);
   });
 
   it('marks leading and underperforming arms', () => {

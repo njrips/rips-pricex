@@ -195,6 +195,22 @@ describe('planToPriceTestService', () => {
     );
   });
 
+  it('launches no secondary metrics when the plan sends an empty list', () => {
+    const guardrails = { default_goal_template: { secondary_events: ['bounce_rate'] } };
+    const empty = buildPriceTestPayloadFromPlan(
+      { ...samplePlan, goal: { primary_metric: 'aov', secondary_events: [], secondary: [] } },
+      { guardrails }
+    );
+    expect(empty.goal.secondary).toEqual([]);
+    expect(empty.goal.secondary_events).toEqual([]);
+
+    const silent = buildPriceTestPayloadFromPlan(
+      { ...samplePlan, goal: { primary_metric: 'aov' } },
+      { guardrails }
+    );
+    expect(silent.goal.secondary_events).toEqual(['bounce_rate']);
+  });
+
   it('maps Classic audience_ui onto segments when plan.audience is missing', () => {
     const payload = buildPriceTestPayloadFromPlan({
       ...samplePlan,

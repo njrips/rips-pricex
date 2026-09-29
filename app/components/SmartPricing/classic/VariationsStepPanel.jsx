@@ -29,23 +29,12 @@ export {
   trafficTotal,
 } from './variationsStepHelpers';
 
-/** Up to 100 with one decimal (e.g. 33.3). */
+/** Whole numbers up to 100; anything after a decimal point is dropped. */
 function percentDraft(raw) {
-  let s = String(raw ?? '').replace(/[^\d.]/g, '');
-  const firstDot = s.indexOf('.');
-  if (firstDot >= 0) {
-    s =
-      s.slice(0, firstDot + 1) +
-      s
-        .slice(firstDot + 1)
-        .replace(/\./g, '')
-        .slice(0, 1);
-  }
-  const whole = firstDot >= 0 ? s.slice(0, firstDot) : s;
-  if (whole.length > 3) {
-    s = firstDot >= 0 ? `${whole.slice(0, 3)}.${s.slice(firstDot + 1)}` : whole.slice(0, 3);
-  }
-  return s;
+  return String(raw ?? '')
+    .split('.')[0]
+    .replace(/\D/g, '')
+    .slice(0, 3);
 }
 
 /**
@@ -204,7 +193,7 @@ export default function VariationsStepPanel({
       <div className={styles.sectionLabel}>Split traffic between variations</div>
       {!isOffer ? (
         <p className={styles.help} style={{ marginTop: 0, marginBottom: 12 }}>
-          Split test traffic between your current price (control) and up to 4 price variations.
+          Split test traffic between your current price (control) and up to 3 price variations.
         </p>
       ) : null}
 

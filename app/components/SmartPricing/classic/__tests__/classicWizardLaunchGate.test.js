@@ -35,8 +35,10 @@ const checkout = {
 
 vi.mock('../../../../hooks/useClassicShopDomain', () => ({ default: () => SHOP }));
 
+const launchMany = vi.fn(async () => ({}));
+
 vi.mock('../../../../hooks/useSmartPricingLaunch', () => ({
-  useSmartPricingLaunch: () => ({ launching: false, launchMany: vi.fn() }),
+  useSmartPricingLaunch: () => ({ launching: false, launchMany }),
 }));
 
 vi.mock('../../../../hooks/useSmartPricingCheckoutReadiness', () => ({
@@ -63,13 +65,14 @@ const HELD =
 
 /** Exposes the gate props the footer button reads, plus the step body. */
 vi.mock('../ClassicWizardShell', () => ({
-  default: ({ stepIndex, continueDisabled, continueDisabledReason, children }) =>
+  default: ({ stepIndex, continueDisabled, continueDisabledReason, onContinue, children }) =>
     h(
       'div',
       null,
       h('span', { 'data-testid': 'step' }, String(stepIndex)),
       h('span', { 'data-testid': 'continue-disabled' }, String(continueDisabled)),
       h('span', { 'data-testid': 'continue-reason' }, continueDisabledReason || ''),
+      h('button', { type: 'button', 'data-testid': 'continue', onClick: onContinue }, 'Continue'),
       children
     ),
 }));
@@ -120,7 +123,7 @@ const PLAN = {
   ],
 };
 
-async function renderAtReview({ id, variations = SPLIT, plans = [PLAN], audience }) {
+async function renderAtReview({ id, variations = SPLIT, plans = [PLAN], audience, goalByPlan }) {
   writeClassicWizardDraft(SHOP, {
     experiment_id: id,
     name: 'Autumn pricing',
@@ -130,6 +133,7 @@ async function renderAtReview({ id, variations = SPLIT, plans = [PLAN], audience
     plans,
     selectedIds: plans.map(plan => plan.variant_id),
     ...(audience ? { audience } : {}),
+    ...(goalByPlan ? { goalByPlan } : {}),
   });
   await act(async () => {
     root.render(
@@ -168,7 +172,7 @@ describe('the Launch button', () => {
     });
 
     expect(read('continue-disabled')).toBe('true');
-    expect(read('continue-reason')).toMatch(/35\.0% of traffic is unassigned/i);
+    expect(read('continue-reason')).toMatch(/35% of traffic is unassigned/i);
   });
 
   it('refuses while checkout is not ready, instead of erroring on click', async () => {
@@ -209,14 +213,14 @@ describe('the Launch button', () => {
 });
 
 describe('the review page', () => {
-  it('spells out a blocked launch the page does not otherwise explain', async () => {
+  it('leaves a blocked launch to the reason beside the Launch button', async () => {
     await renderAtReview({
       id: 'exp_explains',
       variations: [arm('control', 'Control', 40), arm('var_a', 'Variation A', 25)],
     });
 
-    expect(container.textContent).toContain('Not ready to launch');
-    expect(container.textContent).toMatch(/35\.0% of traffic is unassigned/i);
+    expect(container.textContent).not.toContain('Not ready to launch');
+    expect(read('continue-reason')).toMatch(/35% of traffic is unassigned/i);
   });
 
   it('does not say checkout twice', async () => {
@@ -251,8 +255,7 @@ describe('a product a live test is already pricing', () => {
 
     expect(read('continue-disabled')).toBe('true');
     expect(read('continue-reason')).toContain('Summer offer');
-    expect(container.textContent).toContain('Not ready to launch');
-    expect(container.textContent).toContain('Stop that test first');
+    expect(read('continue-reason')).toContain('Stop that test first');
   });
 
   it('asks on a draft resumed straight onto the review step', async () => {
@@ -285,5 +288,42 @@ describe('a product a live test is already pricing', () => {
     await renderAtReview({ id: 'exp_check_failed' });
 
     expect(read('continue-disabled')).toBe('false');
+  });
+});
+
+/**
+ * Goal suggestions are fetched on the Products step, before the merchant has
+ * picked a metric, and were never refreshed. Launch preferred them, so a test
+ * set to average order value could go live judged on something else.
+ */
+describe('what the launched test is judged on', () => {
+  it('uses the metric picked on the Audience step and no secondary metrics', async () => {
+    launchMany.mockClear();
+    await renderAtReview({
+      id: 'exp_metric',
+      audience: {
+        primaryMetric: 'aov',
+        secondaryMetrics: ['bounce_rate'],
+        customGoals: [],
+      },
+      goalByPlan: {
+        'plan-1': {
+          primary_metric: 'conversion_rate',
+          secondary_events: ['bounce_rate'],
+          cogs: { enabled: true, type: 'percentage', value: 55 },
+        },
+      },
+    });
+
+    await act(async () => {
+      container.querySelector('[data-testid="continue"]').click();
+    });
+
+    expect(launchMany).toHaveBeenCalledTimes(1);
+    const [launched] = launchMany.mock.calls[0][0];
+    expect(launched.goal.primary_metric).toBe('aov');
+    expect(launched.goal.secondary_events).toEqual([]);
+    // What the suggestion carried besides the metric still goes through.
+    expect(launched.goal.cogs).toEqual({ enabled: true, type: 'percentage', value: 55 });
   });
 });

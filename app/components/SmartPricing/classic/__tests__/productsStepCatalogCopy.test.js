@@ -8,7 +8,6 @@ import {
   resolveCatalogLoadedProductCount,
   resolveStoreCatalogProductCount,
   buildStoreCatalogStatusText,
-  buildStoreCatalogTotalLabel,
   shouldShowCatalogTruncatedHelp,
 } from '../productsStepCatalogCopy';
 

@@ -38,6 +38,53 @@ describe('smartPricingAiSuggestService', () => {
     });
   });
 
+  describe('pricing one variation of several', () => {
+    const request = {
+      variants: [{ variant_id: 'v1', title: 'Tee', current_price: 40, margin_percent: 55 }],
+      arms: [{ id: 'var_a' }, { id: 'var_b' }],
+      guardrails: { min_margin_percent: 35, max_price_change_percent: 20 },
+      minPct: 10,
+      maxPct: 20,
+    };
+
+    it('returns only the target arm, at the slot it holds among all of them', async () => {
+      const both = await suggestPrices(request);
+      const onlyA = await suggestPrices({ ...request, targetArmIds: ['var_a'] });
+      const onlyB = await suggestPrices({ ...request, targetArmIds: ['var_b'] });
+
+      expect(onlyA.suggestions.map(s => s.arm_id)).toEqual(['var_a']);
+      expect(onlyB.suggestions.map(s => s.arm_id)).toEqual(['var_b']);
+      const priceOf = arm => both.suggestions.find(s => s.arm_id === arm).price;
+      expect(onlyA.suggestions[0].price).toBe(priceOf('var_a'));
+      expect(onlyB.suggestions[0].price).toBe(priceOf('var_b'));
+      // The same band, suggested one variation at a time, still tests two prices.
+      expect(onlyA.suggestions[0].price).not.toBe(onlyB.suggestions[0].price);
+    });
+
+    it('counts what it returns, not what it spread', async () => {
+      const onlyA = await suggestPrices({ ...request, targetArmIds: ['var_a'] });
+      expect(onlyA.summary).toMatch(/^Suggested 1 test prices/);
+    });
+
+    it('rewrites the AI summary for the arm it returns', async () => {
+      hasOpenAiKey.mockReturnValue(true);
+      chatJson.mockResolvedValue({
+        summary: 'Variation A sits low and Variation B sits high.',
+        bands: [{ v: 0, lo: 10, hi: 20 }],
+      });
+      const onlyB = await suggestPrices({ ...request, targetArmIds: ['var_b'] });
+      expect(onlyB.source).toBe('openai');
+      expect(onlyB.suggestions.map(s => s.arm_id)).toEqual(['var_b']);
+      expect(onlyB.summary).not.toMatch(/Variation A/);
+      expect(onlyB.ai_pair_count).toBe(1);
+    });
+
+    it('leaves a request without target arms as it was', async () => {
+      const result = await suggestPrices(request);
+      expect(result.suggestions).toHaveLength(2);
+    });
+  });
+
   it('does not let the merchant band widen past shop max price change', () => {
     const result = deterministicPriceSuggestions({
       variants: [{ variant_id: 'v1', title: 'Tee', current_price: 40, margin_percent: 55 }],

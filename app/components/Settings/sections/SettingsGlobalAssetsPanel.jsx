@@ -22,6 +22,15 @@ function shortStatusMessage(error, fallbackOk) {
   return `${withoutPrefix.slice(0, 69)}…`;
 }
 
+/**
+ * @param {{
+ *   loading?: boolean, saving?: boolean, message?: string | null, error?: string | null,
+ *   css?: string, js?: string, cssEnabled?: boolean, jsEnabled?: boolean,
+ *   onCss?: (value: string) => void, onJs?: (value: string) => void,
+ *   onCssEnabled?: (value: boolean) => void, onJsEnabled?: (value: boolean) => void,
+ *   limits?: Record<string, unknown>
+ * }} props
+ */
 export default function SettingsGlobalAssetsPanel({
   loading = false,
   saving = false,

@@ -151,10 +151,11 @@ describe('global naming principles (PDF spot checks)', () => {
     expect(review).toContain('Open Settings → Price locations');
     expect(review).not.toMatch(/Fix setup before launching/i);
     expect(review).toContain('Traffic may be too low for a reliable result');
-    expect(review).toContain('Picked products');
-    expect(review).toContain("isOfferTest ? 'Products & offers' : 'Products & prices'");
     expect(review).toContain('reviewOverviewLabel');
+    // Step 5 is the summary alone; the per-step cards underneath were removed.
+    expect(review).not.toContain("'Products & prices'");
     const overview = read('reviewLaunchOverview.js');
+    expect(overview).toContain('Picked products');
     expect(overview).toContain('AI suggested prices');
     expect(overview).toContain('REVIEW_OVERVIEW_LINE_ORDER');
     expect(overview).toContain('formatReviewPricingModeLabel');

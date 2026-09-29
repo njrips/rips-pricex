@@ -64,7 +64,7 @@ describe('buildReviewOverviewLines', () => {
     expect(lines.results).toBe(
       'Primary: Revenue per visitor · 90% confidence · 5,000 visitors/variation',
     );
-    expect(lines.safety).toMatch(/^Guardrail ON · Pause if Rev\/visitor drops >10%/);
+    expect(lines.safety).toMatch(/^Guardrail ON · Stop a product if Rev\/visitor drops >10% vs control, after 100 visitors\/variation$/);
   });
 
   it('uses All products scope and guardrail off copy', () => {
@@ -156,5 +156,16 @@ describe('buildReviewOverviewLines', () => {
     expect(lines.test).toBe(
       'Sale test — Offer test · 3 products · Picked products · Offers per variation',
     );
+  });
+
+  it('reads "1 product" for a single-product test', () => {
+    const lines = buildReviewOverviewLines({
+      name: 'Solo',
+      selectedCount: 1,
+      pickMode: 'manual',
+      priceMode: 'manual',
+      variations: [{ id: 'control', traffic: 50 }, { id: 'var_a', letter: 'A', traffic: 50 }],
+    });
+    expect(lines.test).toBe('Solo — Price test · 1 product · Picked products · Manual prices');
   });
 });

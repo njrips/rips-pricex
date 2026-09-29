@@ -9,7 +9,6 @@ import {
   normalizeClassicAudienceTargeting,
   normalizeCustomGoals,
   normalizePrimaryMetric,
-  normalizeSecondaryEvents,
 } from '../targeting/smartPricingAudienceHelpers';
 import ClassicCountryMultiSelect from './ClassicCountryMultiSelect';
 import {
@@ -18,7 +17,6 @@ import {
   getCountryFieldHelp,
   resolveCountryLists,
 } from './countrySelection';
-import ClassicGoalPickerModal from './ClassicGoalPickerModal';
 import LabelWithInfo from '../../Settings/primitives/LabelWithInfo';
 import { IconCheck, IconShield } from './classicIcons';
 import {
@@ -126,16 +124,11 @@ function SelectablePill({
 export default function AudienceSuccessStepPanel({
   value,
   onChange,
-  shopDomain = '',
   significanceEstimate = null,
   disabled = false,
   showTrafficAllocation = true,
 }) {
-  const [goalPickerOpen, setGoalPickerOpen] = useState(false);
-  const [goalPickerTarget, setGoalPickerTarget] = useState('secondary');
   const state = value || createDefaultAudienceState();
-  const secondaryMetrics = normalizeSecondaryEvents(state.secondaryMetrics || []);
-  const customGoals = normalizeCustomGoals(state.customGoals || []);
   const primaryCustomGoal = state.primaryCustomGoal
     ? normalizeCustomGoals([state.primaryCustomGoal])[0] || null
     : null;
@@ -181,20 +174,12 @@ export default function AudienceSuccessStepPanel({
   const primaryMetric = primaryCustomGoal?.event_name
     ? String(primaryCustomGoal.event_name).trim().toLowerCase()
     : normalizePrimaryMetric(state.primaryMetric, 'revenue_per_visitor');
-  const primaryMetricKey = primaryMetric;
   // Profit per visitor is no longer offered, but an experiment already running
   // on it keeps its pill so editing the audience does not re-goal the test.
   const legacyPrimaryOptions = classicMetricOptionsFor([primaryMetric]).filter(
     opt => !GOAL_METRIC_OPTIONS.some(goal => goal.value === opt.value)
   );
-  const primaryMetricOptions = [
-    ...GOAL_METRIC_OPTIONS.map(opt =>
-      opt.value === 'revenue_per_visitor'
-        ? { ...opt, label: 'Revenue per visitor (recommended)' }
-        : opt
-    ),
-    ...legacyPrimaryOptions,
-  ];
+  const primaryMetricOptions = [...GOAL_METRIC_OPTIONS, ...legacyPrimaryOptions];
 
   const patch = partial => {
     if (disabled) return;
@@ -202,38 +187,9 @@ export default function AudienceSuccessStepPanel({
   };
 
   const selectPrimaryMetric = value => {
-    const next = normalizePrimaryMetric(value, 'revenue_per_visitor');
     patch({
-      primaryMetric: next,
+      primaryMetric: normalizePrimaryMetric(value, 'revenue_per_visitor'),
       primaryCustomGoal: null,
-      secondaryMetrics: secondaryMetrics.filter(v => v !== next),
-    });
-  };
-
-  const selectPrimaryCustomGoal = goal => {
-    const normalized = normalizeCustomGoals([goal])[0];
-    if (!normalized?.event_name) return;
-    const nextKey = String(normalized.event_name).trim().toLowerCase();
-    patch({
-      primaryCustomGoal: normalized,
-      primaryMetric: nextKey,
-      secondaryMetrics: secondaryMetrics.filter(v => v !== nextKey),
-      customGoals: customGoals.filter(g => g.event_name !== nextKey),
-    });
-  };
-
-  const toggleSecondary = value => {
-    if (value === primaryMetricKey) return;
-    patch({
-      secondaryMetrics: secondaryMetrics.includes(value)
-        ? secondaryMetrics.filter(v => v !== value)
-        : [...secondaryMetrics, value],
-    });
-  };
-
-  const removeCustomGoal = eventName => {
-    patch({
-      customGoals: customGoals.filter(goal => goal.event_name !== eventName),
     });
   };
 
@@ -439,6 +395,8 @@ export default function AudienceSuccessStepPanel({
               />
             );
           })}
+          {/* Custom goals are no longer offered; a test already launched on
+              one keeps its pill so editing does not silently re-goal it. */}
           {primaryCustomGoal ? (
             <SelectablePill
               key={primaryCustomGoal.event_name}
@@ -451,104 +409,7 @@ export default function AudienceSuccessStepPanel({
               title={`${customGoalTriggerSummary(primaryCustomGoal)} · click to clear custom primary`}
             />
           ) : null}
-          <button
-            type="button"
-            className={`${styles.pill} ${styles.customGoalPill}`}
-            disabled={disabled}
-            onClick={() => {
-              if (disabled) return;
-              setGoalPickerTarget('primary');
-              setGoalPickerOpen(true);
-            }}
-          >
-            + Add goal
-          </button>
-        </div>
-        <p className={styles.help}>
-          Choose one metric to optimise for this test. You can also add a custom goal; it cannot
-          also be a secondary.
-        </p>
-      </div>
-
-      <div className={styles.field}>
-        <div className={styles.fieldLabelStack}>
-          <span className={styles.label}>Secondary metrics</span>
-          <span className={styles.fieldLabelHint}>(optional)</span>
-        </div>
-        <div className={`${styles.pillRow} ${styles.metricPillRow}`}>
-          {GOAL_METRIC_OPTIONS.map(metric => {
-            const active = secondaryMetrics.includes(metric.value);
-            const locked = metric.value === primaryMetricKey;
-            return (
-              <SelectablePill
-                key={`secondary-${metric.value}`}
-                label={metric.label}
-                active={active}
-                disabled={disabled || locked}
-                onClick={() => toggleSecondary(metric.value)}
-              />
-            );
-          })}
-          {customGoals.map(goal => (
-            <SelectablePill
-              key={goal.event_name}
-              label={goal.label}
-              active
-              disabled={disabled}
-              onClick={() => removeCustomGoal(goal.event_name)}
-              title={`${customGoalTriggerSummary(goal)} · click to remove`}
-            />
-          ))}
-          <button
-            type="button"
-            className={`${styles.pill} ${styles.customGoalPill}`}
-            disabled={disabled}
-            onClick={() => {
-              if (disabled) return;
-              setGoalPickerTarget('secondary');
-              setGoalPickerOpen(true);
-            }}
-          >
-            + Add goal
-          </button>
-        </div>
-        <p className={styles.help}>
-          Optional. Quick picks watch common side effects. Use + Add goal to select from your Goals
-          library or create a new storefront trigger.
-        </p>
-      </div>
-
-      {goalPickerOpen && !disabled ? (
-        <ClassicGoalPickerModal
-          shopDomain={shopDomain}
-          selectedGoals={
-            goalPickerTarget === 'primary'
-              ? primaryCustomGoal
-                ? [primaryCustomGoal]
-                : []
-              : customGoals
-          }
-          selectionMode={goalPickerTarget === 'primary' ? 'single' : 'multiple'}
-          title={goalPickerTarget === 'primary' ? 'Choose primary goal' : 'Add goals'}
-          description={
-            goalPickerTarget === 'primary'
-              ? 'Pick a custom goal from your Goals library or create a new storefront event to optimize.'
-              : 'Pick from your Goals library or create a new storefront event. Monitoring only — these do not pick the winner.'
-          }
-          createMetricRole={goalPickerTarget === 'primary' ? 'primary' : 'secondary'}
-          onChange={next => {
-            if (goalPickerTarget === 'primary') {
-              const goal = normalizeCustomGoals(next)[0];
-              if (goal) selectPrimaryCustomGoal(goal);
-              else patch({ primaryCustomGoal: null, primaryMetric: 'revenue_per_visitor' });
-              setGoalPickerOpen(false);
-              return;
-            }
-            patch({ customGoals: normalizeCustomGoals(next) });
-          }}
-          onClose={() => setGoalPickerOpen(false)}
-        />
-      ) : null}
+        </div>      </div>
       </div>
 
       {/* Last on the step: a safety net for the experiment above it, which only
@@ -590,7 +451,8 @@ export default function AudienceSuccessStepPanel({
           <>
             <div className={styles.guardrailRule}>
               <span>
-                Pause this test if revenue per visitor for any variation drops more than
+                Stop testing a product if revenue per visitor for any of its variations drops
+                more than
               </span>
               <span className={styles.guardrailInputWrap}>
                 <input
@@ -611,8 +473,8 @@ export default function AudienceSuccessStepPanel({
                 </span>
               </span>
               <span>
-                below control, once each variation has about{' '}
-                {MIN_VISITORS_FOR_REVENUE_GUARDRAIL} visitors.
+                below that product&rsquo;s control, once each variation has about{' '}
+                {MIN_VISITORS_FOR_REVENUE_GUARDRAIL} visitors. The other products keep running.
               </span>
             </div>
             <p className={styles.guardrailHint} id="revenue-guardrail-help">

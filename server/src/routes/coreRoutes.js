@@ -50,8 +50,19 @@ router.post('/billing/sync-entitlement', requireInternalService, asyncHandler(as
   res.json({ shop: req.shopDomain, ...entitlement, synced: true });
 }));
 
+/**
+ * Grants a paid plan without Shopify billing, so it stays closed unless the
+ * environment is explicitly local. Keying on "not production" left it open on
+ * any deploy that forgot to set NODE_ENV.
+ */
+function devBillingAllowed() {
+  if (process.env.RIPSPRICEX_ALLOW_DEV_BILLING === 'true') return true;
+  const env = String(process.env.NODE_ENV || '').trim().toLowerCase();
+  return env === 'development' || env === 'test';
+}
+
 router.post('/billing/dev-entitle', requireShopSessionOrInternal, asyncHandler(async (req, res) => {
-  if (process.env.NODE_ENV === 'production' && process.env.RIPSPRICEX_ALLOW_DEV_BILLING !== 'true') {
+  if (!devBillingAllowed()) {
     return res.status(403).json({ error: 'Not allowed' });
   }
   const { status = 'ACTIVE', planHandle = 'smart_pricing' } = req.body || {};

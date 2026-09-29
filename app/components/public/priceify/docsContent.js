@@ -43,7 +43,7 @@ export const DOCS_NAV_CARDS = [
     href: '#enforced',
     label: 'Guide 03',
     title: 'What stops a test',
-    body: 'The revenue-per-visitor pause, and the traffic-split fault that blocks Apply winner.',
+    body: 'The revenue-per-visitor stop, and the traffic-split fault that blocks Apply winner.',
   },
   {
     href: '#ai-pricing',
@@ -87,7 +87,7 @@ export const DOCS_GROUPS = [
   {
     id: 'enforced',
     eyebrow: 'ENFORCEMENT',
-    title: 'What pauses a test, and what blocks Apply winner.',
+    title: 'What stops a product, and what blocks Apply winner.',
     tone: 'deep',
   },
   {
@@ -153,7 +153,7 @@ export const DOCS_SECTIONS = [
       { label: 'Min margin', value: '35%' },
       { label: 'Assumed cost', value: '55% of price, when unit cost is unknown' },
       { label: 'Runs at', value: 'Plan build and AI Suggest' },
-      { label: 'Live pause rule', value: 'No — only the revenue guardrail pauses a test' },
+      { label: 'Live pause rule', value: 'No — only the revenue guardrail stops a live test' },
     ],
     paragraphs: [
       'Max price change caps how far a price may move; this caps how close it may come to cost. Both run when a plan is built and when AI Suggest clamps a price, and the tighter of the two wins. Because price tests here are increases, the floor rarely binds — but it is what stops a suggestion from collapsing toward cost on a product whose margin is already thin.',
@@ -167,7 +167,7 @@ export const DOCS_SECTIONS = [
     group: 'ai-pricing',
     title: 'AI price suggestions',
     summary:
-      'On the Products step, Suggest fills a higher test price for every product and variation inside a min–max band you set. Control stays at the catalog price, increases only, and every suggestion is still capped by your price safety settings.',
+      'On the Products step, Suggest fills a test price for every product in the variation you are on, inside a min–max band you set for that variation. Control stays at the catalog price, and every suggestion is still capped by your price safety settings.',
     facts: [
       { label: 'Where', value: 'Create → Products step' },
       { label: 'Direction', value: 'Higher, lower, or AI decides' },
@@ -177,7 +177,7 @@ export const DOCS_SECTIONS = [
       { label: 'Editable', value: 'Any cell, before launch' },
     ],
     paragraphs: [
-      'On the Products step, choose AI suggested, set a min–max band as a percent or a dollar amount, then click Suggest. Control stays at the catalog price. Every selected product × test variation gets a suggested price. You can still edit any cell before launch.',
+      'On the Products step, choose AI suggested, set a min–max band as a percent or a dollar amount, then click Suggest. Control stays at the catalog price. Suggest prices only the variation whose tab is open, so each variation keeps its own band and its own prices — open Variation B and click Suggest there to price it. You can still edit any cell before launch.',
       'The band is signed, so it can test a lower price as well as a higher one. Enter 10 and 20 to test 10–20% dearer; enter −20 and −10 to test 10–20% cheaper. That matters because a price test asks which price earns more, and for some products the answer is a lower one: a product selling badly may simply cost more than its shoppers will pay, and offering less is the only way to find out. Enter −15 and 20 and you have allowed either, which leaves the choice to the suggestion — the AI then picks a direction per product, since that is exactly the judgement you cannot make from the outside. Max price change bounds the distance from the current price, so it caps a cut and a rise at the same figure.',
       'A dollar band works the same way and stays a flat cash amount on every product: $4–$8 adds $4–$8 whether the product sells for $20 or $200, and −$8 to −$4 takes the same off both. Each product is still capped on its own by your price safety settings, so a flat dollar move never pushes a cheap product past your max price change.',
       'One thing the band cannot override is your minimum margin. A cut is refused at the price where the margin would fall below it: a $100 product costing $60, with a 35% minimum margin, will not be priced under $92.31 however wide a discount you ask for — and Priceify says how many prices that affected rather than quietly showing a smaller cut. A product already selling below your minimum margin gets no room to go lower at all, since a test is not the place to correct that.',
@@ -287,20 +287,21 @@ export const DOCS_SECTIONS = [
   {
     id: 'goals',
     group: 'statistics',
-    title: 'Primary and secondary metrics',
+    title: 'Primary success metric',
     summary:
-      'The Audience step picks the one metric the test is judged on. Revenue per visitor is the default and answers the commercial question; conversion rate is the only metric an automatic price write will act on. Secondary metrics are recorded for context and never decide anything.',
+      'The Audience step picks the one metric the test is judged on: revenue per visitor, conversion rate, or average order value. Revenue per visitor is the default and answers the commercial question; conversion rate is the only metric an automatic price write will act on.',
     facts: [
       { label: 'Where', value: 'Create → Audience step' },
-      { label: 'Primary choices', value: 'Revenue per visitor, conversion rate, or a custom goal' },
+      {
+        label: 'Primary choices',
+        value: 'Revenue per visitor, conversion rate, or average order value',
+      },
       { label: 'Default', value: 'Revenue per visitor' },
-      { label: 'Secondary metrics', value: 'Any number — recorded, never decisive' },
     ],
     paragraphs: [
       'One metric decides the test. Revenue per visitor is the default and usually the right one for a price test: raising a price often trades a little conversion for more revenue per shopper, and revenue per visitor is the number that tells you whether that trade paid. Conversion rate answers a narrower question — how many shoppers bought — and ignores what they paid, so a price rise can look like a straight loss on it.',
       'The choice also decides how far the statistics can go on their own. Conversion rate is the only metric with an exact sequential boundary behind it, so it is the only one an automatic price write will ever act on. Revenue per visitor is measured against an estimate of order-value spread, which is enough to inform your judgement and not enough to authorise an unattended price change — a revenue-per-visitor winner always waits for you to apply it.',
-      'Secondary metrics are recorded alongside the primary one and never decide anything. They are there to catch the thing the primary metric cannot see: a price rise that holds revenue per visitor but halves add-to-cart is worth knowing about before you roll it out. A metric already used as the primary cannot also be a secondary.',
-      'A custom goal replaces the primary metric with an event of your own — fired manually, or by a URL match, a click on a selector, or a form being started or submitted. It is judged the same way a conversion is, so it needs the same conversion floor before anything is read.',
+      'Secondary metrics and custom goals are no longer set on new tests. A test launched with them keeps them, and keeps reporting them, so its history still reads correctly.',
       'Profit per visitor is no longer offered. Cost of goods was taken as one shop-wide percentage rather than per-variant cost, which made the metric revenue per visitor scaled by a constant: it ranked every variation identically while reading like a separate measurement. A test launched on it keeps it, and keeps reporting under that name, so its history still reads correctly.',
     ],
   },
@@ -377,20 +378,21 @@ export const DOCS_SECTIONS = [
   {
     id: 'guardrail-metrics',
     group: 'enforced',
-    title: 'Revenue guardrail: the max revenue drop that pauses a test',
+    title: 'Revenue guardrail: the max revenue drop that stops a product',
     summary:
-      'The one rule that stops a live test on commercial grounds. Once each variation has about 100 visitors, Priceify compares revenue per visitor against control, and pauses the test if a challenger is down by more than the percent you set. Each test sets its own figure on the Audience step, starting at 10%.',
+      'Checked product by product. Once each variation of a product has about 100 visitors, Priceify stops testing that product if any variation’s revenue per visitor is down on its control by more than the percent you set. The other products keep running. Each test sets its own figure, starting at 10%.',
     facts: [
       { label: 'Where', value: 'Create → Audience step, per test' },
       { label: 'Default', value: '10%' },
       { label: 'Range', value: '3% to 50%' },
       { label: 'Starts checking at', value: '~100 visitors per variation' },
-      { label: 'Effect', value: 'Pauses the test and stops assignment' },
+      { label: 'Scope', value: 'Each product on its own' },
+      { label: 'Effect', value: 'Stops that product; the rest keep running' },
     ],
     paragraphs: [
-      'A price test can lose money while it runs. This is the rule that limits how much. Once each variation has around 100 visitors — enough for the comparison to mean anything at all — Priceify compares each challenger’s revenue per visitor to control’s, and if a challenger is down by more than your threshold, it pauses the test and stops assigning shoppers to it. Nothing was written to your catalog, so the pause costs you the test rather than a price.',
+      'A price test can lose money while it runs. This is the rule that limits how much. Each product in a test is checked on its own: once each of its variations has around 100 visitors — enough for the comparison to mean anything at all — Priceify compares each variation’s revenue per visitor to that product’s control, and if any variation is down by more than your threshold, it stops testing that product and returns it to its original price. The other products in the test keep running. Nothing was written to your catalog, so the stop costs you that product’s test rather than a price.',
       'The threshold belongs to the test, not the shop. You set it on the Audience step anywhere from 3% to 50%, and it starts at 10%. There is no shop-wide ceiling above it: a test that wants to tolerate a 40% drop while it learns can, and a running test keeps the figure it launched with. Tightening it makes a test more likely to stop early on ordinary variance; loosening it buys the test room at the cost of revenue you can measure.',
-      'This is a safety pause, not a verdict. It reads the observed point estimate rather than a significance boundary, which is exactly what you want from a circuit breaker and exactly what you should not treat as evidence that the price is worse. A paused test can be resumed once you have looked at it.',
+      'This is a safety stop, not a verdict. It reads the observed point estimate rather than a significance boundary, which is exactly what you want from a circuit breaker and exactly what you should not treat as evidence that the price is worse.',
       'A product the guardrail stopped never gets Apply winner on its row. The guardrail fired because that variation lost money against control, so applying its price would be acting on the reading the guardrail rejected. Those rows say what the drop was and against which limit, and the product stays on its original price.',
       'It is the only operational guardrail on the Audience step. The limits on how far a price may move, and the cost floor beneath it, are separate checks that run when prices are built rather than while the test runs.',
     ],

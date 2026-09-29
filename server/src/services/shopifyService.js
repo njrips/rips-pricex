@@ -748,12 +748,10 @@ class ShopifyService {
       const rows = [];
       let cursor = null;
       let currency = 'USD';
-      let pages = 0;
       let truncated = false;
       const pageSize = Math.min(100, Math.max(maxProducts, 1));
 
       while (rows.length < maxProducts) {
-        pages += 1;
         const response = await client.request(query, {
           variables: {
             first: Math.min(pageSize, maxProducts - rows.length),
@@ -805,7 +803,14 @@ class ShopifyService {
           truncated = true;
           break;
         }
-        cursor = connection.pageInfo.endCursor;
+        const nextCursor = connection.pageInfo.endCursor || null;
+        // Without a new cursor the next request would restart at page one and
+        // the loop would never end, since the page cap no longer bounds it.
+        if (!edges.length || !nextCursor || nextCursor === cursor) {
+          truncated = true;
+          break;
+        }
+        cursor = nextCursor;
       }
       return { products: rows, currency, truncated };
     };

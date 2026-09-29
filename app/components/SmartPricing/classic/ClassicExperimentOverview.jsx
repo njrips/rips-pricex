@@ -833,7 +833,7 @@ export default function ClassicExperimentOverview() {
             editFocus === 'guardrail'
               ? 'Revenue per visitor guardrail settings changed.'
               : editFocus === 'metrics'
-                ? 'Primary metric or secondary goals changed.'
+                ? 'Primary success metric changed.'
                 : 'Segment, devices, sources, countries, or traffic allocation changed.',
           actor: activityActor,
         })
@@ -1189,7 +1189,6 @@ export default function ClassicExperimentOverview() {
         open={editOpen}
         focus={editFocus}
         initialValue={editSeed}
-        shopDomain={shopDomain}
         plans={experimentPlans}
         variations={variations}
         shopGuardrails={shopGuardrails || {}}

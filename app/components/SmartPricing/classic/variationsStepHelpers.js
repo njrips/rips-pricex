@@ -61,15 +61,46 @@ export function nextChallengerLetter(variations = []) {
   return LETTERS[challengerCount] || String(challengerCount + 1);
 }
 
+/** Variation traffic shares are whole percentages (34 / 33 / 33, never 33.3). */
 export function roundTrafficPercent(value) {
   const n = Number(value);
   if (!Number.isFinite(n)) return 0;
-  return Math.round(n * 10) / 10;
+  return Math.round(n);
 }
 
-/** One decimal place for variation traffic shares (e.g. 33.3%, 50.0%). */
 export function formatTrafficPercent(value) {
-  return roundTrafficPercent(value).toFixed(1);
+  return String(roundTrafficPercent(value));
+}
+
+/**
+ * Whole-number shares that still add up to what the raw shares did.
+ *
+ * Drafts and plans saved before shares were whole numbers carry splits like
+ * 33.4 / 33.3 / 33.3. Rounding each row on its own turns that into 99% and
+ * blocks Continue on a split the merchant never touched, so the leftover
+ * points go to the rows that lost the most in rounding.
+ */
+export function normalizeWholeTrafficSplit(variations) {
+  const rows = Array.isArray(variations) ? variations : [];
+  const raw = rows.map(row => {
+    const n = Number(row?.traffic);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  });
+  if (raw.every(n => Number.isInteger(n))) {
+    return rows.map((row, i) => (row?.traffic === raw[i] ? row : { ...row, traffic: raw[i] }));
+  }
+  const target = Math.min(100, Math.round(raw.reduce((sum, n) => sum + n, 0)));
+  const floors = raw.map(n => Math.floor(n));
+  let left = target - floors.reduce((sum, n) => sum + n, 0);
+  const order = raw
+    .map((n, i) => ({ i, frac: n - Math.floor(n) }))
+    .sort((a, b) => b.frac - a.frac || a.i - b.i);
+  for (const { i } of order) {
+    if (left <= 0) break;
+    floors[i] += 1;
+    left -= 1;
+  }
+  return rows.map((row, i) => ({ ...row, traffic: floors[i] }));
 }
 
 function rowTraffic(row) {
@@ -105,13 +136,12 @@ export function setVariationTraffic(variations, index, nextTraffic) {
 
 export function splitEvenly(variations) {
   const n = variations.length || 1;
-  const totalTenths = 1000;
-  const base = Math.floor(totalTenths / n);
-  let rem = totalTenths - base * n;
+  const base = Math.floor(100 / n);
+  let rem = 100 - base * n;
   return variations.map(row => {
-    const tenths = base + (rem > 0 ? 1 : 0);
+    const share = base + (rem > 0 ? 1 : 0);
     if (rem > 0) rem -= 1;
-    return { ...row, traffic: tenths / 10 };
+    return { ...row, traffic: share };
   });
 }
 
@@ -173,7 +203,7 @@ export function getVariationsStepContinueState({ variations = [] } = {}) {
     return {
       disabled: true,
       reason: 'under_allocated',
-      hint: `${formatTrafficPercent(remaining)}% of traffic is unassigned. Give it to a variation, or use Split evenly.`,
+      hint: `${formatTrafficPercent(remaining)}% of traffic is unassigned. Give it to a variation to continue.`,
     };
   }
   // Not reachable from the controls, which cap each row at the free remainder,
@@ -203,7 +233,7 @@ export function getVariationsStepContinueState({ variations = [] } = {}) {
 
 export function variationsFromPlanArms(arms = [], experimentType = 'price_test') {
   const isOffer = isOfferExperimentType(experimentType);
-  return (Array.isArray(arms) ? arms : []).map((arm, index) => {
+  return normalizeWholeTrafficSplit((Array.isArray(arms) ? arms : []).map((arm, index) => {
     const isControl =
       index === 0 ||
       arm?.role === 'control' ||
@@ -217,7 +247,7 @@ export function variationsFromPlanArms(arms = [], experimentType = 'price_test')
       description: isControl ? (isOffer ? 'No offer (baseline)' : 'Current price') : '',
       traffic: Number(arm?.allocation_percent ?? arm?.traffic_percent ?? arm?.traffic) || 0,
     };
-  });
+  }));
 }
 
 export function buildNextVariation(variations = []) {

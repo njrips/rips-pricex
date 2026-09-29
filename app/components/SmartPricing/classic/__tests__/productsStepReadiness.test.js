@@ -30,6 +30,8 @@ import {
   getAiSuggestCopy,
   filterPriceSuggestionsRespectingEdits,
   resolveAiSuggestTargetArms,
+  resolveAiSuggestSpreadArms,
+  keepArmKeys,
   hasAnyTestPriceChange,
   hasProductSelection,
   limitSelectionToProducts,
@@ -624,6 +626,10 @@ describe('productsStepReadiness', () => {
         summary: 'Select products first, then re-suggest prices.',
       }).body
     ).toMatch(/Select products first/);
+    // No standing "set the band, then click Suggest" instruction before a run.
+    expect(getAiSuggestCopy({ hasProducts: true }).body).toBe('');
+    expect(getAiSuggestCopy({ hasProducts: false }).body).toBe('');
+    expect(getAiSuggestCopy({ hasProducts: true }).button).toBe('Suggest');
   });
 
   describe('composeAiSuggestBanner', () => {
@@ -940,6 +946,30 @@ describe('resolveAiSuggestTargetArms', () => {
       },
     });
     expect(arms.map(a => a.id)).toEqual(['var_b']);
+  });
+
+  it('spreads across every test variation and keeps only the one being priced', () => {
+    const variations = [{ id: 'control' }, { id: 'var_a' }, { id: 'var_b' }];
+    expect(resolveAiSuggestSpreadArms(variations).map(a => a.id)).toEqual(['var_a', 'var_b']);
+    const keep = keepArmKeys([{ id: 'var_b' }]);
+    expect(
+      keep({
+        'gid://shopify/ProductVariant/1::var_a': '44.99',
+        'gid://shopify/ProductVariant/1::var_b': '46.99',
+      })
+    ).toEqual({ 'gid://shopify/ProductVariant/1::var_b': '46.99' });
+  });
+
+  it('prices only the variation on screen when one is given', () => {
+    const variations = [{ id: 'control' }, { id: 'var_a' }, { id: 'var_b' }];
+    const pricingByArm = { var_a: { priceMode: 'ai' }, var_b: { priceMode: 'ai' } };
+    expect(
+      resolveAiSuggestTargetArms({ variations, pricingByArm, activeArmIndex: 2 }).map(a => a.id)
+    ).toEqual(['var_b']);
+    // Control has no test price, so Suggest from its tab prices the first variation.
+    expect(
+      resolveAiSuggestTargetArms({ variations, pricingByArm, activeArmIndex: 0 }).map(a => a.id)
+    ).toEqual(['var_a']);
   });
 });
 

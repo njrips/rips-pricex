@@ -437,15 +437,45 @@ export function resolveAiSuggestTargetArms({
   variations = [],
   pricingByArm = {},
   defaultPriceMode = 'ai',
+  activeArmIndex = null,
 } = {}) {
   const testArms = (variations || []).filter(
     (row, i) => i > 0 && row?.id && row.id !== 'control',
   );
+  // Suggest prices the variation on screen and nothing else. Every arm starts
+  // in AI mode, so pricing all AI arms filled in tabs the merchant had not
+  // opened yet, with a band chosen for another variation.
+  if (activeArmIndex !== null && activeArmIndex !== undefined) {
+    const active = (variations || [])[Number(activeArmIndex)];
+    const onScreen = testArms.find(arm => arm === active) || testArms[0];
+    return onScreen ? [onScreen] : [];
+  }
   const aiArms = testArms.filter(arm => {
     const mode = pricingByArm[arm.id]?.priceMode || defaultPriceMode;
     return mode === 'ai';
   });
   return aiArms.length ? aiArms : testArms;
+}
+
+/**
+ * Every test variation, in order, for placing prices across a band.
+ *
+ * Suggest prices one variation, but its position in the spread still has to
+ * come from all of them. Asked about one arm alone, the spread puts it in the
+ * same place every time, so two variations given the same band came back with
+ * the same price and tested nothing against each other.
+ */
+export function resolveAiSuggestSpreadArms(variations = []) {
+  return (variations || []).filter((row, i) => i > 0 && row?.id && row.id !== 'control');
+}
+
+/** Filter a `variant::arm` keyed map down to the given arms. */
+export function keepArmKeys(arms = []) {
+  const ids = new Set((arms || []).map(arm => String(arm?.id || '')).filter(Boolean));
+  return (map = {}) =>
+    Object.fromEntries(
+      Object.entries(map || {}).filter(([key]) => ids.has(parsePriceOverrideKey(key).armId))
+    );
 }
 
 /** Skip cells the merchant edited (override kept, AI meta cleared). */
@@ -1143,8 +1173,10 @@ export function getAiSuggestCopy({
     button: busy ? 'Suggesting…' : reSuggest ? 'Re-suggest' : 'Suggest',
   });
 
+  // No standing "set the band, then click Suggest" instruction: the band and
+  // the Suggest button sit side by side and say it themselves.
   if (!hasProducts) {
-    return copy('Select products above, set a min/max band, then click Suggest.', false);
+    return copy('', false);
   }
   // Success, fallback, and error summaries must show even when aiSuggested has
   // not flipped yet — otherwise Suggest can fail in silence.
@@ -1157,10 +1189,7 @@ export function getAiSuggestCopy({
   if (hasArmPrices && !suggested) {
     return copy('Band updated — click Suggest to apply new prices inside this range.', true);
   }
-  return copy(
-    'Set the min/max band first, then click Suggest. Prices stay empty until you do.',
-    false
-  );
+  return copy('', false);
 }
 
 /** Names the single precondition that is keeping Suggest disabled. */
@@ -1244,7 +1273,7 @@ export function getProductsStepContinueState({
       reason: 'no_price_change',
       hint:
         priceMode === 'ai'
-          ? 'Set the min/max band, then click Suggest to apply test prices.'
+          ? 'Click Suggest to fill in test prices.'
           : 'Set at least one test price that differs from the current store price.',
     };
   }

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Badge, Banner, Button } from '@shopify/polaris';
+import { Badge, Banner, Button, Modal } from '@shopify/polaris';
 import useClassicShopDomain from '../../../../hooks/useClassicShopDomain';
 import { saveSmartPricingGuardrails } from '../../../../services/smartPricingApi';
 import { formatCurrency } from '../../smartPricingConstants';

@@ -1,7 +1,7 @@
 import { resolveCountryLists } from './countrySelection';
 import { ensureRevenueGuardrailRows } from './revenueGuardrail';
 import { rollupExperimentRevenueGuardrail } from './classicRevenueGuardrailOverview';
-import { collectActivityLogs, formatActivityRelative, mergeActivityTimeline } from './classicActivity';
+import { collectActivityLogs, mergeActivityTimeline } from './classicActivity';
 import { getPlanProductTitle, normalizePlanStatus } from './classicExperimentHelpers';
 import { formatOfferRule, isOfferExperimentType } from './offerSelection';
 import { buildPreviewUrl, resolvePreviewBaseUrl } from '../../../utils/previewUrl';

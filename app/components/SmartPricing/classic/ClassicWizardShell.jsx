@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { Button } from '@shopify/polaris';
 import { CLASSIC_CREATE_STEPS, getClassicCreateSteps, stepLabelLines } from './classicCreateSteps';
 import {
@@ -7,6 +7,7 @@ import {
   ButtonIconRocket,
   IconCheck,
 } from './classicIcons';
+import TooltipWrapper from '../../shared/TooltipWrapper';
 import styles from './SmartPricingClassic.module.css';
 
 function StepperStepLabel({ label }) {
@@ -36,6 +37,8 @@ export default function ClassicWizardShell({
   continueLabel = 'Continue',
   continueDisabled = false,
   continueDisabledReason = '',
+  /** The reason is a wait ("Checking…"), not something the merchant must fix. */
+  continueDisabledPending = false,
   backLabel = 'Back',
   showCancel = false,
   onCancel,
@@ -61,6 +64,20 @@ export default function ClassicWizardShell({
     .toLowerCase()
     .includes('launch');
   const lastIndex = steps.length - 1;
+
+  // Continue sits at the foot of a long step, and the browser keeps that scroll
+  // position when the next step renders, so it opened halfway down.
+  const shownStep = useRef(stepIndex);
+  useEffect(() => {
+    if (shownStep.current === stepIndex) return;
+    shownStep.current = stepIndex;
+    if (typeof window !== 'undefined' && typeof window.scrollTo === 'function') {
+      window.scrollTo({ top: 0, left: 0 });
+    }
+  }, [stepIndex]);
+  // A disabled button cannot explain itself, so the reason sits beside it.
+  const blockedHint =
+    continueDisabled && !continueBusy ? String(continueDisabledReason || '').trim() : '';
 
   return (
     <div className={styles.page}>
@@ -167,6 +184,18 @@ export default function ClassicWizardShell({
           </div>
         )}
         <div className={styles.footerActions}>
+          {blockedHint ? (
+            <p
+              className={`${styles.footerBlockedHint} ${
+                continueDisabledPending ? styles.footerBlockedHintPending : ''
+              }`}
+              // Not an alert: the step already announces its own problem, and
+              // the button's label carries the reason for screen readers.
+              aria-hidden
+            >
+              {blockedHint}
+            </p>
+          ) : null}
           {typeof onSaveDraft === 'function' ? (
             <Button
               variant="tertiary"
@@ -181,23 +210,23 @@ export default function ClassicWizardShell({
               before it, so committing an experiment to live shopper traffic
               looked exactly like advancing a step. The last click gets its own
               weight; the arrow buttons keep their trailing icon. */}
-          <span className={isLaunch ? styles.launchBtn : styles.iconTrailingBtn}>
-            <Button
-              variant="primary"
-              size={isLaunch ? 'large' : undefined}
-              icon={isLaunch ? ButtonIconRocket : ButtonIconArrowRight}
-              onClick={onContinue}
-              disabled={continueDisabled || continueBusy}
-              loading={continueBusy}
-              accessibilityLabel={
-                continueDisabled && continueDisabledReason
-                  ? `${continueLabel}. ${continueDisabledReason}`
-                  : undefined
-              }
-            >
-              {continueLabel}
-            </Button>
-          </span>
+          <TooltipWrapper content={blockedHint} preferredPosition="above" hoverDelay={150}>
+            <span className={isLaunch ? styles.launchBtn : styles.iconTrailingBtn}>
+              <Button
+                variant="primary"
+                size={isLaunch ? 'large' : undefined}
+                icon={isLaunch ? ButtonIconRocket : ButtonIconArrowRight}
+                onClick={onContinue}
+                disabled={continueDisabled || continueBusy}
+                loading={continueBusy}
+                accessibilityLabel={
+                  blockedHint ? `${continueLabel}. ${blockedHint}` : undefined
+                }
+              >
+                {continueLabel}
+              </Button>
+            </span>
+          </TooltipWrapper>
         </div>
       </div>
     </div>

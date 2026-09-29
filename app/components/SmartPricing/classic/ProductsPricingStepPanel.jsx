@@ -216,7 +216,6 @@ export default function ProductsPricingStepPanel({
   loading = false,
   loadError = '',
   onRetryLoad,
-  continueHint = '',
   shopDefaultsReady = true,
   currency = 'USD',
   bulkAppliedMessage = '',
@@ -246,8 +245,6 @@ export default function ProductsPricingStepPanel({
     () => resolveCatalogLoadedProductCount(catalogLoadedProductCount, opportunities),
     [catalogLoadedProductCount, opportunities]
   );
-  const catalogProductCount = availableProductCount;
-
   const selectedProductCount = useMemo(() => {
     const keys = new Set();
     (opportunities || []).forEach(row => {
@@ -1008,8 +1005,6 @@ export default function ProductsPricingStepPanel({
           two tests over one product is two answers to what it costs. Saying so
           beats letting the merchant hunt for a product that never appears. */}
       <hr className={styles.productsDivider} />
-
-      {continueHint ? <p className={styles.productsContinueHint}>{continueHint}</p> : null}
 
       {isOfferTest ? (
         <OfferArmsEditor

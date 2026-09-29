@@ -230,11 +230,12 @@ export default function ClassicSettingsTab({
             value={metrics?.primaryMetricLabel || '—'}
             note="Choose one metric to optimise for this test."
           />
-          <SettingRow
-            label="Secondary metrics (optional)"
-            multilineValue={secondaryItems.length > 0}
-            value={
-              secondaryItems.length ? (
+          {/* New tests launch without secondary metrics; older ones may still carry some. */}
+          {secondaryItems.length ? (
+            <SettingRow
+              label="Secondary metrics"
+              multilineValue
+              value={
                 <div className={styles.detailChipRow}>
                   {secondaryItems.map((item, index) => (
                     <span
@@ -245,11 +246,9 @@ export default function ClassicSettingsTab({
                     </span>
                   ))}
                 </div>
-              ) : (
-                'None'
-              )
-            }
-          />
+              }
+            />
+          ) : null}
           <SettingRow
             label="Confidence level"
             value={percentOrDash(metrics?.confidenceLevel)}
@@ -288,19 +287,21 @@ export default function ClassicSettingsTab({
               {on ? (
                 <div className={styles.guardrailRule}>
                   <span>
-                    Pauses the test if revenue per visitor for any variation drops more than
+                    Stops testing a product if revenue per visitor for any of its variations
+                    drops more than
                   </span>
                   <span className={styles.guardrailRuleValue}>
                     {String(row.threshold || '').replace(/^-/, '') || '—'}
                   </span>
                   <span>
-                    versus control, after each variation has about{' '}
-                    {MIN_VISITORS_FOR_REVENUE_GUARDRAIL} visitors.
+                    below that product&rsquo;s control, after each variation has about{' '}
+                    {MIN_VISITORS_FOR_REVENUE_GUARDRAIL} visitors. The other products keep
+                    running.
                   </span>
                 </div>
               ) : (
                 <div className={styles.guardrailRule}>
-                  <span>Not pausing on revenue drop. Stop this test yourself if needed.</span>
+                  <span>Not stopping on revenue drop. Stop this test yourself if needed.</span>
                 </div>
               )}
               {/* row.hint is deliberately not rendered: the badge above and the

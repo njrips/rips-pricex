@@ -217,7 +217,7 @@ describe('ClassicCreateWizard AI suggest', () => {
     expect(await priceInputValue()).toMatch(/44\.99/);
   });
 
-  it('requests every AI variation in one suggest call', async () => {
+  it('prices only the variation on screen, not every AI variation', async () => {
     writeClassicWizardDraft(SHOP, {
       experiment_id: 'exp_ai',
       name: 'AI suggest test',
@@ -269,8 +269,9 @@ describe('ClassicCreateWizard AI suggest', () => {
 
     expect(suggestSmartPricingPrices).toHaveBeenCalled();
     const body = suggestSmartPricingPrices.mock.calls.at(-1)?.[1];
-    expect(body.arms).toHaveLength(2);
-    expect(body.arms.map(a => a.id).sort()).toEqual(['var_a', 'var_b']);
+    // Spread across both so A keeps its slot, returned for A only.
+    expect(body.arms.map(a => a.id)).toEqual(['var_a', 'var_b']);
+    expect(body.target_arm_ids).toEqual(['var_a']);
     expect(body.regenerate).toBe(false);
   });
 

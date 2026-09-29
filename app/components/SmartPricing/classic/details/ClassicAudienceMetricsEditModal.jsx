@@ -12,7 +12,6 @@ export default function ClassicAudienceMetricsEditModal({
   open,
   focus = 'audience',
   initialValue,
-  shopDomain = '',
   readOnly = false,
   readOnlyReason = '',
   liveWarning = '',
@@ -60,7 +59,6 @@ export default function ClassicAudienceMetricsEditModal({
     if (!open) return undefined;
     const onKey = event => {
       if (event.key !== 'Escape' || saving) return;
-      if (document.getElementById('classic-goal-picker-title')) return;
       if (document.querySelector('[role="listbox"][aria-label="Countries"]')) return;
       onClose();
     };
@@ -113,7 +111,6 @@ export default function ClassicAudienceMetricsEditModal({
           <AudienceSuccessStepPanel
             value={draft}
             onChange={setDraft}
-            shopDomain={shopDomain}
             significanceEstimate={significanceEstimate}
             disabled={readOnly || saving || !shopDefaultsReady}
           />

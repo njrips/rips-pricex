@@ -3,10 +3,12 @@ import {
   createDefaultVariations,
   getVariationsStepContinueState,
   nextChallengerLetter,
+  normalizeWholeTrafficSplit,
   setVariationTraffic,
   sliderFillPercent,
   splitEvenly,
   trafficRemaining,
+  trafficSplitIsComplete,
   variationTrafficHeadroom,
   variationsFromPlanArms,
 } from '../variationsStepHelpers';
@@ -95,7 +97,7 @@ describe('variation traffic split', () => {
     ];
     expect(setVariationTraffic(rows, 1, -10)[1].traffic).toBe(0);
     expect(setVariationTraffic(rows, 1, 'abc')[1].traffic).toBe(0);
-    expect(setVariationTraffic(rows, 1, 33.6)[1].traffic).toBe(33.6);
+    expect(setVariationTraffic(rows, 1, 33.6)[1].traffic).toBe(34);
   });
 
   it('puts an even split back in one call', () => {
@@ -109,8 +111,33 @@ describe('variation traffic split', () => {
 
   it('divides three arms as evenly as 100 allows', () => {
     const rows = splitEvenly([{ id: 'control' }, { id: 'var_a' }, { id: 'var_b' }]);
-    expect(rows.map(row => row.traffic)).toEqual([33.4, 33.3, 33.3]);
+    expect(rows.map(row => row.traffic)).toEqual([34, 33, 33]);
     expect(trafficRemaining(rows)).toBe(0);
+  });
+
+  it('turns a decimal split saved earlier into whole numbers that still add up', () => {
+    const rows = normalizeWholeTrafficSplit([
+      { id: 'control', traffic: 33.4 },
+      { id: 'var_a', traffic: 33.3 },
+      { id: 'var_b', traffic: 33.3 },
+    ]);
+    expect(rows.map(row => row.traffic)).toEqual([34, 33, 33]);
+    expect(trafficSplitIsComplete(rows)).toBe(true);
+    expect(
+      normalizeWholeTrafficSplit([
+        { id: 'control', traffic: 16.7 },
+        { id: 'var_a', traffic: 16.7 },
+        { id: 'var_b', traffic: 66.6 },
+      ]).map(row => row.traffic)
+    ).toEqual([17, 17, 66]);
+  });
+
+  it('leaves an unfinished split unfinished rather than inventing traffic', () => {
+    const rows = normalizeWholeTrafficSplit([
+      { id: 'control', traffic: 45.5 },
+      { id: 'var_a', traffic: 20 },
+    ]);
+    expect(rows.map(row => row.traffic)).toEqual([46, 20]);
   });
 });
 
@@ -165,7 +192,7 @@ describe('getVariationsStepContinueState', () => {
     });
     expect(gate.disabled).toBe(true);
     expect(gate.reason).toBe('under_allocated');
-    expect(gate.hint).toMatch(/35\.0% of traffic is unassigned/i);
+    expect(gate.hint).toBe('35% of traffic is unassigned. Give it to a variation to continue.');
   });
 
   it('recovers a draft saved over 100 before the cap existed', () => {
@@ -177,8 +204,8 @@ describe('getVariationsStepContinueState', () => {
     });
     expect(gate.disabled).toBe(true);
     expect(gate.reason).toBe('over_allocated');
-    expect(gate.hint).toMatch(/140\.0%/);
-    expect(gate.hint).toMatch(/40\.0%/);
+    expect(gate.hint).toMatch(/140%/);
+    expect(gate.hint).toMatch(/Take 40%/);
   });
 
   it('lists the shape of the problem when several arms are starved', () => {

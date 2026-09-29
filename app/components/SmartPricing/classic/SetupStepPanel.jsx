@@ -42,17 +42,14 @@ export default function SetupStepPanel({
       </div>
 
       <div className={styles.field}>
-        <span className={styles.label}>Optional: hypothesis</span>
         <TextField
           id="classic-hypothesis"
-          label=""
-          labelHidden
+          label="Hypothesis (optional)"
           value={hypothesis}
           onChange={onHypothesisChange}
           placeholder="If we change… then… because…"
           multiline={3}
           autoComplete="off"
-          helpText="Optional, for your notes only."
         />
       </div>
 

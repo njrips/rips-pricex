@@ -440,7 +440,62 @@ function deterministicPriceSuggestions({
   };
 }
 
-async function suggestPrices({
+/**
+ * Keep only the arms the merchant is pricing, and say what was kept.
+ *
+ * Arms are spread across the band by their position among all of them, so the
+ * wizard sends every variation even when Suggest is for one: priced alone, two
+ * variations given the same band landed on the same price. The counts in the
+ * summary are rewritten for what is returned, and the model's own sentence is
+ * dropped because it may describe the variations that were left out.
+ */
+function narrowSuggestionsToArms(result = {}, { targetArmIds, minPct, maxPct, guardrails }) {
+  const ids = new Set(
+    (Array.isArray(targetArmIds) ? targetArmIds : []).map(id => String(id || '')).filter(Boolean)
+  );
+  const all = Array.isArray(result.suggestions) ? result.suggestions : [];
+  if (!ids.size || !all.length) return result;
+  const suggestions = all.filter(item => ids.has(String(item?.arm_id || '')));
+  if (suggestions.length === all.length) return result;
+
+  if (result.source === 'openai') {
+    const fromModel = suggestions.filter(item => item?.ai_band).length;
+    const { min, max } = resolveAiPriceLiftBand(minPct, maxPct, guardrails);
+    return {
+      ...result,
+      suggestions,
+      ai_pair_count: fromModel,
+      fallback_pair_count: suggestions.length - fromModel,
+      summary: describeSuggestionSource({
+        modelSummary: '',
+        fromModel,
+        filled: suggestions.length - fromModel,
+        min,
+        max,
+      }),
+    };
+  }
+  return {
+    ...result,
+    suggestions,
+    summary: String(result.summary || '').replace(
+      /^Suggested \d+ test prices/,
+      `Suggested ${suggestions.length} test prices`
+    ),
+  };
+}
+
+async function suggestPrices({ targetArmIds = null, ...args } = {}) {
+  const result = await suggestPricesForAllArms(args);
+  return narrowSuggestionsToArms(result, {
+    targetArmIds,
+    minPct: args.minPct ?? 10,
+    maxPct: args.maxPct ?? 20,
+    guardrails: args.guardrails || {},
+  });
+}
+
+async function suggestPricesForAllArms({
   variants = [],
   arms = [],
   guardrails = {},

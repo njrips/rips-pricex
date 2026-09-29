@@ -142,6 +142,7 @@ import SetupStepPanel, { EXPERIMENT_TYPES } from './SetupStepPanel';
 import VariationsStepPanel, { createDefaultVariations } from './VariationsStepPanel';
 import {
   getVariationsStepContinueState,
+  normalizeWholeTrafficSplit,
   variationsFromPlanArms,
 } from './variationsStepHelpers';
 import ProductsPricingStepPanel from './ProductsPricingStepPanel';
@@ -178,7 +179,9 @@ import {
   buildLocalPriceSuggestionMeta,
   filterPriceOverridePatch,
   filterPriceSuggestionsRespectingEdits,
+  keepArmKeys,
   metaFromPriceSuggestions,
+  resolveAiSuggestSpreadArms,
   resolveAiSuggestTargetArms,
   resolveBandEdge,
   lookupPriceOverride,
@@ -410,6 +413,8 @@ export default function ClassicCreateWizard({ onTitleChange }) {
     detail: null,
     busy: false,
   });
+  // The variation the Suggest status line was written for.
+  const [aiPriceMetaArmId, setAiPriceMetaArmId] = useState(null);
   const aiSuggestRequestId = useRef(0);
   const [aiSuggestAttempt, setAiSuggestAttempt] = useState(0);
   const productsLoadRequestId = useRef(0);
@@ -420,20 +425,11 @@ export default function ClassicCreateWizard({ onTitleChange }) {
   const priceMode = activePricing.priceMode || defaultPriceMode;
   const bulkPercent = activePricing.bulkPercent ?? '10';
   const bulkDirection = activePricing.bulkDirection || 'increase';
-  // The AI band describes the whole test: Suggest spreads one band across every
-  // AI variation. Reading it per-arm would let a tab show a band that did not
-  // produce the prices in front of you, so it is shared and written to all arms.
-  const sharedAiBand =
-    Object.values(pricingByArm).find(
-      entry =>
-        entry &&
-        (entry.aiMinPct !== undefined ||
-          entry.aiMaxPct !== undefined ||
-          entry.aiUnit !== undefined)
-    ) || {};
-  const aiMinPct = sharedAiBand.aiMinPct ?? '10';
-  const aiMaxPct = sharedAiBand.aiMaxPct ?? '20';
-  const aiUnit = sharedAiBand.aiUnit === 'amount' ? 'amount' : 'percent';
+  // Each variation has its own band, because Suggest prices only the variation
+  // on screen: a tab has to show the band that produced the prices in it.
+  const aiMinPct = activePricing.aiMinPct ?? '10';
+  const aiMaxPct = activePricing.aiMaxPct ?? '20';
+  const aiUnit = activePricing.aiUnit === 'amount' ? 'amount' : 'percent';
 
   const patchActivePricing = useCallback(
     patch => {
@@ -454,28 +450,7 @@ export default function ClassicCreateWizard({ onTitleChange }) {
     [activeArmId, defaultPriceMode]
   );
 
-  /** Band edits apply to every variation, since one band drives them all. */
-  const patchAiBand = useCallback(
-    patch => {
-      setPricingByArm(prev => {
-        const next = { ...prev };
-        new Set([...Object.keys(prev), activeArmId]).forEach(id => {
-          next[id] = {
-            priceMode: defaultPriceMode,
-            bulkPercent: '10',
-            bulkDirection: 'increase',
-            aiMinPct: '10',
-            aiMaxPct: '20',
-            aiUnit: 'percent',
-            ...(prev[id] || {}),
-            ...patch,
-          };
-        });
-        return next;
-      });
-    },
-    [activeArmId, defaultPriceMode]
-  );
+  const patchAiBand = patchActivePricing;
 
   const markArmsAiSuggested = useCallback(armIds => {
     const ids = (armIds || []).map(id => String(id || '').trim()).filter(Boolean);
@@ -783,7 +758,7 @@ export default function ClassicCreateWizard({ onTitleChange }) {
         setHypothesis(String(snapshot.hypothesis));
       if (snapshot.experimentType) setExperimentType(snapshot.experimentType);
       if (Array.isArray(snapshot.variations) && snapshot.variations.length) {
-        setVariations(snapshot.variations);
+        setVariations(normalizeWholeTrafficSplit(snapshot.variations));
       }
       if (Array.isArray(snapshot.selectedIds)) setSelectedIds(snapshot.selectedIds);
       if (snapshot.pickMode) setPickMode(snapshot.pickMode);
@@ -1339,6 +1314,11 @@ export default function ClassicCreateWizard({ onTitleChange }) {
       const rawAudienceState = audience || createDefaultAudienceState();
       const audienceState = {
         ...rawAudienceState,
+        // Secondary metrics are no longer offered. A draft saved before that,
+        // or a test duplicated from an older one, still carries them, and
+        // nothing on screen would say they were about to launch.
+        secondaryMetrics: [],
+        customGoals: [],
         guardrails: ensureRevenueGuardrailRows(
           rawAudienceState.guardrails,
           shopGuardrails.max_revenue_drop_percent
@@ -1376,15 +1356,6 @@ export default function ClassicCreateWizard({ onTitleChange }) {
         );
         const stats = stampStatisticalFields(plan, shopGuardrails);
         const planGoal = goalByPlan[plan.id] || {};
-        const planSecondary =
-          Array.isArray(planGoal.secondary) && planGoal.secondary.length
-            ? buildSecondaryGoalPayload(
-                planGoal.secondary_events || audienceState.secondaryMetrics,
-                planGoal.secondary
-              )
-            : Array.isArray(planGoal.secondary_events) && planGoal.secondary_events.length
-              ? buildSecondaryGoalPayload(planGoal.secondary_events, audienceState.customGoals)
-              : goalPayload;
         return {
           ...plan,
           statistical_design: {
@@ -1445,9 +1416,12 @@ export default function ClassicCreateWizard({ onTitleChange }) {
           },
           goal: {
             ...planGoal,
-            primary_metric: planGoal.primary_metric || goalPayload.primary_metric,
-            secondary_events: planSecondary.secondary_events,
-            secondary: planSecondary.secondary,
+            // The metric chosen on the Audience step, never the per-product
+            // suggestion: that is fetched on the Products step, before the
+            // merchant has chosen, and was never refreshed afterwards.
+            primary_metric: goalPayload.primary_metric,
+            secondary_events: goalPayload.secondary_events,
+            secondary: goalPayload.secondary,
             min_sample_size: sampleSize,
             analysis_method: stats.analysis_method,
             mde_percent: stats.mde_percent,
@@ -1523,7 +1497,7 @@ export default function ClassicCreateWizard({ onTitleChange }) {
   };
 
   const paintLocalAiBandPrices = useCallback(
-    ({ unit = 'percent', rows, targetArms, band }) => {
+    ({ unit = 'percent', rows, targetArms, spreadArms = targetArms, band }) => {
       if (!rows?.length || !targetArms?.length || !band) return false;
       const fallbackMin = unit === 'amount' ? 1 : 10;
       const fallbackMax = unit === 'amount' ? 5 : 20;
@@ -1531,10 +1505,14 @@ export default function ClassicCreateWizard({ onTitleChange }) {
       const max = band.max ?? resolveBandEdge(aiMaxPct, fallbackMax);
       const shopMaxChange = Number(shopGuardrails.max_price_change_percent);
       const maxChangePct = Number.isFinite(shopMaxChange) && shopMaxChange > 0 ? shopMaxChange : 15;
-      const spreadOpts = { rows, targetArms, min, max, unit, maxChangePct };
-      const localPatch = buildAiBandPriceOverrides(spreadOpts);
+      // Spread across every variation so each keeps its own slot in the band,
+      // then keep only the ones being priced: spread alone, two variations
+      // given the same band would land on the same price.
+      const spreadOpts = { rows, targetArms: spreadArms, min, max, unit, maxChangePct };
+      const keep = keepArmKeys(targetArms);
+      const localPatch = keep(buildAiBandPriceOverrides(spreadOpts));
       if (!Object.keys(localPatch).length) return false;
-      const fullMeta = buildLocalPriceSuggestionMeta(spreadOpts, 'local');
+      const fullMeta = keep(buildLocalPriceSuggestionMeta(spreadOpts, 'local'));
       let applied = false;
       setPriceOverrides(prev => {
         const filtered = filterPriceOverridePatch(localPatch, prev, priceSuggestionMeta);
@@ -1569,6 +1547,7 @@ export default function ClassicCreateWizard({ onTitleChange }) {
               variations,
               pricingByArm,
               defaultPriceMode: priceMode,
+              activeArmIndex,
             });
       const rows = resolvePricingRows({
         opportunities,
@@ -1601,7 +1580,13 @@ export default function ClassicCreateWizard({ onTitleChange }) {
       const fallbackMax = unit === 'amount' ? 5 : 20;
       const min = band?.min ?? resolveBandEdge(aiMinPct, fallbackMin);
       const max = band?.max ?? resolveBandEdge(aiMaxPct, fallbackMax);
-      const painted = paintLocalAiBandPrices({ unit, rows, targetArms, band });
+      const painted = paintLocalAiBandPrices({
+        unit,
+        rows,
+        targetArms,
+        spreadArms: resolveAiSuggestSpreadArms(variations),
+        band,
+      });
       const fallbackLine = painted
         ? `Local ${describeAiBandRange(min, max, unit)} band fallback (AI unavailable).`
         : 'Could not build local prices — check product prices and try again.';
@@ -1625,6 +1610,7 @@ export default function ClassicCreateWizard({ onTitleChange }) {
       variations,
       pricingByArm,
       priceMode,
+      activeArmIndex,
       opportunities,
       selectedIds,
       pickMode,
@@ -1646,7 +1632,9 @@ export default function ClassicCreateWizard({ onTitleChange }) {
         variations,
         pricingByArm,
         defaultPriceMode: priceMode,
+        activeArmIndex,
       });
+      setAiPriceMetaArmId(targetArms[0]?.id || null);
       if (!rows.length || !targetArms.length) {
         setAiPriceMeta({
           source: null,
@@ -1739,10 +1727,13 @@ export default function ClassicCreateWizard({ onTitleChange }) {
             ai_reason: row.ai_reason,
             scenario_rationale: row.scenario_rationale,
           })),
-          arms: targetArms.map(arm => ({
+          // Every variation, so the one on screen keeps its own slot in the
+          // spread; only its prices are applied below.
+          arms: resolveAiSuggestSpreadArms(variations).map(arm => ({
             id: arm.id,
             label: arm.name || arm.role || arm.id,
           })),
+          target_arm_ids: targetArms.map(arm => arm.id),
           min_pct: minPct,
           max_pct: maxPct,
           unit,
@@ -1760,8 +1751,9 @@ export default function ClassicCreateWizard({ onTitleChange }) {
           : Array.isArray(result?.data?.suggestions)
             ? result.data.suggestions
             : [];
+        const targetIds = new Set(targetArms.map(arm => String(arm.id)));
         const suggestions = filterPriceSuggestionsRespectingEdits(
-          rawSuggestions,
+          rawSuggestions.filter(item => targetIds.has(String(item?.arm_id || ''))),
           priceOverrides,
           metaForFilter,
         );
@@ -1917,6 +1909,7 @@ export default function ClassicCreateWizard({ onTitleChange }) {
           patchAiBand({ ...restore, aiSuggested: false });
         }
         setAiBandAttempt({ min: null, max: null });
+        setAiPriceMetaArmId(activeArmId);
         setAiPriceMeta(prev => ({
           ...prev,
           summary: `Max price change is now ${next}%. Click Suggest to use your full band.`,
@@ -1930,7 +1923,7 @@ export default function ClassicCreateWizard({ onTitleChange }) {
         setRaisingMaxPriceChange(false);
       }
     },
-    [shopDomain, shopGuardrails, loadGuardrails, aiBandAttempt, patchAiBand]
+    [shopDomain, shopGuardrails, loadGuardrails, aiBandAttempt, patchAiBand, activeArmId]
   );
 
   /** Average selected-product price: the dollar equivalent of a percent cap. */
@@ -2350,8 +2343,8 @@ export default function ClassicCreateWizard({ onTitleChange }) {
    * why, and the handler keeps every check, because it is the one that must
    * not be wrong.
    *
-   * `code` lets the review step skip explaining a reason it already covers
-   * with a richer block of its own.
+   * `code` names which gate refused, for callers and tests that need more
+   * than the sentence.
    */
   const launchGate = (() => {
     if (!shopGuardrailsReady) {
@@ -2495,6 +2488,10 @@ export default function ClassicCreateWizard({ onTitleChange }) {
                 : (step === 0 || step === 3) && !shopGuardrailsReady
                   ? 'Loading shop test defaults…'
                   : ''
+        }
+        continueDisabledPending={
+          (step === 4 && ['loading', 'checkout_loading'].includes(launchGate.code)) ||
+          ((step === 0 || step === 3) && !shopGuardrailsReady)
         }
         continueBusy={busy || launching}
         showCancel={step === 0}
@@ -2653,8 +2650,8 @@ export default function ClassicCreateWizard({ onTitleChange }) {
             onApplyBulk={applyBulk}
             onAiSuggest={applyAiBand}
             aiSuggestBusy={aiPriceMeta.busy}
-            aiSuggestSummary={aiPriceMeta.summary}
-            aiSuggestDetail={aiPriceMeta.detail}
+            aiSuggestSummary={aiPriceMetaArmId === activeArmId ? aiPriceMeta.summary : null}
+            aiSuggestDetail={aiPriceMetaArmId === activeArmId ? aiPriceMeta.detail : null}
             aiSuggested={activePricing.aiSuggested === true}
             onAiBandDirty={() => patchActivePricing({ aiSuggested: false })}
             aiUnit={aiUnit}
@@ -2666,7 +2663,6 @@ export default function ClassicCreateWizard({ onTitleChange }) {
             loading={loadingProducts}
             loadError={productsLoadError}
             onRetryLoad={loadOpportunities}
-            continueHint={productsStepGate.hint}
             shopDefaultsReady={shopGuardrailsReady}
             shopMaxChangePercent={shopGuardrails.max_price_change_percent}
             onRaiseMaxPriceChange={raiseMaxPriceChange}
@@ -2682,7 +2678,6 @@ export default function ClassicCreateWizard({ onTitleChange }) {
           <AudienceSuccessStepPanel
             value={audience}
             onChange={handleAudienceChange}
-            shopDomain={shopDomain}
             significanceEstimate={significanceEstimate}
             disabled={!shopGuardrailsReady}
             // Asked for on Variations, beside the split it feeds.
@@ -2693,17 +2688,13 @@ export default function ClassicCreateWizard({ onTitleChange }) {
         {step === 4 ? (
           <ReviewLaunchStepPanel
             name={name}
-            hypothesis={hypothesis}
             experimentType={experimentType}
             experimentTypeLabel={experimentTypeLabel}
             variations={variations}
             selectedCount={selectedIds.length}
             pickMode={pickMode}
             priceMode={priceMode}
-            bulkPercent={bulkPercent}
-            bulkDirection={bulkDirection}
             pricingByArm={pricingByArm}
-            offerByArm={offerByArm}
             audience={audience}
             estimatedDays={estimatedDays}
             estimatedTimeDetail={significanceEstimate.detail}
@@ -2714,20 +2705,7 @@ export default function ClassicCreateWizard({ onTitleChange }) {
             onFixSetup={openCheckoutSetup}
             onFixPriceSurfaces={openPriceSurfaceSettings}
             onRefreshCheckout={() => refreshCheckoutReadiness()}
-            onEditStep={goToStep}
             plans={plans}
-            autoApplyWinner={shopGuardrails.auto_apply_winner === true}
-            autoApplyDelayDays={Number(shopGuardrails.auto_apply_delay_days) || 0}
-            // Only the reasons this panel does not already explain with a
-            // block of its own. Checkout has its alert and its Re-check
-            // action; repeating it in a second banner would say the same
-            // thing twice, in two tones.
-            launchBlockedReason={
-              launchGate.disabled &&
-              ['variations', 'audience', 'products', 'conflict'].includes(launchGate.code)
-                ? launchGate.reason
-                : ''
-            }
           />
         ) : null}
       </ClassicWizardShell>

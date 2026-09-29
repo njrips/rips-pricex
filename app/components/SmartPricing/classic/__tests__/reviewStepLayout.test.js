@@ -1,15 +1,13 @@
 // @vitest-environment jsdom
 /**
- * The review step listed up to eight selected products with a thumbnail, a base
- * price and a price chip per arm -- a third rendering of the pricing table two
- * steps back, and the tallest thing on a page whose job is one last glance. It
- * now reports the count and hands the detail back to the Products step, and the
- * audience and metric facts are two cards in a grid rather than eleven rows in
- * one column.
+ * Step 5 is the five-line summary and the launch buttons. The per-step cards
+ * that used to sit underneath it (Basics, Products & prices, Variations &
+ * traffic, Audience, Metrics & guardrail) repeated every earlier step and are
+ * gone; the stepper and "Back to edit" go back to any step.
  */
 import { act, createElement as h } from 'react';
 import { createRoot } from 'react-dom/client';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 if (!window.matchMedia) {
   window.matchMedia = query => ({
@@ -30,8 +28,9 @@ let ReviewLaunchStepPanel;
 let PolarisAppProvider;
 
 const VARIATIONS = [
-  { id: 'control', letter: null, role: 'Control', name: 'Control', traffic: 50 },
-  { id: 'var_a', letter: 'A', role: 'Variation A', name: 'Variation A', traffic: 50 },
+  { id: 'control', letter: null, role: 'Control', name: 'Control', traffic: 34 },
+  { id: 'var_a', letter: 'A', role: 'Variation A', name: 'Variation A', traffic: 33 },
+  { id: 'var_b', letter: 'B', role: 'Variation B', name: 'Variation B', traffic: 33 },
 ];
 
 const PLANS = Array.from({ length: 6 }, (_, i) => ({
@@ -39,9 +38,7 @@ const PLANS = Array.from({ length: 6 }, (_, i) => ({
   variant_id: `v${i}`,
   title: `Runner Shoe ${i}`,
   product_title: `Runner Shoe ${i}`,
-  product_type: 'Shoes',
   image_url: `https://example.test/${i}.png`,
-  variant_count: 2,
   price_arms: [
     { id: 'control', role: 'control', price: 40 },
     { id: 'var_a', role: 'challenger', price: 46, letter: 'A' },
@@ -49,13 +46,11 @@ const PLANS = Array.from({ length: 6 }, (_, i) => ({
 }));
 
 const AUDIENCE = {
-  segment: 'new_visitors',
-  trafficAllocation: 60,
+  segment: 'all_visitors',
+  trafficAllocation: 100,
   primaryMetric: 'revenue_per_visitor',
-  secondaryMetrics: [],
-  customGoals: [],
   minSampleSize: '5000',
-  guardrails: [{ id: 'revenue', label: 'Revenue per visitor', threshold: '-12%', on: true }],
+  guardrails: [{ id: 'revenue', label: 'Revenue per visitor', threshold: '-10%', on: true }],
   devices: [],
   sources: [],
 };
@@ -75,305 +70,92 @@ afterEach(async () => {
 });
 
 async function renderPanel(props = {}) {
-  const onEditStep = props.onEditStep || vi.fn();
   await act(async () => {
     root.render(
       h(
         PolarisAppProvider,
         { i18n: {} },
         h(ReviewLaunchStepPanel, {
-          name: 'Spring pricing',
+          name: 'Test 007',
           variations: VARIATIONS,
           plans: PLANS,
-          selectedCount: 42,
+          selectedCount: 2,
+          pickMode: 'all',
           audience: AUDIENCE,
           estimatedDays: 21,
           ...props,
-          onEditStep,
         })
       )
     );
   });
-  return { onEditStep };
-}
-
-function headingText(text) {
-  return [...container.querySelectorAll('h2, h3')].some(
-    node => (node.textContent || '').trim() === text
-  );
 }
 
 describe('overview summary', () => {
-  it('shows the five Step 5 overview lines above the section cards', async () => {
-    await renderPanel({ name: 'Spring pricing', pickMode: 'manual', priceMode: 'ai' });
-    expect(container.textContent).toMatch(
-      /Test: Spring pricing — Price test · 42 products · Picked products · AI suggested prices/,
-    );
-    expect(container.textContent).toMatch(/Traffic: 60% of eligible visitors · Control 50% · Var A 50%/);
-    expect(container.textContent).toMatch(
-      /Results: Primary: Revenue per visitor · 90% confidence · 5,000 visitors\/variation/,
-    );
-    expect(container.textContent).toMatch(/Safety: Guardrail ON · Pause if Rev\/visitor drops >/);
-  });
-});
-
-describe('products card', () => {
-  it('drops the product list preview', async () => {
-    await renderPanel();
-    expect(container.querySelectorAll('img')).toHaveLength(0);
-    expect(container.textContent).not.toMatch(/Runner Shoe/);
-  });
-
-  it('reports the selected count instead', async () => {
-    await renderPanel();
-    expect(container.textContent).toMatch(/42 products/);
-  });
-
-  it('uses the Step 5 pricing labels on the products card badge', async () => {
-    await renderPanel({ priceMode: 'ai' });
-    expect(container.textContent).toMatch(/Pricing: AI suggested prices/);
-  });
-
-  it('shows bulk and manual pricing labels on the badge', async () => {
-    await renderPanel({ priceMode: 'bulk' });
-    expect(container.textContent).toMatch(/Pricing: Bulk adjusted prices/);
-
-    await renderPanel({ priceMode: 'manual' });
-    expect(container.textContent).toMatch(/Pricing: Manual prices/);
-  });
-
-  it('falls back to the plan count when no explicit count is passed', async () => {
-    await renderPanel({ selectedCount: 0 });
-    expect(container.textContent).toMatch(/6 products/);
-  });
-
-  it('no longer repeats each arm price on this page', async () => {
-    await renderPanel();
-    expect(container.textContent).not.toMatch(/\$46/);
-  });
-
-  it('still says prices are pending before Products is confirmed', async () => {
-    await renderPanel({ plans: [], selectedCount: 0 });
-    expect(container.textContent).toMatch(/Prices finalize when you continue/i);
-  });
-});
-
-describe('audience and metrics cards', () => {
-  it('splits the old combined card in two, matching the Audience step', async () => {
-    await renderPanel();
-    expect(headingText('Audience')).toBe(true);
-    expect(headingText('Metrics & guardrail')).toBe(true);
-    expect(headingText('Audience & metrics')).toBe(false);
-  });
-
-  it('keeps every fact the combined card carried', async () => {
-    await renderPanel();
-    for (const label of [
-      'Segment',
-      'Devices',
-      'Sources',
-      'Countries',
-      'Primary',
-      'Secondary',
-      'Min visitors',
-      'Revenue guardrail',
-      'Analysis',
-    ]) {
-      expect(container.textContent).toContain(label);
-    }
-  });
-
-  it('sends both cards back to the audience step', async () => {
-    const { onEditStep } = await renderPanel();
-    const editButtons = [...container.querySelectorAll('button')].filter(
-      node => (node.textContent || '').trim() === 'Edit'
-    );
-    await act(async () => {
-      editButtons.at(-1).dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+  it('reads as the five Step 5 lines', async () => {
+    await renderPanel({
+      priceMode: 'ai',
+      pricingByArm: { var_a: { priceMode: 'ai' }, var_b: { priceMode: 'manual' } },
     });
-    expect(onEditStep).toHaveBeenCalledWith(3);
-  });
-});
-
-describe('trimmed copy', () => {
-  it('drops the planning-method essay from the duration banner', async () => {
-    await renderPanel();
-    expect(container.textContent).not.toMatch(/conversion-rate planning proxy/i);
-    expect(container.textContent).not.toMatch(/slowest variation allocation/i);
-  });
-
-  it('states the analysis in one line', async () => {
-    await renderPanel();
-    expect(container.textContent).not.toMatch(/fixed-horizon conversion traffic-sizing/i);
-    expect(container.textContent).toMatch(/Sequential · 90% confidence · manual winner review/);
-  });
-
-  it('drops the redundant note that min sample comes from Stat settings', async () => {
-    await renderPanel();
-    expect(container.textContent).not.toMatch(/from Stat settings/i);
-    expect(container.textContent).toMatch(/5,000 visitors/);
-  });
-});
-
-describe('revenue guardrail readback', () => {
-  it('shows the threshold when the guardrail is armed', async () => {
-    await renderPanel();
-    expect(container.textContent).toMatch(/Pause below 12%/);
+    const items = [...container.querySelectorAll('li')].map(node => node.textContent);
+    expect(items).toEqual([
+      'Test: Test 007 — Price test · 2 products · All products · Mixed pricing per variation',
+      'Traffic: 100% of eligible visitors · Control 34% · Var A 33% · Var B 33%',
+      'Audience: All visitors · All devices · All sources · All countries',
+      'Results: Primary: Revenue per visitor · 90% confidence · 5,000 visitors/variation',
+      'Safety: Guardrail ON · Stop a product if Rev/visitor drops >10% vs control, after 100 visitors/variation',
+    ]);
   });
 
   it('says Off rather than a threshold it will not enforce', async () => {
-    // The guardrail is switchable per experiment now; this row used to print a
-    // threshold either way.
     await renderPanel({
       audience: {
         ...AUDIENCE,
         guardrails: [{ id: 'revenue', label: 'Revenue per visitor', threshold: '-12%', on: false }],
       },
     });
-    expect(container.textContent).not.toMatch(/Pause below/);
-    expect(container.textContent).toContain('Revenue guardrailOff');
-  });
-
-  it('treats an experiment with no guardrail row as armed at the default', async () => {
-    await renderPanel({ audience: { ...AUDIENCE, guardrails: [] } });
-    expect(container.textContent).toMatch(/Pause below 10%/);
+    expect(container.textContent).toContain('Safety: Guardrail OFF');
   });
 });
 
-describe('experiment traffic allocation', () => {
-  /**
-   * It sat under Audience, whose Edit goes to a step that no longer carries the
-   * control -- it moved to the Variations step earlier, next to the split it
-   * divides.
-   */
-  function sectionFor(headingLabel) {
-    return [...container.querySelectorAll('h2, h3')]
-      .find(node => (node.textContent || '').trim() === headingLabel)
-      ?.closest('section');
-  }
-
-  it('reads out above the split it divides', async () => {
+describe('nothing underneath the summary', () => {
+  it('drops the per-step cards and their Edit links', async () => {
     await renderPanel();
-    expect(sectionFor('Variations & traffic').textContent).toContain(
-      '60% of eligible visitors enter'
+    expect(container.querySelectorAll('h2, h3')).toHaveLength(0);
+    for (const heading of [
+      'Basics',
+      'Products & prices',
+      'Variations & traffic',
+      'Metrics & guardrail',
+      'Secondary',
+      'Analysis',
+    ]) {
+      expect(container.textContent).not.toContain(heading);
+    }
+    const edits = [...container.querySelectorAll('button')].filter(
+      node => (node.textContent || '').trim() === 'Edit'
     );
+    expect(edits).toHaveLength(0);
   });
 
-  it('is no longer filed under an Audience card that cannot change it', async () => {
+  it('does not list products or repeat arm prices', async () => {
     await renderPanel();
-    expect(sectionFor('Audience').textContent).not.toContain('60%');
-  });
-
-  it('sends the merchant to the variations step to change it', async () => {
-    const { onEditStep } = await renderPanel();
-    const edit = sectionFor('Variations & traffic').querySelector('button');
-    await act(async () => {
-      edit.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    });
-    expect(onEditStep).toHaveBeenCalledWith(1);
-  });
-
-  it('shows a full allocation rather than the old 50% default', async () => {
-    await renderPanel({ audience: { ...AUDIENCE, trafficAllocation: 100 } });
-    expect(sectionFor('Variations & traffic').textContent).toContain(
-      '100% of eligible visitors enter'
-    );
-  });
-});
-
-describe('why launch is refusing', () => {
-  it('says so, rather than leaving a dead button to explain itself', async () => {
-    await renderPanel({ launchBlockedReason: 'Traffic split must total 100%.' });
-    expect(container.textContent).toContain('Not ready to launch');
-    expect(container.textContent).toContain('Traffic split must total 100%.');
-  });
-
-  it('stays quiet when nothing is blocking', async () => {
-    await renderPanel();
-    expect(container.textContent).not.toContain('Not ready to launch');
-  });
-});
-
-describe('offer tests', () => {
-  it('names the products section Products & offers', async () => {
-    await renderPanel({ experimentType: 'offer_test', plans: [] });
-    expect(headingText('Products & offers')).toBe(true);
-    expect(headingText('Products & prices')).toBe(false);
-  });
-
-  it('does not promise prices on a step that sets offers', async () => {
-    await renderPanel({ experimentType: 'offer_test', plans: [] });
-    expect(container.textContent).toContain('Offers finalize when you continue');
-    expect(container.textContent).not.toContain('Prices finalize when you continue');
-  });
-
-  it('still says prices for a price test', async () => {
-    await renderPanel({ plans: [] });
-    expect(container.textContent).toContain('Prices finalize when you continue');
-  });
-});
-
-describe('the five Edit buttons', () => {
-  it('do not all announce themselves as just "Edit"', async () => {
-    await renderPanel();
-    const labels = [...container.querySelectorAll('button')]
-      .filter(node => (node.textContent || '').trim() === 'Edit')
-      .map(node => node.getAttribute('aria-label'));
-    expect(labels).toHaveLength(5);
-    expect(new Set(labels).size).toBe(5);
-    expect(labels).toContain('Edit variations');
-  });
-});
-
-describe('how the experiment will end', () => {
-  /**
-   * The Analysis row said "manual winner review" whichever way the shop was
-   * set. Automatic price writes have no Settings field any more, but shops
-   * that turned them on still have them on and the server still honours them.
-   */
-  it('promises a manual review only when that is true', async () => {
-    await renderPanel();
-    expect(container.textContent).toContain('manual winner review');
-  });
-
-  it('warns that winners will be written without asking again', async () => {
-    await renderPanel({ autoApplyWinner: true, autoApplyDelayDays: 3 });
-    expect(container.textContent).toContain('winners apply automatically after 3 days');
-    expect(container.textContent).not.toContain('manual winner review');
-  });
-
-  it('says day, not days, for a one-day wait', async () => {
-    await renderPanel({ autoApplyWinner: true, autoApplyDelayDays: 1 });
-    expect(container.textContent).toContain('after 1 day');
-    expect(container.textContent).not.toContain('after 1 days');
-  });
-
-  it('drops the delay clause when there is no delay', async () => {
-    await renderPanel({ autoApplyWinner: true, autoApplyDelayDays: 0 });
-    expect(container.textContent).toContain('winners apply automatically');
-    expect(container.textContent).not.toContain('after 0');
+    expect(container.querySelectorAll('img')).toHaveLength(0);
+    expect(container.textContent).not.toMatch(/Runner Shoe/);
+    expect(container.textContent).not.toMatch(/\$46/);
   });
 });
 
 describe('banner order', () => {
-  it('puts a blocked launch above the Step 5 overview', async () => {
-    await renderPanel({ launchBlockedReason: 'Traffic split must total 100%.' });
-    const text = container.textContent;
-    expect(text.indexOf('Not ready to launch')).toBeLessThan(text.indexOf('Test: Spring pricing'));
-    expect(text.indexOf('Not ready to launch')).toBeLessThan(text.indexOf('Basics'));
-  });
-
   it('puts checkout trouble above the Step 5 overview', async () => {
     await renderPanel({ checkoutReady: false, checkoutReadiness: { message: 'Fix setup.' } });
     const text = container.textContent;
-    expect(text.indexOf('Checkout is not ready')).toBeLessThan(text.indexOf('Test: Spring pricing'));
+    expect(text.indexOf('Checkout is not ready')).toBeLessThan(text.indexOf('Test: Test 007'));
   });
 
   it('leads with the overview when the timeline is on track', async () => {
     await renderPanel();
-    const text = container.textContent;
-    expect(text.indexOf('Test: Spring pricing')).toBeLessThan(text.indexOf('Basics'));
-    expect(text).not.toContain('Estimated collection window');
+    expect(container.textContent.startsWith('Test: Test 007')).toBe(true);
+    expect(container.textContent).not.toContain('Estimated collection window');
   });
 
   it('shows the traffic warning before the overview when the estimate is not feasible', async () => {
@@ -386,16 +168,10 @@ describe('banner order', () => {
     });
     const text = container.textContent;
     expect(text.indexOf('Traffic may be too low for a reliable result')).toBeLessThan(
-      text.indexOf('Test: Spring pricing'),
+      text.indexOf('Test: Test 007')
     );
   });
 
-  /**
-   * The estimate used to print its whole derivation on the way to Launch:
-   * traffic inputs, the sparse-store caveat and the powered-reference note, all
-   * above the summary they were introducing. What to do about it got lost in
-   * how it was worked out.
-   */
   it('shows what to do about the estimate and keeps the arithmetic behind a hint', async () => {
     await renderPanel({
       significanceEstimate: {
@@ -405,10 +181,7 @@ describe('banner order', () => {
       },
     });
 
-    expect(container.textContent).toContain(
-      'try testing fewer products or fewer variations'
-    );
-    expect(container.textContent).not.toContain('Choose a higher-traffic product');
+    expect(container.textContent).toContain('try testing fewer products or fewer variations');
     expect(container.textContent).not.toContain('conservative planning prior');
 
     const hint = [...container.querySelectorAll('button')].find(node =>
@@ -421,10 +194,5 @@ describe('banner order', () => {
   it('still prints the whole paragraph for a caller that only passes one', async () => {
     await renderPanel({ estimatedTimeDetail: 'Everything in one paragraph.' });
     expect(container.textContent).toContain('Everything in one paragraph.');
-    expect(
-      [...container.querySelectorAll('button')].some(node =>
-        /How this is worked out/.test(node.textContent || '')
-      )
-    ).toBe(false);
   });
 });

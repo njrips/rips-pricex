@@ -2,6 +2,7 @@ import { formatSplitCountryAudienceLabel, resolveCountryLists } from './countryS
 import { parseMinSampleSize } from './classicAudienceEdit';
 import { formatVisitorCount } from './estimateSignificanceDuration';
 import { formatTrafficPercent } from './variationsStepHelpers';
+import { MIN_VISITORS_FOR_REVENUE_GUARDRAIL } from './revenueGuardrail';
 import {
   classicSegmentLabel,
   primaryMetricLabel,
@@ -84,7 +85,7 @@ function variationOverviewLabel(arm) {
 function productsOverviewText(selectedCount, plansLength, pickMode) {
   const count = Number(selectedCount) || Number(plansLength) || 0;
   const scope = pickMode === 'all' ? 'All products' : 'Picked products';
-  return `${count} products · ${scope}`;
+  return `${count} ${count === 1 ? 'product' : 'products'} · ${scope}`;
 }
 
 function variationOverviewSummary(variations = []) {
@@ -120,15 +121,19 @@ function countriesOverviewText(audience) {
   return formatSplitCountryAudienceLabel(lists.includeCountries, lists.excludeCountries);
 }
 
+/**
+ * The guardrail is checked per product and starts at its own visitor floor,
+ * not at the results sample, so neither is borrowed from minSampleSize.
+ */
 function guardrailOverviewText(audience) {
   const revenueGuardrailRow = (audience?.guardrails || []).find(row => row?.id === 'revenue');
-  const minVisitors = formatVisitorCount(parseMinSampleSize(audience?.minSampleSize));
   if (revenueGuardrailRow && revenueGuardrailRow.on === false) {
     return 'Guardrail OFF';
   }
   const thresholdRaw = String(revenueGuardrailRow?.threshold || '-10%').replace(/^-/, '');
   const thresholdPercent = thresholdRaw.replace(/%$/, '') || '10';
-  return `Guardrail ON · Pause if Rev/visitor drops >${thresholdPercent}% vs control, after ${minVisitors} visitors/variation`;
+  const minVisitors = formatVisitorCount(MIN_VISITORS_FOR_REVENUE_GUARDRAIL);
+  return `Guardrail ON · Stop a product if Rev/visitor drops >${thresholdPercent}% vs control, after ${minVisitors} visitors/variation`;
 }
 
 /**

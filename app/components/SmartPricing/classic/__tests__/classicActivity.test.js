@@ -3,6 +3,7 @@ import {
   activityFilterCounts,
   activityKindTone,
   appendActivityToPlans,
+  collapseDuplicateLaunchActivities,
   collectActivityLogs,
   createActivityEntry,
   dedupeActivityItems,
@@ -14,6 +15,7 @@ import {
   prependActivityLog,
   stampLaunchOnPlan,
 } from '../classicActivity';
+import { mapServerEventToActivity } from '../productActionAvailability';
 import { buildActivityTimeline } from '../classicExperimentDetailsHelpers';
 
 describe('classic activity log', () => {
@@ -75,6 +77,50 @@ describe('classic activity log', () => {
     expect(merged).toHaveLength(1);
     expect(merged[0].id).toBe('paused_1');
     expect(merged[0].detail).toBe('From the list menu');
+  });
+
+  it('collapses per-product launch server events into one History line', () => {
+    const t0 = '2026-08-20T10:00:00.000Z';
+    const serverEvents = ['p1', 'p2', 'p3'].map((planId, index) =>
+      mapServerEventToActivity({
+        id: `ev_${planId}`,
+        event_type: 'launched',
+        created_at: new Date(Date.parse(t0) + index * 4000).toISOString(),
+        actor: 'merchant',
+        plan_id: planId,
+        test_id: `t_${planId}`,
+        payload: {
+          product_title: `Product ${index + 1}`,
+          ...(index === 0 ? { traffic_allocation_percent: 50 } : {}),
+        },
+      })
+    );
+    const merged = mergeActivityTimeline(
+      [
+        {
+          id: 'started',
+          at: t0,
+          title: 'Launched test',
+          kind: 'started',
+          detail: 'Traffic allocation set to 50%.',
+        },
+      ],
+      [{ id: 'started', kind: 'started', title: 'Launched test', at: t0, detail: 'Test t_p1' }],
+      serverEvents
+    );
+    const launches = merged.filter(item => item.title === 'Launched test');
+    expect(launches).toHaveLength(1);
+    expect(launches[0].detail).toMatch(/Traffic allocation set to 50%/);
+    expect(launches[0].launch_product_count).toBeGreaterThanOrEqual(3);
+  });
+
+  it('keeps separate launch entries when they are far apart in time', () => {
+    const items = collapseDuplicateLaunchActivities([
+      { id: 'a', kind: 'started', title: 'Launched test', at: '2026-08-01T10:00:00.000Z' },
+      { id: 'b', kind: 'started', title: 'Launched test', at: '2026-08-01T10:05:00.000Z' },
+      { id: 'c', kind: 'started', title: 'Launched test', at: '2026-08-15T10:00:00.000Z' },
+    ]);
+    expect(items.filter(item => item.title === 'Launched test')).toHaveLength(2);
   });
 
   it('filters by group and counts chips', () => {

@@ -220,11 +220,13 @@ function resolvePlanGoal(plan = {}, guardrails = {}) {
     planGoal.cogs && typeof planGoal.cogs === 'object'
       ? planGoal.cogs
       : buildCogsGoal(guardrails, plan);
+  // An empty list is an answer — the wizard no longer offers secondary metrics
+  // and sends none — so the shop template only fills in when the plan is silent.
+  const planNamesSecondary =
+    Array.isArray(planGoal.secondary_events) || Array.isArray(planGoal.secondary);
   const secondary = normalizeSecondaryGoalList(
     planGoal.secondary,
-    Array.isArray(planGoal.secondary_events) && planGoal.secondary_events.length
-      ? planGoal.secondary_events
-      : defaultGoal.secondary_events
+    planNamesSecondary ? planGoal.secondary_events : defaultGoal.secondary_events
   );
   const revenueGuardrail = buildRevenueDropGuardrailConfig(guardrails, plan);
   const launchPrefs =

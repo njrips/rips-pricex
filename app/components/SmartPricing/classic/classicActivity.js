@@ -31,10 +31,93 @@ const SNAPSHOT_KINDS = new Set([
   'queued',
   'winner_ready',
   'linked',
+  'started',
   'resumed',
   'restored',
   'updated',
 ]);
+
+/** One merchant launch can write a server event per product; batch within this window. */
+export const LAUNCH_ACTIVITY_BATCH_MS = 30 * 60 * 1000;
+
+const LAUNCH_ACTIVITY_TITLES = new Set(['Launched test', 'Launched']);
+
+export function isLaunchActivityItem(item = {}) {
+  const kind = String(item?.kind || '').trim();
+  if (kind === 'started' || kind === 'linked') return true;
+  if (String(item?.status || '').trim().toLowerCase() === 'launched') return true;
+  return LAUNCH_ACTIVITY_TITLES.has(String(item?.title || '').trim());
+}
+
+/**
+ * Collapse multiple launch lines from one wizard run (per-SKU server events +
+ * reconstructed started_at + client activity_log) into a single History entry.
+ */
+export function collapseDuplicateLaunchActivities(items = [], batchMs = LAUNCH_ACTIVITY_BATCH_MS) {
+  const list = Array.isArray(items) ? items.filter(Boolean) : [];
+  const launches = [];
+  const rest = [];
+  for (const item of list) {
+    if (isLaunchActivityItem(item)) launches.push(item);
+    else rest.push(item);
+  }
+  if (launches.length <= 1) {
+    return list;
+  }
+
+  launches.sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
+  const mergedLaunches = [];
+  let batch = [launches[0]];
+  for (let i = 1; i < launches.length; i += 1) {
+    const curr = launches[i];
+    const batchStart = new Date(batch[0].at).getTime();
+    const currTime = new Date(curr.at).getTime();
+    if (Number.isFinite(batchStart) && Number.isFinite(currTime) && currTime - batchStart <= batchMs) {
+      batch.push(curr);
+    } else {
+      mergedLaunches.push(combineLaunchActivityBatch(batch));
+      batch = [curr];
+    }
+  }
+  mergedLaunches.push(combineLaunchActivityBatch(batch));
+
+  return [...rest, ...mergedLaunches].sort(
+    (a, b) => new Date(b.at).getTime() - new Date(a.at).getTime()
+  );
+}
+
+function combineLaunchActivityBatch(batch = []) {
+  const rows = Array.isArray(batch) ? batch.filter(Boolean) : [];
+  if (!rows.length) return null;
+  if (rows.length === 1) return rows[0];
+
+  const chronological = [...rows].sort(
+    (a, b) => new Date(a.at).getTime() - new Date(b.at).getTime()
+  );
+  const primary =
+    chronological.find(item => item.source === 'server') ||
+    chronological.find(item => String(item.id || '') === 'started') ||
+    chronological[0];
+
+  const trafficDetail = rows
+    .map(item => String(item.detail || '').trim())
+    .find(text => /traffic allocation/i.test(text));
+  const count = rows.length;
+
+  return {
+    ...primary,
+    id: primary.id || `started_${chronological[0].at}`,
+    at: chronological[0].at,
+    title: 'Launched test',
+    kind: 'started',
+    detail:
+      trafficDetail ||
+      (count > 1
+        ? `${count} products entered live testing.`
+        : primary.detail || ''),
+    launch_product_count: count,
+  };
+}
 
 export function activityKindMeta(kind) {
   return ACTIVITY_KIND_META[String(kind || '').trim()] || { label: 'Event', group: 'lifecycle' };
@@ -238,10 +321,12 @@ export function mergeActivityTimeline(reconstructed = [], logged = [], serverEve
     if (SNAPSHOT_KINDS.has(item.kind) && logKinds.has(item.kind)) return false;
     return true;
   });
-  return dedupeActivityItems(
-    [...serverItems, ...logItems, ...snapshots]
-      .filter(item => item.at)
-      .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())
+  return collapseDuplicateLaunchActivities(
+    dedupeActivityItems(
+      [...serverItems, ...logItems, ...snapshots]
+        .filter(item => item.at)
+        .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())
+    )
   );
 }
 
