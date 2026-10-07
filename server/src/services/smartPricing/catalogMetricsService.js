@@ -179,6 +179,10 @@ function flattenCatalogRows(
         sku: String(variant.sku || '').trim(),
         handle: String(product.handle || product.product_handle || '').trim(),
         image_url: product.imageUrl || null,
+        collections: Array.isArray(product.collections) ? product.collections : [],
+        collection_ids: Array.isArray(product.collections)
+          ? product.collections.map(c => c.id).filter(Boolean)
+          : [],
         current_price: currentPrice,
         currency: product.currency || 'USD',
         margin_percent:
@@ -220,8 +224,27 @@ function flattenCatalogRows(
   return prioritizeSkuRows(withTraffic);
 }
 
+/**
+ * Shopify search clause for what a merchant typed into the product picker.
+ *
+ * Shopify only documents trailing wildcards, and a bare second word is matched
+ * against every field rather than the title, so `title:*red shirt*` was not
+ * the search it looked like. Each word is a prefix match on title or SKU, all
+ * words required. Characters the grammar treats as syntax are dropped so a
+ * title with a colon or bracket cannot turn into a different query.
+ */
+function buildProductSearchClause(productSearch = '') {
+  const terms = String(productSearch || '')
+    .replace(/[\\:()"'*<>=!{}[\]^~]/g, ' ')
+    .split(/\s+/)
+    .map(term => term.replace(/^-+/, ''))
+    .filter(term => term && !/^(AND|OR|NOT)$/.test(term))
+    .slice(0, 6);
+  return terms.map(term => `(title:${term}* OR sku:${term}*)`).join(' ');
+}
+
 function buildProductQueries({ focusCollectionIds = [], productSearch = '' } = {}) {
-  const search = String(productSearch || '').trim();
+  const search = buildProductSearchClause(productSearch);
   const collectionIds = Array.isArray(focusCollectionIds)
     ? focusCollectionIds.map(id => extractGidNumericId(id)).filter(Boolean)
     : [];
@@ -230,7 +253,7 @@ function buildProductQueries({ focusCollectionIds = [], productSearch = '' } = {
     return collectionIds.map(id => {
       const parts = ['status:active', `collection_id:${id}`];
       if (search) {
-        parts.push(`title:*${search}*`);
+        parts.push(search);
       }
       return parts.join(' ');
     });
@@ -238,7 +261,7 @@ function buildProductQueries({ focusCollectionIds = [], productSearch = '' } = {
 
   const parts = ['status:active'];
   if (search) {
-    parts.push(`title:*${search}*`);
+    parts.push(search);
   }
   return [parts.join(' ')];
 }
@@ -380,6 +403,7 @@ module.exports = {
   calibrateShopConversionRate,
   prioritizeSkuRows,
   buildProductQueries,
+  buildProductSearchClause,
   fetchCatalogProducts,
   DEFAULT_ASSUMED_MARGIN_PERCENT,
   DEFAULT_CONVERSION_RATE,

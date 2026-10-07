@@ -67,11 +67,11 @@ export const HELP_FAQ_ITEMS = [
   },
   {
     q: 'How does AI price Suggest work?',
-    a: 'On Products, AI suggested mode fills test-variation prices inside your min–max band, then clamps them to shop max price change and a cost-aware min-margin floor. Control stays at the catalog price. Variations are spread across the full band rather than bunched together, because prices a point or two apart cannot be told apart at real store traffic. Every cell stays editable before launch. Open the info icon next to AI Price Suggestions for the full calculation.',
+    a: 'On Products, AI suggested mode asks the AI for a range inside your min–max band for every product you selected, then places the test-variation prices across that range and clamps them to shop max price change and a cost-aware min-margin floor. Control stays at the catalog price. Variations are spread across the range rather than bunched together, because prices a point or two apart cannot be told apart at real store traffic. Every cell stays editable before launch. Open the info icon next to AI Price Suggestions for the full calculation.',
   },
   {
     q: 'What does Suggest send to the AI?',
-    a: 'Per product you selected: its title, current price, margin percent, units sold in the last 30 days, its opportunity score, and Priceify’s own read on how hard it can be pushed. Plus your variation names, the min–max band you typed, the test metric, and your shop price safety limits (max price change and minimum margin). Nothing about a shopper is sent: no customer details, orders, or visitor data. Your shop domain and your Shopify product ids are not sent either, and nothing is stored or reused, so each click asks fresh. The reply is re-checked against your own catalog prices and limits before it becomes a price, so a suggestion cannot exceed your guardrails even if the model ignores them.',
+    a: 'Per product you selected: its title, product type, current price and currency, margin percent, units sold in the last 30 days, a revenue level (not the amount), product page visits per day, its opportunity score, its variant count, and Priceify’s own read on how hard it can be pushed. Plus how many variations you are testing, the min–max band you typed, the test metric, and your shop price safety limits (max price change and minimum margin). Nothing about a shopper is sent: no customer details, orders, or visitor records — the visit figure is only a daily count. Your shop domain and your Shopify product ids are not sent either, and nothing is stored or reused, so each click asks fresh. The reply is re-checked against your own catalog prices and limits before it becomes a price, so a suggestion cannot exceed your guardrails even if the model ignores them.',
   },
   {
     q: 'The prices filled in but the banner says they are not from AI',
@@ -169,8 +169,9 @@ export function attentionTicketToPrompt(tickets, selectedId) {
   return id;
 }
 
-export function shouldAutoOpenAttention({ ticketId, view } = {}) {
+export function shouldAutoOpenAttention({ ticketId, view, compose } = {}) {
   if (String(ticketId || '').trim()) return false;
+  if (String(compose || '') === '1') return false;
   return String(view || '').trim().toLowerCase() !== 'all';
 }
 
@@ -209,6 +210,93 @@ export function filterHelpFaq(items, query) {
   const needle = String(query || '').trim().toLowerCase();
   if (!needle) return list;
   return list.filter((item) => `${item?.q || ''} ${item?.a || ''}`.toLowerCase().includes(needle));
+}
+
+/** Filters above the ticket table, by who has to act next. */
+export const TICKET_FILTERS = [
+  { id: 'all', label: 'All' },
+  { id: 'needs_reply', label: 'Needs your reply' },
+  { id: 'with_support', label: 'With support' },
+  { id: 'done', label: 'Resolved' },
+];
+
+function ticketFilterId(ticket) {
+  const status = String(ticket?.status || '').toLowerCase();
+  if (status === 'waiting_merchant') return 'needs_reply';
+  if (status === 'resolved' || status === 'closed') return 'done';
+  return 'with_support';
+}
+
+export function normalizeTicketFilter(value) {
+  const id = String(value || '').trim().toLowerCase();
+  return TICKET_FILTERS.some((filter) => filter.id === id) ? id : 'all';
+}
+
+/** Ticket count per filter id, for the filter labels. */
+export function countTicketsByFilter(tickets) {
+  const counts = { all: 0, needs_reply: 0, with_support: 0, done: 0 };
+  (Array.isArray(tickets) ? tickets : []).forEach((ticket) => {
+    counts.all += 1;
+    counts[ticketFilterId(ticket)] += 1;
+  });
+  return counts;
+}
+
+/**
+ * Tickets for the table: filtered by who acts next, matched against id, subject,
+ * category and the last message, with tickets needing a reply first.
+ */
+export function filterTickets(tickets, { filter = 'all', query = '' } = {}) {
+  const id = normalizeTicketFilter(filter);
+  const needle = String(query || '').trim().toLowerCase();
+  return (Array.isArray(tickets) ? tickets : [])
+    .filter((ticket) => id === 'all' || ticketFilterId(ticket) === id)
+    .filter((ticket) => {
+      if (!needle) return true;
+      const haystack = [
+        ticket?.public_id,
+        ticket?.subject,
+        ticketCategoryLabel(ticket?.category),
+        ticket?.last_message_preview,
+      ]
+        .join(' ')
+        .toLowerCase();
+      return haystack.includes(needle);
+    })
+    .map((ticket, index) => ({ ticket, index }))
+    .sort((a, b) => {
+      const aNeeds = ticketFilterId(a.ticket) === 'needs_reply' ? 0 : 1;
+      const bNeeds = ticketFilterId(b.ticket) === 'needs_reply' ? 0 : 1;
+      return aNeeds - bNeeds || a.index - b.index;
+    })
+    .map(({ ticket }) => ticket);
+}
+
+/** "Just now", "12 min ago", "3 h ago", "Yesterday", then a short date. */
+export function formatTicketRelativeTime(value, now = Date.now()) {
+  if (!value) return '';
+  const date = new Date(value);
+  const time = date.getTime();
+  if (Number.isNaN(time)) return '';
+  const minutes = Math.floor((Number(now) - time) / 60000);
+  if (minutes < 1) return 'Just now';
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} h ago`;
+  if (hours < 48) return 'Yesterday';
+  const sameYear = date.getFullYear() === new Date(Number(now)).getFullYear();
+  return date.toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    ...(sameYear ? {} : { year: 'numeric' }),
+  });
+}
+
+/** Who wrote the last message, as shown in the table. */
+export function ticketLastMessageLine(ticket) {
+  const preview = String(ticket?.last_message_preview || '').trim();
+  if (!preview) return '';
+  return `${ticket?.last_message_author === 'staff' ? 'Support' : 'You'}: ${preview}`;
 }
 
 export function merchantTicketLookupError(status, fallback = 'Ticket not found') {

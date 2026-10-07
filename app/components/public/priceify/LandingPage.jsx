@@ -168,10 +168,12 @@ export default function LandingPage({ storeUrl }) {
         </div>
       </section>
 
-      <section className="px-logo-cloud" aria-label={LOGO_CLOUD.title}>
-        <p className="px-logo-cloud-label">{LOGO_CLOUD.title}</p>
-        <LogoMarquee />
-      </section>
+      {LOGO_CLOUD.enabled ? (
+        <section className="px-logo-cloud" aria-label={LOGO_CLOUD.title}>
+          <p className="px-logo-cloud-label">{LOGO_CLOUD.title}</p>
+          <LogoMarquee />
+        </section>
+      ) : null}
 
       <section className="px-section px-section--soft" id="how-it-works">
         <SectionIntro title={PRICE_TEST_DEMO.title} lead={PRICE_TEST_DEMO.lead} />
@@ -196,7 +198,7 @@ export default function LandingPage({ storeUrl }) {
             src={LANDING_ASSETS.platformWalkthrough}
             alt="Four-step overview of choosing products, splitting traffic, setting prices, and measuring results"
             width={1200}
-            height={1063}
+            height={897}
             loading="lazy"
             decoding="async"
           />

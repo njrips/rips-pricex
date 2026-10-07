@@ -211,27 +211,9 @@ async function fetchShopifyFunctions(shopDomain, accessToken) {
 }
 
 async function fetchAutomaticAppDiscounts(shopDomain, accessToken) {
-  const queryWithHandle = `
-    query rpxOfferAutomaticAppDiscounts {
-      discountNodes(first: 100) {
-        nodes {
-          discount {
-            ... on DiscountAutomaticApp {
-              discountId
-              title
-              status
-              discountClasses
-              appDiscountType {
-                functionId
-                functionHandle
-              }
-            }
-          }
-        }
-      }
-    }
-  `;
-  const queryWithoutHandle = `
+  // AppDiscountType has no functionHandle on any version this app targets, so
+  // asking for it only bought a failed request before every lookup.
+  const query = `
     query rpxOfferAutomaticAppDiscounts {
       discountNodes(first: 100) {
         nodes {
@@ -250,23 +232,7 @@ async function fetchAutomaticAppDiscounts(shopDomain, accessToken) {
       }
     }
   `;
-  let response;
-  try {
-    response = await getShopifyService().requestAdminGraphql(
-      shopDomain,
-      accessToken,
-      queryWithHandle
-    );
-  } catch (err) {
-    if (!/functionhandle/i.test(String(err?.message || ''))) {
-      throw err;
-    }
-    response = await getShopifyService().requestAdminGraphql(
-      shopDomain,
-      accessToken,
-      queryWithoutHandle
-    );
-  }
+  const response = await getShopifyService().requestAdminGraphql(shopDomain, accessToken, query);
   const nodes = response?.data?.discountNodes?.nodes || [];
   return nodes.map(node => node?.discount).filter(Boolean);
 }
@@ -381,7 +347,7 @@ async function createAutomaticAppDiscount({
   const attempts = [];
   const handle = String(functionHandle || '').trim();
   const id = String(functionId || '').trim();
-  // 2025-10+ prefers the stable extension handle; older APIs still take functionId.
+  // Current versions take the stable extension handle; older ones only functionId.
   if (handle) {
     attempts.push({ title, discountClasses, startsAt, functionHandle: handle });
   }

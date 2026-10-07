@@ -11,12 +11,22 @@
 
 // Import Node.js runtime adapter for Shopify API
 require('@shopify/shopify-api/adapters/node');
-const { shopifyApi, ApiVersion } = require('@shopify/shopify-api');
+const { shopifyApi } = require('@shopify/shopify-api');
 const logger = require('../utils/logger');
 const {
   normalizeProductGid,
   normalizeVariantGid,
 } = require('./smartPricing/smartPricingCatalogUtils');
+// Keep in step with api_version in the shopify.app*.toml files. Each Admin API
+// version is served for about a year; past that Shopify answers with the oldest
+// one still live and flags the app for calling a retired version.
+const DEFAULT_ADMIN_API_VERSION = '2026-07';
+const ADMIN_API_FALLBACK_VERSIONS = ['2026-04', '2026-01'];
+
+function adminApiVersion() {
+  return String(process.env.SHOPIFY_ADMIN_API_VERSION || '').trim() || DEFAULT_ADMIN_API_VERSION;
+}
+
 const ADMIN_GRAPHQL_UNAVAILABLE_CACHE = new Map();
 const ADMIN_REST_UNAVAILABLE_CACHE = new Map();
 
@@ -130,7 +140,7 @@ class ShopifyService {
       apiSecretKey: process.env.SHOPIFY_API_SECRET,
       scopes: process.env.SHOPIFY_SCOPES?.split(',') || [],
       hostName: process.env.APP_URL?.replace(/https?:\/\//, '') || 'localhost:3000',
-      apiVersion: ApiVersion.July23,
+      apiVersion: adminApiVersion(),
       isEmbeddedApp: true,
     });
   }
@@ -152,8 +162,6 @@ class ShopifyService {
 
   /**
    * Direct Admin GraphQL helper for routes that need a newer API version than the SDK enum bundle ships with.
-   * This is used for discount/function management because community reports indicate
-   * `discountAutomaticAppCreate` had issues on Admin API versions before 2025-04.
    */
   async requestAdminGraphql(shopDomain, accessToken, query, variables = {}, opts = {}) {
     const unavailableKey = String(shopDomain || '')
@@ -172,14 +180,11 @@ class ShopifyService {
     }
 
     const requestedVersion = String(
-      opts.apiVersion || process.env.SHOPIFY_ADMIN_API_VERSION || '2025-04'
+      opts.apiVersion || adminApiVersion()
     ).trim();
     const fallbackVersions = [
       String(process.env.SHOPIFY_ADMIN_API_VERSION_FALLBACK || '').trim(),
-      '2026-04',
-      '2026-01',
-      '2025-10',
-      '2025-07',
+      ...ADMIN_API_FALLBACK_VERSIONS,
     ].filter(Boolean);
     const versionsToTry = [requestedVersion, ...fallbackVersions].filter(
       (version, idx, list) => version && list.indexOf(version) === idx
@@ -271,14 +276,11 @@ class ShopifyService {
    */
   async requestAdminRest(shopDomain, accessToken, opts = {}) {
     const requestedVersion = String(
-      opts.apiVersion || process.env.SHOPIFY_ADMIN_API_VERSION || '2025-04'
+      opts.apiVersion || adminApiVersion()
     ).trim();
     const fallbackVersions = [
       String(process.env.SHOPIFY_ADMIN_API_VERSION_FALLBACK || '').trim(),
-      '2026-04',
-      '2026-01',
-      '2025-10',
-      '2025-07',
+      ...ADMIN_API_FALLBACK_VERSIONS,
     ].filter(Boolean);
     const versionsToTry = [requestedVersion, ...fallbackVersions].filter(
       (version, idx, list) => version && list.indexOf(version) === idx
@@ -687,7 +689,9 @@ class ShopifyService {
     accessToken,
     {
       maxProducts = 80,
-      variantsFirst = 50,
+      // At 50 a 69-variant product loaded 50 and its other sizes could never be
+      // tested. 100 per product with collections is about 270 cost points a page.
+      variantsFirst = 100,
       productQuery = 'status:active',
       includeUnitCost = true,
     } = {}
@@ -711,6 +715,14 @@ class ShopifyService {
               tags
               featuredImage {
                 url
+              }
+              collections(first: 25) {
+                edges {
+                  node {
+                    id
+                    title
+                  }
+                }
               }
               variants(first: $variantsFirst) {
                 edges {
@@ -775,6 +787,10 @@ class ShopifyService {
             productType: node.productType || '',
             tags: Array.isArray(node.tags) ? node.tags : [],
             imageUrl: node.featuredImage?.url || null,
+            collections: (node.collections?.edges || [])
+              .map(ce => ce?.node)
+              .filter(c => c?.id)
+              .map(c => ({ id: c.id, title: c.title || '' })),
             variants: (node.variants?.edges || []).map(ve => ({
               id: ve.node.id,
               title: ve.node.title || 'Default Title',
@@ -1325,51 +1341,6 @@ class ShopifyService {
     // Implementation depends on your specific use case
     logger.debug('Applying theme modifications', { themeId, modifications });
     return { success: true };
-  }
-
-  /**
-   * Create app proxy route for storefront integration
-   *
-   * @param {string} shopDomain - Shop domain
-   * @param {string} accessToken - Access token
-   * @param {string} proxyPath - Proxy path
-   * @returns {Promise<Object>} Proxy configuration
-   */
-  async createAppProxy(shopDomain, accessToken, proxyPath) {
-    const session = this.getSession(shopDomain, accessToken);
-    const client = new this.api.clients.Graphql({ session });
-
-    const mutation = `
-      mutation appProxyCreate($input: AppProxyInput!) {
-        appProxyCreate(input: $input) {
-          appProxy {
-            id
-            subPath
-            subPathPrefix
-          }
-          userErrors {
-            field
-            message
-          }
-        }
-      }
-    `;
-
-    const variables = {
-      input: {
-        subPath: proxyPath,
-        subPathPrefix: 'apps',
-        proxyUrl: `${process.env.APP_URL}/api/proxy`,
-      },
-    };
-
-    try {
-      const response = await client.request(mutation, { variables });
-      return response.data.appProxyCreate.appProxy;
-    } catch (error) {
-      logger.error('Error creating app proxy', { error: error.message, shopDomain });
-      throw error;
-    }
   }
 }
 

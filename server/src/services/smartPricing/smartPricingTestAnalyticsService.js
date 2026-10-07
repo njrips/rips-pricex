@@ -156,6 +156,8 @@ function buildArmAnalyticsRow(arm, projection, matches, baselinePpv) {
     livePpv !== null &&
     liveRpv > (baseline || 0) &&
     livePpv < (baseline || liveRpv);
+  const conversions = Number(live.conversions) || 0;
+  const matched = matches.analyticsVariant !== null && matches.analyticsVariant !== undefined;
 
   return {
     arm_id: arm.id,
@@ -164,8 +166,12 @@ function buildArmAnalyticsRow(arm, projection, matches, baselinePpv) {
     price: arm.price,
     variant_id: live.id || matches.testVariant?.id || null,
     variant_name: live.name || matches.testVariant?.name || null,
+    allocation_percent: finiteOrNull(arm.allocation_percent ?? matches.testVariant?.allocation),
     visitors,
-    conversions: Number(live.conversions) || 0,
+    conversions,
+    revenue: matched ? finiteOrNull(live.revenue) : null,
+    // An average needs at least one order to average over.
+    avg_order_value: matched && conversions > 0 ? finiteOrNull(live.avgOrderValue) : null,
     // Null, not 0, when this arm could not be matched to live analytics: the
     // arm has reported nothing, and a confident "0.00%" reads as a variation
     // that nobody bought rather than one nobody has seen yet.
@@ -495,6 +501,8 @@ async function buildSmartPricingTestAnalytics(shopDomain, testId) {
     test_id: testId,
     plan_id: plan?.id || metadata.smart_pricing_plan_id || null,
     test_status: autoWinner?.test_status || revenueGuardrail?.test_status || test.status,
+    started_at: test.started_at || null,
+    stopped_at: test.stopped_at || null,
     revenue_guardrail: revenueGuardrail,
     auto_winner: autoWinner,
     baseline_ppv: baselinePpv,
@@ -509,6 +517,7 @@ async function buildSmartPricingTestAnalytics(shopDomain, testId) {
       visitors: totalVisitors,
       conversions: totalConversions,
       overall_conversion_rate: overallConversionRate,
+      revenue: finiteOrNull(analyticsSummary.totalRevenue),
       live_weighted_ppv: weightedLivePpv,
       live_weighted_rpv: weightedLiveRpv,
       projected_best_ppv: armRows.reduce((best, row) => {

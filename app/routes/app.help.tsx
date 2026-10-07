@@ -40,7 +40,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   const listRes = await expressSupportFetch("/support/tickets", { shop });
   const tickets = Array.isArray(listRes.data?.tickets) ? listRes.data.tickets : [];
-  if (shouldAutoOpenAttention({ ticketId, view: search.get("view") })) {
+  if (
+    shouldAutoOpenAttention({
+      ticketId,
+      view: search.get("view"),
+      compose: search.get("compose"),
+    })
+  ) {
     const attentionId = pickAttentionTicket(tickets);
     if (attentionId) {
       throw redirect(withEmbeddedSearch(request, "/app/help", { ticket: attentionId }));

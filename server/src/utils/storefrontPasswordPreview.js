@@ -12,9 +12,6 @@
 
 const { assertPublicHttpUrl, BlockedUrlError } = require('./outboundUrlGuard');
 
-/** @deprecated Kept for tests/docs only — never auto-injected (stores use different passwords). */
-const DEV_STOREFRONT_PASSWORD_FALLBACK = 'sp';
-
 const MAX_PREVIEW_REDIRECTS = 5;
 
 const BROWSER_UA =
@@ -415,20 +412,6 @@ async function unlockShopifyStorefrontSession(parsedUrl, password, signal) {
 }
 
 /**
- * Submit Shopify storefront password and return a Cookie header for follow-up fetches.
- * Returns empty string unless unlock is verified (do not return seed cookies alone).
- *
- * @param {URL} parsedUrl - Store URL (must be *.myshopify.com)
- * @param {string} password
- * @param {AbortSignal} signal
- * @returns {Promise<string>}
- */
-async function getShopifyStorefrontPasswordCookie(parsedUrl, password, signal) {
-  const result = await unlockShopifyStorefrontSession(parsedUrl, password, signal);
-  return result.ok ? result.cookie : '';
-}
-
-/**
  * Fetch a storefront preview page, optionally authenticating with the storefront password first.
  *
  * @param {string} targetUrl
@@ -526,11 +509,58 @@ async function fetchStorefrontPreviewHtml(
   return { ok: true, html };
 }
 
+/**
+ * Storefront AJAX JSON (`/products/<handle>.js`, `/cart/add.js`, `products.json`).
+ * Redirects are not followed: on these endpoints a redirect means the password page.
+ * @returns {Promise<{ ok: boolean, json?: any, cookie: string, reason?: string, status?: number }>}
+ */
+async function fetchStorefrontJson(targetUrl, { method = 'GET', body, cookie = '', signal } = {}) {
+  let parsedTarget;
+  try {
+    parsedTarget = await assertPublicHttpUrl(targetUrl);
+  } catch (error) {
+    if (error instanceof BlockedUrlError) {
+      return { ok: false, reason: 'blocked_target', cookie };
+    }
+    throw error;
+  }
+  const headers = { Accept: 'application/json', 'User-Agent': BROWSER_UA };
+  if (cookie) {
+    headers.Cookie = cookie;
+  }
+  if (body !== undefined) {
+    headers['Content-Type'] = 'application/json';
+  }
+  const response = await fetch(parsedTarget.toString(), {
+    method,
+    redirect: 'manual',
+    signal,
+    headers,
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+  const jar = String(cookie || '')
+    .split(/;\s*/)
+    .filter(entry => entry.includes('='));
+  collectSetCookies(response, jar);
+  const nextCookie = cookieHeader(jar);
+  if (!response.ok) {
+    return { ok: false, reason: 'fetch_failed', status: response.status, cookie: nextCookie };
+  }
+  const contentType = String(response.headers.get('content-type') || '').toLowerCase();
+  if (!contentType.includes('json') && !contentType.includes('javascript')) {
+    return { ok: false, reason: 'not_json', status: response.status, cookie: nextCookie };
+  }
+  try {
+    return { ok: true, json: JSON.parse(await response.text()), cookie: nextCookie };
+  } catch {
+    return { ok: false, reason: 'bad_json', status: response.status, cookie: nextCookie };
+  }
+}
+
 module.exports = {
-  DEV_STOREFRONT_PASSWORD_FALLBACK,
+  fetchStorefrontJson,
   getDevStorefrontPasswordDefault,
   resolveStorefrontPasswordForPreviewRequest,
-  getShopifyStorefrontPasswordCookie,
   unlockShopifyStorefrontSession,
   isLikelyShopifyPasswordPage,
   fetchStorefrontPreviewHtml,

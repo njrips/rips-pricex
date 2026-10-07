@@ -70,7 +70,23 @@ function isAllowedAdminOrigin(origin) {
 
 app.use('/api/track', storefrontCors);
 app.use('/api/proxy', storefrontCors);
+// The storefront posts events as text/plain JSON: a cross-origin JSON post
+// needs a preflight first, and a shopper who clicks through to the cart leaves
+// before that round trip finishes. Plain text also lets sendBeacon carry it.
+app.use(['/api/track', '/api/proxy'], express.text({ type: 'text/plain', limit: '64kb' }), (req, _res, next) => {
+  if (typeof req.body === 'string') {
+    try {
+      req.body = req.body.trim() ? JSON.parse(req.body) : {};
+    } catch {
+      req.body = {};
+    }
+  }
+  next();
+});
 app.use(adminCors);
+// Inbox saves send every plan the shop has: up to 5,000 at about 2kb each,
+// which passes 10mb. Parsed here first, so the general limit below skips them.
+app.use('/api/smart-pricing/inbox', express.json({ limit: '25mb' }));
 // Wizard drafts and full-shop inbox sync can exceed 2mb when many products carry preview metadata.
 app.use(express.json({ limit: '10mb' }));
 

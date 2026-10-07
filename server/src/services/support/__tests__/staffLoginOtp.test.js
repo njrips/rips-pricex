@@ -8,8 +8,10 @@ const {
   createCode,
   hashCode,
   requestStaffLoginCode,
+  shouldStubStaffLoginMail,
   verifyStaffLoginCode,
 } = require('../staffLoginOtp');
+const { STAFF_LOGIN_MAX_FAILURES, clearStaffLoginFailures } = require('../staffAuth');
 const { staffLoginCodeEmail } = require('../supportMailer');
 
 function memoryDb() {
@@ -125,5 +127,33 @@ describe('staffLoginOtp', () => {
       query: db.query.bind(db),
     });
     assert.equal(verified.email, 'ops@echologyx.com');
+  });
+
+  it('locks an email after too many wrong codes, even with the right one', async () => {
+    const db = memoryDb();
+    const email = 'lockout@echologyx.com';
+    clearStaffLoginFailures(`email:${email}`);
+    const created = await createCode(email, { query: db.query.bind(db) });
+    for (let i = 0; i < STAFF_LOGIN_MAX_FAILURES; i += 1) {
+      assert.equal(await verifyStaffLoginCode(email, '000000', { query: db.query.bind(db) }), null);
+    }
+    assert.equal(await verifyStaffLoginCode(email, created.code, { query: db.query.bind(db) }), null);
+    clearStaffLoginFailures(`email:${email}`);
+    const verified = await verifyStaffLoginCode(email, created.code, { query: db.query.bind(db) });
+    assert.equal(verified.email, email);
+  });
+
+  it('never stubs the email in production, so the code is not logged', () => {
+    const previousEnv = process.env.NODE_ENV;
+    process.env.RIPSPRICEX_STAFF_LOGIN_STUB = 'true';
+    process.env.NODE_ENV = 'production';
+    try {
+      assert.equal(shouldStubStaffLoginMail(), false);
+      process.env.NODE_ENV = 'development';
+      assert.equal(shouldStubStaffLoginMail(), true);
+    } finally {
+      if (previousEnv === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = previousEnv;
+    }
   });
 });

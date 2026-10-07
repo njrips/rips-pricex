@@ -150,6 +150,21 @@ function experimentIdOfTest(test) {
 }
 
 /**
+ * The name the merchant gave the experiment, not the per-product test name.
+ * Classic launches name each test "Smart Pricing · <experiment> · <product>".
+ */
+function experimentTitleOfTest(test) {
+  const metadata = parseJsonColumn(test?.metadata, {});
+  const stamped = String(metadata?.experiment_title || '').trim();
+  if (stamped) return stamped;
+  const name = String(test?.name || '')
+    .trim()
+    .replace(/^Smart Pricing · /, '');
+  const sep = name.indexOf(' · ');
+  return (sep > 0 ? name.slice(0, sep) : name).trim() || 'Another price test';
+}
+
+/**
  * @param {string} shopDomain
  * @param {object} [options]
  * @param {string[]} [options.ignoreTestIds] Tests to leave out, so a test
@@ -190,6 +205,8 @@ async function getPriceTestEnrollment(
     const hold = {
       test_id: String(test.id),
       test_name: String(test.name || 'Another price test'),
+      experiment_id: experimentIdOfTest(test) || null,
+      experiment_title: experimentTitleOfTest(test),
       status: kind.status,
       live: kind.live,
     };

@@ -45,6 +45,9 @@ const { syncInboxPlans } = require('../services/smartPricing/smartPricingInboxSy
 const { isSmartPricingEnabled } = require('../services/smartPricing/smartPricingFeatureService');
 const {
   listInboxPlans,
+  restoreOrphanedLivePlans,
+  deleteExperimentEverywhere,
+  listExperimentTests,
   saveInboxPlans,
   deleteInboxPlan,
   patchInboxPlan,
@@ -52,6 +55,7 @@ const {
   getInboxPlanById,
   summarizeInboxPlans,
 } = require('../models/smartPricingInboxStore');
+const logger = require('../utils/logger');
 const {
   getShopWizardDrafts,
   saveShopWizardDraft,
@@ -82,6 +86,9 @@ const {
   rerunSmartPricingProduct,
   buildSmartPricingProductReport,
 } = require('../services/smartPricing/smartPricingProductLifecycleService');
+const {
+  buildSmartPricingProductDaily,
+} = require('../services/smartPricing/smartPricingProductDailyService');
 const {
   listProductEvents,
 } = require('../models/smartPricingProductEventStore');
@@ -515,6 +522,12 @@ router.get(
     } else if (archivedRaw === 'false' || archivedRaw === '0') {
       archived = false;
     }
+    await restoreOrphanedLivePlans(req.shopDomain).catch(err =>
+      logger.warn('inbox orphan restore failed', {
+        shop: req.shopDomain,
+        message: err.message,
+      })
+    );
     const payload = await listInboxPlans(req.shopDomain, {
       q: req.query.q || req.query.search || '',
       status: req.query.status || '',
@@ -625,6 +638,9 @@ router.put(
         source: 'server',
       });
     } catch (err) {
+      if (err.isValidation) {
+        return sendValidationError(res, err.errors || [err.message]);
+      }
       if (err.code === 'INBOX_REVISION_CONFLICT') {
         return sendError(res, HTTP_STATUS.CONFLICT, err.message, {
           revision: err.current?.revision || null,
@@ -645,6 +661,30 @@ router.delete(
       return sendValidationError(res, ['planId is required']);
     }
     const result = await deleteInboxPlan(req.shopDomain, planId);
+    return sendSuccess(res, HTTP_STATUS.OK, result);
+  })
+);
+
+router.get(
+  '/experiments/:experimentId/tests',
+  asyncHandler(async (req, res) => {
+    const experimentId = String(req.params.experimentId || '').trim();
+    if (!experimentId) {
+      return sendValidationError(res, ['experimentId is required']);
+    }
+    const tests = await listExperimentTests(req.shopDomain, experimentId);
+    return sendSuccess(res, HTTP_STATUS.OK, { tests });
+  })
+);
+
+router.delete(
+  '/experiments/:experimentId',
+  asyncHandler(async (req, res) => {
+    const experimentId = String(req.params.experimentId || '').trim();
+    if (!experimentId) {
+      return sendValidationError(res, ['experimentId is required']);
+    }
+    const result = await deleteExperimentEverywhere(req.shopDomain, experimentId);
     return sendSuccess(res, HTTP_STATUS.OK, result);
   })
 );
@@ -777,15 +817,29 @@ router.post(
  *
  * The ceilings are generous against any real catalog selection and exist so a
  * malformed or hostile body cannot turn one click into unbounded work.
+ *
+ * Products are what the wizard limits and what each AI call is sized in, so
+ * they are counted here too. A 500-row cap on variants turned away a selection
+ * the wizard allows -- 250 products of three sizes each -- with an error.
+ * These follow the wizard's 500-product cap.
  */
-const MAX_SUGGEST_VARIANTS = 500;
+const MAX_SUGGEST_PRODUCTS = 500;
+const MAX_SUGGEST_VARIANTS = 5000;
 const MAX_SUGGEST_ARMS = 10;
 
 function suggestPriceRequestLimits(variants, arms) {
   const errors = [];
+  const products = new Set(
+    variants.map(row => String(row?.product_id || row?.product_gid || `variant:${row?.variant_id}`))
+  );
+  if (products.size > MAX_SUGGEST_PRODUCTS) {
+    errors.push(
+      `variants cannot cover more than ${MAX_SUGGEST_PRODUCTS} products in one request (received ${products.size})`
+    );
+  }
   if (variants.length > MAX_SUGGEST_VARIANTS) {
     errors.push(
-      `variants cannot exceed ${MAX_SUGGEST_VARIANTS} products in one request (received ${variants.length})`
+      `variants cannot exceed ${MAX_SUGGEST_VARIANTS} rows in one request (received ${variants.length})`
     );
   }
   if (arms.length > MAX_SUGGEST_ARMS) {
@@ -808,10 +862,8 @@ router.post(
     if (!arms.length) {
       return sendValidationError(res, ['arms is required']);
     }
-    // Bounded because nothing downstream was. Every product is priced and
-    // every arm spread even when only the first 60 products reach the model,
-    // so a caller asking for tens of thousands of rows spent the whole request
-    // on work no wizard could ever show.
+    // Bounded because every product goes to the model: a caller asking for
+    // tens of thousands of rows would spend one click on hundreds of AI calls.
     const limits = suggestPriceRequestLimits(variants, arms);
     if (limits.length) {
       return sendValidationError(res, limits);
@@ -1294,6 +1346,18 @@ router.get(
     try {
       const report = await buildSmartPricingProductReport(req.shopDomain, req.params.planId);
       return sendSuccess(res, HTTP_STATUS.OK, report);
+    } catch (err) {
+      return sendValidationError(res, [err.message]);
+    }
+  })
+);
+
+router.get(
+  '/products/:planId/daily',
+  asyncHandler(async (req, res) => {
+    try {
+      const daily = await buildSmartPricingProductDaily(req.shopDomain, req.params.planId);
+      return sendSuccess(res, HTTP_STATUS.OK, daily);
     } catch (err) {
       return sendValidationError(res, [err.message]);
     }

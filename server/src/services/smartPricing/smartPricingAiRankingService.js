@@ -7,6 +7,7 @@ const logger = require('../../utils/logger');
 const { query } = require('../../utils/database');
 const { normalizeShopDomain } = require('./smartPricingCatalogUtils');
 const { chatJson } = require('./smartPricingAiProvider');
+const { classifyMarginTier } = require('./smartPricingAiSuggestFeatures');
 
 const AI_CACHE_TTL_MS =
   Number.parseInt(process.env.SMART_PRICING_AI_RANKING_CACHE_TTL_MS || '', 10) ||
@@ -75,6 +76,9 @@ function buildCompactCandidatePayload(rows = []) {
       // Null is a statement rather than a gap: this shop has not recorded a
       // cost, so the margin is unknown rather than good.
       margin_percent: Number.isFinite(margin) && margin > 0 ? margin : null,
+      // The same labels the price-suggestion prompt reasons with, so "healthy"
+      // means one thing to both models instead of whatever each one guesses.
+      margin_tier: classifyMarginTier(margin),
       monthly_units: measured ? units : 0,
       sales_data: measured ? 'measured' : 'none_recorded',
       opportunity_score: row.opportunity_score,
@@ -162,11 +166,26 @@ async function writeAiCache(shopDomain, scope, payload) {
   );
 }
 
+/** The shop's goal in words; a metric key alone tells the model nothing. */
+const OBJECTIVE_FOR_RANKING = {
+  revenue_per_visitor: 'revenue per visitor: price times how often visitors buy.',
+  conversion_rate: 'conversion rate: the share of visitors who buy.',
+  aov: 'average order value: what the typical order is worth.',
+};
+
+function describeObjectiveForRanking(objective) {
+  const key = String(objective || '')
+    .trim()
+    .toLowerCase();
+  return OBJECTIVE_FOR_RANKING[key] || `${key || 'revenue_per_visitor'}.`;
+}
+
 async function callOpenAiRanking(candidates, guardrails = {}) {
   const objective = guardrails.objective || 'revenue_per_visitor';
   const systemPrompt = `You are a pricing strategist choosing which products a Shopify merchant should price-test first.
+The shop's tests are judged on ${describeObjectiveForRanking(objective)}
 
-Order the candidates by how much a price test on each would teach, and mark the few worth starting with. Return strict JSON only:
+Put the candidates in order of how much a price test on each would teach, and mark the few worth starting with. Return strict JSON only, with no other text:
 {
   "summary": "one sentence about this shop, max 200 chars",
   "items": [
@@ -174,21 +193,19 @@ Order the candidates by how much a price test on each would teach, and mark the 
   ]
 }
 
-Hard rules:
-- "v" is the index of a candidate in the input candidates array. Use each index at most once, and include every candidate.
-- "rank" is 1 for the most worthwhile test and increases from there. No two candidates share a rank.
-- "pick" is true for at most 5 candidates: the ones you would actually start this week.
-- "why" addresses the merchant directly and gives the reason for the rank. Never restate the numbers they can already see.
-- Return no prose outside the JSON.
+Rules:
+- "v" is the candidate's index in the input candidates array. Include every candidate exactly once.
+- "rank" starts at 1 for the most worthwhile test. No two candidates share a rank.
+- "pick" is true for at most 5 candidates: the ones you would start this week.
+- "why" speaks to the merchant and gives the reason for the rank, without repeating numbers they can already see.
 
 What makes a product worth testing first:
-- A test only teaches something if enough people see it. monthly_units high means a result arrives in weeks; sales_data "none_recorded" means this shop has no measured demand for it and any test will be slow to conclude, however promising the product looks.
-- margin_percent known and healthy means there is room to move the price in either direction without threatening the product's profitability. Rank these above thin-margin products.
-- margin_percent null means the shop has not recorded a cost, so the margin is unknown rather than good. Do not rank a product highly on a margin nobody has measured.
-- price_recently_changed true: rank it down. Its recent sales reflect a price that has already moved, so a test on it measures two changes at once. Only rank it highly if the margin is exceptional.
-- confidence_level says how much to trust the rest of that row. Low confidence is a reason to rank a product lower, not a reason to ignore it.
-- The shop is optimising ${objective}, so prefer products where that measure has room to move rather than simply the most expensive ones.
-- The shop's limits are min margin ${guardrails.min_margin_percent ?? 35}% and max price change ${guardrails.max_price_change_percent ?? 15}%. A product whose price cannot move far enough to matter is not a good first test.`;
+- Enough buyers to learn from. A test concludes only with sales: high monthly_units gives a result in weeks. confidence_level (low, medium, high) says how much sales history backs the row. sales_data "none_recorded" means no measured demand, so a test will be slow however promising the product looks.
+- Room on margin. margin_tier healthy (35% or more) or strong (50% or more) leaves room to move the price either way; rank these above thin. Unknown (margin_percent null) means no cost was recorded: the margin is unknown rather than good, so never rank a product highly on it. The shop will not sell below a ${guardrails.min_margin_percent ?? 35}% margin.
+- Room to move. Prices may change by at most ${guardrails.max_price_change_percent ?? 15}%. A product where that is too small to matter is a poor first test.
+- A settled price. price_recently_changed true: rank it down, because its recent sales reflect a price that already moved and a test would measure two changes at once.
+- opportunity_score (0 to 1) is Priceify's own read of traffic, margin and risk. Use it as a starting point, not the answer.
+- Prefer products where the goal has room to improve, not simply the most expensive ones.`;
 
   // Shared helper so this path gets the same timeout, single retry and
   // truncation check as price suggestions. It runs while a merchant waits for

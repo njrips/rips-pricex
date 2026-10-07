@@ -20,7 +20,10 @@ import {
   suggestSmartPricingPrices,
   batchPreviewSmartPricingLaunch,
 } from '../../../services/smartPricingApi';
-import { useSmartPricingLaunch } from '../../../hooks/useSmartPricingLaunch';
+import {
+  alreadyLaunchedPlanIds,
+  useSmartPricingLaunch,
+} from '../../../hooks/useSmartPricingLaunch';
 import { useSmartPricingCheckoutReadiness } from '../../../hooks/useSmartPricingCheckoutReadiness';
 import { readInboxPlans, writeInboxPlans } from '../smartPricingConstants';
 import { persistInboxPlansNow } from '../smartPricingInboxPersistence';
@@ -36,11 +39,11 @@ import { persistInboxPlansNow } from '../smartPricingInboxPersistence';
  *
  * It was 100 from the first commit with no recorded reason, and at 100 it bit
  * ordinary catalogs -- a 118-product store could not select its own catalog.
- * The wizard can only ever show what the opportunities endpoint returns, which
- * is 120 products, so 250 sits clear of anything reachable today while still
- * bounding that page weight.
+ * At 250 a 282-product store could not put its own catalog in one test. Live
+ * variants are fetched 50 tests to a request, three requests at a time, so 500
+ * is at most ten requests per page view, four rounds at worst.
  */
-const CLASSIC_MAX_PRODUCT_SELECTION = 250;
+const CLASSIC_MAX_PRODUCT_SELECTION = 500;
 /** Long enough that typing does not write on every keystroke. */
 const WIZARD_AUTOSAVE_DELAY_MS = 600;
 
@@ -110,7 +113,7 @@ function draftSavedMessage(saved) {
   // missing, so interrupting each step would be noise; but Save draft is them
   // asking what was kept, and on another device this one opens a step short.
   if (saved?.plansOmitted) {
-    return 'Draft saved. This test covers too many products to sync its pricing table, so opening the draft on another device will rebuild the table when you pass through the Products step. Your products, variations, prices and audience are all saved.';
+    return 'Draft saved. Because this test has many products, it reopens on the Products step on other devices. Everything you entered is kept.';
   }
   return 'Draft saved. Keep editing here, or pick it up later from Drafts on the tests page.';
 }
@@ -188,6 +191,7 @@ import {
   priceOverrideKey,
   reconcileSelectedVariantIds,
   resolvePricingRows,
+  limitSelectionToProducts,
 } from './productsStepReadiness';
 import {
   isActionableOfferConfig,
@@ -338,6 +342,7 @@ export default function ClassicCreateWizard({ onTitleChange }) {
   const [busy, setBusy] = useState(false);
   /** Full-page loader while Launch test runs, then while routing to test details. */
   const [launchPhase, setLaunchPhase] = useState('');
+  const [launchProgress, setLaunchProgress] = useState(null);
   const [savingDraft, setSavingDraft] = useState(false);
   // Stable on SSR + first client paint; a real id appears once the draft has been
   // read after mount, so server and client markup agree.
@@ -678,18 +683,10 @@ export default function ClassicCreateWizard({ onTitleChange }) {
         // their experiment is saved where another device can pick it up; when
         // only the browser copy landed, this is where they get to hear it,
         // rather than on the other device when it turns out not to be there.
-        if (!saved || saved.skipped) return;
-        if (saved.plansOmitted) {
-          // Saved, but only after leaving the pricing table behind on the
-          // server. The browser copy still has it; say so once here rather
-          // than silently diverging across devices.
-          setMessageType('warning');
-          setMessage(
-            'Saved without the pricing table on the server. It is still here in this browser; on another device, pass through Products to rebuild it.'
-          );
-          return;
-        }
-        if (saved.server) return;
+        // A server copy without its pricing table still holds everything the
+        // merchant entered, and the table is rebuilt on the Products step, so
+        // that counts as saved here. Save draft is where it gets explained.
+        if (!saved || saved.skipped || saved.server) return;
         // A warning, not an error. The browser copy is already written by the
         // time this runs, so nothing has been lost and the step has already
         // moved; a red banner across the top of every step said otherwise.
@@ -1076,7 +1073,7 @@ export default function ClassicCreateWizard({ onTitleChange }) {
             const reconciled = reconcileSelectedVariantIds(prev, rows);
             if (reconciled.length) next = reconciled;
           } else if (!prev.length && pickModeRef.current === 'all') {
-            next = defaults.length ? defaults.slice(0, maxSelection) : prev;
+            next = defaults.length ? limitSelectionToProducts(rows, defaults, maxSelection) : prev;
           }
           return next;
         });
@@ -1195,10 +1192,9 @@ export default function ClassicCreateWizard({ onTitleChange }) {
   const buildBatch = useCallback(async () => {
     const ids =
       pickMode === 'all'
-        ? (opportunities || [])
-            .map(o => o.variant_id)
+        ? resolvePricingRows({ opportunities, pickMode, maxSelection })
+            .map(row => row.variant_id)
             .filter(Boolean)
-            .slice(0, maxSelection)
         : selectedIds;
     if (!ids.length) {
       throw new Error('Select at least one product.');
@@ -1713,6 +1709,8 @@ export default function ClassicCreateWizard({ onTitleChange }) {
         const result = await suggestSmartPricingPrices(shopDomain, {
           variants: rows.map(row => ({
             variant_id: row.variant_id,
+            // Lets the server ask about each product once, for all its variants.
+            product_id: row.product_id || row.product_gid || null,
             title: row.product_title || row.title,
             current_price: Number(row.current_price ?? row.price) || 0,
             currency: row.currency || 'USD',
@@ -2199,12 +2197,22 @@ export default function ClassicCreateWizard({ onTitleChange }) {
         );
         return;
       }
-      const enriched = enrichPlansForLaunch();
-      if (!enriched.length) {
+      const built = enrichPlansForLaunch();
+      if (!built.length) {
         setMessageType('error');
         setMessage('No products to launch. Go back to Products and select at least one.');
         return;
       }
+      // After a launch that stopped part way, the saved copies of the plans that
+      // went live carry their test ids. Writing the freshly built plans over them
+      // dropped those ids, which hid running tests from the list.
+      const live = alreadyLaunchedPlanIds(shopDomain, built);
+      const savedById = new Map(
+        (readInboxPlans(shopDomain) || []).filter(plan => plan?.id).map(plan => [plan.id, plan])
+      );
+      const enriched = built.map(plan =>
+        live.has(plan.id) ? savedById.get(plan.id) || plan : plan
+      );
       const merged = upsertExperimentPlansInInbox(
         readInboxPlans(shopDomain),
         enriched,
@@ -2223,7 +2231,8 @@ export default function ClassicCreateWizard({ onTitleChange }) {
       try {
         setBusy(true);
         setLaunchPhase('launching');
-        await launchMany(enriched);
+        setLaunchProgress(null);
+        await launchMany(enriched, { onProgress: setLaunchProgress });
         // Stop autosave before clearing, or a debounced write still in flight
         // would put the draft straight back after the experiment went live.
         autosaveSuspended.current = true;
@@ -2240,6 +2249,7 @@ export default function ClassicCreateWizard({ onTitleChange }) {
         }
       } catch (err) {
         setLaunchPhase('');
+        setLaunchProgress(null);
         setMessageType('error');
         const detailText = Array.isArray(err?.details)
           ? err.details
@@ -2247,7 +2257,11 @@ export default function ClassicCreateWizard({ onTitleChange }) {
               .filter(Boolean)
               .join('; ')
           : '';
-        setMessage(detailText || err.message || 'Launch failed.');
+        setMessage(
+          err?.failures?.length
+            ? err.message
+            : detailText || err.message || 'Launch failed.'
+        );
       } finally {
         setBusy(false);
       }
@@ -2435,7 +2449,9 @@ export default function ClassicCreateWizard({ onTitleChange }) {
   const wizardBootstrapping = hydrated && (!draftHydrated || !shopGuardrailsReady);
   const launchLoaderLabel =
     launchPhase === 'launching'
-      ? 'Launching test…'
+      ? launchProgress?.total > 1
+        ? `Launching test… ${launchProgress.done} of ${launchProgress.total}`
+        : 'Launching test…'
       : launchPhase === 'opening'
         ? 'Opening test…'
         : '';
@@ -2582,11 +2598,11 @@ export default function ClassicCreateWizard({ onTitleChange }) {
             onPickModeChange={mode => {
               setPickMode(mode);
               if (mode === 'all') {
-                const ids = opportunities
-                  .map(o => o.variant_id)
-                  .filter(Boolean)
-                  .slice(0, maxSelection);
-                setSelectedIds(ids);
+                setSelectedIds(
+                  resolvePricingRows({ opportunities, pickMode: 'all', maxSelection })
+                    .map(row => row.variant_id)
+                    .filter(Boolean)
+                );
               }
             }}
             collectionOptions={collectionOptions}

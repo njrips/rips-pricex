@@ -36,6 +36,8 @@ import {
   mergeExperimentAnalytics,
 } from '../components/SmartPricing/classic/classicExperimentDetailsHelpers';
 
+const FOCUS_REFRESH_MIN_MS = 60000;
+
 function unwrapTest(payload) {
   if (!payload) return null;
   if (payload.test && typeof payload.test === 'object') return payload.test;
@@ -59,6 +61,24 @@ export function useClassicExperimentDetails(shopDomain, planId) {
       hydrateOptions && typeof hydrateOptions === 'object' ? hydrateOptions : {};
     setReloadKey(key => key + 1);
   }, []);
+
+  // Orders arrive from Shopify's webhook while the merchant is elsewhere, so a
+  // return to the tab picks them up. Polling is left out: one refresh asks for
+  // every product's results, and an experiment can hold dozens.
+  const lastFocusRefreshRef = useRef(0);
+  useEffect(() => {
+    if (typeof document === 'undefined') return undefined;
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return;
+      const now = Date.now();
+      if (now - lastFocusRefreshRef.current < FOCUS_REFRESH_MIN_MS) return;
+      lastFocusRefreshRef.current = now;
+      refresh({ quiet: true });
+    };
+    lastFocusRefreshRef.current = Date.now();
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [refresh]);
 
   useEffect(() => {
     let cancelled = false;

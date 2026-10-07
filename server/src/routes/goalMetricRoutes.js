@@ -39,7 +39,7 @@ function normalizeEventName(value) {
 }
 
 function getShopDomain(req) {
-  return String(req.query.domain || req.shopDomain || '')
+  return String(req.shopDomain || '')
     .trim()
     .toLowerCase();
 }

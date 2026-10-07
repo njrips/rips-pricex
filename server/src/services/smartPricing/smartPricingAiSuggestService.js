@@ -30,26 +30,72 @@ function round2(n) {
 }
 
 /**
- * How many products go to the model in one request. The rest are priced by the
- * same spread the model is asked to follow, and the summary says how many.
+ * Every selected product goes to the model, in calls of this many products.
  *
- * Raised from 40 when the model started answering with one band per product
- * instead of one number per product per variation, which roughly halved the
- * output a full request needs.
+ * One call for a whole selection used to stop at 45 products and price the
+ * rest without the model. Smaller calls run side by side instead: a reply of
+ * twenty products is about 1,200 tokens, which arrives well inside the call
+ * timeout, where one 45-product reply took long enough to risk it.
  */
-const MAX_VARIANTS_PER_REQUEST = 60;
+const PRODUCTS_PER_AI_CALL = 20;
+
+/** Calls in flight at once. 500 products is 25 calls, so two rounds. */
+const AI_CALLS_IN_PARALLEL = 13;
+
+/**
+ * The whole Suggest request, retries included, finishes inside this. The
+ * wizard and nginx both stop waiting at 60 seconds, and an answer that
+ * arrives after that is one the merchant never sees.
+ */
+const AI_SUGGEST_BUDGET_MS = 38000;
+const AI_CALL_TIMEOUT_MS = 20000;
+/** A call started with less time than this would be cut off mid-reply. */
+const MIN_TIME_FOR_AI_CALL_MS = 6000;
 
 /**
  * Room for the reply this request actually needs.
  *
  * A fixed ceiling is either wasteful for three products or fatal for thirty:
  * a reply cut off at the limit is truncated JSON, which parses to nothing and
- * falls back silently. One row is `{"v":12,"lo":8,"hi":16},` -- around sixteen
- * tokens, and no longer growing with the number of variations -- plus the
- * summary and braces.
+ * falls back silently. One row is the band, the best change, direction,
+ * confidence and a rationale of up to 120 characters -- around 56 tokens, and
+ * not growing with the number of variations -- plus the summary and braces.
  */
 function estimateSuggestionTokens(variantCount) {
-  return Math.max(300, Math.round(variantCount * 16 * 1.4) + 160);
+  return Math.max(300, Math.round(variantCount * 56 * 1.4) + 160);
+}
+
+/**
+ * The test's goal in words, so "best" means the same thing to the model as to
+ * the test. The goal is the merchant's primary metric, and a cut that wins on
+ * conversion rate can lose on revenue per visitor.
+ */
+const OBJECTIVE_FOR_MODEL = {
+  revenue_per_visitor:
+    'revenue per visitor: price times how often visitors buy. A higher price that loses too many orders loses; a lower price that wins enough extra orders wins.',
+  conversion_rate:
+    'conversion rate: the share of visitors who buy. Prices at or below today usually help it, so favour small rises and well-founded cuts, never at the expense of the margin limit.',
+  aov:
+    'average order value. Higher prices raise it directly, but a rise that drives buyers away still fails the test, so keep rises believable for the category.',
+};
+
+function describeObjectiveForModel(objective) {
+  const key = String(objective || '')
+    .trim()
+    .toLowerCase();
+  return OBJECTIVE_FOR_MODEL[key] || `${key || 'revenue_per_visitor'}.`;
+}
+
+/**
+ * The model's single best change for a product, kept inside the band it is
+ * tested within. Null when the reply gave none.
+ */
+function normalizeModelBest(item, band) {
+  const raw = item?.best;
+  if (raw === null || raw === undefined || raw === '') return null;
+  const best = Number(raw);
+  if (!Number.isFinite(best)) return null;
+  return round2(Math.min(band.hi, Math.max(band.lo, best)));
 }
 
 /**
@@ -162,6 +208,7 @@ function describeProductForModel(row, index) {
     opportunity_score: row.opportunity_score,
     recommended_scenario: scenario,
     catalog_hint: hint ? hint.slice(0, 160) : null,
+    ...(row.variant_count > 1 ? { variant_count: row.variant_count } : {}),
     ...enrichProductSignalsForPriceSuggest(row),
   };
 }
@@ -237,6 +284,7 @@ function normalizeVariantRows(variants = []) {
   return (Array.isArray(variants) ? variants : [])
     .map(row => ({
       variant_id: String(row.variant_id || '').trim(),
+      product_id: String(row.product_id || row.product_gid || '').trim() || null,
       title: String(row.title || row.product_title || 'Product').trim(),
       current_price: Number(row.current_price ?? row.price) || 0,
       currency: row.currency || 'USD',
@@ -252,6 +300,91 @@ function normalizeVariantRows(variants = []) {
       scenario_rationale: row.scenario_rationale || null,
     }))
     .filter(row => row.variant_id && row.current_price > 0);
+}
+
+function median(values) {
+  const sorted = values.filter(Number.isFinite).sort((a, b) => a - b);
+  if (!sorted.length) return 0;
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+/**
+ * Variant rows grouped into the products the model is asked about.
+ *
+ * Sizes and colours of one product share its demand, category and margin, so
+ * they get one judgement and one range. Asked per variant, the model gave a
+ * tee's S, M and L three different ranges for no reason the merchant could see,
+ * and a product with many variants used up the request on near-copies of
+ * itself. A row without a product id stays on its own: two products can share
+ * a title, so a title is never enough to merge them.
+ *
+ * The product's row sums what is per variant (units, revenue) and takes the
+ * largest of what is per product (visitors, which every variant row repeats).
+ */
+function groupRowsByProduct(rows = []) {
+  const groups = new Map();
+  rows.forEach(row => {
+    const key = row.product_id ? `product:${row.product_id}` : `variant:${row.variant_id}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(row);
+  });
+  return Array.from(groups.values()).map(variants => {
+    if (variants.length === 1) {
+      return { variants, product: { ...variants[0], variant_count: 1 } };
+    }
+    const lead = variants.reduce((best, row) =>
+      row.units_sold_30d > best.units_sold_30d ? row : best
+    );
+    const sum = key => variants.reduce((total, row) => total + (Number(row[key]) || 0), 0);
+    const largest = key => Math.max(...variants.map(row => Number(row[key]) || 0));
+    const withMargin = variants.filter(row => Number(row.margin_percent) > 0);
+    const weight = row => Math.max(1, row.units_sold_30d);
+    const margin = withMargin.length
+      ? withMargin.reduce((total, row) => total + row.margin_percent * weight(row), 0) /
+        withMargin.reduce((total, row) => total + weight(row), 0)
+      : null;
+    const scores = variants.map(row => row.opportunity_score).filter(Number.isFinite);
+    return {
+      variants,
+      product: {
+        ...lead,
+        current_price: round2(median(variants.map(row => row.current_price))),
+        margin_percent: margin === null ? null : round2(margin),
+        units_sold_30d: sum('units_sold_30d'),
+        revenue_30d: sum('revenue_30d'),
+        daily_visitors: largest('daily_visitors'),
+        visitors_30d: largest('visitors_30d'),
+        opportunity_score: scores.length ? Math.max(...scores) : null,
+        variant_count: variants.length,
+      },
+    };
+  });
+}
+
+function chunk(items, size) {
+  const out = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
+}
+
+/**
+ * Run `task` over `items` with at most `limit` in flight, never starting one
+ * after `deadline`. Items that never start resolve to null.
+ */
+async function runWithinBudget(items, limit, deadline, task) {
+  const results = new Array(items.length).fill(null);
+  let next = 0;
+  async function worker() {
+    while (next < items.length) {
+      const index = next++;
+      const remaining = deadline - Date.now();
+      if (remaining < MIN_TIME_FOR_AI_CALL_MS) return;
+      results[index] = await task(items[index], Math.min(AI_CALL_TIMEOUT_MS, remaining));
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
 }
 
 /**
@@ -459,7 +592,8 @@ function narrowSuggestionsToArms(result = {}, { targetArmIds, minPct, maxPct, gu
   if (suggestions.length === all.length) return result;
 
   if (result.source === 'openai') {
-    const fromModel = suggestions.filter(item => item?.ai_band).length;
+    // The deterministic spread sets `ai_band` too, so it cannot tell them apart.
+    const fromModel = suggestions.filter(item => item?.from_ai === true).length;
     const { min, max } = resolveAiPriceLiftBand(minPct, maxPct, guardrails);
     return {
       ...result,
@@ -472,6 +606,8 @@ function narrowSuggestionsToArms(result = {}, { targetArmIds, minPct, maxPct, gu
         filled: suggestions.length - fromModel,
         min,
         max,
+        products: result.product_count,
+        aiProducts: result.ai_product_count,
       }),
     };
   }
@@ -548,7 +684,7 @@ async function suggestPricesForAllArms({
     guardrails
   );
   const armCatalog = testArms.map(a => ({ id: a.id, label: a.label || a.name || a.id }));
-  const sent = rows.slice(0, MAX_VARIANTS_PER_REQUEST);
+  const groups = groupRowsByProduct(rows);
 
   const minBandWidth = computeMinDetectableBandWidth(min, max, testArms.length);
   const minGapHint =
@@ -575,172 +711,201 @@ async function suggestPricesForAllArms({
    * two numbers per product however many variations there are, so the reply
    * stays well clear of the ceiling that used to truncate it.
    */
-  const payload = await chatJson({
-    label: 'price_suggest',
-    systemPrompt: `You are a pricing scientist designing Shopify A/B price tests in Priceify.
+  const systemPrompt = `You are a pricing scientist planning Shopify A/B price tests in Priceify.
+The test is judged on ${describeObjectiveForModel(objective)} Do not assume higher is better.
 
-For each product choose the RANGE of price changes its test should explore.
-Priceify spaces the individual test variations across the range you return and
-rounds them to realistic price points, so return one range per product, not one
-price per variation. The unchanged current price is always tested alongside
-them as the control, so your range is what to compare against it.
+For each product, return a RANGE of percent changes to test against its current price, which always runs alongside as the control. Priceify places the test prices inside your range and rounds them to realistic price points, so give one range per product, not one price per variation.
 
-Return strict JSON only:
+Return strict JSON only, with no other text:
 {
-  "summary": "one sentence, max 200 chars",
+  "summary": "one sentence for the merchant, max 200 chars",
   "bands": [
-    {
-      "v": 0,
-      "lo": 8,
-      "hi": 16,
-      "direction": "rise",
-      "confidence": "medium",
-      "rationale": "Short merchant-facing reason, max 120 chars"
-    }
+    { "v": 0, "lo": 8, "hi": 16, "best": 12, "direction": "rise", "confidence": "medium", "rationale": "max 120 chars, plain language" }
   ]
 }
 
-Hard rules:
-- "v" is the index of a product in the input products array. Use each index at most once, and include every product.
-- "lo" and "hi" are percent changes to that product's current price, with lo < hi. Positive raises the price, negative lowers it. -12 means 12% cheaper than today.
-- Both must stay inside [${min}, ${max}]. Never move a price further than max_price_change_percent=${shopMax}% in either direction.
-- "hi" minus "lo" must be at least ${minBandWidth}. With ${testArms.length} variation(s), aim for roughly ${minGapHint}% or more between adjacent test prices — pinpoints fail at typical Shopify traffic.
-- Optional per product: "direction" (cut|rise|either|hold), "confidence" (low|medium|high), "rationale" (max 120 chars, plain language for the merchant).
-- Each product index MUST get its own lo/hi. Read current_price, monthly_units, revenue_30d, revenue_signal, margin_percent, opportunity_score, price_tier, and traffic_tier — do not copy the same band to every index unless only one product is sent.
-- Return no prose outside the JSON.
+Rules:
+- "v" is the product's index in the input products array. Include every product exactly once, each with its own range judged on its own data.
+- variant_count above 1 means the entry stands for that many variants of one product, and current_price is their typical price. The range applies to all of them.
+- "lo" and "hi" are percent changes with lo < hi: positive raises the price, negative lowers it (-12 = 12% cheaper).
+- "best" is the change inside lo..hi you expect to do best on the goal.
+- lo, hi and best stay inside [${min}, ${max}], never more than ${shopMax}% in either direction.
+- hi - lo is at least ${minBandWidth}, so the ${testArms.length} test price(s) sit about ${minGapHint}% or more apart; closer prices cannot be told apart at typical Shopify traffic.
+- "direction" is cut | rise | either | hold. "confidence" is low | medium | high.
 
-Objective and profit (not conversion alone):
-- The shop optimizes for ${objective}. Prefer ranges that improve expected profit per visit; a higher price that kills orders can lose overall, and a lower price that wins volume can win.
-- Use price_tier: impulse SKUs tolerate wider % moves; premium/considered SKUs need smaller, cautious moves.
-- Use traffic_tier: unmeasured or very_low → WIDE band; high traffic → narrower band can still learn.
-- Use margin_tier: thin or unknown → stay near current price; never propose a cut on thin/unknown margin.
-- heuristic_direction is Priceify's prior — weigh it, but override when catalog_hint or sales_data clearly disagree.
-
-Choosing the DIRECTION for each product${
+Direction${
       direction === 'both'
         ? ' (the allowed range spans both, so this is yours to decide per product)'
         : ''
     }:
-- Do not assume higher is better. The question a price test answers is which price earns more, and for some products that is a lower one.
-- Test a price CUT where the evidence points to the product being priced above what its shoppers will pay: weak or no sales despite a high opportunity score, or a price that sits above what its category and price point would suggest. A cut has to win back more orders than the margin it gives up, so it needs volume to be the thing that is missing.
-- Test a price RISE where demand looks healthy: steady monthly_units, and margin that shows the product is not being carried by its price alone.
-- A cut is not a discount strategy. You are looking for the price that earns the most, so propose one only where you would expect the extra orders to more than pay for the lower margin.
-- Never propose a cut on a product whose margin_percent is thin or null. Thin margin means the lost profit is most of the profit; null means the shop has not recorded a cost, so nobody knows how much a cut gives away.
+- Rise when demand looks healthy (steady monthly_units) and margin_tier is healthy or strong.
+- Cut only when the product looks overpriced (few sales despite a high opportunity_score, which runs 0 to 1, or a price above what its category usually costs) and the extra orders should more than pay for the lower margin.
+- Never propose a cut when margin_tier is thin or unknown. Unknown (margin_percent null) means no cost was recorded: the margin is unknown rather than good.
+- heuristic_direction (cut_candidate, rise_candidate, rise_cautious, hold_near, explore) and catalog_hint are Priceify's own read. Weigh them, but let the data decide.
 
-How wide to make a product's range:
-- monthly_units low, or sales_data "none_recorded": use a WIDE range. A small price difference cannot be detected on light traffic, so a narrow band on a slow seller learns nothing however long it runs.
-- monthly_units high: a narrower range is enough to detect a response, and it puts less revenue at risk while the test runs.
-- margin_percent healthy and known: the range may reach the far end of what is allowed.
-- margin_percent thin: stay close to the current price in either direction. A few points of price is most of the profit on a thin-margin product.
-- margin_percent null: the shop has not recorded a cost for this product, so its margin is unknown rather than good. Stay nearer the middle of the allowed range instead of assuming headroom nobody has measured.
-- revenue_signal "low" or "none_recorded": treat like light traffic — prefer a wider band so the test can learn something.
-- recommended_scenario "conservative": stay nearer the current price in either direction. "aggressive": the catalog already flagged headroom — the range may reach further into the allowed band. "recommended": use the usual balance.
-- catalog_hint, when present, is Priceify's own read on this SKU. Use it as context, not as an order to ignore the band rules above.
-- Judge the price point too: shoppers carry a larger increase on a considered purchase than on an impulse one.
-- The test is being judged on ${objective}. The best range for that measure is not always the highest price the product can carry: fewer orders at a higher price can lose on it, and more orders at a lower price can win.`,
-    userPrompt: JSON.stringify({
-      objective,
-      allowed_band: {
-        min_pct: min,
-        max_pct: max,
-        min_width: minBandWidth,
-        // Stated as well as implied by the numbers: a model given -15..20 has
-        // to be told that the negative half is a real option rather than a
-        // bound it should stay clear of.
-        direction_allowed: direction,
-      },
-      variations_per_product: armCatalog.length,
-      guardrails: {
-        min_margin_percent: guardrails.min_margin_percent ?? 35,
-        max_price_change_percent: guardrails.max_price_change_percent ?? 15,
-      },
-      products: sent.map((r, index) => describeProductForModel(r, index)),
-    }),
-    temperature: regenerate ? 0.55 : 0.25,
-    maxTokens: estimateSuggestionTokens(sent.length),
-  });
+Range width:
+- monthly_units low, sales_data "none_recorded", or traffic_tier unmeasured or very_low: use a WIDE range, or the test learns nothing.
+- traffic_tier high: a narrower range is enough and puts less revenue at risk.
+- margin_tier thin or unknown: stay near the current price. Healthy or strong: may reach the far end of the range.
+- price_tier impulse tolerates bigger % moves; considered and premium need smaller ones.
+- recommended_scenario "conservative": stay near today's price. "aggressive": may go further. "recommended": balanced.
+
+Beyond this shop's data:
+- Use what you know about this kind of product (title, product_type, currency, current_price): what shoppers usually pay, how price-sensitive the category is, and which price points look normal (49 rather than 50).
+- You have no live market data. Never quote or invent competitor prices, store names or statistics.
+- When the two disagree, measured shop data wins (sales_data "measured"). General knowledge counts for more when sales_data is "none_recorded".
+- The rationale says what decided the range, e.g. "Sells steadily on a strong margin" or "Priced below what this category usually costs".`;
+
+  const askModel = async (batch, timeoutMs) => {
+    const payload = await chatJson({
+      label: 'price_suggest',
+      systemPrompt,
+      userPrompt: JSON.stringify({
+        objective,
+        allowed_band: {
+          min_pct: min,
+          max_pct: max,
+          min_width: minBandWidth,
+          // Stated as well as implied by the numbers: a model given -15..20 has
+          // to be told that the negative half is a real option rather than a
+          // bound it should stay clear of.
+          direction_allowed: direction,
+        },
+        variations_per_product: armCatalog.length,
+        guardrails: {
+          min_margin_percent: guardrails.min_margin_percent ?? 35,
+          max_price_change_percent: guardrails.max_price_change_percent ?? 15,
+        },
+        products: batch.map((group, index) => describeProductForModel(group.product, index)),
+      }),
+      temperature: regenerate ? 0.55 : 0.25,
+      maxTokens: estimateSuggestionTokens(batch.length),
+      timeoutMs,
+      // Products a call misses are asked again below, in smaller calls, which
+      // fits the time budget better than the SDK repeating the whole call.
+      maxRetries: 0,
+    });
+
+    const used = new Set();
+    const parsed = [];
+    (Array.isArray(payload?.bands) ? payload.bands : []).forEach(item => {
+      const index = Number(item?.v);
+      const group = Number.isInteger(index) ? batch[index] : null;
+      if (!group || used.has(index)) return;
+      const normalized = normalizeModelBand(item, { min, max, minWidth: minBandWidth });
+      if (!normalized) return;
+      used.add(index);
+      parsed.push({ group, normalized, item });
+    });
+    return { parsed, summary: String(payload?.summary || '').trim() };
+  };
+
+  const deadline = Date.now() + AI_SUGGEST_BUDGET_MS;
+  const answered = new Map();
+  const replySummaries = [];
+  let aiCalls = 0;
+  const ask = (batch, timeoutMs) => {
+    aiCalls += 1;
+    return askModel(batch, timeoutMs);
+  };
+  // A reply that gave every product the same band did not look at them, so
+  // repeats are judged within one reply, not across calls that each saw
+  // different products.
+  const collect = replies =>
+    replies.forEach(reply => {
+      if (!reply?.parsed.length) return;
+      const bandKey = band => `${band.lo}:${band.hi}`;
+      const counts = {};
+      reply.parsed.forEach(({ normalized }) => {
+        counts[bandKey(normalized)] = (counts[bandKey(normalized)] || 0) + 1;
+      });
+      const lazySingleBand = reply.parsed.length > 1 && Object.keys(counts).length === 1;
+      reply.parsed.forEach(entry => {
+        answered.set(entry.group, {
+          ...entry,
+          duplicateBand: lazySingleBand || counts[bandKey(entry.normalized)] > 1,
+        });
+      });
+      if (reply.summary) replySummaries.push(reply.summary);
+    });
+
+  collect(
+    await runWithinBudget(chunk(groups, PRODUCTS_PER_AI_CALL), AI_CALLS_IN_PARALLEL, deadline, ask)
+  );
+  const unanswered = groups.filter(group => !answered.has(group));
+  if (unanswered.length) {
+    collect(
+      await runWithinBudget(
+        chunk(unanswered, Math.ceil(PRODUCTS_PER_AI_CALL / 2)),
+        AI_CALLS_IN_PARALLEL,
+        deadline,
+        ask
+      )
+    );
+  }
+
+  if (!answered.size) {
+    return { ...fallback, ai_attempted: true, ai_calls: aiCalls };
+  }
+
   const varietyAttempt = regenerate ? Math.max(1, Number(attempt) || 1) : 0;
-
-  const items = Array.isArray(payload?.bands) ? payload.bands : [];
-  if (!items.length) {
-    return { ...fallback, ai_attempted: true };
-  }
-
   const suggestions = [];
-  const usedRows = new Set();
-  const parsedBands = [];
-
-  for (const item of items) {
-    const index = Number(item?.v);
-    const row = Number.isInteger(index) ? sent[index] : null;
-    if (!row || usedRows.has(index)) {
-      continue;
-    }
-    const normalized = normalizeModelBand(item, { min, max, minWidth: minBandWidth });
-    if (!normalized) {
-      continue;
-    }
-    parsedBands.push({ index, row, normalized, item });
-    usedRows.add(index);
-  }
-
-  const bandKey = band => `${band.lo}:${band.hi}`;
-  const bandCounts = {};
-  parsedBands.forEach(({ normalized }) => {
-    const key = bandKey(normalized);
-    bandCounts[key] = (bandCounts[key] || 0) + 1;
-  });
-  const lazySingleBand =
-    parsedBands.length > 1 && Object.keys(bandCounts).length === 1;
-
-  for (const { row, normalized, item } of parsedBands) {
-    const duplicateBand =
-      lazySingleBand || (bandCounts[bandKey(normalized)] || 0) > 1;
-    const band = mergeModelBandWithHeuristics(row, normalized, min, max, {
+  groups.forEach(group => {
+    const answer = answered.get(group);
+    if (!answer) return;
+    const { normalized, item, duplicateBand } = answer;
+    const band = mergeModelBandWithHeuristics(group.product, normalized, min, max, {
       duplicateBand,
       varietyAttempt,
     });
-
-    const scoreBoost = computeOpportunityScoreBoost(row);
+    const scoreBoost = computeOpportunityScoreBoost(group.product);
     const aiRationale = sanitizeModelRationale(item?.rationale);
     const aiDirection = sanitizeModelDirection(item?.direction);
     const aiConfidence = sanitizeModelConfidence(item?.confidence);
+    const aiBest = normalizeModelBest(item, band);
 
-    const priced = priceArmsAcrossBand({
-      row,
-      testArms,
-      guardrails,
-      shopMax,
-      scoreBoost,
-      targetAt: offset =>
-        row.current_price * (1 + (band.lo + (band.hi - band.lo) * offset) / 100),
-      requestedLow: row.current_price * (1 + band.lo / 100),
-      requestedHigh: row.current_price * (1 + band.hi / 100),
-    });
+    // One variation is one price to test, so it goes where the model expects
+    // the most. With several, they stay spread across the band: the spread is
+    // what lets the test tell which price earns more, the model's pick included.
+    const singleAtBest = aiBest !== null && testArms.length === 1;
+    group.variants.forEach(row => {
+      const priced = priceArmsAcrossBand({
+        row,
+        testArms,
+        guardrails,
+        shopMax,
+        scoreBoost: singleAtBest ? 0 : scoreBoost,
+        targetAt: offset =>
+          row.current_price *
+          (1 + (singleAtBest ? aiBest : band.lo + (band.hi - band.lo) * offset) / 100),
+        requestedLow: row.current_price * (1 + band.lo / 100),
+        requestedHigh: row.current_price * (1 + band.hi / 100),
+      });
 
-    priced.forEach(entry => {
-      suggestions.push({
-        variant_id: row.variant_id,
-        ...entry,
-        guardrail_limited: outsideRequestedRange(
-          entry.delta_percent,
-          requestedMin,
-          requestedMax,
-          0.01
-        ),
-        ai_band: { lo: band.lo, hi: band.hi },
-        ai_rationale: aiRationale,
-        ai_direction: aiDirection,
-        ai_confidence: aiConfidence,
+      priced.forEach(entry => {
+        suggestions.push({
+          variant_id: row.variant_id,
+          ...entry,
+          from_ai: true,
+          guardrail_limited: outsideRequestedRange(
+            entry.delta_percent,
+            requestedMin,
+            requestedMax,
+            0.01
+          ),
+          ai_band: { lo: band.lo, hi: band.hi },
+          ai_best_delta_percent: aiBest,
+          ai_rationale: aiRationale,
+          ai_direction: aiDirection,
+          ai_confidence: aiConfidence,
+        });
       });
     });
-  }
+  });
 
-  if (!suggestions.length) {
-    return { ...fallback, ai_attempted: true };
-  }
-
-  // Fill any missing variant×arm pairs with deterministic so UI is complete.
+  // Products the model still had not answered when the budget ran out keep
+  // the deterministic spread, so every row has a price, and the summary says
+  // how many.
   const fromModel = suggestions.length;
   const seen = new Set(suggestions.map(s => `${s.variant_id}::${s.arm_id}`));
   for (const fill of fallback.suggestions) {
@@ -752,20 +917,26 @@ How wide to make a product's range:
   }
   const filled = suggestions.length - fromModel;
 
-  const modelSummary = String(payload?.summary || '')
-    .trim()
-    .slice(0, 220);
+  // A reply only describes the products it saw, so its sentence stands for
+  // the whole request only when one reply covered all of them.
+  const modelSummary =
+    aiCalls === 1 && replySummaries.length === 1 ? replySummaries[0].slice(0, 220) : '';
   return {
     source: 'openai',
     suggestions,
     ai_pair_count: fromModel,
     fallback_pair_count: filled,
+    product_count: groups.length,
+    ai_product_count: answered.size,
+    ai_calls: aiCalls,
     summary: describeSuggestionSource({
       modelSummary,
       fromModel,
       filled,
       min,
       max,
+      products: groups.length,
+      aiProducts: answered.size,
     }),
   };
 }
@@ -778,13 +949,20 @@ How wide to make a product's range:
  * had no way to know the rest was the same spread they would have got with the
  * model switched off.
  */
-function describeSuggestionSource({ modelSummary, fromModel, filled, min, max }) {
+function describeSuggestionSource({ modelSummary, fromModel, filled, min, max, products, aiProducts }) {
   const band = describeSignedBand(min, max, '%');
-  const base = modelSummary || `AI suggested ${fromModel} test prices within ${band}.`;
+  const forProducts =
+    Number(aiProducts) > 0 ? ` for ${aiProducts} product${aiProducts === 1 ? '' : 's'}` : '';
+  const base = modelSummary || `AI suggested ${fromModel} test prices${forProducts} within ${band}.`;
   if (filled <= 0) {
     return base;
   }
-  const note = `${filled} price${filled === 1 ? '' : 's'} the model did not return ${
+  const missedProducts = Number(products) - Number(aiProducts);
+  const missed =
+    missedProducts > 0
+      ? ` for ${missedProducts} product${missedProducts === 1 ? '' : 's'} the AI did not answer in time`
+      : ' the model did not return';
+  const note = `${filled} price${filled === 1 ? '' : 's'}${missed} ${
     filled === 1 ? 'was' : 'were'
   } filled with the even ${band} spread.`;
   return `${base} ${note}`.slice(0, 320);

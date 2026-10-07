@@ -4,6 +4,10 @@ vi.mock('../../../../services', () => ({
   apiDelete: vi.fn(),
 }));
 
+vi.mock('../../../../services/smartPricingApi', () => ({
+  deleteSmartPricingExperiment: vi.fn(),
+}));
+
 vi.mock('../../smartPricingConstants', () => ({
   readInboxPlans: vi.fn(),
   writeInboxPlans: vi.fn(),
@@ -21,6 +25,7 @@ vi.mock('../classicWizardDraftSync', () => ({
 }));
 
 import { apiDelete } from '../../../../services';
+import { deleteSmartPricingExperiment } from '../../../../services/smartPricingApi';
 import { readInboxPlans, writeInboxPlans } from '../../smartPricingConstants';
 import { deletePersistedInboxPlan, persistInboxPlansNow } from '../../smartPricingInboxPersistence';
 import { forgetWizardDraftEverywhere } from '../classicWizardDraftSync';
@@ -47,6 +52,40 @@ describe('classicExperimentDelete', () => {
     apiDelete.mockResolvedValue({});
     writeInboxPlans.mockImplementation((_domain, plans) => plans);
     forgetWizardDraftEverywhere.mockResolvedValue(true);
+    deleteSmartPricingExperiment.mockResolvedValue({ archived_test_ids: [] });
+  });
+
+  it('deletes tests of the experiment this browser had no plan for', async () => {
+    // An experiment of 250 products whose local copy held 200 plans: the
+    // other 50 tests used to stay running behind a deleted row.
+    deleteSmartPricingExperiment.mockResolvedValue({
+      archived_test_ids: ['test-1', 'test-2', 'test-unlisted'],
+    });
+    readInboxPlans
+      .mockReturnValueOnce([{ id: 'p1' }, { id: 'p2' }, { id: 'p3' }])
+      .mockReturnValue([{ id: 'p3' }]);
+    const result = await deleteClassicExperimentSynchronized('shop.myshopify.com', {
+      ...experiment,
+      plans: experiment.plans.map(plan => ({ ...plan, metadata: { experiment_id: 'exp_1' } })),
+    });
+
+    expect(deleteSmartPricingExperiment).toHaveBeenCalledWith('shop.myshopify.com', 'exp_1');
+    expect(apiDelete).not.toHaveBeenCalled();
+    expect(result.deletedTestIds).toEqual(['test-1', 'test-2', 'test-unlisted']);
+    expect(result.ok).toBe(true);
+  });
+
+  it('falls back to the listed tests when the experiment delete fails', async () => {
+    deleteSmartPricingExperiment.mockRejectedValue(new Error('Server busy'));
+    const result = await deleteClassicExperimentSynchronized('shop.myshopify.com', {
+      ...experiment,
+      plans: experiment.plans.map(plan => ({ ...plan, metadata: { experiment_id: 'exp_1' } })),
+    });
+
+    expect(apiDelete).toHaveBeenCalledWith('/tests/test-1');
+    expect(apiDelete).toHaveBeenCalledWith('/tests/test-2');
+    expect(result.ok).toBe(false);
+    expect(result.errors).toContain('Server busy');
   });
 
   it('also forgets the saved draft, so the experiment stays deleted', async () => {
@@ -113,7 +152,10 @@ describe('classicExperimentDelete', () => {
     expect(writeInboxPlans).toHaveBeenCalledWith('shop.myshopify.com', [{ id: 'p3' }], {
       persist: false,
     });
-    expect(persistInboxPlansNow).toHaveBeenCalledWith('shop.myshopify.com', [{ id: 'p3' }]);
+    // Named, because the server no longer drops a launched plan for being absent.
+    expect(persistInboxPlansNow).toHaveBeenCalledWith('shop.myshopify.com', [{ id: 'p3' }], {
+      deletedPlanIds: ['p1', 'p2'],
+    });
     expect(deletePersistedInboxPlan).not.toHaveBeenCalled();
     expect(apiDelete).toHaveBeenCalledWith('/tests/test-1');
     expect(apiDelete).toHaveBeenCalledWith('/tests/test-2');

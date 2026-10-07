@@ -202,37 +202,6 @@ function parseRipxCheckoutExtensionConfig(source) {
   };
 }
 
-function buildRipxCheckoutExtensionConfigSource({
-  batchUrl,
-  secret = '',
-  probeAlwaysDiscount = false,
-  probeAttributeMatrix = false,
-}) {
-  return `/**
- * Synced from root .env via: npm run shopify:checkout-discount:sync-config
- * (or: node scripts/write-ripx-checkout-config.js)
- * Do not commit real secrets if this file is public; use CI env + sync before build.
- */
-export const RIPX_PRICE_RESOLVE_BATCH_URL = ${JSON.stringify(String(batchUrl || '').trim())};
-
-export const RIPX_CHECKOUT_PRICE_SECRET = ${JSON.stringify(String(secret || '').trim())};
-
-export const RIPX_CHECKOUT_PROBE_ALWAYS_DISCOUNT = ${JSON.stringify(Boolean(probeAlwaysDiscount))};
-export const RIPX_CHECKOUT_PROBE_ATTRIBUTE_MATRIX = ${JSON.stringify(Boolean(probeAttributeMatrix))};
-`;
-}
-
-function getRipxCheckoutExtensionConfigAbsolutePath() {
-  return path.join(__dirname, '../../../', RIPX_EXTENSION_CONFIG_RELATIVE_PATH);
-}
-
-function writeRipxCheckoutExtensionConfigFile(options) {
-  const absolutePath = getRipxCheckoutExtensionConfigAbsolutePath();
-  const source = buildRipxCheckoutExtensionConfigSource(options || {});
-  fs.writeFileSync(absolutePath, source, 'utf8');
-  return { absolutePath, source };
-}
-
 /**
  * @param {object} params
  * @param {string} params.envBatchUrl — from getConfiguredBatchResolveUrls
@@ -861,9 +830,6 @@ module.exports = {
   parseRipxCheckoutExtensionConfig,
   buildExtensionConfigDiagnostics,
   readRipxCheckoutExtensionConfigFile,
-  writeRipxCheckoutExtensionConfigFile,
-  buildRipxCheckoutExtensionConfigSource,
-  getRipxCheckoutExtensionConfigAbsolutePath,
   extensionConfigInputFromReadResult,
   RIPX_EXTENSION_CONFIG_RELATIVE_PATH,
 };

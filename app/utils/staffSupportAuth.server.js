@@ -25,8 +25,6 @@ const staffAuth = loadSupportModule('staffAuth.js');
 const staffNextPath = loadSupportModule('staffNextPath.js');
 const staffLoginOtp = loadSupportModule('staffLoginOtp.js');
 
-export const STAFF_COOKIE_NAME = staffAuth.STAFF_COOKIE_NAME;
-
 export function staffToken() {
   return staffAuth.staffToken();
 }
@@ -46,10 +44,6 @@ export function verifyStaffLoginCode(email, code) {
 export function isValidStaffCookieHeader(cookieHeader) {
   const cookies = staffAuth.parseCookieHeader(cookieHeader);
   return staffAuth.isValidStaffCookieValue(cookies[staffAuth.STAFF_COOKIE_NAME]);
-}
-
-export function isValidStaffPassword(candidate) {
-  return staffAuth.isValidStaffToken(candidate);
 }
 
 function staffCookieSecure(request) {

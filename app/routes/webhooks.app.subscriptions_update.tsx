@@ -33,9 +33,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   try {
     await pushEntitlementToExpress(shop, entitlement);
   } catch (err) {
-    // Answering 500 asks Shopify to redeliver. The previous uninstall handler
-    // swallowed its failure instead, which left the app's own record of the
-    // shop untouched with no second attempt.
+    // Answering 500 asks Shopify to redeliver.
     console.error("Failed to sync subscription entitlement", err);
     return new Response("Failed to record subscription change", { status: 500 });
   }

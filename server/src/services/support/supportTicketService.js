@@ -38,17 +38,11 @@ const {
   presentStaffTicket,
 } = require('./supportTicketPresenters');
 const {
-  TICKET_CATEGORIES,
-  TICKET_STATUSES,
   CREATE_LIMIT_PER_HOUR,
   REPLY_LIMIT_PER_HOUR,
-  BODY_MAX_CHARS,
   isPublicIdFormat,
-  normalizeCategory,
   normalizeStatus,
-  normalizeSubject,
   normalizeBody,
-  normalizeReplyEmail,
   isCreateRateLimited,
   validateCreateInput,
 } = require('./supportTicketValidation');
@@ -260,17 +254,11 @@ async function listStaffTickets(filters = {}) {
 }
 
 module.exports = {
-  TICKET_CATEGORIES,
-  TICKET_STATUSES,
   CREATE_LIMIT_PER_HOUR,
   REPLY_LIMIT_PER_HOUR,
-  BODY_MAX_CHARS,
   isPublicIdFormat,
-  normalizeCategory,
   normalizeStatus,
-  normalizeSubject,
   normalizeBody,
-  normalizeReplyEmail,
   assertCanCreateTicket,
   buildDiagnostics,
   createMerchantTicket,

@@ -299,61 +299,6 @@ export function mergeInboxPlanChoices(
   return order.map(id => mergedById.get(id)).filter(Boolean);
 }
 
-export async function resolveInboxConflict(
-  domain,
-  choice,
-  { localPlans = [], conflict = null, planChoices = null, fieldChoices = null } = {}
-) {
-  const payload = conflict || getInboxConflict(domain);
-  if (!payload) {
-    return { ok: false, reason: 'no_conflict' };
-  }
-
-  if (payload.revision) {
-    setInboxServerRevision(domain, payload.revision);
-  }
-
-  if (choice === 'merge' && (planChoices || fieldChoices)) {
-    const merged = mergeInboxPlanChoices(
-      localPlans,
-      payload.plans || [],
-      planChoices || {},
-      fieldChoices || {}
-    );
-    const saved = await saveSmartPricingInboxPlans(domain, merged, {
-      revision: payload.revision,
-    });
-    if (saved?.revision) {
-      setInboxServerRevision(domain, saved.revision);
-    }
-    clearInboxConflict(domain);
-    return { ok: true, plans: merged, revision: saved?.revision || payload.revision };
-  }
-
-  if (choice === 'server') {
-    const merged = mergeServerAndLocalInbox(payload.plans || [], localPlans);
-    const saved = await saveSmartPricingInboxPlans(domain, merged, {
-      revision: payload.revision,
-    });
-    if (saved?.revision) {
-      setInboxServerRevision(domain, saved.revision);
-    }
-    clearInboxConflict(domain);
-    return { ok: true, plans: merged, revision: saved?.revision || payload.revision };
-  }
-
-  if (choice === 'keep_local') {
-    const saved = await saveSmartPricingInboxPlans(domain, localPlans);
-    if (saved?.revision) {
-      setInboxServerRevision(domain, saved.revision);
-    }
-    clearInboxConflict(domain);
-    return { ok: true, plans: localPlans, revision: saved?.revision || null };
-  }
-
-  return { ok: false, reason: 'unknown_choice' };
-}
-
 export function schedulePersistInboxPlans(domain, plans, { onStatus, onConflict } = {}) {
   const key = String(domain || 'default');
   if (persistTimers.has(key)) {
@@ -388,7 +333,11 @@ export function schedulePersistInboxPlans(domain, plans, { onStatus, onConflict 
   persistTimers.set(key, timer);
 }
 
-export async function persistInboxPlansNow(domain, plans) {
+/**
+ * The server only drops plans missing from `plans` when they never launched.
+ * A launched plan is removed only when its id is in `deletedPlanIds`.
+ */
+export async function persistInboxPlansNow(domain, plans, { deletedPlanIds = [] } = {}) {
   const key = String(domain || 'default');
   if (persistTimers.has(key)) {
     clearTimeout(persistTimers.get(key));
@@ -397,6 +346,7 @@ export async function persistInboxPlansNow(domain, plans) {
   const wirePlans = compactInboxPlans(plans);
   try {
     const saved = await saveSmartPricingInboxPlans(domain, wirePlans, {
+      deletedPlanIds,
       revision: getInboxServerRevision(domain),
     });
     if (saved?.revision) {
@@ -409,10 +359,13 @@ export async function persistInboxPlansNow(domain, plans) {
     if (!conflictPayload) {
       throw err;
     }
+    const deleting = new Set(deletedPlanIds);
     const merged = mergeServerAndLocalInbox(conflictPayload.plans || [], wirePlans, {
       preferLocalIds: wirePlans.map(plan => plan?.id).filter(Boolean),
+    }).filter(plan => !deleting.has(plan?.id));
+    const saved = await saveSmartPricingInboxPlans(domain, compactInboxPlans(merged), {
+      deletedPlanIds,
     });
-    const saved = await saveSmartPricingInboxPlans(domain, compactInboxPlans(merged));
     if (saved?.revision) {
       setInboxServerRevision(domain, saved.revision);
     }

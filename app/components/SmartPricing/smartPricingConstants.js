@@ -1,8 +1,3 @@
-export const SCENARIO_PRESETS = [
-  { id: 'conservative', label: 'Safe', hint: '2 prices · ±5%' },
-  { id: 'recommended', label: 'Balanced', hint: '3 prices · ±8%', recommended: true },
-  { id: 'aggressive', label: 'Bold', hint: '4 prices · ±12%' },
-];
 
 export function formatCurrency(amount, currency = 'USD') {
   const n = Number(amount);
@@ -69,7 +64,14 @@ export function writeInboxPlans(domain, plans, { persist = true } = {}) {
   } catch {
     // This copy is a cache; the server holds the plans. Letting a full or
     // blocked storage throw here used to abort the caller mid-launch, which
-    // cost the merchant the launch rather than just the local copy.
+    // cost the merchant the launch rather than just the local copy. The old
+    // copy goes too: left in place it is read back as current and saved over
+    // newer plans on the server.
+    try {
+      localStorage.removeItem(inboxStorageKey(domain));
+    } catch {
+      // nothing more to do
+    }
   }
   if (typeof window !== 'undefined') {
     window.dispatchEvent(
@@ -82,72 +84,12 @@ export function writeInboxPlans(domain, plans, { persist = true } = {}) {
   return stamped;
 }
 
-export function countQueuedInboxPlans(domain) {
-  return readInboxPlans(domain).filter(plan => plan.status === 'queued' || plan.status === 'draft')
-    .length;
-}
-
-/** Queued + winner-ready plans that need merchant attention in the sidebar badge. */
-export function countInboxAttentionPlans(domain) {
-  return readInboxPlans(domain).filter(
-    plan => plan.status === 'queued' || plan.status === 'draft' || plan.status === 'winner_ready'
-  ).length;
-}
-
-export function appendInboxPlans(domain, newPlans) {
-  const existing = readInboxPlans(domain);
-  const merged = [...newPlans, ...existing.filter(p => !newPlans.some(n => n.id === p.id))].map(
-    plan => ({ ...plan, status: plan.status || 'queued' })
-  );
-  writeInboxPlans(domain, merged);
-  return merged;
-}
-
 export function updateInboxPlan(domain, planId, patch) {
   const plans = readInboxPlans(domain).map(plan =>
     plan.id === planId ? { ...plan, ...patch } : plan
   );
   writeInboxPlans(domain, plans);
   return plans;
-}
-
-export function findInboxPlan(domain, planId) {
-  return readInboxPlans(domain).find(plan => plan.id === planId) || null;
-}
-
-export function findInboxPlanByTestId(domain, testId) {
-  const id = String(testId || '').trim();
-  if (!id) return null;
-  return readInboxPlans(domain).find(plan => String(plan.test_id || '') === id) || null;
-}
-
-export function removeInboxPlan(domain, planId, { persist = true } = {}) {
-  const plans = readInboxPlans(domain).filter(plan => plan.id !== planId);
-  writeInboxPlans(domain, plans, { persist });
-  return { plans, deletedPlanId: planId };
-}
-
-export function reorderInboxPlan(domain, planId, direction) {
-  const plans = readInboxPlans(domain);
-  const queuedIds = plans
-    .filter(plan => plan.status === 'queued' || plan.status === 'draft')
-    .map(plan => plan.id);
-  const index = queuedIds.indexOf(planId);
-  if (index < 0) {
-    return plans;
-  }
-  const targetIndex = direction === 'up' ? index - 1 : index + 1;
-  if (targetIndex < 0 || targetIndex >= queuedIds.length) {
-    return plans;
-  }
-  return reorderQueuedPlans(domain, swapIds(queuedIds, index, targetIndex));
-}
-
-function swapIds(ids, fromIndex, toIndex) {
-  const next = [...ids];
-  const [moved] = next.splice(fromIndex, 1);
-  next.splice(toIndex, 0, moved);
-  return next;
 }
 
 export function reorderQueuedPlans(domain, orderedQueuedIds) {
@@ -164,43 +106,4 @@ export function reorderQueuedPlans(domain, orderedQueuedIds) {
     }
   });
   return writeInboxPlans(domain, [...reordered, ...others]);
-}
-
-export function mergeInboxSyncStatuses(domain, syncPlans = []) {
-  const syncMap = new Map(
-    (Array.isArray(syncPlans) ? syncPlans : [])
-      .filter(row => row?.plan_id)
-      .map(row => [row.plan_id, row])
-  );
-  if (syncMap.size === 0) {
-    return readInboxPlans(domain);
-  }
-  const merged = readInboxPlans(domain).map(plan => {
-    const sync = syncMap.get(plan.id);
-    if (!sync?.synced) {
-      return plan;
-    }
-    const patch = {
-      test_status: sync.test_status,
-      test_sync_at: new Date().toISOString(),
-    };
-    if (sync.winner_applied || sync.inbox_status === 'applied') {
-      patch.status = 'applied';
-      patch.winner_applied_at = sync.winner_applied_at || new Date().toISOString();
-    } else if (sync.inbox_status === 'paused') {
-      patch.status = 'paused';
-    } else if (sync.inbox_status === 'completed') {
-      patch.status = 'completed';
-      if (sync.auto_decision === 'control') {
-        patch.control_retained_at = sync.control_retained_at || new Date().toISOString();
-      }
-    } else if (sync.winner_ready || sync.inbox_status === 'winner_ready') {
-      patch.status = plan.status === 'paused' ? 'paused' : 'winner_ready';
-    } else if (sync.inbox_status === 'running') {
-      patch.status = 'running';
-    }
-    return { ...plan, ...patch };
-  });
-  writeInboxPlans(domain, merged);
-  return merged;
 }

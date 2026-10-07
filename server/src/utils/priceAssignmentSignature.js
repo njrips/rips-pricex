@@ -64,30 +64,6 @@ function signPriceAssignment(input) {
   return crypto.createHmac('sha256', secret).update(canonicalize(p)).digest('hex');
 }
 
-function getPriceAssignmentSigningBlocker(input) {
-  const secret = getSignatureSecret();
-  const p = normalizeSignaturePayload(input || {});
-  if (!secret) {
-    return 'assignment_signature_secret_missing';
-  }
-  if (!p.testId) {
-    return 'test_id_missing';
-  }
-  if (!p.variantId) {
-    return 'variant_id_missing';
-  }
-  if (!p.userId) {
-    return 'user_id_missing';
-  }
-  if (!p.shopDomain) {
-    return 'shop_domain_missing';
-  }
-  if (!Number.isFinite(p.issuedAtMs) || p.issuedAtMs <= 0) {
-    return 'issued_at_invalid';
-  }
-  return null;
-}
-
 function timingSafeEqualsHex(a, b) {
   if (!a || !b) {
     return false;
@@ -150,5 +126,4 @@ module.exports = {
   getSignatureSecret,
   getSignatureTtlSeconds,
   shouldRequireSignedAssignment,
-  getPriceAssignmentSigningBlocker,
 };

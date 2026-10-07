@@ -4,7 +4,7 @@
  * who currently holds a product.
  */
 
-const { normalizeVariantGid, normalizeProductGid } = require('./smartPricingCatalogUtils');
+const { normalizeVariantGid } = require('./smartPricingCatalogUtils');
 
 function collectVariantIdsFromConfig(config = {}) {
   const ids = new Set();
@@ -25,26 +25,6 @@ function collectVariantIdsFromConfig(config = {}) {
   return ids;
 }
 
-function testTargetsProduct(test = {}, productId) {
-  const normalizedProductId = normalizeProductGid(productId);
-  if (!normalizedProductId) {
-    return false;
-  }
-  const targetType = String(test?.target_type || '')
-    .trim()
-    .toLowerCase();
-  const targetId = normalizeProductGid(test?.target_id);
-  if (targetType === 'all-products' || targetType === 'all_products') {
-    return true;
-  }
-  if (targetId && targetId === normalizedProductId) {
-    return true;
-  }
-  const targetIds = Array.isArray(test?.target_ids) ? test.target_ids : [];
-  return targetIds.some(id => normalizeProductGid(id) === normalizedProductId);
-}
-
 module.exports = {
   collectVariantIdsFromConfig,
-  testTargetsProduct,
 };

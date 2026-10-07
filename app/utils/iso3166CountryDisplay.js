@@ -69,23 +69,6 @@ export function getCountryDisplayName(code) {
 }
 
 /**
- * Full name with code in brackets, e.g. "United States of America (US)".
- * Unknown codes still return the code so legacy values remain visible.
- * @param {string} code
- */
-export function getCountryDisplayLabel(code) {
-  const c = resolveCountryToCode(code) || normalizeCountryCode(code);
-  if (!c) {
-    return String(code || '').trim();
-  }
-  const row = BY_CODE.get(c);
-  if (row) {
-    return `${row.name} (${c})`;
-  }
-  return c;
-}
-
-/**
  * Read-only country list as ISO alpha-2 codes (US, CA, GB).
  * @param {string[]} codes
  * @param {number} [maxVisible]

@@ -29,6 +29,8 @@ export const HERO = {
 };
 
 export const LOGO_CLOUD = {
+  /** Hidden until we have real merchant logos to show. */
+  enabled: false,
   title: 'Trusted by Leading Brands',
 };
 
@@ -251,7 +253,7 @@ export const FINAL_CTA = {
 
 export const LANDING_SECTION_ORDER = [
   'hero',
-  'logo-cloud',
+  ...(LOGO_CLOUD.enabled ? ['logo-cloud'] : []),
   'price-test-demo',
   'platform',
   'features',
@@ -262,12 +264,6 @@ export const LANDING_SECTION_ORDER = [
 ];
 
 export const FOOTER_BRAND_TAGLINE = 'Test Your Way to Better Pricing.';
-
-/** @deprecated use FOOTER_BRAND_TAGLINE */
-export const FOOTER_BLURB = FOOTER_BRAND_TAGLINE;
-
-/** @deprecated brochure footer uses FOOTER_COPYRIGHT */
-export const FOOTER_TAGLINE = FOOTER_BRAND_TAGLINE;
 
 export const FOOTER_COPYRIGHT = 'Copyright © Priceify. All rights reserved.';
 
@@ -345,37 +341,6 @@ export const FOOTER_LINK_SECTIONS = [
     ],
   },
 ];
-
-/** Legacy three-column layout for older references. */
-export const FOOTER_COLUMNS = FOOTER_LINK_SECTIONS.slice(0, 3).map(section => ({
-  heading: section.heading,
-  links: section.links.filter(link => !link.muted && !link.install),
-}));
-
-/** Legacy exports kept for docs/tests that still reference older section ids. */
-export const HOW_IT_WORKS_STEPS = PLATFORM_SECTION.steps;
-export const FEATURE_CARDS = FEATURES_SECTION.items.map(item => ({
-  icon: item.icon,
-  title: item.title,
-  body: item.body,
-}));
-export const PROBLEM_CARDS = [];
-export const WALKTHROUGH_STEPS = PLATFORM_SECTION.steps.map((step, index) => ({
-  title: step.title,
-  body: step.body,
-  mock: ['hypothesis', 'variations', 'results', 'results'][index] || 'results',
-}));
-export const WALKTHROUGH_EYEBROW = 'How it works';
-export const USE_CASES = [];
-/** @deprecated use PRICE_TEST_DEMO.lead */
-export const EXPERIMENT_INTRO = PRICE_TEST_DEMO.lead;
-export const EXPERIMENT_POINTS = [];
-export const RESULTS_POINTS = [];
-export const HERO_SETUP_MOCK = { nav: [] };
-/** @deprecated layout mock only */
-export const EXPERIMENT_MOCK = { heading: '', charts: [], control: {}, variation: {} };
-export const RESULTS_BOARD = { columns: [], control: {}, variation: {} };
-export const WALKTHROUGH_MOCKS = {};
 
 export const PUBLIC_COPY_FORBIDDEN =
   /Watch a 90|no theme changes|no code or theme changes|\bDocs\b|\bBlog\b/;

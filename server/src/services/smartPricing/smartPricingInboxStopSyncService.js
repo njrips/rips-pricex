@@ -2,7 +2,6 @@
  * Push Smart Pricing inbox status when linked tests stop or winners apply.
  */
 
-const logger = require('../../utils/logger');
 const { getTestById } = require('../../models/test');
 const {
   findInboxPlanByTestId,
@@ -128,22 +127,7 @@ async function syncSmartPricingInboxForTest(shopDomain, testId, { reason = 'test
   };
 }
 
-function scheduleSmartPricingInboxSync(shopDomain, testId, meta = {}) {
-  if (!isSmartPricingEnabled()) {
-    return;
-  }
-  syncSmartPricingInboxForTest(shopDomain, testId, meta).catch(err => {
-    logger.warn('Smart Pricing inbox stop sync failed', {
-      shopDomain,
-      testId,
-      reason: meta.reason,
-      error: err.message,
-    });
-  });
-}
-
 module.exports = {
   syncSmartPricingInboxForTest,
-  scheduleSmartPricingInboxSync,
   isSmartPricingTest,
 };

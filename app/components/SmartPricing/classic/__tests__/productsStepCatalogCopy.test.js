@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildAllProductsCapHelp,
+  buildAllProductsSelectionCountLabel,
   buildCatalogTruncatedHelp,
   buildProductPickerEmptyMessage,
   buildProductsStepEmptyMessage,
@@ -43,6 +45,31 @@ describe('productsStepCatalogCopy', () => {
         withheldCount: 226,
       })
     ).toBe('226 active products in your store · 0 available to add · 226 in other tests');
+  });
+
+  it('accounts for store products that cannot be priced, so the line adds up', () => {
+    expect(
+      buildStoreCatalogStatusText({
+        storeProductCount: 299,
+        availableProductCount: 282,
+        withheldCount: 15,
+      })
+    ).toBe(
+      '299 active products in your store · 282 available to add · 15 in other tests · 2 can’t be tested (gift cards or no price)'
+    );
+  });
+
+  it('names the all-products cap as the top of the list, not the first', () => {
+    expect(
+      buildAllProductsSelectionCountLabel({ availableProductCount: 282, maxSelection: 250 })
+    ).toBe('Top 250 of 282 products');
+    expect(
+      buildAllProductsSelectionCountLabel({ availableProductCount: 40, maxSelection: 250 })
+    ).toBe('All 40 products');
+    expect(buildAllProductsCapHelp({ availableProductCount: 282, maxSelection: 250 })).toMatch(
+      /leaves 32 out\. Once it launches, those 250 are held, so a second All products test picks up the other 32\./
+    );
+    expect(buildAllProductsCapHelp({ availableProductCount: 250, maxSelection: 250 })).toBe('');
   });
 
   it('uses server loaded count for truncation copy, not the shortened pick list', () => {
@@ -149,5 +176,22 @@ describe('productsStepCatalogCopy', () => {
         tests: [{ name: 'Summer pricing' }],
       })
     ).toContain('Summer pricing');
+  });
+
+  it('names the experiments holding products, not one test per product', () => {
+    const detail = buildWithheldDetail({
+      total: 242,
+      tests: [{ name: 'Smart Pricing · AAAAA · DZR Minna - 43' }],
+      experiments: [
+        { title: 'Offer Test Example', products: 180, live: true },
+        { title: 'AAAAA', products: 50, live: true },
+        { title: 'Spring', products: 7, live: false },
+        { title: 'Old', products: 5, live: true },
+      ],
+    });
+    expect(detail).toBe(
+      '242 products in other tests: Offer Test Example (180 products, running); AAAAA (50 products, running); Spring (7 products, paused); and 1 more. End those tests on the Tests page to reuse them here.'
+    );
+    expect(detail).not.toContain('DZR Minna');
   });
 });

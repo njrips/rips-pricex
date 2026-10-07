@@ -56,6 +56,10 @@ import {
   buildClassicExperimentDeleteConfirmMessage,
   deleteClassicExperimentSynchronized,
 } from './classicExperimentDelete';
+import {
+  stopPausedTestsBeforeArchive,
+  withUnlistedExperimentTests,
+} from './classicExperimentTestScope';
 import { buildClassicWizardResumePath, canDeleteClassicExperimentNow, classicBatchOutcomeMessage, CLASSIC_STOPPED_PLAN_STATUS, getClassicExperimentResumeId, isClassicExperimentEnded, isSettledClassicPlan, resolveClassicDetailsTab, splitSettledByIds } from './classicExperimentListActions';
 import { isOfferExperimentType } from './offerSelection';
 import {
@@ -234,6 +238,14 @@ export default function ClassicExperimentOverview() {
     params.delete('product');
     setSearchParams(params, { replace: true });
   }, [searchParams, setSearchParams]);
+
+  const productNavList = useMemo(
+    () =>
+      (Array.isArray(experimentPlans) ? experimentPlans : [])
+        .filter(row => row?.id)
+        .map(row => ({ planId: String(row.id), title: row.title || '' })),
+    [experimentPlans]
+  );
 
   const selectedProductRow = useMemo(() => {
     if (!selectedProductId) return null;
@@ -445,7 +457,13 @@ export default function ClassicExperimentOverview() {
     if (!actionableTestIds.length || busyAction) return;
     setBusyAction('pause');
     try {
-      const { succeeded, failed } = await postToEachTest(actionableTestIds, 'pause');
+      const testIds = await withUnlistedExperimentTests(
+        shopDomain,
+        experimentPlans,
+        actionableTestIds,
+        { statuses: ['running'] }
+      );
+      const { succeeded, failed } = await postToEachTest(testIds, 'pause');
       if (!succeeded.length) {
         showError(failed[0]?.reason, 'Could not pause test.');
         return;
@@ -492,7 +510,13 @@ export default function ClassicExperimentOverview() {
     if (!actionableTestIds.length || busyAction) return;
     setBusyAction('stop');
     try {
-      const { succeeded, failed } = await postToEachTest(actionableTestIds, 'stop');
+      const testIds = await withUnlistedExperimentTests(
+        shopDomain,
+        experimentPlans,
+        actionableTestIds,
+        { statuses: ['running', 'paused'] }
+      );
+      const { succeeded, failed } = await postToEachTest(testIds, 'stop');
       if (!succeeded.length) {
         showError(failed[0]?.reason, 'Could not stop test.');
         return;
@@ -600,12 +624,18 @@ export default function ClassicExperimentOverview() {
       // A product whose winner is already applied is left out entirely: it is
       // its own holder, so the preflight reads it as free, and restarting it
       // would re-split traffic on a price the merchant has committed to.
+      const testIds = await withUnlistedExperimentTests(
+        shopDomain,
+        experimentPlans,
+        actionableTestIds,
+        { statuses: ['paused'] }
+      );
       const preflight = await apiPost('/smart-pricing/tests/resume-preflight', {
-        test_ids: actionableTestIds,
+        test_ids: testIds,
       })
         .then(res => res?.data || res || {})
         .catch(() => null);
-      const plan = planResume(preflight, actionableTestIds);
+      const plan = planResume(preflight, testIds);
 
       if (plan.action !== 'resume_all') {
         setResumeConflicts(plan);
@@ -652,19 +682,27 @@ export default function ClassicExperimentOverview() {
     setMoreOpen(false);
     try {
       const archivedAt = new Date().toISOString();
-      await replaceExperimentPlansLocal(
-        stampPlans(
-          experimentPlans,
-          {
-            id: 'archived',
-            kind: 'archived',
-            title: 'Test archived',
-            detail: 'Hidden from the active tests list',
-            at: archivedAt,
-          },
-          { archived: true, archived_at: archivedAt }
+      const stopped = new Set(
+        await stopPausedTestsBeforeArchive(shopDomain, experimentPlans, ids =>
+          postToEachTest(ids, 'stop')
         )
       );
+      const archived = stampPlans(
+        experimentPlans,
+        {
+          id: 'archived',
+          kind: 'archived',
+          title: 'Test archived',
+          detail: 'Hidden from the active tests list',
+          at: archivedAt,
+        },
+        { archived: true, archived_at: archivedAt }
+      ).map(row =>
+        stopped.has(String(row?.test_id || row?.metadata?.test_id || '').trim())
+          ? { ...row, status: CLASSIC_STOPPED_PLAN_STATUS }
+          : row
+      );
+      await replaceExperimentPlansLocal(archived);
       showSuccess('Test archived.');
       navigate(`${ROUTES.appSmartPricing(shopDomain)}?tab=archived`);
     } catch (err) {
@@ -1110,6 +1148,9 @@ export default function ClassicExperimentOverview() {
                 row={selectedProductRow}
                 sharedTest={Boolean(selectedProductRow?.sharedTest)}
                 currency={currency}
+                primaryMetric={kpis.primaryMetric}
+                products={productNavList}
+                onOpenProduct={openProduct}
                 onClose={closeProduct}
                 onChanged={refresh}
               />

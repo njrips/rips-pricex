@@ -55,6 +55,7 @@ async function chatJson({
   temperature = 0.3,
   maxTokens = 900,
   timeoutMs = DEFAULT_TIMEOUT_MS,
+  maxRetries = 1,
   label = 'chat',
 } = {}) {
   const apiKey = String(process.env.OPENAI_API_KEY || '').trim();
@@ -79,7 +80,10 @@ async function chatJson({
       // Every caller has a deterministic answer to fall back on, and a
       // merchant waiting on a spinner would rather have that answer than a
       // request that never returns.
-      { timeout: Math.max(1000, Number(timeoutMs) || DEFAULT_TIMEOUT_MS), maxRetries: 1 }
+      {
+        timeout: Math.max(1000, Number(timeoutMs) || DEFAULT_TIMEOUT_MS),
+        maxRetries: Math.max(0, Math.floor(Number(maxRetries) || 0)),
+      }
     );
 
     // A reply cut off at the token ceiling is truncated JSON, which parses to

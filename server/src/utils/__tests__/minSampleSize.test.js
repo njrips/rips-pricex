@@ -32,15 +32,34 @@ describe('minSampleSize', () => {
     assert.equal(resolveConfiguredMinSampleSize({}, {}), null);
   });
 
-  it('does not invent a floor when no sample size is stored', () => {
+  it('does not invent a visitor floor when no sample size is stored', () => {
     const gated = applyMinSampleSizeGate(
       { significant: true, winner: 'variantB' },
-      [{ visitors: 12 }, { visitors: 9 }],
+      [
+        { visitors: 12, conversions: 11 },
+        { visitors: 9, conversions: 10 },
+      ],
       null
     );
     assert.equal(gated.significant, true);
     assert.equal(gated.winner, 'variantB');
-    assert.equal(gated.sampleReady, undefined);
+    assert.equal(gated.sampleReady, true);
+    assert.equal(gated.minSampleSize, undefined);
+  });
+
+  it('still holds the conversion floor when nothing was stored', () => {
+    const gated = applyMinSampleSizeGate(
+      { significant: true, winner: 'variantB', confidence: 97 },
+      [
+        { visitors: 400, conversions: 6 },
+        { visitors: 410, conversions: 2 },
+      ],
+      null,
+      null
+    );
+    assert.equal(gated.significant, false);
+    assert.equal(gated.confidence, null);
+    assert.match(gated.message, /10 conversions per variation/);
   });
 
   it('blocks a winner until every arm reaches the configured floor', () => {

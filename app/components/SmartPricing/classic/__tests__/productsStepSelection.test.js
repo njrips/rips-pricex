@@ -194,10 +194,44 @@ describe('products step selection area', () => {
       title: `Product ${p}`,
       current_price: 10,
     }));
-    await renderPanel({ opportunities: rows, maxSelection: 10 });
+    await renderPanel({ opportunities: rows, maxSelection: 10, pickMode: 'all' });
 
-    expect(container.textContent).toMatch(
-      /up to 10 products, so 2 of your 12 available here are left out/i,
+    expect(container.textContent).toMatch(/up to 10 products/i);
+    expect(container.textContent).toMatch(/takes the 10 with the best mix of traffic, margin and sales/i);
+    expect(container.textContent).toMatch(/leaves 2 out/i);
+  });
+
+  it('does not say products are left out when the merchant picks them by hand', async () => {
+    const rows = Array.from({ length: 12 }, (_, p) => ({
+      product_id: `p${p}`,
+      variant_id: `p${p}v0`,
+      title: `Product ${p}`,
+      current_price: 10,
+    }));
+    await renderPanel({ opportunities: rows, maxSelection: 10 });
+    expect(container.textContent).not.toMatch(/leaves 2 out/i);
+  });
+
+  it('caps sibling variants by product, not by variant count', async () => {
+    // Three sizes each: slicing ids at the cap kept 3 whole products and a third of a fourth.
+    const variantGid = (p, i) => `gid://shopify/ProductVariant/${(p + 1) * 10 + i}`;
+    const rows = Array.from({ length: 5 }, (_, p) =>
+      ['S', 'M', 'L'].map((size, i) => ({
+        product_id: `gid://shopify/Product/${p + 1}`,
+        variant_id: variantGid(p, i),
+        title: `Product ${p} — ${size}`,
+        current_price: 10,
+      }))
+    ).flat();
+    const { onSelectedIdsChange } = await renderPanel({
+      opportunities: rows,
+      maxSelection: 4,
+      selectedIds: [0, 1, 2, 3].map(p => variantGid(p, 0)),
+    });
+    const next = onSelectedIdsChange.mock.calls.at(-1)[0];
+    expect(next).toHaveLength(12);
+    expect(next).toEqual(
+      expect.arrayContaining([0, 1, 2, 3].flatMap(p => [0, 1, 2].map(i => variantGid(p, i))))
     );
   });
 
@@ -211,7 +245,7 @@ describe('products step selection area', () => {
     }));
     await renderPanel({ opportunities: rows, maxSelection: 10, pickMode: 'all' });
 
-    expect(container.textContent).toMatch(/First 10 of 12 products/);
+    expect(container.textContent).toMatch(/Top 10 of 12 products/);
     expect(container.textContent).not.toMatch(/All 12 products/);
   });
 

@@ -2241,13 +2241,6 @@ export function buildSettingsSummary(plan = null, test = null, shopGuardrails = 
   };
 }
 
-export function formatPct(value, digits = 1) {
-  if (value === null || value === undefined || !Number.isFinite(Number(value))) return '—';
-  const n = Number(value);
-  const sign = n > 0 ? '+' : '';
-  return `${sign}${n.toFixed(digits)}%`;
-}
-
 export function formatNumber(value) {
   if (value === null || value === undefined || !Number.isFinite(Number(value))) return '—';
   return Number(value).toLocaleString();

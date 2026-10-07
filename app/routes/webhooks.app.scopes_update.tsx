@@ -24,7 +24,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
     try {
       const accessToken = session?.accessToken || undefined;
-      await fetch(`${expressApiBase()}/api/shops/install`, {
+      const res = await fetch(`${expressApiBase()}/api/shops/install`, {
         method: "POST",
         headers: internalServiceHeaders(
           shop,
@@ -36,8 +36,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           refresh_scopes: Boolean(accessToken),
         }),
       });
+      if (!res.ok) {
+        console.error(`Scope sync for ${shop} failed in the API with ${res.status}`);
+        return new Response(null, { status: 500 });
+      }
     } catch (err) {
+      // Answering 500 asks Shopify to redeliver; the API would otherwise keep
+      // calling Shopify with the old scopes.
       console.error("Failed to sync Express shop_sessions scopes", err);
+      return new Response(null, { status: 500 });
     }
     return new Response();
 };

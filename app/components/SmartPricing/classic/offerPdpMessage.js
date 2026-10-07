@@ -6,10 +6,6 @@ export const OFFER_PDP_CUTOUT_ATTR = 'data-ripx-offer-pdp-cutout';
 export const OFFER_PDP_HOST_PAINTED_ATTR = 'data-ripx-offer-cutout-painted';
 export const OFFER_PDP_HOST_HIDDEN_ATTR = 'data-ripx-offer-cutout-hidden';
 
-/** Horizon `product-price`, then Dawn `.price`, then common wrappers. */
-export const OFFER_PDP_HOST_SELECTOR =
-  'product-price, .price, .product__price, .product-price, .product-single__price, [data-price-container], sale-price, .product-form__price';
-
 /** Skip recommendation / complementary cards even when they sit inside the product section. */
 export const OFFER_PDP_RELATED_SEL =
   '.recommended-products,.related-products,product-recommendations,.product-recommendations,[data-section-type="recently-viewed"],[id*="related"],[id*="recommend"],[id*="complementary"],.complementary-products';

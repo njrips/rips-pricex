@@ -197,6 +197,49 @@ describe('smartPricingTestAnalyticsService', () => {
     expect(result.arms.find(arm => arm.arm_id === 'c').conversion_rate).toBe(2.5);
   });
 
+  it('reports revenue, order value, planned split and test dates for the product view', async () => {
+    getTestById.mockResolvedValue({
+      id: 'test-6',
+      status: 'running',
+      started_at: '2026-09-20T10:00:00.000Z',
+      stopped_at: null,
+      metadata: { smart_pricing_source: 'smart_pricing' },
+      variants: [
+        { id: 'v1', name: 'Control', config: { price: 40 }, allocation: 50 },
+        { id: 'v2', name: 'A', config: { price: 44 }, allocation: 50 },
+      ],
+    });
+    findInboxPlanByTestId.mockResolvedValue({
+      id: 'SP-6',
+      price_arms: [
+        { id: 'c', role: 'control', label: 'Control', price: 40 },
+        { id: 'a', role: 'challenger', label: 'A', price: 44 },
+      ],
+      arm_projections: [],
+    });
+    analyticsService.getTestAnalytics.mockResolvedValue({
+      variants: [
+        { id: 'v1', visitors: 100, conversions: 4, revenue: 160, avgOrderValue: 40 },
+        // Seen, but nobody has bought yet: no order value to average.
+        { id: 'v2', visitors: 90, conversions: 0, revenue: 0, avgOrderValue: 0 },
+      ],
+      summary: { totalVisitors: 190, totalConversions: 4, totalRevenue: 160 },
+      significance: {},
+    });
+
+    const result = await buildSmartPricingTestAnalytics('demo.myshopify.com', 'test-6');
+    const [control, challenger] = result.arms;
+
+    expect(result.started_at).toBe('2026-09-20T10:00:00.000Z');
+    expect(result.stopped_at).toBeNull();
+    expect(result.summary.revenue).toBe(160);
+    expect(control.revenue).toBe(160);
+    expect(control.avg_order_value).toBe(40);
+    expect(control.allocation_percent).toBe(50);
+    expect(challenger.revenue).toBe(0);
+    expect(challenger.avg_order_value).toBeNull();
+  });
+
   it('does not mark a winner when significance is not ready', async () => {
     getTestById.mockResolvedValue({
       id: 'test-3',

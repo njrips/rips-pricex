@@ -1,36 +1,23 @@
 import { useEffect, useState } from 'react';
-import { Form, Link, useNavigation, useRevalidator, useSearchParams } from 'react-router';
-import { Badge, Banner, Button, Select, TextField } from '@shopify/polaris';
+import { Link, useNavigation, useRevalidator, useSearchParams } from 'react-router';
+import { Banner, Button, TextField } from '@shopify/polaris';
 import LabelWithInfo from '../../Settings/primitives/LabelWithInfo';
 import SettingsGuideBody from '../../Settings/SettingsGuideBody';
 import { searchDocsNavTopics, searchDocsSections } from '../../public/priceify/docsContent';
 import { openPublicDocsHref, publicDocsHref } from '../../Settings/settingsGuideLinks';
 import ClassicAdminShell from './ClassicAdminShell';
+import HelpTicketsTab from './HelpTicketsTab';
 import {
   HELP_FAQ_ITEMS,
   HELP_GLOSSARY_TERMS,
   HELP_TABS,
-  TICKET_CATEGORY_OPTIONS,
   attentionTicketToPrompt,
   countTicketsAwaitingMerchant,
   filterHelpFaq,
-  formatTicketTime,
   resolveHelpTab,
-  ticketCategoryLabel,
-  ticketMerchantHint,
-  ticketStatusLabel,
 } from './helpFaq';
 import { withCurrentEmbeddedSearch } from '../../../utils/shopifyEmbeddedSearch';
 import styles from './SmartPricingClassic.module.css';
-
-function statusTone(status) {
-  const value = String(status || '').toLowerCase();
-  if (value === 'resolved' || value === 'closed') return 'success';
-  if (value === 'waiting_merchant') return 'warning';
-  if (value === 'waiting_staff') return 'info';
-  return undefined;
-}
-
 
 /**
  * @param {{
@@ -57,6 +44,12 @@ export default function ClassicHelpPage({
   const submitting = navigation.state === 'submitting';
   const creating = submitting && navigation.formData?.get('intent') === 'create';
   const replying = submitting && navigation.formData?.get('intent') === 'reply';
+  // Errors come back without saying which form failed, so remember the last one sent.
+  const pendingIntent = submitting ? String(navigation.formData?.get('intent') || '') : '';
+  const [submittedIntent, setSubmittedIntent] = useState('');
+  if (pendingIntent && pendingIntent !== submittedIntent) {
+    setSubmittedIntent(pendingIntent);
+  }
   const [searchParams, setSearchParams] = useSearchParams();
   const selectedId = String(searchParams.get('ticket') || selectedTicket?.public_id || '').toUpperCase();
   const attentionId = attentionTicketToPrompt(tickets, selectedId);
@@ -86,11 +79,31 @@ export default function ClassicHelpPage({
   const openGuides = (hash = '') => {
     openPublicDocsHref(publicDocsHref(hash));
   };
-  const [category, setCategory] = useState('setup');
-  const [subject, setSubject] = useState('');
-  const [body, setBody] = useState('');
-  const [replyEmail, setReplyEmail] = useState(staffEmail || '');
+  const [draft, setDraft] = useState(() => ({
+    category: 'setup',
+    subject: '',
+    body: '',
+    replyEmail: staffEmail || '',
+  }));
   const [replyBody, setReplyBody] = useState('');
+  const [ticketFilter, setTicketFilter] = useState('all');
+  const [ticketQuery, setTicketQuery] = useState('');
+  // Drafts outlive tab switches, but not the submit that turned them into a
+  // ticket or a message. Each success is cleared once, keyed by what it produced.
+  const createdKey = searchParams.get('created') === '1' ? selectedId : '';
+  const sentKey =
+    searchParams.get('sent') === '1'
+      ? `${selectedId}:${(selectedTicket?.messages || []).length}`
+      : '';
+  const [clearedKeys, setClearedKeys] = useState({ created: '', sent: '' });
+  if (createdKey && clearedKeys.created !== createdKey) {
+    setClearedKeys(prev => ({ ...prev, created: createdKey }));
+    setDraft(prev => ({ ...prev, subject: '', body: '' }));
+  }
+  if (sentKey && clearedKeys.sent !== sentKey) {
+    setClearedKeys(prev => ({ ...prev, sent: sentKey }));
+    setReplyBody('');
+  }
 
   // Scroll when a different ticket opens, not on every reply that re-renders it.
   const selectedTicketId = selectedTicket?.public_id || '';
@@ -126,7 +139,7 @@ export default function ClassicHelpPage({
     };
   }, [navigation.state, revalidator]);
 
-  const selectTab = nextTab => {
+  const selectTab = (nextTab, { compose = false } = {}) => {
     const params = new URLSearchParams(searchParams);
     if (nextTab === 'answers') {
       params.delete('tab');
@@ -135,6 +148,10 @@ export default function ClassicHelpPage({
       params.set('view', 'all');
     } else {
       params.set('tab', 'tickets');
+      if (compose) {
+        params.delete('ticket');
+        params.set('compose', '1');
+      }
     }
     setSearchParams(params, { replace: true });
   };
@@ -144,7 +161,7 @@ export default function ClassicHelpPage({
       titleBar="Help & docs"
       meta="Support"
       title="Help & docs"
-      subtitle="Answers for Setup, launch, and live tests. File a ticket if you still need us — we attach shop diagnostics automatically."
+      subtitle="Find an answer, or ask our team. Tickets include your shop details automatically."
       tabs={HELP_TABS.map(item =>
         item.id === 'tickets' && awaitingMerchant > 0
           ? { ...item, label: `${item.label} (${awaitingMerchant})` }
@@ -154,14 +171,9 @@ export default function ClassicHelpPage({
       onTabChange={selectTab}
       tabsLabel="Help sections"
     >
-      {listError ? (
+      {listError && tab === 'tickets' ? (
         <div style={{ marginBottom: 16 }}>
           <Banner tone="warning" title={listError} />
-        </div>
-      ) : null}
-      {formError ? (
-        <div style={{ marginBottom: 16 }}>
-          <Banner tone="critical" title={formError} />
         </div>
       ) : null}
       {ticketError ? (
@@ -174,7 +186,7 @@ export default function ClassicHelpPage({
           <Banner tone="success" title={formNotice} />
         </div>
       ) : null}
-      {attentionId ? (
+      {attentionId && tab === 'answers' ? (
         <div style={{ marginBottom: 16 }}>
           <Banner tone="warning" title="Support is waiting on you">
             <Link to={helpHref({ ticket: attentionId })}>
@@ -296,7 +308,7 @@ export default function ClassicHelpPage({
 
           <p className={styles.help}>
             {noAnswers ? `Nothing matches “${faqQuery}”. ` : 'Still stuck? '}
-            <Button variant="plain" onClick={() => selectTab('tickets')}>
+            <Button variant="plain" onClick={() => selectTab('tickets', { compose: true })}>
               Open a support ticket
             </Button>
           </p>
@@ -308,170 +320,36 @@ export default function ClassicHelpPage({
           The drafts below are held in this component, so a tab switch mid-ticket
           cannot lose one. */}
       {tab === 'tickets' ? (
-        <div>
-        <div className={styles.sectionLabel}>Your tickets</div>
-        <p className={styles.help} style={{ marginBottom: 12 }}>
-          These ids belong to this shop only. Other stores cannot open them. Support replies appear
-          here automatically — this page refreshes itself while you have it open.
-        </p>
-        {tickets.length === 0 ? (
-          <p className={styles.help}>No tickets yet for this shop. File one below.</p>
-        ) : (
-          <ul className={styles.adminHintList}>
-            {tickets.map((ticket) => (
-              <li key={ticket.public_id}>
-                <Link
-                  to={helpHref({ ticket: ticket.public_id })}
-                  style={
-                    selectedId && ticket.public_id === selectedId
-                      ? { fontWeight: 650 }
-                      : undefined
-                  }
-                >
-                  {ticket.public_id}
-                </Link>
-                {' · '}
-                {ticket.subject}
-                {' · '}
-                {ticketCategoryLabel(ticket.category)}
-                {' · '}
-                <Badge tone={statusTone(ticket.status)}>{ticketStatusLabel(ticket.status)}</Badge>
-                {ticket.updated_at ? ` · ${formatTicketTime(ticket.updated_at)}` : ''}
-                {ticket.last_message_preview
-                  ? ` · ${ticket.last_message_author === 'staff' ? 'Support' : 'You'}: ${ticket.last_message_preview}`
-                  : ''}
-              </li>
-            ))}
-          </ul>
-        )}
-
-        <div className={styles.sectionLabel} id="help-new-ticket" style={{ marginTop: 28 }}>
-          New ticket
-        </div>
-        <p className={styles.help} style={{ marginBottom: 12 }}>
-          We include shop domain, plan, checkout readiness, and recent test ids. Do not paste
-          access tokens.
-        </p>
-        <Form method="post">
-          <input type="hidden" name="intent" value="create" />
-          <div style={{ display: 'grid', gap: 12, maxWidth: 560 }}>
-            <Select
-              label="Category"
-              options={TICKET_CATEGORY_OPTIONS}
-              value={category}
-              onChange={setCategory}
-            />
-            <input type="hidden" name="category" value={category} />
-            <input type="hidden" name="subject" value={subject} />
-            <input type="hidden" name="body" value={body} />
-            <input type="hidden" name="reply_email" value={replyEmail} />
-            <TextField
-              label="Subject"
-              value={subject}
-              onChange={setSubject}
-              autoComplete="off"
-              maxLength={200}
-            />
-            <TextField
-              label="What happened"
-              value={body}
-              onChange={setBody}
-              multiline={5}
-              autoComplete="off"
-              maxLength={8000}
-            />
-            <TextField
-              label="Reply email (optional)"
-              type="email"
-              value={replyEmail}
-              onChange={setReplyEmail}
-              autoComplete="email"
-              helpText="We use this if we need to email you outside Admin."
-            />
-            <div>
-              <Button
-                submit
-                variant="primary"
-                loading={creating}
-                disabled={creating || !subject.trim() || !body.trim()}
-              >
-                {creating ? 'Submitting…' : 'Submit ticket'}
-              </Button>
-            </div>
-          </div>
-        </Form>
-
-        {selectedTicket ? (
-          <div id="help-ticket" className={styles.adminRow} style={{ marginTop: 20 }}>
-            <div className={styles.adminRowHead}>
-              <p className={styles.adminRowTitle}>
-                {selectedTicket.public_id} — {selectedTicket.subject}
-              </p>
-              <Badge tone={statusTone(selectedTicket.status)}>
-                {ticketStatusLabel(selectedTicket.status)}
-              </Badge>
-            </div>
-            {selectedTicket.status === 'waiting_merchant' ? (
-              <div style={{ margin: '12px 0' }}>
-                <Banner tone="warning" title={ticketMerchantHint(selectedTicket.status)} />
-              </div>
-            ) : (
-              <p className={styles.help}>{ticketMerchantHint(selectedTicket.status)}</p>
-            )}
-            <p className={styles.help}>
-              Category: {ticketCategoryLabel(selectedTicket.category)} · Shop diagnostics were
-              attached when you created this ticket.
-            </p>
-            <div style={{ display: 'grid', gap: 12, marginTop: 12 }}>
-              {(selectedTicket.messages || []).map((message) => (
-                <div key={message.id}>
-                  <p className={styles.sectionLabel}>
-                    {message.author === 'staff' ? 'Support' : 'You'}
-                    {message.created_at ? ` · ${formatTicketTime(message.created_at)}` : ''}
-                  </p>
-                  <p className={styles.adminRowBody} style={{ whiteSpace: 'pre-wrap' }}>
-                    {message.body}
-                  </p>
-                </div>
-              ))}
-            </div>
-            {selectedTicket.status !== 'closed' ? (
-              <Form method="post" style={{ marginTop: 16 }}>
-                <input type="hidden" name="intent" value="reply" />
-                <input type="hidden" name="public_id" value={selectedTicket.public_id} />
-                <input type="hidden" name="body" value={replyBody} />
-                <TextField
-                  label="Add a reply"
-                  value={replyBody}
-                  onChange={setReplyBody}
-                  multiline={3}
-                  autoComplete="off"
-                  maxLength={8000}
-                />
-                <div style={{ marginTop: 12 }}>
-                  <Button submit loading={replying} disabled={replying || !replyBody.trim()}>
-                    {replying ? 'Sending…' : 'Send reply'}
-                  </Button>
-                </div>
-              </Form>
-            ) : null}
-            {selectedId ? (
-              <p className={styles.help} style={{ marginTop: 12 }}>
-                <Link to={helpHref({ view: 'all' })}>Back to all tickets</Link>
-              </p>
-            ) : null}
-          </div>
-        ) : null}
-        </div>
+        <HelpTicketsTab
+          tickets={tickets}
+          selectedTicket={selectedTicket}
+          selectedId={selectedId}
+          compose={searchParams.get('compose') === '1'}
+          helpHref={helpHref}
+          draft={draft}
+          onDraftChange={setDraft}
+          creating={creating}
+          replyBody={replyBody}
+          onReplyChange={setReplyBody}
+          replying={replying}
+          filter={ticketFilter}
+          onFilterChange={setTicketFilter}
+          query={ticketQuery}
+          onQueryChange={setTicketQuery}
+          formError={formError}
+          formIntent={submittedIntent}
+        />
       ) : null}
 
-      <p className={styles.help} style={{ marginTop: 24 }}>
-        <Link to={withCurrentEmbeddedSearch(searchParams, '/app/setup')}>Store setup</Link>
-        {' · '}
-        <Link to={withCurrentEmbeddedSearch(searchParams, '/app/settings')}>Settings</Link>
-        {' · '}
-        Uninstalled or before install: use the public Contact page or the App Store listing.
-      </p>
+      {tab === 'answers' ? (
+        <p className={styles.help} style={{ marginTop: 24 }}>
+          <Link to={withCurrentEmbeddedSearch(searchParams, '/app/setup')}>Store setup</Link>
+          {' · '}
+          <Link to={withCurrentEmbeddedSearch(searchParams, '/app/settings')}>Settings</Link>
+          {' · '}
+          Uninstalled or before install: use the public Contact page or the App Store listing.
+        </p>
+      ) : null}
     </ClassicAdminShell>
   );
 }

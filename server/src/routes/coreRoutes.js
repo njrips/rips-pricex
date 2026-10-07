@@ -12,6 +12,17 @@ const {
   pricingPlansUrl,
 } = require('../services/billing/entitlementService');
 const { upsertShopSession, getShopSession, deleteShopSession } = require('../models/shopSession');
+const {
+  redactShop,
+  redactCustomerOrders,
+  describeCustomerData,
+} = require('../services/privacyComplianceService');
+const { clearOpportunityCache } = require('../services/smartPricing/opportunityService');
+const {
+  recordOrderConversions,
+  cancelOrderConversions,
+  refundOrderConversions,
+} = require('../services/orderConversionService');
 const logger = require('../utils/logger');
 
 const router = express.Router();
@@ -53,11 +64,13 @@ router.post('/billing/sync-entitlement', requireInternalService, asyncHandler(as
 /**
  * Grants a paid plan without Shopify billing, so it stays closed unless the
  * environment is explicitly local. Keying on "not production" left it open on
- * any deploy that forgot to set NODE_ENV.
+ * any deploy that forgot to set NODE_ENV. The override flag is refused in
+ * production for the same reason RIPSPRICEX_ALLOW_UNVERIFIED_API is.
  */
 function devBillingAllowed() {
-  if (process.env.RIPSPRICEX_ALLOW_DEV_BILLING === 'true') return true;
   const env = String(process.env.NODE_ENV || '').trim().toLowerCase();
+  if (env === 'production') return false;
+  if (process.env.RIPSPRICEX_ALLOW_DEV_BILLING === 'true') return true;
   return env === 'development' || env === 'test';
 }
 
@@ -131,6 +144,56 @@ router.post('/shops/uninstall', requireInternalService, asyncHandler(async (req,
   await markShopUninstalled(req.shopDomain);
   await deleteShopSession(req.shopDomain).catch(() => {});
   res.json({ ok: true });
+}));
+
+// The opportunity list caches catalog prices for 12 hours; a price edited in
+// Admin would otherwise seed the next test from the old one.
+router.post('/shops/products-updated', requireInternalService, asyncHandler(async (req, res) => {
+  clearOpportunityCache(req.shopDomain);
+  res.json({ ok: true });
+}));
+
+// Order webhooks, relayed by the app after it has verified the HMAC. A failure
+// answers 500 so Shopify redelivers; recording is idempotent per order.
+router.post('/orders/created', requireInternalService, asyncHandler(async (req, res) => {
+  const result = await recordOrderConversions(req.shopDomain, req.body || {});
+  res.json({ ok: true, ...result });
+}));
+
+router.post('/orders/cancelled', requireInternalService, asyncHandler(async (req, res) => {
+  const result = await cancelOrderConversions(req.shopDomain, req.body || {});
+  res.json({ ok: true, ...result });
+}));
+
+router.post('/orders/refunded', requireInternalService, asyncHandler(async (req, res) => {
+  const result = await refundOrderConversions(req.shopDomain, req.body || {});
+  res.json({ ok: true, ...result });
+}));
+
+// Shopify's mandatory privacy webhooks, relayed by the app after it has
+// verified the HMAC. A failure answers 500 so Shopify retries the delivery.
+router.post('/privacy/shop-redact', requireInternalService, asyncHandler(async (req, res) => {
+  const deleted = await redactShop(req.shopDomain);
+  res.json({ ok: true, deleted });
+}));
+
+router.post('/privacy/customers-redact', requireInternalService, asyncHandler(async (req, res) => {
+  const result = await redactCustomerOrders(req.shopDomain, req.body?.orders_to_redact);
+  res.json({ ok: true, ...result });
+}));
+
+router.post('/privacy/customers-data-request', requireInternalService, asyncHandler(async (req, res) => {
+  const body = req.body || {};
+  const { orders } = await describeCustomerData(req.shopDomain, body.orders_requested);
+  // The merchant answers the customer; this is the record of what we hold.
+  logger.info('customers/data_request received', {
+    shop: req.shopDomain,
+    dataRequestId: body.data_request?.id ?? null,
+    customerId: body.customer?.id ?? null,
+    ordersRequested: Array.isArray(body.orders_requested) ? body.orders_requested.length : 0,
+    conversionEventsHeld: orders.length,
+  });
+  res.json({ ok: true, orders });
 }));
 
 module.exports = router;

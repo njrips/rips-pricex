@@ -38,6 +38,7 @@ vi.mock('../../../../hooks/useClassicShopDomain', () => ({ default: () => SHOP }
 const launchMany = vi.fn(async () => ({}));
 
 vi.mock('../../../../hooks/useSmartPricingLaunch', () => ({
+  alreadyLaunchedPlanIds: () => new Set(),
   useSmartPricingLaunch: () => ({ launching: false, launchMany }),
 }));
 

@@ -88,8 +88,7 @@
   width: auto;
 }
 
-.backLink,
-.footerLink {
+.backLink {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -105,19 +104,8 @@
   padding: 0;
 }
 
-.footerLink {
-  font-weight: var(--classic-fw-medium); /* Figma Cancel / Back */
-  padding: 6px 8px;
-}
-
-.backLink:hover,
-.footerLink:hover {
+.backLink:hover {
   color: var(--classic-orange);
-}
-
-.footerLink:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
 }
 
 .stepOf {
@@ -378,19 +366,6 @@ button.stepItem {
   pointer-events: none;
 }
 
-.footerLinkInner {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  line-height: 1;
-}
-
-.footerLinkInner svg {
-  display: block;
-  flex-shrink: 0;
-}
-
 .page :global(.Polaris-Button),
 .listPage :global(.Polaris-Button),
 .modalBackdrop :global(.Polaris-Button) {
@@ -507,9 +482,7 @@ button.stepItem {
 .listPage .listFooterLinks :global(.Polaris-Button),
 .reviewHead :global(.Polaris-Button),
 .detailFactHead :global(.Polaris-Button),
-.labelRow :global(.Polaris-Button),
 .variationRemove :global(.Polaris-Button),
-.productsHeaderActions :global(.Polaris-Button),
 .selectionBar :global(.Polaris-Button--variantPlain),
 .selectionCard :global(.Polaris-Button--variantPlain),
 .adminRowActions :global(.Polaris-Button--variantPlain) {
@@ -546,30 +519,6 @@ button.stepItem {
 }
 
 /* RipX-only: quieter than Continue so it doesn’t compete with Figma primary CTA */
-.saveDraftLink {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 0;
-  background: transparent;
-  color: var(--classic-muted);
-  font-family: inherit;
-  font-size: var(--classic-fs-label);
-  font-weight: var(--classic-fw-medium);
-  line-height: 1;
-  cursor: pointer;
-  min-height: 32px;
-  padding: 6px 12px;
-}
-
-.saveDraftLink:hover:not(:disabled) {
-  color: var(--classic-orange);
-}
-
-.saveDraftLink:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
 
 .expTitleRow {
   display: flex;
@@ -641,62 +590,6 @@ button.stepItem {
   color: var(--classic-muted);
 }
 
-.primaryBtn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  min-height: 32px;
-  padding: 6px 12px;
-  border: 0;
-  border-radius: 8px;
-  background: var(--classic-orange);
-  color: var(--classic-primary-btn-text, #ffffff);
-  font-family: inherit;
-  font-size: 0.8125rem;
-  font-weight: var(--classic-fw-medium);
-  letter-spacing: 0;
-  cursor: pointer;
-  text-decoration: none;
-  box-shadow: none;
-  -webkit-font-smoothing: antialiased;
-}
-
-.primaryBtn:hover:not(:disabled) {
-  background: var(--classic-orange-deep, #1a1a1a);
-  color: var(--classic-primary-btn-text, #ffffff);
-  filter: none;
-}
-
-.primaryBtn:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-  box-shadow: none;
-}
-
-.ghostBtn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  min-height: 32px;
-  padding: 6px 12px;
-  border-radius: 8px;
-  border: 1px solid var(--classic-line);
-  background: var(--classic-card);
-  color: var(--classic-ink);
-  font-family: inherit;
-  font-size: 0.8125rem;
-  font-weight: var(--classic-fw-medium);
-  cursor: pointer;
-}
-
-.ghostBtn:hover {
-  border-color: var(--classic-line);
-  background: var(--classic-wash);
-  color: var(--classic-ink);
-}
-
 .label {
   display: block;
   margin-bottom: var(--classic-space-label);
@@ -718,20 +611,14 @@ button.stepItem {
   margin-bottom: 24px; /* Figma card section gap 24 */
   display: flex;
   flex-direction: column;
-  gap: 8px; /* Figma label → control → help */
+  gap: 8px;
 }
 
 .field .label {
   margin-bottom: 0;
 }
 
-.field .labelRow {
-  margin-bottom: 0;
-}
-
-.input,
-.textarea,
-.select {
+.input {
   width: 100%;
   min-height: 32px;
   border: 1px solid var(--classic-line);
@@ -747,22 +634,12 @@ button.stepItem {
   box-sizing: border-box;
 }
 
-.input::placeholder,
-.textarea::placeholder {
+.input::placeholder {
   color: var(--classic-muted);
   font-weight: var(--classic-fw-regular);
 }
 
-.textarea {
-  min-height: 88px;
-  resize: vertical;
-  line-height: 1.45;
-  padding-top: 11px;
-}
-
-.input:focus,
-.textarea:focus,
-.select:focus {
+.input:focus {
   border-color: var(--classic-orange);
   box-shadow: 0 0 0 2px rgba(48, 48, 48, 0.15);
 }
@@ -772,7 +649,7 @@ button.stepItem {
   font-size: var(--classic-fs-help);
   font-weight: var(--classic-fw-regular);
   color: var(--classic-muted);
-  line-height: 16px; /* Figma hypothesis helper */
+  line-height: 16px;
 }
 
 /* A help line whose detail sits in a tooltip. The dotted underline is the only
@@ -807,7 +684,7 @@ button.stepItem {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px; /* Figma type grid gap-x/y 8 */
-  margin-bottom: 24px; /* gap before Advanced options */
+  margin-bottom: 24px;
 }
 
 .choiceCard {
@@ -824,7 +701,7 @@ button.stepItem {
 .productsStep .choiceCard {
   display: flex;
   flex-direction: column;
-  gap: 6px; /* Figma pick/price mode cards */
+  gap: 6px;
 }
 
 .choiceCard:hover {
@@ -950,30 +827,10 @@ button.stepItem {
   padding: 13px;
 }
 
-.choiceIcon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--classic-orange);
-  flex-shrink: 0;
-}
-
-.choiceIconAccent {
-  color: var(--classic-orange);
-}
-
-.choiceCardSelected .choiceIcon {
-  color: var(--classic-orange);
-}
-
 .choiceTitleText {
   flex: 0 1 auto;
   min-width: 0;
   text-align: left;
-}
-
-.checkInlineEnd {
-  margin-left: auto;
 }
 
 /* Products mode cards: reserve space for corner check (match product tiles) */
@@ -1016,21 +873,6 @@ button.stepItem {
   font-size: 12px;
   font-weight: var(--classic-fw-regular);
   line-height: 16px;
-}
-
-.check {
-  width: 18px;
-  height: 18px;
-  border-radius: 999px;
-  background: var(--classic-orange);
-  color: #fff;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: var(--classic-fs-overline);
-  font-weight: var(--classic-fw-extrabold);
-  margin-left: auto;
-  flex-shrink: 0;
 }
 
 .checkCorner {
@@ -1078,19 +920,7 @@ button.stepItem {
 }
 
 .advancedBody .modeRow {
-  margin-bottom: 20px; /* Figma advanced grid gap-y 20 */
-}
-
-.audienceMinSample {
-  max-width: 320px; /* Figma min sample input width */
-}
-
-.audienceMinSample .input {
-  max-width: 320px;
-}
-
-.audienceAdvanced {
-  margin-top: 24px; /* Figma section gap after guardrails help */
+  margin-bottom: 20px;
 }
 
 /* Step 4 is three decisions, not one column of fields: who is in the
@@ -1198,17 +1028,6 @@ button.stepItem {
   flex-shrink: 0;
 }
 
-.trafficBanner .ghostBtn {
-  min-height: 26px;
-  padding: 5px 11px;
-  border-radius: 10px;
-  background: var(--classic-card); /* Figma Split evenly #ffffff */
-  border: 1px solid var(--classic-line);
-  color: var(--classic-muted);
-  font-size: 12px;
-  font-weight: var(--classic-fw-medium);
-}
-
 .trafficBannerText {
   display: inline-flex;
   align-items: center;
@@ -1241,7 +1060,7 @@ button.stepItem {
   border-radius: 8px;
   padding: 17px;
   margin-bottom: 12px;
-  background: var(--classic-card); /* #ffffff */
+  background: var(--classic-card);
 }
 
 .variationBlock :global(.Polaris-Labelled--hidden) {
@@ -1256,8 +1075,7 @@ button.stepItem {
   width: 100%;
 }
 
-.variationBadgeLetter,
-.letter {
+.variationBadgeLetter {
   width: 24px;
   height: 24px;
   border-radius: 10px; /* Figma letter wells are 10px radius, not full circles */
@@ -1279,11 +1097,6 @@ button.stepItem {
   border: 1px solid var(--classic-line);
 }
 
-.letterAlt {
-  background: var(--classic-orange-soft);
-  color: var(--classic-orange-deep, #1a1a1a);
-}
-
 .variationTag {
   font-size: 12px;
   font-weight: var(--classic-fw-regular);
@@ -1295,18 +1108,6 @@ button.stepItem {
 
 .variationRemove {
   margin-left: auto;
-}
-
-.variationInput {
-  margin-bottom: 0;
-  background: var(--classic-card) !important; /* white inputs on cream card */
-  border-radius: 10px !important;
-  padding: 9px 13px !important;
-  min-height: 38px;
-}
-
-.variationInput:last-of-type {
-  margin-bottom: 0;
 }
 
 .sliderRow {
@@ -1321,7 +1122,7 @@ button.stepItem {
   width: 100%;
   display: flex;
   flex-direction: column;
-  gap: 6px; /* Figma Traffic label → track */
+  gap: 6px;
 }
 
 .sliderMeta {
@@ -1407,17 +1208,6 @@ button.stepItem {
   cursor: pointer;
 }
 
-.pct {
-  font-weight: var(--classic-fw-medium);
-  font-size: 11px;
-  letter-spacing: 0.55px;
-  text-transform: uppercase;
-  color: var(--classic-ink);
-  line-height: 16.5px;
-  text-align: right;
-  white-space: nowrap;
-}
-
 /* The percentage next to a slider is typed as well as dragged, so it is a field
    rather than a label. Narrow enough that "100%" fits and nothing wider can. */
 .percentField {
@@ -1441,83 +1231,16 @@ button.stepItem {
   min-width: 0;
 }
 
-.addVariation {
-  width: 100%;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  min-height: 32px;
-  padding: 6px 12px;
-  border: 1px dashed var(--classic-line);
-  border-radius: 6px;
-  background: transparent;
-  color: var(--classic-muted);
-  font-family: inherit;
-  font-size: var(--classic-fs-label);
-  font-weight: var(--classic-fw-regular); /* Figma Regular */
-  cursor: pointer;
-}
-
-.addVariation svg {
-  width: 16px;
-  height: 16px;
-  flex-shrink: 0;
-}
-
-.addVariation:hover {
-  background: var(--classic-wash);
-  border-color: var(--classic-muted-soft);
-  color: var(--classic-ink);
-}
-
 /* Products */
 .modeRow {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px; /* Figma mode / product card gap */
-  margin-bottom: 24px; /* Figma major section gap */
+  margin-bottom: 24px;
 }
 
 .modeRow3 {
   grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
-.searchWrap {
-  position: relative;
-  margin-bottom: 10px;
-}
-
-.searchWrap svg {
-  position: absolute;
-  left: 12px;
-  top: 50%;
-  transform: translateY(-50%);
-  color: var(--classic-muted);
-}
-
-.searchInput {
-  width: 100%;
-  border: 1px solid var(--classic-line);
-  border-radius: 6px;
-  background: var(--classic-card);
-  color: var(--classic-ink);
-  font-family: inherit;
-  font-size: var(--classic-fs-body);
-  font-weight: var(--classic-fw-regular);
-  padding: 11px 12px 11px 38px;
-  outline: none;
-}
-
-.searchWrapPill {
-  margin-bottom: 0;
-}
-
-.searchInputPill {
-  border-radius: 6px !important;
-  padding-left: 40px !important;
-  min-height: 44px;
-  background: var(--classic-card);
 }
 
 .tableSearch {
@@ -1527,8 +1250,7 @@ button.stepItem {
   margin-bottom: 0;
 }
 
-.tableToolbar .tableSearch .input,
-.tableToolbar .tableSearch .searchInputPill {
+.tableToolbar .tableSearch .input {
   background: var(--classic-pricing-input, #ffffff) !important;
   border: 1px solid var(--classic-pricing-border, #e3e3e3) !important;
   border-radius: 10px !important;
@@ -1584,46 +1306,6 @@ button.stepItem {
   white-space: nowrap;
 }
 
-.tablePageSizeSelect {
-  width: auto;
-  min-width: 72px;
-  padding: 6px 28px 6px 10px;
-  border-radius: 8px;
-  font-size: var(--classic-fs-help);
-  line-height: 1.2;
-  appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5 6 8l3.5-3.5' fill='none' stroke='%236b7280' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 10px center;
-  cursor: pointer;
-}
-
-.tablePagerBtn {
-  width: 28px;
-  height: 28px;
-  border: 1px solid var(--classic-line);
-  border-radius: 8px;
-  background: var(--classic-surface, #fff);
-  color: var(--classic-ink);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  padding: 0;
-  flex-shrink: 0;
-}
-
-.tablePagerBtn:hover:not(:disabled) {
-  border-color: rgba(var(--accent-primary-rgb), 0.45);
-  color: var(--classic-orange);
-  background: var(--classic-orange-soft);
-}
-
-.tablePagerBtn:disabled {
-  opacity: 0.35;
-  cursor: not-allowed;
-}
-
 .tablePagerChevronPrev {
   display: flex;
   align-items: center;
@@ -1657,15 +1339,6 @@ button.stepItem {
 .productsStatus {
   margin: 0 0 16px;
 }
-
-@keyframes productSkeletonPulse {
-  0%,
-  100% {
-    opacity: 0.55;
-  }
-  50% {
-    opacity: 1;
-  }}
 
 .choiceCardCompact {
   padding: 12px 14px;
@@ -1723,96 +1396,16 @@ button.stepItem {
   gap: 12px;
 }
 
-.allProductsBox {
-  margin-bottom: 10px;
-  padding: 13px;
-  border-radius: var(--classic-radius-sm);
-  background: var(--classic-panel-tint, #f7f7f7);
-  border: 1px solid var(--classic-line);
-}
-
-.allProductsHeader {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  margin-bottom: 12px;
-  font-size: var(--classic-fs-label);
-  font-weight: var(--classic-fw-semibold);
-  color: var(--classic-orange-deep, #1a1a1a);
-  line-height: 1.4;
-}
-
-.allProductsCheck {
-  display: inline-flex;
-  color: var(--classic-orange-deep, #1a1a1a);
-  margin-top: 1px;
-  flex-shrink: 0;
-}
-
-.successBannerInline {
-  margin-bottom: 0;
-  border-radius: 6px 12px 0 0;
-  border-bottom: 0;
-}
-
-.allProductsBox .showAllBtn {
-  margin-top: 0;
-}
-
-.aiSuggestBanner {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  align-items: stretch;
-  margin-bottom: 14px;
-  padding: 14px 16px;
-  background: var(--classic-orange-soft);
-  border: 1px solid var(--classic-line);
-  border-radius: 6px;
-}
-
-.aiSuggestTitle {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  color: var(--classic-orange-deep, #1a1a1a);
-  font-size: 14px;
-  font-weight: var(--classic-fw-semibold);
-  line-height: 20px;
-}
-
 /* Title text and its guide icon, always adjacent. Every pattern that pairs a
    heading with an info icon should use one of these classes so the icon never
    lands on the far edge of a wide row again. */
 .titleWithInfo,
-.panelHeadingGroup,
-.adminRowHeadMain,
-.labelRow,
-.aiSuggestTitleLead {
+.adminRowHeadMain {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   min-width: 0;
   max-width: 100%;
-}
-
-.panelHeadingGroup .panelTitle {
-  margin: 0;
-}
-
-.aiSuggestTitleLead svg {
-  color: var(--classic-orange);
-  flex-shrink: 0;
-}
-
-.aiSuggestBody {
-  margin: 0;
-  color: var(--classic-muted);
-  font-size: 13px;
-  font-weight: var(--classic-fw-regular);
-  line-height: 1.45;
 }
 
 .aiSuggestStatusLine {
@@ -1854,24 +1447,19 @@ button.stepItem {
   color: var(--classic-orange);
 }
 
-.labelRow,
 .titleWithInfo {
   margin-bottom: 8px;
 }
 
 .titleWithInfo .label,
 .titleWithInfo .sectionLabel,
-.titleWithInfo .stepSectionTitle,
-.labelRow .label,
-.labelRow .sectionLabel,
-.labelRow .stepSectionTitle {
+.titleWithInfo .stepSectionTitle {
   margin-bottom: 0;
 }
 
 /* Polaris wraps a tooltip activator in an unstyled span. Pin the wrapper to
    its icon so a titleWithInfo row never stretches it across the row. */
 .titleWithInfo > span,
-.labelRow > span,
 .infoIconWrap {
   display: inline-flex;
   flex: 0 0 auto;
@@ -1882,7 +1470,6 @@ button.stepItem {
 /* When the icon is embedded inside the label copy rather than in a
    titleWithInfo row — review facts, settings detail rows. */
 .label:has(.infoIconLink),
-.kvLabel:has(.infoIconLink),
 .stepSectionTitle:has(.infoIconLink),
 .sectionLabel:has(.infoIconLink),
 .panelTitle:has(.infoIconLink) {
@@ -1936,37 +1523,6 @@ button.stepItem {
   font-weight: var(--classic-fw-semibold);
   text-decoration: underline;
   text-underline-offset: 2px;
-}
-
-.aiTextBtn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  border: 0;
-  background: transparent;
-  color: var(--classic-orange);
-  font-family: inherit;
-  font-size: 12px;
-  font-weight: var(--classic-fw-semibold);
-  cursor: pointer;
-  padding: 0;
-  white-space: nowrap;
-}
-
-.aiTextBtn:hover:not(:disabled) {
-  color: var(--classic-orange-deep, #1a1a1a);
-}
-
-.aiTextBtn:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
-
-.bulkBarPeach {
-  background: var(--classic-orange-soft);
-  border-color: rgba(48, 48, 48, 0.2);
-  padding: 14px 16px;
 }
 
 /* Figma 60:11746 — single cream bar, compact controls, Apply right */
@@ -2141,7 +1697,7 @@ button.stepItem {
   font-size: 13px; /* Figma Size S */
   font-weight: var(--classic-fw-regular);
   line-height: 18.5px;
-  color: var(--classic-muted); /* Figma #616161 — not ink */
+  color: var(--classic-muted);
 }
 
 .variantBullet {
@@ -2207,7 +1763,7 @@ button.stepItem {
 }
 
 .audiencePanel .pill.pillActive {
-  font-weight: var(--classic-fw-regular); /* Figma Regular on active device/source */
+  font-weight: var(--classic-fw-regular);
 }
 
 .audiencePanel {
@@ -2359,20 +1915,6 @@ button.stepItem {
   justify-content: flex-end;
 }
 
-.productsHeaderRow {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin: 4px 0 0;
-}
-
-.productsHeaderActions {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-
 .groupTabRow {
   display: inline-flex;
   gap: 4px;
@@ -2458,16 +2000,6 @@ button.stepItem {
   border-color: var(--classic-orange);
 }
 
-.segmentOnPeach {
-  background: var(--classic-segment-on, rgba(255, 255, 255, 0.55));
-  border-color: rgba(var(--accent-primary-rgb), 0.18);
-}
-
-.segmentOnPeach .segmentBtn:not(.segmentBtnActive) {
-  background: var(--classic-card);
-  color: var(--classic-orange);
-}
-
 .infoBanner {
   display: flex;
   gap: 10px;
@@ -2495,14 +2027,6 @@ button.stepItem {
   background: var(--classic-panel-tint, #f7f7f7);
   border: 1px solid var(--classic-line, #e3e3e3);
   box-sizing: border-box;
-}
-
-.bulkBarInner {
-  display: contents;
-}
-
-.bulkBarControls {
-  display: contents;
 }
 
 .bulkBar .segment,
@@ -2552,26 +2076,6 @@ button.stepItem {
 .bulkBar .segmentBtn:disabled {
   opacity: 0.55;
   cursor: not-allowed;
-}
-
-.bulkBarAction.primaryBtn,
-.bulkBar .bulkBarAction,
-.bulkBar .primaryBtn {
-  margin-left: auto;
-  min-height: 24px !important;
-  height: 24px;
-  padding: 4px 10px !important;
-  border-radius: 10px;
-  font-size: 12px !important;
-  font-weight: var(--classic-fw-medium);
-  line-height: 16px;
-  box-shadow: none !important;
-  flex-shrink: 0;
-}
-
-.bulkBarAction:disabled,
-.bulkBar .primaryBtn:disabled {
-  opacity: 0.55;
 }
 
 .table {
@@ -2698,37 +2202,6 @@ button.stepItem {
   color: var(--classic-disabled-text, #9a9590);
 }
 
-.deltaBadge {
-  display: inline-flex;
-  flex-direction: column;
-  align-items: flex-end;
-  justify-content: center;
-  gap: 1px;
-  min-height: 28px;
-  padding: 4px 10px;
-  border-radius: 999px;
-  background: var(--classic-success-bg);
-  color: var(--classic-success, #047b5d);
-  font-weight: var(--classic-fw-bold);
-  font-size: var(--classic-fs-help);
-  line-height: 1.15;
-  white-space: nowrap;
-}
-
-.deltaPct {
-  font-size: var(--classic-fs-help);
-  font-weight: var(--classic-fw-bold);
-  color: inherit;
-}
-
-.deltaAmount {
-  font-size: 0.65rem;
-  font-weight: var(--classic-fw-semibold);
-  color: inherit;
-  opacity: 0.9;
-}
-
-
 .variationMetricWinner {
   background: rgba(63, 177, 113, 0.12);
   border-radius: 4px;
@@ -2756,24 +2229,7 @@ button.stepItem {
 }
 
 .table tbody tr.variantRow > td:first-child {
-  padding-left: 40px; /* Figma accordion indent */
-}
-
-/* Audience */
-.pillSelect {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 32px;
-  padding: 0 12px;
-  border-radius: 999px;
-  border: 1px solid var(--classic-line);
-  background: var(--classic-card);
-  font-family: inherit;
-  font-size: var(--classic-fs-meta);
-  font-weight: var(--classic-fw-semibold);
-  cursor: pointer;
-  color: var(--classic-ink);
+  padding-left: 40px;
 }
 
 /* Revenue guardrail is a single always-on setting, so it reads as one card with
@@ -2880,43 +2336,11 @@ button.stepItem {
   line-height: 1.45;
 }
 
-.toggle {
-  width: 36px;
-  height: 20px;
-  border-radius: 999px;
-  border: 0;
-  background: var(--classic-wash, #f7f7f7); /* Figma off track */
-  position: relative;
-  cursor: pointer;
-  flex-shrink: 0;
-  padding: 0 4px 0 16px;
-}
-
-.toggleOn {
-  background: var(--classic-orange);
-}
-
-.toggleKnob {
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 16px;
-  height: 16px;
-  border-radius: 999px;
-  background: var(--classic-card);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.1);
-  transition: left 0.15s ease;
-}
-
-.toggleOn .toggleKnob {
-  left: 18px;
-}
-
 /* Review */
 .reviewStack {
   display: flex;
   flex-direction: column;
-  gap: 24px; /* Figma Review Main content gap */
+  gap: 24px;
 }
 
 .reviewOverview {
@@ -2941,17 +2365,6 @@ button.stepItem {
 
 .reviewOverviewLabel {
   font-weight: var(--classic-fw-semibold, 600);
-}
-
-.reviewSection {
-  border: 1px solid var(--classic-line);
-  border-radius: 6px;
-  padding: 17px;
-  margin-bottom: 0;
-  background: var(--classic-card); /* Figma review cards #ffffff */
-  display: flex;
-  flex-direction: column;
-  gap: 12px; /* Figma section head → body */
 }
 
 .reviewHead {
@@ -3002,29 +2415,6 @@ button.stepItem {
 
 .pillActive .checkPlain {
   color: var(--classic-orange-deep, #1a1a1a);
-}
-
-.editLink {
-  border: 0;
-  background: transparent;
-  color: var(--classic-orange-deep, #1a1a1a); /* Figma Edit #1a1a1a */
-  font-family: inherit;
-  font-size: 12px;
-  font-weight: var(--classic-fw-medium);
-  cursor: pointer;
-  padding: 0;
-  line-height: 16px;
-}
-
-.editLink:hover {
-  color: var(--classic-orange);
-}
-
-.badgeRow {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 0;
 }
 
 .badge {
@@ -3088,83 +2478,7 @@ button.stepItem {
   font-weight: var(--classic-fw-semibold);
 }
 
-.kvLabel {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin: 0 0 4px;
-  font-size: var(--classic-fs-label);
-  font-weight: var(--classic-fw-regular);
-  color: var(--classic-muted);
-  line-height: 20px;
-}
-
-.kvValue {
-  margin: 0;
-  font-size: var(--classic-fs-label);
-  font-weight: var(--classic-fw-regular);
-  color: var(--classic-ink);
-  line-height: 20px;
-}
-
-.reviewRows {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-/* Two columns of stacked label/value pairs. The single-column rows below put a
-   fixed 96px label beside each value, which reads fine for three facts and runs
-   very tall for eleven. */
-.reviewGrid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px 20px;
-}
-
-.reviewGridItem {
-  min-width: 0;
-}
-
-.reviewGridItem .kvLabel {
-  margin: 0 0 2px;
-}
-
 /* Country lists are long enough to wrap awkwardly in half the width. */
-.reviewGridWide {
-  grid-column: 1 / -1;
-}
-
-@media (max-width: 620px) {
-  .reviewGrid {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-
-.reviewRow {
-  display: flex;
-  gap: 16px;
-  align-items: flex-start;
-}
-
-.reviewRow .kvLabel {
-  width: 96px;
-  flex-shrink: 0;
-  margin: 0;
-}
-
-.reviewRow .kvValue {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
-.reviewLine {
-  margin: 0 0 6px;
-  font-size: var(--classic-fs-body);
-  font-weight: var(--classic-fw-regular);
-  color: var(--classic-body);
-  line-height: 1.45;
-}
 
 .panelTitle {
   display: flex;
@@ -3179,15 +2493,8 @@ button.stepItem {
   line-height: 1.3;
 }
 
-.reviewGrid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px 24px;
-}
-
-
 .conversionRow {
-  margin: 0 0 16px; /* Figma conversion rows gap */
+  margin: 0 0 16px;
 }
 
 .conversionRow:last-child {
@@ -3225,13 +2532,6 @@ button.stepItem {
   flex-shrink: 0;
 }
 
-@media (min-width: 900px) {
-  .overviewActionBtn {
-    width: 168px;
-    min-width: 168px;
-    justify-content: center;
-  }}
-
 .overviewMeta {
   display: flex;
   flex-wrap: wrap;
@@ -3250,7 +2550,7 @@ button.stepItem {
 }
 
 .overviewSplit > .statCard {
-  padding: 25px; /* Conversion + Totals — Figma */
+  padding: 25px;
 }
 
 .overviewSplit .selectionBar {
@@ -3260,7 +2560,7 @@ button.stepItem {
 }
 
 .overviewSplit .selectionBar + .selectionBar {
-  margin-top: 12px; /* Figma Totals row gap */
+  margin-top: 12px;
 }
 
 .overviewSplit .selectionBar strong {
@@ -3423,12 +2723,6 @@ button.stepItem {
   width: 1%;
 }
 
-.variationsActionsCol .ghostBtn {
-  min-height: 32px;
-  padding: 6px 12px;
-  font-size: 12px;
-}
-
 .variationsProductsFooter {
   display: flex;
   align-items: center;
@@ -3443,30 +2737,6 @@ button.stepItem {
   justify-content: space-between;
   gap: 12px;
   flex-wrap: wrap;
-}
-
-.variationProductMeta {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-}
-
-.variationsProductCopy {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-  flex: 1;
-}
-
-.variationsProductCopy strong {
-  font-size: 13px;
-  font-weight: var(--classic-fw-medium);
-  color: var(--classic-ink);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 @media (max-width: 840px) {
@@ -3486,11 +2756,6 @@ button.stepItem {
   gap: 8px;
   align-items: center;
   margin-top: 14px;
-}
-
-.variationPreviewRow .ghostBtn {
-  min-height: 32px;
-  padding: 6px 12px;
 }
 
 .variationQrPopover {
@@ -3535,14 +2800,6 @@ button.stepItem {
   align-self: center;
   border-radius: 8px;
   background: #fff;
-}
-
-.variationProductPreviewList {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding-top: 4px;
-  border-top: 1px solid var(--classic-line);
 }
 
 .overviewTabPanel {
@@ -3690,7 +2947,7 @@ button.stepItem {
 }
 
 .productsStep .tableScroll .table tbody tr.variantRow > td:first-child {
-  padding-left: 40px; /* Figma pl-40 accordion body */
+  padding-left: 40px;
 }
 
 .productsStep .tableScroll .table tbody tr.variantRow .priceField {
@@ -3705,29 +2962,6 @@ button.stepItem {
 .productsStep .tableScroll .table tbody tr.variantRow .deltaPlain,
 .productsStep .tableScroll .table tbody tr.variantRow .deltaPlainEmpty {
   color: var(--classic-muted);
-}
-
-.tableToolBtn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 32px;
-  padding: 6px 12px;
-  border-radius: 8px;
-  border: 1px solid var(--classic-pricing-border, #e3e3e3);
-  background: var(--classic-pricing-input, #ffffff);
-  color: var(--classic-ink);
-  font-family: inherit;
-  font-size: var(--classic-fs-meta);
-  font-weight: var(--classic-fw-medium);
-  line-height: 1;
-  cursor: pointer;
-}
-
-.tableToolBtn:hover {
-  border-color: var(--classic-line);
-  color: var(--classic-ink);
-  background: var(--classic-wash);
 }
 
 .tableCategorySelect {
@@ -3762,7 +2996,7 @@ button.stepItem {
 
 .deltaPlainPos {
   color: #2f8f5b;
-  background: rgba(63, 177, 113, 0.15); /* Figma green Δ pills */
+  background: rgba(63, 177, 113, 0.15);
 }
 
 .deltaPlainNeg {
@@ -3804,146 +3038,6 @@ button.stepItem {
 /* Nested inside .aiSuggestBanner — label on one row, controls on the next.
    Everything in one flex-wrap row used to scatter the min/max boxes, the unit
    toggle, and Suggest across the full panel width. */
-.aiBar {
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 10px;
-  margin: 2px 0 0;
-  padding: 10px 12px;
-  border-radius: 10px;
-  background: var(--classic-segment-on, rgba(255, 255, 255, 0.55));
-  border: 1px solid rgba(48, 48, 48, 0.12);
-  box-sizing: border-box;
-}
-
-.aiBarLead {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px 10px;
-  min-width: 0;
-}
-
-.aiBarLabel {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  flex: 0 0 auto;
-  color: var(--classic-ink);
-  font-size: 14px;
-  font-weight: var(--classic-fw-medium);
-  line-height: 20px;
-  white-space: nowrap;
-}
-
-.aiBarLabel svg {
-  color: var(--classic-orange);
-  flex-shrink: 0;
-}
-
-.aiBarDirection {
-  font-size: 12px;
-  font-weight: var(--classic-fw-regular);
-  line-height: 16px;
-  color: var(--classic-muted);
-}
-
-.aiBarControls {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 10px;
-  width: 100%;
-  min-width: 0;
-}
-
-.aiBarAction {
-  display: inline-flex;
-  flex: 0 0 auto;
-  margin-left: auto;
-}
-
-.aiBar .bulkField {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  margin: 0;
-  font-size: 12px;
-  font-weight: var(--classic-fw-medium);
-  color: var(--classic-muted);
-  line-height: 1;
-}
-
-.aiBar .bulkField span {
-  white-space: nowrap;
-}
-
-.aiBarInput,
-.aiBar .bulkInput {
-  /* Wider than the other compact fields: a number input paints its stepper
-     inside the box, and at the old 64px the arrows sat on top of the digits. */
-  width: 86px !important;
-  min-height: 34px;
-  padding: 6px 4px 6px 10px !important;
-  margin: 0 !important;
-  text-align: left;
-  background: var(--classic-card, #ffffff) !important;
-  border: 1px solid var(--classic-line, #e3e3e3) !important;
-  border-radius: 10px !important;
-  color: var(--classic-ink) !important;
-  box-shadow: none !important;
-}
-
-.aiBarInput:focus,
-.aiBar .bulkInput:focus {
-  border-color: var(--classic-orange) !important;
-  box-shadow: 0 0 0 2px rgba(48, 48, 48, 0.15) !important;
-}
-
-.aiBarInput:disabled,
-.aiBar .bulkInput:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
-
-.aiBar .bulkBarMuted {
-  color: var(--classic-muted);
-  font-size: 12px;
-  font-weight: var(--classic-fw-regular);
-  line-height: 1;
-}
-
-.aiBar .segment,
-.aiBar .bulkSegment {
-  margin-bottom: 0;
-  flex-shrink: 0;
-}
-
-.aiBarAction :global(.Polaris-Button) {
-  min-height: 32px;
-  box-shadow: none;
-}
-
-.iconClose {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
-  border: 1px solid var(--classic-line);
-  background: var(--classic-card);
-  color: var(--classic-muted);
-  font-size: var(--classic-fs-title-sm);
-  line-height: 1;
-  cursor: pointer;
-}
-
-.iconClose:hover {
-  color: var(--classic-ink);
-  border-color: var(--classic-orange-border);
-}
 
 .segmentLetter {
   display: inline-flex;
@@ -4044,31 +3138,6 @@ button.stepItem {
 
 .variantRow .pricePrefix {
   color: var(--classic-muted);
-}
-
-.showAllBtn {
-  width: auto;
-  margin: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 4px;
-  border-radius: 8px;
-  border: 1px solid var(--classic-line);
-  font-size: 12px;
-  font-weight: var(--classic-fw-medium);
-  line-height: 1;
-  color: var(--classic-ink);
-  min-height: 32px;
-  padding: 6px 12px;
-  background: var(--classic-card);
-}
-
-.showAllBtn svg {
-  width: 14px;
-  height: 14px;
-  color: var(--classic-ink);
-  flex-shrink: 0;
 }
 
 .error {
@@ -4191,10 +3260,6 @@ button.stepItem {
   color: var(--classic-ink);
 }
 
-.listHeader .primaryBtn {
-  gap: 4px;
-}
-
 .overviewTitle {
   margin: 0;
   font-family: var(--ripx-font-classic, var(--ripx-font-ui, 'Inter', system-ui, sans-serif));
@@ -4240,11 +3305,6 @@ button.stepItem {
   letter-spacing: -0.02em;
   line-height: 1.2;
   color: var(--classic-ink);
-}
-
-.statValueLg {
-  font-size: 1.875rem; /* 30px — overview KPIs */
-  line-height: 1.15;
 }
 
 .statIcon {
@@ -4334,8 +3394,7 @@ button.stepItem {
   margin-bottom: 0;
 }
 
-.listSearch .input,
-.listSearch .searchInputPill {
+.listSearch .input {
   min-height: 32px;
   background: var(--classic-card) !important;
   border-color: var(--classic-line);
@@ -4348,23 +3407,6 @@ button.stepItem {
   border: 1px solid var(--classic-line);
   border-radius: 8px; /* Figma table shell */
   overflow: hidden;
-}
-
-.expTableBusy {
-  position: absolute;
-  inset: 0;
-  z-index: 3;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  pointer-events: auto;
-  cursor: wait;
-  background: rgba(255, 255, 255, 0.78);
-  background: color-mix(in srgb, var(--classic-card) 78%, transparent);
-  color: var(--classic-muted);
-  font-size: 13px;
-  font-weight: 500;
 }
 
 .listEmptyState {
@@ -4399,7 +3441,7 @@ button.stepItem {
 
 .expTableWrap .table th:nth-child(2),
 .expTableWrap .table td:nth-child(2) {
-  text-align: left; /* Figma status pills are left-padded, not centered */
+  text-align: left;
 }
 
 .expTableWrap .table th:nth-child(n + 4):not(:last-child),
@@ -4419,56 +3461,6 @@ button.stepItem {
   text-align: center;
   color: inherit;
 }
-
-.expRowOpen {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--classic-muted);
-  cursor: pointer;
-  padding: 0;
-}
-
-.expRowOpen:hover {
-  background: var(--classic-orange-soft);
-  color: var(--classic-orange);
-}
-
-.iconGhostBtn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  min-height: 32px;
-  padding: 0;
-  border-radius: 8px;
-  border: 1px solid var(--classic-line);
-  background: var(--classic-card);
-  color: var(--classic-ink);
-  cursor: pointer;
-}
-
-.iconGhostBtn:hover {
-  border-color: var(--classic-orange-border);
-  color: var(--classic-orange);
-}
-
-.overviewActions .ghostBtn {
-  min-height: 32px;
-  padding: 6px 12px;
-}
-
-.overviewActions .overviewActionBtn.ghostBtn,
-.overviewActions .overviewActionBtn.primaryBtn {
-  justify-content: center;
-}
-
 
 /* Figma pricing table: Product left · Base price right · Test price center · Δ right */
 .productsStep .tableScroll .table th:first-child,
@@ -4521,72 +3513,9 @@ button.stepItem {
   color: var(--classic-muted);
 }
 
-.fieldLabelStack {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin-bottom: var(--classic-space-label);
-}
-
-.fieldLabelStack .label {
-  margin-bottom: 0;
-}
-
-.fieldLabelHint {
-  font-size: 11px;
-  font-weight: 400;
-  color: var(--classic-muted);
-  line-height: 1.25;
-}
-
-.expTableWrap .table td:nth-child(2) .statusPill {
-  margin: 0;
-}
-
-.statusRunning {
-  background: var(--classic-success-bg);
-  color: var(--classic-success);
-}
-
-.statusDraft {
-  background: var(--classic-wash);
-  color: var(--classic-muted);
-}
-
-.statusPaused {
-  background: rgba(239, 168, 49, 0.2);
-  color: #7e4700;
-}
-
-.statusCompleted {
-  background: var(--classic-orange-soft);
-  color: var(--classic-orange-deep, #1a1a1a);
-}
-
-.statusPill {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 20px;
-  padding: 2px 8px;
-  border-radius: 999px;
-  font-size: 12px;
-  font-weight: var(--classic-fw-medium);
-  text-transform: lowercase; /* Figma status labels */
-  line-height: 16px;
-}
-
-.statusDot {
-  width: 6px;
-  height: 6px;
-  border-radius: 999px;
-  background: currentColor;
-  opacity: 0.7;
-}
-
 .liftPos {
   color: var(--classic-success, #047b5d);
-  font-weight: var(--classic-fw-regular); /* Figma Regular */
+  font-weight: var(--classic-fw-regular);
 }
 
 .rowLink:hover {
@@ -4667,14 +3596,6 @@ button.stepItem {
 
 .modalSearch {
   margin-bottom: 10px;
-}
-
-.modalSearchInput {
-  padding-left: 38px !important;
-  margin-bottom: 0 !important;
-  border-radius: 6px !important;
-  min-height: 30px;
-  background: var(--classic-card) !important;
 }
 
 .collectionItem {
@@ -4970,7 +3891,7 @@ button.stepItem {
   background: var(--classic-orange);
 }
 
-:global([data-theme='dark']) .card,:global([data-theme='dark']) .statCard,:global([data-theme='dark']) .expTableWrap,:global([data-theme='dark']) .variationBlock,:global([data-theme='dark']) .choiceCard,:global([data-theme='dark']) .reviewSection,:global([data-theme='dark']) .allProductsBox,:global([data-theme='dark']) .audiencePanel,:global([data-theme='dark']) .modal,:global([data-theme='dark']) .modalSide,:global([data-theme='dark']) .modalFooter,:global([data-theme='dark']) .variationQrPopover,:global([data-theme='dark']) .variationsProductsTableScroll .table th:first-child,:global([data-theme='dark']) .variationsProductsTableScroll .table td:first-child,:global([data-theme='dark']) .countryField,:global([data-theme='dark']) .filterPillTrack {
+:global([data-theme='dark']) .card,:global([data-theme='dark']) .statCard,:global([data-theme='dark']) .expTableWrap,:global([data-theme='dark']) .variationBlock,:global([data-theme='dark']) .choiceCard,:global([data-theme='dark']) .audiencePanel,:global([data-theme='dark']) .modal,:global([data-theme='dark']) .modalSide,:global([data-theme='dark']) .modalFooter,:global([data-theme='dark']) .variationQrPopover,:global([data-theme='dark']) .variationsProductsTableScroll .table th:first-child,:global([data-theme='dark']) .variationsProductsTableScroll .table td:first-child,:global([data-theme='dark']) .countryField,:global([data-theme='dark']) .filterPillTrack {
   background: var(--classic-card);
   color: var(--classic-ink);
   border-color: var(--classic-line);
@@ -4980,28 +3901,15 @@ button.stepItem {
   background: var(--classic-table-head, var(--classic-wash));
 }
 
-:global([data-theme='dark']) .tablePagerBtn {
-  background: var(--classic-card);
-  color: var(--classic-ink);
-  border-color: var(--classic-line);
-}
-
 :global([data-theme='dark']) .input,
-:global([data-theme='dark']) .textarea,
-:global([data-theme='dark']) .select,
 :global([data-theme='dark']) .guardrailInput,
-:global([data-theme='dark']) .variationInput,
-:global([data-theme='dark']) .ghostBtn,
-:global([data-theme='dark']) .iconGhostBtn,
-:global([data-theme='dark']) .listSearch .input,
-:global([data-theme='dark']) .listSearch .searchInputPill {
+:global([data-theme='dark']) .listSearch .input {
   background: var(--classic-pricing-input, var(--classic-card)) !important;
   color: var(--classic-ink) !important;
   border-color: var(--classic-line) !important;
 }
 
 :global([data-theme='dark']) .input::placeholder,
-:global([data-theme='dark']) .textarea::placeholder,
 :global([data-theme='dark']) .countrySearchInput::placeholder {
   color: var(--classic-muted-soft);
 }
@@ -5012,7 +3920,6 @@ button.stepItem {
 :global([data-theme='dark']) .label,
 :global([data-theme='dark']) .sectionLabel,
 :global([data-theme='dark']) .productName,
-:global([data-theme='dark']) .kvValue,
 :global([data-theme='dark']) .statValue,
 :global([data-theme='dark']) .rowLink,
 :global([data-theme='dark']) .choiceTitle,
@@ -5027,11 +3934,9 @@ button.stepItem {
 :global([data-theme='dark']) .subtitle,
 :global([data-theme='dark']) .help,
 :global([data-theme='dark']) .productSub,
-:global([data-theme='dark']) .kvLabel,
 :global([data-theme='dark']) .statLabel,
 :global([data-theme='dark']) .choiceDesc,
 :global([data-theme='dark']) .backLink,
-:global([data-theme='dark']) .footerLink,
 :global([data-theme='dark']) .stepOf,
 :global([data-theme='dark']) .filterPill,
 :global([data-theme='dark']) .variationTag {
@@ -5039,11 +3944,7 @@ button.stepItem {
 }
 
 :global([data-theme='dark']) .eyebrow,
-:global([data-theme='dark']) .editLink,
 :global([data-theme='dark']) .filterPillActive,
-:global([data-theme='dark']) .allProductsHeader,
-:global([data-theme='dark']) .allProductsCheck,
-:global([data-theme='dark']) .letter,
 :global([data-theme='dark']) .variationBadgeLetter,
 :global([data-theme='dark']) .armLetter,
 :global([data-theme='dark']) .stepItemActive .stepDot {
@@ -5071,33 +3972,6 @@ button.stepItem {
 }
 
 :global([data-theme='dark']) .audiencePanel .pill:not(.pillActive) {
-  background: var(--classic-wash);
-  color: var(--classic-muted);
-}
-
-:global([data-theme='dark']) .toggle {
-  background: var(--classic-wash);
-}
-
-:global([data-theme='dark']) .toggleKnob {
-  background: var(--classic-ink);
-}
-
-:global([data-theme='dark']) .toggleOn .toggleKnob {
-  background: #1c1917;
-}
-
-:global([data-theme='dark']) .statusPaused {
-  background: rgba(251, 191, 36, 0.18);
-  color: #fbbf24;
-}
-
-:global([data-theme='dark']) .statusCompleted {
-  background: var(--classic-orange-soft);
-  color: var(--classic-orange-deep);
-}
-
-:global([data-theme='dark']) .statusDraft {
   background: var(--classic-wash);
   color: var(--classic-muted);
 }
@@ -5140,7 +4014,6 @@ button.stepItem {
   color: var(--classic-muted);
 }
 
-:global([data-theme='dark']) .searchInputPill:-webkit-autofill,
 :global([data-theme='dark']) .input:-webkit-autofill,
 :global([data-theme='dark']) .priceInput:-webkit-autofill {
   -webkit-box-shadow: 0 0 0 1000px var(--classic-pricing-input, #111827) inset !important;
@@ -5187,18 +4060,6 @@ button.stepItem {
   background: var(--classic-line-strong, rgba(231, 229, 228, 0.28));
 }
 
-:global([data-theme='dark']) .aiBar {
-  background: rgba(0, 0, 0, 0.22);
-  border-color: rgba(48, 48, 48, 0.2);
-}
-
-:global([data-theme='dark']) .aiBarInput,
-:global([data-theme='dark']) .aiBar .bulkInput {
-  background: var(--classic-card) !important;
-  border-color: var(--classic-line) !important;
-  color: var(--classic-ink) !important;
-}
-
 :global([data-theme='dark']) .bulkBar,
 :global([data-theme='dark']) .bulkBarFigma {
   background: var(--classic-panel-tint, rgba(252, 246, 240, 0.12));
@@ -5228,9 +4089,7 @@ button.stepItem {
   border-color: var(--classic-line);
 }
 
-:global([data-theme='dark']) .tableToolBtn,
-:global([data-theme='dark']) .tableToolbar .tableSearch .input,
-:global([data-theme='dark']) .tableToolbar .tableSearch .searchInputPill {
+:global([data-theme='dark']) .tableToolbar .tableSearch .input {
   background: var(--classic-card) !important;
   border-color: var(--classic-line) !important;
   color: var(--classic-ink);
@@ -5259,17 +4118,6 @@ button.stepItem {
 
 :global([data-theme='dark']) .priceField:has(.priceInput:disabled) .pricePrefix {
   background: transparent;
-}
-
-:global([data-theme='dark']) .deltaBadge,
-:global([data-theme='dark']) .deltaPos {
-  background: transparent;
-  color: #6ee7b7;
-}
-
-:global([data-theme='dark']) .deltaNeg {
-  background: rgba(248, 113, 113, 0.18);
-  color: #fca5a5;
 }
 
 /* Admin palette — inherit :root tokens (no EchoTest cream/orange redeclare) */
@@ -5833,32 +4681,10 @@ button.stepItem {
   gap: 14px;
 }
 
-.activityItem {
-  display: grid;
-  grid-template-columns: minmax(120px, 160px) 1fr;
-  gap: 12px;
-  padding-bottom: 14px;
-  border-bottom: 1px solid var(--classic-line);
-}
-
-.activityItem:last-child {
-  border-bottom: 0;
-  padding-bottom: 0;
-}
-
 .activityWhen {
   font-size: 12px;
   color: var(--classic-muted);
   line-height: 1.4;
-}
-
-.activityBody strong {
-  display: block;
-  margin-bottom: 4px;
-}
-
-.activityBody .help {
-  margin: 0;
 }
 
 .detailChipRow {
@@ -5878,17 +4704,6 @@ button.stepItem {
   color: var(--classic-ink);
   font-size: 12px;
   line-height: 16px;
-}
-
-.detailFieldBlock {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-top: 16px;
-}
-
-.detailFieldBlock:first-of-type {
-  margin-top: 12px;
 }
 
 .activityHead {
@@ -6179,12 +4994,6 @@ button.stepItem {
   overflow: visible;
 }
 
-@media (max-width: 720px) {
-  .activityItem {
-    grid-template-columns: 1fr;
-    gap: 4px;
-  }}
-
 /* Classic admin pages (Setup / Settings) — checklist rows */
 .adminStack {
   display: flex;
@@ -6298,57 +5107,6 @@ button.stepItem {
   padding: 12px;
 }
 
-.adminBadge {
-  display: inline-flex;
-  align-items: center;
-  min-height: 24px;
-  padding: 2px 10px;
-  border-radius: 999px;
-  font-size: var(--classic-fs-help);
-  font-weight: var(--classic-fw-medium);
-  line-height: 1.2;
-  white-space: nowrap;
-}
-
-.adminBadgeOk {
-  background: var(--classic-success-bg);
-  color: var(--classic-success);
-}
-
-.adminBadgeWarn {
-  background: var(--classic-orange-soft);
-  color: var(--classic-orange-deep);
-}
-
-.adminBadgeNeutral {
-  background: var(--classic-wash);
-  color: var(--classic-muted);
-}
-
-.adminField {
-  display: flex;
-  flex-direction: column;
-  gap: var(--classic-space-label);
-  margin-bottom: var(--classic-space-field);
-}
-
-.adminField:last-child {
-  margin-bottom: 0;
-}
-
-.adminCheckRow {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-top: 4px;
-}
-
-.adminCheckRow input {
-  width: 16px;
-  height: 16px;
-  accent-color: var(--classic-orange);
-}
-
 .adminTabTrack {
   max-width: 768px;
   width: 100%;
@@ -6367,27 +5125,541 @@ button.stepItem {
   margin-top: 4px;
 }
 
-.adminCodeBlock {
-  margin: 0;
-  white-space: pre-wrap;
-  word-break: break-word;
-  padding: 12px;
-  border-radius: 6px;
-  /* White, so the snippet reads as a field to copy out rather than another
-     shade of the tinted card and dashed disclosure it now sits two levels
-     inside. The card token rather than a literal #fff: it is white on every
-     light theme and stays legible on the dark ones, where a hardcoded white
-     box would carry this muted grey text. */
-  background: var(--classic-card);
-  border: 1px solid var(--classic-line);
-  color: var(--classic-ink);
-  font-size: var(--classic-fs-help);
-  line-height: 1.45;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-}
-
 .adminStackTight {
   display: flex;
   flex-direction: column;
   gap: 14px;
+}
+
+/* Product drill-down on the test Overview */
+.productDetailNav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.productDetailPager {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--classic-muted);
+  font-size: 12px;
+}
+
+.productDetailHead {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.productDetailHeadMain {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.productDetailHeadSide {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.productDetailLinks {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.productDetailVerdict {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--classic-line);
+}
+
+.productDetailVerdict .rolloutProgress {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 420px;
+}
+
+.productDetailActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.statGrid.productDetailStats {
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
+.productDetailTable .winnerBadge {
+  margin-left: 8px;
+}
+
+.productDetailMetricCell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 96px;
+}
+
+.productDetailMetricCell .barTrack {
+  height: 4px;
+}
+
+.productDetailSplit {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.productDetailList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.productDetailList li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: flex-start;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--classic-line);
+}
+
+.productDetailList li:last-child {
+  border-bottom: 0;
+}
+
+.productDetailRowTop {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+}
+
+.productDetailChartControls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.productDetailChartControls .segmentBtn {
+  min-height: 26px;
+  padding: 2px 10px;
+  font-size: 12px;
+}
+
+.productDetailChartReadout {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 16px;
+  margin: 12px 0 4px;
+  font-size: 12px;
+}
+
+.productDetailLegendItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.productDetailSwatch {
+  width: 10px;
+  height: 3px;
+  border-radius: 2px;
+  background: currentColor;
+}
+
+.productDetailChart {
+  display: block;
+  width: 100%;
+  height: auto;
+  cursor: crosshair;
+}
+
+.productDetailGrid {
+  stroke: var(--classic-line);
+  stroke-width: 1;
+}
+
+.productDetailGuide {
+  stroke: var(--classic-line-strong, var(--classic-line));
+  stroke-dasharray: 3 3;
+}
+
+.productDetailAxis {
+  fill: var(--classic-muted);
+  font-size: 11px;
+}
+
+.productDetailLine {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.dailyLine0 {
+  color: #616161;
+}
+
+.dailyLine1 {
+  color: #2c6ecb;
+}
+
+.dailyLine2 {
+  color: #e8590c;
+}
+
+.dailyLine3 {
+  color: #2f8f5b;
+}
+
+.dailyLine4 {
+  color: #8051c3;
+}
+
+.dailyLine5 {
+  color: #c4317a;
+}
+
+.dailyLine6 {
+  color: #0f8a9d;
+}
+
+.dailyLine7 {
+  color: #b38600;
+}
+
+.productDetailLine.dailyLine0 {
+  stroke-dasharray: 5 4;
+}
+
+@media (max-width: 840px) {
+  .productDetailSplit {
+    grid-template-columns: 1fr;
+  }
+
+  .productDetailHead {
+    flex-direction: column;
+  }
+
+  .productDetailHeadSide {
+    align-items: flex-start;
+  }
+
+  .productDetailLinks {
+    justify-content: flex-start;
+  }
+}
+/* Help → Support tickets */
+.ticketPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.ticketToolbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.ticketToolbarTitle {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.ticketHeading {
+  margin: 0;
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: var(--classic-fw-semibold);
+  color: var(--classic-ink);
+}
+
+.ticketFilters {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.ticketSegment {
+  margin-bottom: 0;
+  flex-wrap: wrap;
+}
+
+.ticketFilterCount {
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--classic-wash);
+  color: var(--classic-muted);
+  font-size: 11px;
+  line-height: 18px;
+  text-align: center;
+}
+
+.segmentBtnActive .ticketFilterCount {
+  background: rgba(255, 255, 255, 0.25);
+  color: #fff;
+}
+
+.ticketSearch {
+  flex: 1 1 240px;
+  max-width: 320px;
+}
+
+.ticketTable {
+  min-width: 560px;
+}
+
+.ticketRow {
+  cursor: pointer;
+}
+
+.ticketRow:hover > td {
+  background: var(--classic-wash);
+}
+
+.ticketRowAttention > td:first-child {
+  box-shadow: inset 3px 0 0 var(--classic-orange);
+}
+
+.ticketRowSelected > td {
+  background: var(--classic-orange-soft);
+}
+
+.ticketIdCell {
+  width: 96px;
+  white-space: nowrap;
+}
+
+.ticketIdLink {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  font-weight: var(--classic-fw-semibold);
+  color: var(--classic-ink);
+  text-decoration: none;
+}
+
+.ticketIdLink:hover,
+.ticketIdLink:focus-visible {
+  text-decoration: underline;
+}
+
+.ticketSubjectCell {
+  max-width: 420px;
+}
+
+.ticketSubject,
+.ticketPreview {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ticketSubject {
+  font-weight: var(--classic-fw-medium);
+  color: var(--classic-ink);
+}
+
+.ticketPreview {
+  margin-top: 2px;
+  font-size: var(--classic-fs-help);
+  color: var(--classic-muted);
+}
+
+.ticketMetaCell {
+  white-space: nowrap;
+  color: var(--classic-muted);
+}
+
+.ticketEmpty {
+  padding: 32px 16px;
+  border: 1px dashed var(--classic-line);
+  border-radius: var(--classic-radius-sm);
+  text-align: center;
+}
+
+.ticketBackLink {
+  align-self: flex-start;
+  font-size: var(--classic-fs-label);
+  color: var(--classic-muted);
+  text-decoration: none;
+}
+
+.ticketBackLink:hover {
+  color: var(--classic-ink);
+}
+
+.ticketCard {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 20px;
+  border: 1px solid var(--classic-line);
+  border-radius: var(--classic-radius);
+  background: var(--classic-card);
+}
+
+.ticketComposeGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 260px;
+  gap: 16px;
+  align-items: start;
+}
+
+.ticketAside {
+  gap: 8px;
+  background: var(--classic-wash);
+}
+
+.ticketAsideList {
+  margin: 0 0 4px;
+  padding-left: 18px;
+  font-size: var(--classic-fs-label);
+  color: var(--classic-body);
+  line-height: 22px;
+}
+
+.ticketFormFields {
+  display: grid;
+  gap: 14px;
+}
+
+.ticketFormRow {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.ticketFormActions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ticketDetailHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ticketDetailId {
+  margin: 0 0 2px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  color: var(--classic-muted);
+}
+
+.ticketThread {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ticketMessage {
+  max-width: 82%;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--classic-line);
+}
+
+.ticketMessageSupport {
+  align-self: flex-start;
+  background: var(--classic-wash);
+  border-top-left-radius: 4px;
+}
+
+.ticketMessageMerchant {
+  align-self: flex-end;
+  background: var(--classic-orange-soft);
+  border-top-right-radius: 4px;
+}
+
+.ticketMessageMeta {
+  margin: 0 0 4px;
+  font-size: var(--classic-fs-help);
+  color: var(--classic-muted);
+}
+
+.ticketMessageMeta strong {
+  color: var(--classic-ink);
+  font-weight: var(--classic-fw-semibold);
+}
+
+.ticketMessageBody {
+  margin: 0;
+  font-size: var(--classic-fs-label);
+  line-height: 20px;
+  color: var(--classic-body);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.ticketReply {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 16px;
+  border-top: 1px solid var(--classic-line);
+}
+
+@media (max-width: 760px) {
+  .ticketComposeGrid,
+  .ticketFormRow {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ticketSearch {
+    max-width: none;
+  }
+
+  .ticketMessage {
+    max-width: 100%;
+  }
+}
+
+@media (max-width: 640px) {
+  .ticketTable {
+    min-width: 0;
+  }
+
+  .ticketCategoryCol {
+    display: none;
+  }
+
+  .ticketSubjectCell {
+    max-width: 200px;
+  }
 }

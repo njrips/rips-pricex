@@ -87,7 +87,7 @@ async function pauseStaleRunningOnCancelPolicy() {
     `UPDATE tests t
      SET status = 'paused', updated_at = NOW(), stopped_at = COALESCE(stopped_at, NOW())
      FROM shops s
-     WHERE t.shop_domain = s.shop_domain
+     WHERE LOWER(TRIM(t.shop_domain)) = LOWER(TRIM(s.shop_domain))
        AND t.type IN ('price','pricing','offer')
        AND t.status = 'running'
        AND (
@@ -133,6 +133,30 @@ async function sweepRetention() {
   await withJobLease('data_retention', RETENTION_LEASE_SECONDS, () => sweepExpiredData());
 }
 
+const INBOX_SYNC_BATCH = 50;
+const inboxSyncCursors = new Map();
+
+/**
+ * The tests this pass syncs for a shop.
+ *
+ * Each pass syncs at most 50 tests, to bound the Shopify and analytics calls.
+ * It used to take the first 50 every time, so in a bigger inbox the same tests
+ * were synced over and over and the rest never were: they could stop or reach
+ * a winner and the list would not hear of it. The window now moves on each
+ * pass and wraps, so every test is reached in turn.
+ */
+function nextInboxSyncWindow(shop, testIds) {
+  const ids = [...new Set((testIds || []).map(id => String(id || '').trim()).filter(Boolean))].sort();
+  if (ids.length <= INBOX_SYNC_BATCH) return ids;
+  const start = (inboxSyncCursors.get(shop) || 0) % ids.length;
+  const window = [];
+  for (let i = 0; i < INBOX_SYNC_BATCH; i += 1) {
+    window.push(ids[(start + i) % ids.length]);
+  }
+  inboxSyncCursors.set(shop, (start + INBOX_SYNC_BATCH) % ids.length);
+  return window;
+}
+
 async function syncAllInboxes(reason = 'interval') {
   const { acquireJobLease, releaseJobLease } = require('../utils/jobLease');
   const shops = await listInstalledShops();
@@ -146,13 +170,10 @@ async function syncAllInboxes(reason = 'interval') {
     }
     try {
       const stored = await listInboxPlans(shop, { archived: false }).catch(() => ({ plans: [] }));
-      const testIds = [
-        ...new Set(
-          (stored.plans || [])
-            .map(plan => String(plan?.test_id || '').trim())
-            .filter(Boolean)
-        ),
-      ].slice(0, 50);
+      const testIds = nextInboxSyncWindow(
+        shop,
+        (stored.plans || []).map(plan => plan?.test_id)
+      );
       for (const testId of testIds) {
         await syncSmartPricingInboxForTest(shop, testId, { reason }).catch(err => {
           logger.warn('inbox interval sync failed', {
@@ -212,4 +233,5 @@ module.exports = {
   evaluateAllAutoWinners,
   sweepAllRolloutReadiness,
   sweepRetention,
+  nextInboxSyncWindow,
 };

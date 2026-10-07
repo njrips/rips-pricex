@@ -6,18 +6,6 @@
 import { resolveCountryToCode } from '../../../utils/iso3166CountryDisplay';
 import { resolveCountryLists } from '../classic/countrySelection';
 
-export const DEVICE_OPTIONS = [
-  { label: 'All devices', value: 'all' },
-  { label: 'Desktop only', value: 'desktop' },
-  { label: 'Mobile only', value: 'mobile' },
-];
-
-export const CUSTOMER_OPTIONS = [
-  { label: 'All visitors', value: 'all' },
-  { label: 'New visitors', value: 'new' },
-  { label: 'Returning visitors', value: 'returning' },
-];
-
 export const GOAL_METRIC_OPTIONS = [
   { label: 'Revenue per visitor', value: 'revenue_per_visitor' },
   { label: 'Conversion rate', value: 'conversion_rate' },
@@ -93,26 +81,6 @@ export const CUSTOM_GOAL_TRIGGER_OPTIONS = [
 ];
 
 const CUSTOM_TRIGGER_SET = new Set(CUSTOM_GOAL_TRIGGER_OPTIONS.map(o => o.value));
-
-export function createEmptyCustomGoalDraft() {
-  return {
-    name: '',
-    event_name: '',
-    aggregation: 'count',
-    direction: 'increase',
-    trigger_type: 'css_click',
-    trigger_config: {
-      selector: '',
-      url_pattern: '',
-      parameter_name: '',
-      visibility_threshold: 50,
-      visibility_min_duration_ms: 0,
-      visibility_frequency: 'once_per_page',
-      observe_dom_changes: true,
-      custom_javascript: '',
-    },
-  };
-}
 
 export const CLASSIC_DEVICE_OPTIONS = ['Desktop', 'Mobile', 'Tablet'];
 export const CLASSIC_SOURCE_OPTIONS = [
@@ -447,15 +415,6 @@ export function customGoalTriggerSummary(goal = {}) {
   return `Manual event · ${goal.event_name || 'event_key'}`;
 }
 
-/** Alias for catalog / Goals-page definitions. */
-export function catalogGoalTriggerSummary(definition = {}) {
-  return customGoalTriggerSummary({
-    event_name: definition.event_name || definition.eventName,
-    trigger_type: definition.trigger_type,
-    trigger_config: definition.trigger_config,
-  });
-}
-
 /**
  * Map a Goals catalog definition (builtin or shop custom) into Classic customGoals shape.
  * Returns null for guardrails or missing event keys.
@@ -507,33 +466,6 @@ export function mapGoalDefinitionToCustomGoal(definition) {
     },
     catalog_id: definition.catalog_id || definition.id || null,
   };
-}
-
-/** Exclude guardrails; keep secondary (+ primary candidates as monitoring). */
-export function filterPickerCatalogDefinitions(definitions = []) {
-  return (Array.isArray(definitions) ? definitions : [])
-    .map(mapGoalDefinitionToCustomGoal)
-    .filter(Boolean);
-}
-
-/** Attach a goal by event_name (dedupe). Caps at 8. */
-export function attachCustomGoal(selected = [], goal) {
-  const mapped =
-    goal && goal.event_name && goal.trigger_type
-      ? {
-          ...goal,
-          event_name: slugCustomSecondary(goal.event_name),
-        }
-      : mapGoalDefinitionToCustomGoal(goal);
-  if (!mapped?.event_name) return normalizeCustomGoals(selected);
-  const list = normalizeCustomGoals(selected);
-  if (list.some(item => item.event_name === mapped.event_name)) return list;
-  return normalizeCustomGoals([...list, mapped]);
-}
-
-export function detachCustomGoal(selected = [], eventName) {
-  const key = slugCustomSecondary(eventName);
-  return normalizeCustomGoals(selected).filter(item => item.event_name !== key);
 }
 
 export function validateCustomGoalDraft(draft = {}) {
@@ -878,30 +810,3 @@ export function normalizeAudienceSegments(raw = {}) {
 
   return result;
 }
-
-export function summarizeAudienceSegments(segments = {}) {
-  const s = normalizeAudienceSegments(segments);
-  const parts = [];
-  if (s.device !== 'all') parts.push(s.device);
-  if (Array.isArray(s.device_rules) && s.device_rules.length) {
-    parts.push(s.device_rules.map(r => `${r.type} ${r.value}`).join(', '));
-  }
-  if (s.customer !== 'all') parts.push(s.customer);
-  if (s.countries.length) parts.push(s.countries.join(', '));
-  if (Array.isArray(s.traffic_source_rules) && s.traffic_source_rules.length) {
-    parts.push(`${s.traffic_source_rules.length} traffic rules`);
-  }
-  if (s.exclude_bots) parts.push('no bots');
-  if (s.exclude_internal_ips) parts.push('no internal IPs');
-  if (s.browser_user_agent_pattern) parts.push('browser filter');
-  if (s.traffic_ramp_percent !== null && s.traffic_ramp_percent !== undefined)
-    parts.push(`${s.traffic_ramp_percent}% traffic`);
-  return parts.length ? parts.join(' · ') : 'All visitors';
-}
-
-export function audiencesEqual(a, b) {
-  return (
-    JSON.stringify(normalizeAudienceSegments(a)) === JSON.stringify(normalizeAudienceSegments(b))
-  );
-}
-

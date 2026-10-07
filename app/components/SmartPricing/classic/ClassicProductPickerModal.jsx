@@ -18,6 +18,7 @@ import {
   buildStoreCatalogStatusText,
   shouldShowCatalogTruncatedHelp,
 } from './productsStepCatalogCopy';
+import useFocusTrap from '../../../hooks/useFocusTrap';
 import styles from './SmartPricingClassic.module.css';
 
 /**
@@ -70,6 +71,9 @@ function matchesCollection(row, collectionId, collectionLabel) {
   if (want && candidates.some(id => id === want || id.endsWith(want) || want.endsWith(id))) {
     return true;
   }
+  // The catalog says which collections a product is in. Guessing from the
+  // title past that point put products in collections they are not in.
+  if (Array.isArray(row.collection_ids)) return false;
   const hay = `${row.collection_title || ''} ${row.product_type || ''}`.toLowerCase();
   return collectionLabel ? hay.includes(String(collectionLabel).toLowerCase()) : false;
 }
@@ -110,6 +114,8 @@ export default function ClassicProductPickerModal({
   withheldByOtherTests = null,
   onClose,
 }) {
+  // The picker is only mounted while open.
+  const focusTrapRef = useFocusTrap(true, onClose);
   const [sideSearch, setSideSearch] = useState('');
   const [productSearch, setProductSearch] = useState('');
   // Collections and categories cut the catalog two different ways, so the
@@ -136,10 +142,37 @@ export default function ClassicProductPickerModal({
       .map(label => ({ kind: 'category', label, value: label }));
   }, [opportunities]);
 
-  const collectionGroups = useMemo(
-    () => (collectionOptions || []).map(opt => ({ ...opt, kind: 'collection' })),
-    [collectionOptions]
-  );
+  /**
+   * Collections the loaded products are actually in, when the catalog says so.
+   *
+   * The shop-wide list is fetched separately and stops at 40, so a shop with
+   * more never saw the rest, and it listed collections with nothing testable
+   * in them. Built from the products, it is every collection worth picking.
+   */
+  const collectionGroups = useMemo(() => {
+    const fromProducts = new Map();
+    (opportunities || []).forEach(row => {
+      (Array.isArray(row?.collections) ? row.collections : []).forEach(collection => {
+        const id = String(collection?.id || '');
+        if (id && !fromProducts.has(id)) {
+          fromProducts.set(id, String(collection.title || '').trim() || 'Untitled collection');
+        }
+      });
+    });
+    if (!fromProducts.size) {
+      return (collectionOptions || []).map(opt => ({ ...opt, kind: 'collection' }));
+    }
+    const allOption = (collectionOptions || []).find(opt => !opt?.value) || {
+      label: 'All products',
+      value: '',
+    };
+    return [
+      { ...allOption, kind: 'collection' },
+      ...[...fromProducts.entries()]
+        .map(([value, label]) => ({ label, value, kind: 'collection' }))
+        .sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' })),
+    ];
+  }, [opportunities, collectionOptions]);
 
   const hasCategories = categoryOptions.length > 0;
   const activeTab = hasCategories ? sideTab : 'collections';
@@ -344,7 +377,13 @@ export default function ClassicProductPickerModal({
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className={styles.modal} role="dialog" aria-modal="true" aria-label="Product picker">
+      <div
+        ref={focusTrapRef}
+        className={styles.modal}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Product picker"
+      >
         <div className={styles.modalHeader}>
           <div>
             <h2 className={`${styles.modalTitle} ripx-classic-sans`}>Product picker</h2>

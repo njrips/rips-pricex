@@ -24,7 +24,12 @@ redirect_urls = [
 ]
 
 [webhooks]
-api_version = "2025-10"
+api_version = "2026-07"
+
+  # Mandatory for App Store apps: Shopify rejects a submission without them.
+  [[webhooks.subscriptions]]
+  compliance_topics = ["customers/data_request", "customers/redact", "shop/redact"]
+  uri = "/webhooks/compliance"
 
   [[webhooks.subscriptions]]
   topics = ["app/uninstalled"]
@@ -43,6 +48,16 @@ api_version = "2025-10"
   [[webhooks.subscriptions]]
   topics = ["app_subscriptions/update"]
   uri = "/webhooks/app/subscriptions_update"
+
+  # Purchases are recorded from these: Shopify no longer runs the storefront
+  # script on the order-status page. Orders are protected customer data
+  # (level 1: no name, email, phone or address fields are read), so Shopify
+  # rejects this subscription until the Partner Dashboard request
+  # (API access requests > Protected customer data access) is approved.
+  # Uncomment once approved.
+  # [[webhooks.subscriptions]]
+  # topics = ["orders/create", "orders/cancelled", "refunds/create"]
+  # uri = "/webhooks/orders"
 
 [app_proxy]
 url = "https://pricefy.echologyx.com/api/proxy"

@@ -11,25 +11,6 @@ function kvKey(shopDomain) {
     .toLowerCase()}`;
 }
 
-async function getProductCollectionMap(shopDomain) {
-  const shop = String(shopDomain || '')
-    .trim()
-    .toLowerCase();
-  if (!shop) {
-    return {};
-  }
-  try {
-    const result = await query('SELECT value FROM key_value_store WHERE key = $1 LIMIT 1', [
-      kvKey(shop),
-    ]);
-    const raw = result.rows?.[0]?.value;
-    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
-    return parsed?.map && typeof parsed.map === 'object' ? parsed.map : {};
-  } catch {
-    return {};
-  }
-}
-
 async function saveProductCollectionMap(shopDomain, map = {}) {
   const shop = String(shopDomain || '')
     .trim()
@@ -60,16 +41,6 @@ async function saveProductCollectionMap(shopDomain, map = {}) {
   return { count: Object.keys(normalized).length };
 }
 
-function resolveCollectionsForProduct(productId, map = {}) {
-  const product = normalizeProductGid(productId);
-  if (!product) {
-    return [];
-  }
-  return Array.isArray(map[product]) ? map[product] : [];
-}
-
 module.exports = {
-  getProductCollectionMap,
   saveProductCollectionMap,
-  resolveCollectionsForProduct,
 };

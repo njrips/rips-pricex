@@ -638,12 +638,28 @@ describe('productsStepReadiness', () => {
         source: 'deterministic',
         fallbackLine: 'Local 10% lower through 10% higher band fallback (AI unavailable).',
         errorMessage:
-          'variants cannot exceed 500 products in one request (received 832)',
+          'variants cannot cover more than 250 products in one request (received 832)',
         unit: 'percent',
       });
-      expect(status).toBe('Too many products (832). Max 500 per suggest.');
+      expect(status).toBe('Too many products (832). Max 250 per suggest.');
       expect(detail).toMatch(/Local 10%/);
       expect(detail).toMatch(/832/);
+    });
+
+    it('names what was over the limit', () => {
+      const statusFor = errorMessage =>
+        composeAiSuggestBanner({ source: 'deterministic', errorMessage, unit: 'percent' }).status;
+
+      expect(statusFor('variants cannot exceed 2500 rows in one request (received 2600)')).toBe(
+        'Too many variants (2600). Max 2500 per suggest.'
+      );
+      expect(statusFor('arms cannot exceed 10 variations in one request (received 11)')).toBe(
+        'Too many variations (11). Max 10 per suggest.'
+      );
+      // The wording the server used before the limit counted products.
+      expect(statusFor('variants cannot exceed 500 products in one request (received 832)')).toBe(
+        'Too many products (832). Max 500 per suggest.'
+      );
     });
   });
 

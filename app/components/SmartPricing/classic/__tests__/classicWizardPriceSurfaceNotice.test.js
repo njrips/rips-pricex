@@ -34,6 +34,7 @@ let readiness = null;
 vi.mock('../../../../hooks/useClassicShopDomain', () => ({ default: () => SHOP }));
 
 vi.mock('../../../../hooks/useSmartPricingLaunch', () => ({
+  alreadyLaunchedPlanIds: () => new Set(),
   useSmartPricingLaunch: () => ({ launching: false, launchMany: vi.fn() }),
 }));
 

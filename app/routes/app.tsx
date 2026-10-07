@@ -46,9 +46,9 @@ function SupportLinkHandler() {
       | undefined;
     if (!shopify?.support?.registerHandler) return undefined;
     void shopify.support.registerHandler(() => {
-      // Help is tabbed, so the ticket form only exists while the Support tab is
-      // open. Scroll to it when it is on the page, and otherwise ask for that
-      // tab by name — from Help's other tab as much as from another page.
+      // The ticket form is its own view on Help's Support tab. Scroll to it when
+      // it is on the page, and otherwise open that view by name — from the
+      // ticket table or Help's other tab as much as from another page.
       if (pathname === "/app/help" || pathname === "/help") {
         const form = document.getElementById("help-new-ticket");
         if (form) {
@@ -56,7 +56,9 @@ function SupportLinkHandler() {
           return;
         }
       }
-      navigate(withCurrentEmbeddedSearch(search, "/app/help", { tab: "tickets" }));
+      navigate(
+        withCurrentEmbeddedSearch(search, "/app/help", { tab: "tickets", compose: "1" }),
+      );
     });
     return () => {
       void shopify.support?.registerHandler?.(null);

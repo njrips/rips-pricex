@@ -7,7 +7,6 @@ import {
   PlayCircleIcon,
   PlusIcon,
   SearchIcon,
-  SelectIcon,
 } from '@shopify/polaris-icons';
 
 /**
@@ -30,45 +29,6 @@ export function IconCheck({ size = 16 }) {
   return (
     <svg width={size} height={size} viewBox={`0 0 ${vb} ${vb}`} aria-hidden>
       <path d={d} {...strokeProps} strokeWidth={vb === 14 ? '1.167' : '1.333'} />
-    </svg>
-  );
-}
-
-/** Back / Cancel — Lucide ArrowLeft with stem (Figma 13:426). */
-export function IconArrowLeft({ size = 16 }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 16 16" aria-hidden>
-      <path d="M8 12.667 3.333 8 8 3.333" {...strokeProps} strokeWidth="1.333" />
-      <path d="M12.667 8H3.333" {...strokeProps} strokeWidth="1.333" />
-    </svg>
-  );
-}
-
-/** Continue — Lucide ArrowRight with stem (Figma 16:5175). */
-export function IconArrowRight({ size = 16 }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 16 16" aria-hidden>
-      <path d="M3.333 8H12.667" {...strokeProps} strokeWidth="1.333" />
-      <path d="M8 3.333 12.667 8 8 12.667" {...strokeProps} strokeWidth="1.333" />
-    </svg>
-  );
-}
-
-/** List row open — Lucide arrow-up-right (Figma 13:106). */
-export function IconArrowUpRight({ size = 16 }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 16 16" aria-hidden>
-      <path d="M4.667 4.667H11.333V11.333" {...strokeProps} strokeWidth="1.333" />
-      <path d="M4.667 11.333 11.333 4.667" {...strokeProps} strokeWidth="1.333" />
-    </svg>
-  );
-}
-
-export function IconPlus({ size = 14 }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 16 16" aria-hidden>
-      <path d="M3.333 8H12.667" {...strokeProps} strokeWidth="1.333" />
-      <path d="M8 3.333V12.667" {...strokeProps} strokeWidth="1.333" />
     </svg>
   );
 }
@@ -153,33 +113,6 @@ export function IconBoxes({ size = 16 }) {
       <rect x="8.5" y="2" width="5.5" height="5.5" rx="1" {...strokeProps} strokeWidth="1.333" />
       <rect x="2" y="8.5" width="5.5" height="5.5" rx="1" {...strokeProps} strokeWidth="1.333" />
       <rect x="8.5" y="8.5" width="5.5" height="5.5" rx="1" {...strokeProps} strokeWidth="1.333" />
-    </svg>
-  );
-}
-
-export function IconSparkles({ size = 16 }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 16 16" aria-hidden>
-      <path
-        d="M8 1.5 8.8 4.5 12 5.2 8.8 5.9 8 8.9 7.2 5.9 4 5.2l3.2-.7L8 1.5Z"
-        {...strokeProps}
-        strokeWidth="1.2"
-      />
-      <path
-        d="M12.5 9.5 13 11.2 14.7 11.7 13 12.2 12.5 13.9 12 12.2 10.3 11.7 12 11.2 12.5 9.5Z"
-        {...strokeProps}
-        strokeWidth="1.1"
-      />
-    </svg>
-  );
-}
-
-export function IconPercent({ size = 16 }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 16 16" aria-hidden>
-      <circle cx="5.333" cy="5.333" r="1.5" {...strokeProps} strokeWidth="1.333" />
-      <circle cx="10.667" cy="10.667" r="1.5" {...strokeProps} strokeWidth="1.333" />
-      <path d="M11.667 4.333 4.333 11.667" {...strokeProps} strokeWidth="1.333" />
     </svg>
   );
 }
@@ -280,14 +213,6 @@ export function IconTrendUp({ size = 14 }) {
   );
 }
 
-export function IconPause({ size = 14 }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 16 16" aria-hidden>
-      <path d="M5 3.5v9M11 3.5v9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-    </svg>
-  );
-}
-
 export function IconTrophy({ size = 14, className, ...rest }) {
   return (
     <svg
@@ -306,16 +231,6 @@ export function IconTrophy({ size = 14, className, ...rest }) {
         strokeWidth="1.4"
         strokeLinecap="round"
       />
-    </svg>
-  );
-}
-
-export function IconMore({ size = 16 }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 16 16" aria-hidden>
-      <circle cx="3.5" cy="8" r="1.2" fill="currentColor" />
-      <circle cx="8" cy="8" r="1.2" fill="currentColor" />
-      <circle cx="12.5" cy="8" r="1.2" fill="currentColor" />
     </svg>
   );
 }
@@ -342,79 +257,6 @@ export function IconOverview({ size = 14 }) {
       <path d="M7 8.167 9.333 5.833" {...strokeProps} strokeWidth="1.167" />
       <path
         d="M1.948 11.083C1.436 10.197 1.167 9.191 1.167 8.167c0-1.024.269-2.03.781-2.917a5.833 5.833 0 0 1 8.208 0c.512.887.781 1.893.781 2.917 0 1.024-.27 2.03-.781 2.916"
-        {...strokeProps}
-        strokeWidth="1.167"
-      />
-    </svg>
-  );
-}
-
-/** Performance tab — Lucide ChartColumn (Figma 13:4936). */
-export function IconChart({ size = 14 }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 14 14" fill="none" aria-hidden>
-      <path
-        d="M1.75 1.75v9.333c0 .31.123.606.342.825.219.219.515.342.825.342H12.25"
-        {...strokeProps}
-        strokeWidth="1.167"
-      />
-      <path d="M10.5 9.917V5.25" {...strokeProps} strokeWidth="1.167" />
-      <path d="M7.583 9.917V2.917" {...strokeProps} strokeWidth="1.167" />
-      <path d="M4.667 9.917V8.167" {...strokeProps} strokeWidth="1.167" />
-    </svg>
-  );
-}
-
-/** Variations tab — Lucide Trophy (Figma 13:4943). */
-export function IconFlask({ size = 14 }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 14 14" fill="none" aria-hidden>
-      <path
-        d="M5.833 8.552v.948a1.75 1.75 0 0 1-.569 1.239c-.365.27-.661.621-.866 1.026A3.5 3.5 0 0 0 4.083 12.82"
-        {...strokeProps}
-        strokeWidth="1.167"
-      />
-      <path
-        d="M8.167 8.552v.948a1.75 1.75 0 0 0 .569 1.239c.365.27.661.621.866 1.026A3.5 3.5 0 0 1 9.917 12.82"
-        {...strokeProps}
-        strokeWidth="1.167"
-      />
-      <path
-        d="M10.5 5.25h.875a1.458 1.458 0 1 0 0-2.917H10.5"
-        {...strokeProps}
-        strokeWidth="1.167"
-      />
-      <path d="M2.333 12.833h9.334" {...strokeProps} strokeWidth="1.167" />
-      <path
-        d="M3.5 5.25a3.5 3.5 0 0 0 7 0V1.75A.583.583 0 0 0 9.917 1.167H4.083A.583.583 0 0 0 3.5 1.75v3.5Z"
-        {...strokeProps}
-        strokeWidth="1.167"
-      />
-      <path
-        d="M3.5 5.25h-.875a1.458 1.458 0 1 1 0-2.917H3.5"
-        {...strokeProps}
-        strokeWidth="1.167"
-      />
-    </svg>
-  );
-}
-
-/** Metrics tab — Lucide Crosshair / target rings (Figma 13:4962). */
-export function IconTarget({ size = 14 }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 14 14" fill="none" aria-hidden>
-      <path
-        d="M7 12.833A5.833 5.833 0 1 0 7 1.167a5.833 5.833 0 0 0 0 11.666Z"
-        {...strokeProps}
-        strokeWidth="1.167"
-      />
-      <path
-        d="M7 10.5A3.5 3.5 0 1 0 7 3.5a3.5 3.5 0 0 0 0 7Z"
-        {...strokeProps}
-        strokeWidth="1.167"
-      />
-      <path
-        d="M7 8.167A1.167 1.167 0 1 0 7 5.833a1.167 1.167 0 0 0 0 2.334Z"
         {...strokeProps}
         strokeWidth="1.167"
       />
@@ -478,47 +320,6 @@ export function IconQr({ size = 14, className, ...rest }) {
   );
 }
 
-export function IconExternalLink({ size = 14 }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 14 14" fill="none" aria-hidden>
-      <path
-        d="M10.5 7.583V11.083a.875.875 0 0 1-.875.875H2.917a.875.875 0 0 1-.875-.875V4.375A.875.875 0 0 1 2.917 3.5H6.417"
-        {...strokeProps}
-        strokeWidth="1.167"
-      />
-      <path d="M8.75 1.75h3.5v3.5" {...strokeProps} strokeWidth="1.167" />
-      <path d="M6.417 7.583 12.25 1.75" {...strokeProps} strokeWidth="1.167" />
-    </svg>
-  );
-}
-
-export function IconLightbulb({ size = 18 }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden>
-      <path
-        d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.8c.6.5 1 1.2 1.1 2h4.8c.1-.8.5-1.5 1.1-2A6 6 0 0 0 12 3Z"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-export function IconList({ size = 14 }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden>
-      <path
-        d="M3 4h10M3 8h10M3 12h10"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
-
 /** Bulk adjust — Lucide CirclePlus (Figma 13:1169). */
 export function IconPlusCircle({ size = 16 }) {
   return (
@@ -530,15 +331,6 @@ export function IconPlusCircle({ size = 16 }) {
       />
       <path d="M5.333 8H10.667" {...strokeProps} strokeWidth="1.333" />
       <path d="M8 5.333V10.667" {...strokeProps} strokeWidth="1.333" />
-    </svg>
-  );
-}
-
-export function IconMinusCircle({ size = 20 }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden>
-      <circle cx="12" cy="12" r="8.25" stroke="currentColor" strokeWidth="1.6" />
-      <path d="M8.5 12h7" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
     </svg>
   );
 }
@@ -573,19 +365,6 @@ export function IconWand({ size = 16 }) {
       <path d="M4.667 5.333H2" {...strokeProps} strokeWidth="1.333" />
       <path d="M14 10.667H11.333" {...strokeProps} strokeWidth="1.333" />
       <path d="M7.333 2H6" {...strokeProps} strokeWidth="1.333" />
-    </svg>
-  );
-}
-
-export function IconSliders({ size = 20 }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden>
-      <path
-        d="M4 7h10M18 7h2M14 7a2 2 0 1 1-4 0 2 2 0 0 1 4 0ZM4 17h2M10 17h10M8 17a2 2 0 1 1-4 0 2 2 0 0 1 4 0Z"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinecap="round"
-      />
     </svg>
   );
 }
@@ -628,20 +407,6 @@ export function IconInfo({ size = 16 }) {
   );
 }
 
-export function IconPencil({ size = 18 }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden>
-      <path
-        d="M14.5 5.5 18.5 9.5M5 19l1.2-4.4L16.2 4.6a1.6 1.6 0 0 1 2.3 0l1 1a1.6 1.6 0 0 1 0 2.3L8.4 17.8 5 19Z"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
 /**
  * Polaris Button `icon` source. Forwards `className` onto the SVG so it
  * fills the 20px Admin icon slot (no nested span / mixed baseline).
@@ -658,12 +423,10 @@ export const ButtonIconPlus = PlusIcon;
 export const ButtonIconArrowLeft = ArrowLeftIcon;
 export const ButtonIconArrowRight = ArrowRightIcon;
 export const ButtonIconSearch = SearchIcon;
-export const ButtonIconSelect = SelectIcon;
 export const ButtonIconExternalLink = ExternalIcon;
 export const ButtonIconPause = PauseCircleIcon;
 export const ButtonIconPlay = PlayCircleIcon;
 export const ButtonIconMore = MenuHorizontalIcon;
-export const ButtonIconHandPick = buttonIcon(IconHandPick, 20);
 export const ButtonIconTrophy = buttonIcon(IconTrophy, 20);
 export const ButtonIconRocket = buttonIcon(IconRocket, 20);
 export const ButtonIconQr = buttonIcon(IconQr, 20);

@@ -11,7 +11,10 @@ const {
   normalizeStaffEmail,
   parseCookieHeader,
   safeStaffNext,
+  staffClearCookieHeader,
+  staffClientKeyFromHeaders,
   staffNextTicketId,
+  staffSetCookieHeader,
   recordStaffLoginFailure,
   staffLoginBlocked,
   timingSafeEqualString,
@@ -60,6 +63,23 @@ describe('staffAuth', () => {
     assert.equal(staffLoginBlocked(key), true);
     clearStaffLoginFailures(key);
     assert.equal(staffLoginBlocked(key), false);
+  });
+
+  it('builds the staff session cookie the login route sets and clears', () => {
+    process.env.RIPSPRICEX_STAFF_SUPPORT_TOKEN = 'correct-token';
+    const set = staffSetCookieHeader({ secure: true });
+    assert.match(set, new RegExp(`^rpx_staff_support=${cookieValueForToken('correct-token')};`));
+    assert.match(set, /Path=\/staff; HttpOnly; SameSite=Lax; Max-Age=\d+; Secure$/);
+    assert.equal(staffSetCookieHeader({ secure: false }).includes('Secure'), false);
+    assert.match(staffClearCookieHeader({ secure: true }), /^rpx_staff_support=; .*Max-Age=0; Secure$/);
+    delete process.env.RIPSPRICEX_STAFF_SUPPORT_TOKEN;
+    assert.equal(staffSetCookieHeader(), null);
+  });
+
+  it('keys login failures on the first forwarded address', () => {
+    const headers = { 'x-forwarded-for': '203.0.113.9, 10.0.0.1', 'x-real-ip': '10.0.0.1' };
+    assert.equal(staffClientKeyFromHeaders((name) => headers[name]), '203.0.113.9');
+    assert.equal(staffClientKeyFromHeaders(() => null), 'unknown');
   });
 
   it('returns only same-origin staff support paths after login', () => {

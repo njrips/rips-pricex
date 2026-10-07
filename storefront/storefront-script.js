@@ -1243,6 +1243,116 @@
       }
     );
   }
+  /**
+   * Posts a tracking payload so it survives the shopper leaving the page.
+   *
+   * The API is on another origin, and a JSON post there waits on a preflight
+   * first; an add to cart that redirects to /cart usually lands before that
+   * round trip ends, and the event is gone. Plain text needs no preflight and
+   * is what sendBeacon can carry, which the browser delivers after unload. The
+   * server parses either.
+   */
+  function postTrackPayload(url, payload) {
+    var body = JSON.stringify(payload);
+    try {
+      if (navigator.sendBeacon) {
+        var beaconBody =
+          typeof Blob === 'function' ? new Blob([body], { type: 'text/plain;charset=UTF-8' }) : body;
+        if (navigator.sendBeacon(url, beaconBody)) return Promise.resolve(true);
+      }
+    } catch (_beaconErr) {}
+    return fetch(url, {
+      method: 'POST',
+      keepalive: true,
+      credentials: 'omit',
+      mode: 'cors',
+      headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
+      body: body,
+    }).then(
+      function (r) {
+        return Boolean(r && r.ok);
+      },
+      function () {
+        return false;
+      }
+    );
+  }
+  /**
+   * Exposure: the shopper has been shown a product a test prices.
+   *
+   * A visit to any page assigns the shopper to every running test, so the
+   * assignment alone says nothing about whether they saw the product. Tests
+   * count a visitor from this instead. It must be called at a point both arms
+   * reach — the control arm paints nothing — and before anything that depends
+   * on the price shown, or one arm would count different shoppers than the
+   * other. Sent once per test per browser session; the server keeps the first.
+   */
+  var RIPX_EXPOSED_SESSION_KEY = '__ripx_exposed_v1__';
+  var _ripxExposurePending = [];
+  var _ripxExposureTimer = null;
+  var _ripxExposedThisPage = {};
+
+  function readRipxExposedTestIds() {
+    try {
+      var raw = window.sessionStorage ? window.sessionStorage.getItem(RIPX_EXPOSED_SESSION_KEY) : null;
+      var list = raw ? JSON.parse(raw) : [];
+      return Array.isArray(list) ? list : [];
+    } catch (_eExposedRead) {
+      return [];
+    }
+  }
+
+  function rememberRipxExposedTestIds(ids) {
+    try {
+      if (!window.sessionStorage) return;
+      var merged = readRipxExposedTestIds();
+      ids.forEach(function (id) {
+        if (merged.indexOf(id) === -1) merged.push(id);
+      });
+      window.sessionStorage.setItem(RIPX_EXPOSED_SESSION_KEY, JSON.stringify(merged.slice(-200)));
+    } catch (_eExposedWrite) {}
+  }
+
+  function flushRipxExposures() {
+    if (_ripxExposureTimer) {
+      clearTimeout(_ripxExposureTimer);
+      _ripxExposureTimer = null;
+    }
+    var ids = _ripxExposurePending.splice(0, _ripxExposurePending.length);
+    if (!ids.length) return;
+    var userId = getUserId();
+    if (!userId) return;
+    // Remembered only once sent: a failed post that still marked the session
+    // would drop this shopper from the visitor count for the rest of the visit.
+    postTrackPayload(CONFIG.apiUrl + '/track/exposure', {
+      shop_domain: getShopDomain(),
+      user_id: userId,
+      test_ids: ids,
+    }).then(function (sent) {
+      if (sent) {
+        rememberRipxExposedTestIds(ids);
+        return;
+      }
+      ids.forEach(function (id) {
+        delete _ripxExposedThisPage[id];
+      });
+    });
+  }
+
+  function markTestExposed(testId) {
+    if (PREVIEW_MODE || !hasValidConfig || !CONFIG.apiUrl || !testId) return;
+    var id = String(testId);
+    if (_ripxExposedThisPage[id]) return;
+    _ripxExposedThisPage[id] = true;
+    if (readRipxExposedTestIds().indexOf(id) !== -1) return;
+    _ripxExposurePending.push(id);
+    if (!_ripxExposureTimer) _ripxExposureTimer = setTimeout(flushRipxExposures, 300);
+  }
+
+  try {
+    window.addEventListener('pagehide', flushRipxExposures);
+  } catch (_ePagehide) {}
+
   /** Fetch with one retry after delay (for transient failures). */
   function fetchWithRetry(url, options, timeoutMs, retryDelayMs) {
     var delay = typeof retryDelayMs === 'number' && retryDelayMs > 0 ? retryDelayMs : 800;
@@ -2741,6 +2851,15 @@
   const LIVE_VARIANT_BATCH_SIZE = 50;
   const LIVE_VARIANT_CHUNK_CONCURRENCY = 3;
   var _variantCachePromise = null;
+  /** Test ids the page-load batch asked about. Others are fetched if the page needs them. */
+  var _batchRequestedTestIds = null;
+  /** Asks /track/variants about more test ids with the page-load context. Set by the batch. */
+  var _fetchMoreVariants = null;
+  /** Late test ids waiting to go out together, and what came back for each. */
+  var _lateVariantQueue = null;
+  var _lateVariantResults = {};
+  /** How long late asks wait for company before going out as one request. */
+  const LATE_VARIANT_BATCH_DELAY_MS = 30;
   /** Single in-flight GET /track/preview per page (main loop + visual preview + reapply share it). */
   var _previewVariantInflight = null;
   var _previewVariantInflightKey = '';
@@ -3057,6 +3176,78 @@
   }
 
   /**
+   * Which live tests the page-load batch asks about.
+   *
+   * Every page asked about every running test, and a classic experiment is one
+   * test per variant: a few hundred products is a thousand tests, twenty-odd
+   * requests before a price could change. A shop whose tests fit in one request
+   * still asks for all of them. Past that, the batch asks only for the tests
+   * this page would run, judged by the check the run loop itself applies, and a
+   * test the page needs later goes out then, together with any others.
+   */
+  function selectBatchTestIds(activeTests) {
+    var tests = (activeTests || []).filter(function (t) {
+      return t && t.id;
+    });
+    var ids = function (list) {
+      return list.map(function (t) {
+        return t.id;
+      });
+    };
+    if (tests.length <= LIVE_VARIANT_BATCH_SIZE) return ids(tests);
+    return ids(
+      tests.filter(function (t) {
+        try {
+          return shouldRunPriceTestOnCurrentPage(t);
+        } catch (_eScope) {
+          // A check that cannot answer keeps the test, which is what every page did before.
+          return true;
+        }
+      })
+    );
+  }
+
+  /**
+   * Assignment for a test the page-load batch did not ask about.
+   *
+   * Asks that land within a few milliseconds of each other -- a grid of cards
+   * rendering at once -- share one request instead of one each. `answered` is
+   * true when the server replied for this test, so an unassigned test is not
+   * asked about again through the single-test endpoint.
+   */
+  function fetchLateVariant(testId) {
+    var id = String(testId);
+    if (Object.prototype.hasOwnProperty.call(_lateVariantResults, id)) {
+      return Promise.resolve(_lateVariantResults[id]);
+    }
+    if (!_lateVariantQueue) {
+      var queue = { ids: [], promise: null };
+      _lateVariantQueue = queue;
+      queue.promise = new Promise(function (resolve) {
+        setTimeout(resolve, LATE_VARIANT_BATCH_DELAY_MS);
+      })
+        .then(function () {
+          if (_lateVariantQueue === queue) _lateVariantQueue = null;
+          return _fetchMoreVariants(queue.ids);
+        })
+        .catch(function () {
+          return { variants: {}, answered: {} };
+        });
+    }
+    var current = _lateVariantQueue;
+    if (current.ids.indexOf(id) === -1) current.ids.push(id);
+    return current.promise.then(function (result) {
+      var answered = !!(result && result.answered && result.answered[id]);
+      var outcome = {
+        answered: answered,
+        variant: (result && result.variants && result.variants[id]) || null,
+      };
+      if (answered) _lateVariantResults[id] = outcome;
+      return outcome;
+    });
+  }
+
+  /**
    * Live price-test entry point.
    *
    * See `PRICE_TEST_FLOW.md` before changing this request contract. The backend uses the
@@ -3087,13 +3278,12 @@
     }
     const userId = getUserId();
     const shopDomain = getShopDomain();
-    const requestedTestIds = CONFIG.activeTests
-      .map(function (t) {
-        return t.id;
-      })
-      .filter(Boolean);
+    const requestedTestIds = selectBatchTestIds(CONFIG.activeTests);
     const testIds = requestedTestIds.join(',');
-    if (!requestedTestIds.length) {
+    var anyActiveTestIds = CONFIG.activeTests.some(function (t) {
+      return t && t.id;
+    });
+    if (!anyActiveTestIds) {
       recordRipxSkip('runtime', 'no_active_test_ids', {
         activeTestsCount: CONFIG.activeTests ? CONFIG.activeTests.length : 0,
       });
@@ -3175,7 +3365,7 @@
               chunkIndex: chunkIndex,
               testIds: chunkIds,
             });
-            return { variants: {}, diagnostics: null };
+            return { variants: {}, diagnostics: null, failed: true };
           }
           return r.json();
         })
@@ -3184,6 +3374,8 @@
             variants: (data && data.variants) || {},
             diagnostics: data && data.diagnostics ? data.diagnostics : null,
             chunkIndex: chunkIndex,
+            ok: !(data && data.failed),
+            testIds: chunkIds,
           };
         })
         .catch(function (err) {
@@ -3216,6 +3408,47 @@
         return results.filter(Boolean);
       });
     }
+    _batchRequestedTestIds = new Set(requestedTestIds.map(String));
+    _fetchMoreVariants = function (lateIds) {
+      var lateChunks = [];
+      for (var li = 0; li < lateIds.length; li += LIVE_VARIANT_BATCH_SIZE) {
+        lateChunks.push(lateIds.slice(li, li + LIVE_VARIANT_BATCH_SIZE));
+      }
+      return Promise.all(
+        lateChunks.map(function (chunk, index) {
+          return fetchVariantChunk(chunk, 'late-' + index);
+        })
+      ).then(function (lateResults) {
+        var lateVariants = {};
+        var answered = {};
+        lateResults.forEach(function (result) {
+          if (!result || !result.ok) return;
+          (result.testIds || []).forEach(function (testId) {
+            answered[String(testId)] = true;
+          });
+          Object.keys(result.variants || {}).forEach(function (testId) {
+            lateVariants[testId] = result.variants[testId];
+          });
+        });
+        var safeLate = sanitizeDiagnosticVariantsMap(lateVariants);
+        Object.keys(safeLate).forEach(function (testId) {
+          recordRipxAssignment(testId, safeLate[testId], 'live_late_batch');
+        });
+        var lateReassigned = findReassignedTestIds(lateVariants);
+        writeLiveVariantCacheMap(lateVariants);
+        if (lateReassigned.length) {
+          recordRipxSkip('runtime', 'assignment_changed_since_cache', {
+            testIds: lateReassigned,
+          });
+          flushQueuedPriceReapply('assignment_changed');
+        }
+        persistRipxLiveDiagnostics('variants_late_response', {
+          requestedTestIds: lateIds,
+          assignedTestIds: Object.keys(lateVariants),
+        });
+        return { variants: lateVariants, answered: answered };
+      });
+    };
     _variantCachePromise = fetchVariantChunksWithConcurrency()
       .then(function (results) {
         var variants = {};
@@ -3441,6 +3674,9 @@
     if (cachedLiveVariant) {
       // Keep the network refresh in flight, but do not hold page painting on repeat navigation.
       getVariantCachePromise();
+      if (_fetchMoreVariants && _batchRequestedTestIds && !_batchRequestedTestIds.has(id)) {
+        fetchLateVariant(id).catch(function () {});
+      }
       recordRipxAssignment(id, cachedLiveVariant, 'live_session_cache');
       return cachedLiveVariant;
     }
@@ -3457,6 +3693,17 @@
       }
     } catch (e) {
       console.error('Error getting variant from cache:', e);
+    }
+
+    if (_fetchMoreVariants && _batchRequestedTestIds && !_batchRequestedTestIds.has(id)) {
+      try {
+        var late = await fetchLateVariant(id);
+        if (late.answered) {
+          return late.variant ? normalizeVariantForStorefront(late.variant) : null;
+        }
+      } catch (_eLate) {
+        // Falls through to the single-test request below.
+      }
     }
 
     const userId = getUserId();
@@ -3680,15 +3927,10 @@
 
     try {
       const proof = await getTrackAssignmentProofFields(testId);
-      await fetchWithTimeout(
+      await postTrackPayload(
         CONFIG.apiUrl + '/track',
-        {
-          method: 'POST',
-          keepalive: true,
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(
-            Object.assign(
-              {
+        Object.assign(
+          {
             test_id: testId,
             variant_id: variantId,
             user_id: userId,
@@ -3696,12 +3938,9 @@
             event_type: 'conversion',
             event_value: value,
             metadata: meta,
-              },
-              proof
-            )
-          ),
-        },
-        6000
+          },
+          proof
+        )
       );
     } catch (error) {
       if (DEBUG) debugLog('track conversion failed', error && (error.message || error.name));
@@ -3734,15 +3973,10 @@
 
     try {
       const proof = await getTrackAssignmentProofFields(testId);
-      await fetchWithTimeout(
+      await postTrackPayload(
         CONFIG.apiUrl + '/track',
-        {
-          method: 'POST',
-          keepalive: true,
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(
-            Object.assign(
-              {
+        Object.assign(
+          {
             test_id: testId,
             variant_id: vid,
             user_id: userId,
@@ -3751,12 +3985,9 @@
             event_name: String(eventName).trim(),
             event_value: typeof value === 'number' ? value : 0,
             metadata: metadata && typeof metadata === 'object' ? metadata : {},
-              },
-              proof
-            )
-          ),
-        },
-        6000
+          },
+          proof
+        )
       );
     } catch (error) {
       if (DEBUG) debugLog('track event failed', error && (error.message || error.name));
@@ -9491,6 +9722,32 @@
     }
   }
 
+  var RIPX_LISTING_CARD_SEL =
+    '[data-product-id], .product-card, .grid-product__content, [data-product], .card--product, product-card, .product-card-wrapper, .product-item, .grid__item .card, .collection-list__product';
+
+  /** Whether a card for any of these products is on the page, whatever price it shows. */
+  function listingShowsAnyRipxProduct(targetIds) {
+    var wanted = (targetIds || [])
+      .map(function (id) {
+        return toNumericProductId(id);
+      })
+      .filter(Boolean);
+    if (!wanted.length) return false;
+    var cards;
+    try {
+      cards = document.querySelectorAll(RIPX_LISTING_CARD_SEL);
+    } catch (_eCards) {
+      return false;
+    }
+    for (var i = 0; i < cards.length; i += 1) {
+      var card = cards[i];
+      if (!card || (card.closest && card.closest(RIPX_CART_UI_SELECTOR))) continue;
+      var pid = toNumericProductId(getProductIdForListingCard(card, wanted));
+      if (pid && wanted.indexOf(pid) !== -1) return true;
+    }
+    return false;
+  }
+
   /**
    * Apply price test to product cards on collection/homepage/search (non-PDP).
    * Prefers elements with data-product-id / data-variant-id (Intelligems-style tagging) for reliable targeting.
@@ -9516,6 +9773,8 @@
       return excludedTargetIds.indexOf(normalized) === -1;
     });
     if (!filteredTargetIds.length) return;
+    // Before the per-arm branch below, which returns early for control.
+    if (listingShowsAnyRipxProduct(filteredTargetIds)) markTestExposed(testId);
     if (variantIdForCart != null && String(variantIdForCart).trim() !== '') {
       window.__RIPX_PRICE_TEST_CTX__ = { testId: testId, variantId: variantIdForCart };
       injectPriceTestCartAttributes(
@@ -9552,9 +9811,7 @@
       }
       var display = formatShopPrice(priceNum);
       if (!display && priceMode === 'fixed') return;
-      var allWithProductId = document.querySelectorAll(
-        '[data-product-id], .product-card, .grid-product__content, [data-product], .card--product, product-card, .product-card-wrapper, .product-item, .grid__item .card, .collection-list__product'
-      );
+      var allWithProductId = document.querySelectorAll(RIPX_LISTING_CARD_SEL);
       allWithProductId.forEach(function (card) {
         if (!card || inCartUi(card)) return;
         var attr = getProductIdForListingCard(card, [targetId]);
@@ -10137,6 +10394,7 @@
       previewSynthetic: !!test.previewSynthetic,
     });
     if ((pdpProductMatch || pdpCollectionMatch) && !isExcludedProductForTest(test, curProductId)) {
+      markTestExposed(test.id);
       applyPriceTest(test.id, curProductId, test.targetVariantId || null, variant);
     } else if (productScope && curProductId && PREVIEW_MODE) {
       ripxTrace(
@@ -11762,30 +12020,13 @@
     } catch (_storageErr) {}
 
     var shopDomain = getShopDomain();
-    var body = JSON.stringify({
+    postTrackPayload(CONFIG.apiUrl + '/track/catalog-product-view', {
       shop_domain: shopDomain,
       site: !shopDomain ? window.location.hostname : null,
       product_id: productId,
       variant_id: variantId,
       visitor_key: visitorKey,
     });
-    var endpoint = CONFIG.apiUrl + '/track/catalog-product-view';
-    try {
-      if (navigator.sendBeacon) {
-        var beaconBody =
-          typeof Blob === 'function' ? new Blob([body], { type: 'application/json' }) : body;
-        navigator.sendBeacon(endpoint, beaconBody);
-        return;
-      }
-    } catch (_beaconErr) {}
-    fetch(endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: body,
-      keepalive: true,
-      credentials: 'omit',
-      mode: 'cors',
-    }).catch(function () {});
   }
 
   /**
@@ -13947,7 +14188,7 @@
 
     if (sync && navigator.sendBeacon) {
       var beaconBody =
-        typeof Blob === 'function' ? new Blob([body], { type: 'application/json' }) : body;
+        typeof Blob === 'function' ? new Blob([body], { type: 'text/plain;charset=UTF-8' }) : body;
       navigator.sendBeacon(`${CONFIG.apiUrl}/track/heatmap`, beaconBody);
     } else {
       fetch(`${CONFIG.apiUrl}/track/heatmap`, {

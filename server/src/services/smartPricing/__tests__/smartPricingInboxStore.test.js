@@ -11,6 +11,11 @@ const {
   patchInboxPlan,
   patchInboxPlansFromSync,
   linkInboxPlanToTest,
+  restoreOrphanedLivePlans,
+  deleteExperimentEverywhere,
+  listExperimentTests,
+  planFromOrphanedTest,
+  MAX_PLANS_PER_SHOP,
 } = require('../../../models/smartPricingInboxStore');
 
 /**
@@ -271,5 +276,163 @@ describe('smartPricingInboxStore', () => {
         expectedRevision: '2026-07-01T12:00:00.000Z',
       })
     ).rejects.toMatchObject({ code: 'INBOX_REVISION_CONFLICT' });
+  });
+
+  describe('a save never loses a launched plan', () => {
+    function recordingClient() {
+      return { query: jest.fn().mockResolvedValue({ rowCount: 0, rows: [] }), release: jest.fn() };
+    }
+
+    it('prunes only plans that never launched when the array leaves some out', async () => {
+      const client = recordingClient();
+      getClient.mockResolvedValueOnce(client);
+      query.mockResolvedValueOnce({ rows: [] });
+
+      await saveInboxPlans('demo.myshopify.com', [{ id: 'SP-1', status: 'queued' }]);
+
+      const prune = findCall(client, 'plan_id <> ALL');
+      expect(prune[0]).toContain('test_id IS NULL');
+      expect(prune[0]).toContain("COALESCE(plan_json->>'test_id', '') = ''");
+    });
+
+    it('deletes only the named plans when the array is empty', async () => {
+      const client = recordingClient();
+      getClient.mockResolvedValueOnce(client);
+      query.mockResolvedValueOnce({ rows: [] });
+
+      await saveInboxPlans('demo.myshopify.com', [], { deletedPlanIds: ['SP-9'] });
+
+      const deletes = sqlCalls(client).filter(call => call[0].startsWith('DELETE'));
+      expect(deletes).toHaveLength(1);
+      expect(deletes[0][1]).toEqual(['demo.myshopify.com', 'SP-9']);
+    });
+
+    it('refuses a save over the cap instead of trimming it', async () => {
+      const plans = Array.from({ length: MAX_PLANS_PER_SHOP + 1 }, (_, i) => ({ id: `SP-${i}` }));
+      await expect(saveInboxPlans('demo.myshopify.com', plans)).rejects.toMatchObject({
+        isValidation: true,
+      });
+      expect(getClient).not.toHaveBeenCalled();
+    });
+
+    it('holds a 250-product experiment several times over', () => {
+      expect(MAX_PLANS_PER_SHOP).toBeGreaterThanOrEqual(500 * 10);
+    });
+  });
+
+  it('deletes an experiment by archiving all its tests and removing its plans', async () => {
+    const client = {
+      query: jest.fn(async sql => {
+        if (String(sql).startsWith('UPDATE tests')) return { rows: [{ id: 't1' }, { id: 't2' }] };
+        if (String(sql).includes('DELETE FROM smart_pricing_inbox_plans')) {
+          return { rows: [{ plan_id: 'SP-1' }] };
+        }
+        return { rows: [] };
+      }),
+      release: jest.fn(),
+    };
+    getClient.mockResolvedValueOnce(client);
+
+    const result = await deleteExperimentEverywhere('Demo.myshopify.com', 'exp-1');
+
+    const update = findCall(client, 'UPDATE tests');
+    expect(update[0]).toContain("metadata->>'experiment_id' = $2");
+    expect(update[1]).toEqual(['demo.myshopify.com', 'exp-1']);
+    const remove = findCall(client, 'DELETE FROM smart_pricing_inbox_plans');
+    expect(remove[1]).toEqual(['demo.myshopify.com', 'exp-1', ['t1', 't2']]);
+    expect(client.query).toHaveBeenCalledWith('COMMIT');
+    expect(result).toEqual({ archived_test_ids: ['t1', 't2'], deleted_plan_ids: ['SP-1'] });
+  });
+
+  it("lists an experiment's tests that are not deleted", async () => {
+    query.mockResolvedValueOnce({
+      rows: [
+        { id: 't1', status: 'running', target_id: 'gid://shopify/Product/1', plan_id: 'SP-1' },
+        { id: 't2', status: 'paused', target_id: null, plan_id: null },
+      ],
+    });
+
+    const tests = await listExperimentTests('Demo.myshopify.com', 'exp-1');
+
+    const [sql, params] = query.mock.calls[0];
+    expect(sql).toContain("metadata->>'experiment_id' = $2");
+    expect(sql).toContain("status <> 'archived'");
+    expect(params).toEqual(['demo.myshopify.com', 'exp-1']);
+    expect(tests).toEqual([
+      { id: 't1', status: 'running', product_id: 'gid://shopify/Product/1', plan_id: 'SP-1' },
+      { id: 't2', status: 'paused', product_id: null, plan_id: null },
+    ]);
+  });
+
+  describe('restoreOrphanedLivePlans', () => {
+    const orphan = {
+      id: 'd2a6f082-7c17-4870-ae5c-8bb77536bf08',
+      name: 'Smart Pricing · AAAAA · DZR Minna - 43',
+      type: 'price',
+      status: 'running',
+      target_id: 'gid://shopify/Product/1',
+      variants: [
+        {
+          config: {
+            byProduct: {
+              'gid://shopify/Product/1': {
+                byVariant: { 'gid://shopify/ProductVariant/11': { price: 105 } },
+              },
+            },
+          },
+        },
+      ],
+      goal: { primary_metric: 'conversion_rate' },
+      metadata: {
+        experiment_id: 'exp-1',
+        smart_pricing_plan_id: 'SP-249',
+        current_price: 105,
+        price_arms: [{ id: 'control', price: 105 }],
+      },
+      started_at: new Date('2026-09-24T19:19:56Z'),
+      created_at: new Date('2026-09-24T19:19:56Z'),
+      updated_at: new Date('2026-09-24T19:19:56Z'),
+    };
+
+    it('rebuilds the plan in the experiment it was launched from', () => {
+      const plan = planFromOrphanedTest(orphan);
+      expect(plan).toMatchObject({
+        id: 'SP-249',
+        title: 'AAAAA · DZR Minna - 43',
+        product_title: 'DZR Minna - 43',
+        status: 'running',
+        test_id: orphan.id,
+        product_id: 'gid://shopify/Product/1',
+        variant_id: 'gid://shopify/ProductVariant/11',
+        experiment_type: 'price_test',
+        restored_from_test: true,
+        metadata: { experiment_id: 'exp-1', experiment_title: 'AAAAA' },
+      });
+    });
+
+    it('names offer tests as offer tests and keys plan-less tests by test id', () => {
+      const plan = planFromOrphanedTest({
+        ...orphan,
+        type: 'offer',
+        metadata: { experiment_id: 'exp-2' },
+      });
+      expect(plan.id).toBe(`SP-restored-${orphan.id}`);
+      expect(plan.experiment_type).toBe('offer_test');
+    });
+
+    it('looks only at live Smart Pricing tests with no plan, and inserts without overwriting', async () => {
+      query.mockResolvedValueOnce({ rows: [orphan] });
+      query.mockResolvedValue({ rows: [] });
+
+      await restoreOrphanedLivePlans('Demo.myshopify.com');
+
+      const [selectSql, selectParams] = query.mock.calls[0];
+      expect(selectSql).toContain("t.status IN ('running', 'paused')");
+      expect(selectSql).toContain('NOT EXISTS');
+      expect(selectParams[0]).toBe('demo.myshopify.com');
+      const insert = query.mock.calls.find(call => String(call[0]).includes('INSERT INTO'));
+      expect(insert[0]).toContain('ON CONFLICT (shop_domain, plan_id) DO NOTHING');
+      expect(insert[1][1]).toBe('SP-249');
+    });
   });
 });

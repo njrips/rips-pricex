@@ -1,7 +1,9 @@
 import { apiDelete } from '../../../services';
+import { deleteSmartPricingExperiment } from '../../../services/smartPricingApi';
 import { readInboxPlans, writeInboxPlans } from '../smartPricingConstants';
 import { deletePersistedInboxPlan, persistInboxPlansNow } from '../smartPricingInboxPersistence';
 import { collectExperimentTestIds, getClassicExperimentResumeId } from './classicExperimentListActions';
+import { getPlanExperimentId } from './classicExperimentHelpers';
 import { forgetWizardDraftEverywhere } from './classicWizardDraftSync';
 
 export function getClassicExperimentDeleteTargets(experiment) {
@@ -49,6 +51,7 @@ export async function deleteClassicExperimentSynchronized(
   { deleteLinkedTests = true } = {}
 ) {
   const { planIds, testIds } = getClassicExperimentDeleteTargets(experiment);
+  const plans = Array.isArray(experiment?.plans) ? experiment.plans : [];
   const resumeId = getClassicExperimentResumeId(experiment);
   if (!planIds.length) {
     // An unfinished wizard draft: no plans, no linked tests, so the draft
@@ -90,7 +93,7 @@ export async function deleteClassicExperimentSynchronized(
   await forgetWizardDraftEverywhere(shopDomain, resumeId);
 
   try {
-    await persistInboxPlansNow(shopDomain, remaining);
+    await persistInboxPlansNow(shopDomain, remaining, { deletedPlanIds: planIds });
     deletedPlanIds.push(...planIds);
   } catch (persistErr) {
     for (const planId of planIds) {
@@ -103,8 +106,22 @@ export async function deleteClassicExperimentSynchronized(
     }
   }
 
+  // The plans in this browser are not a complete list of the experiment's
+  // tests: a plan can be missing from the local copy while its test runs on.
+  // The server is asked for every test in the experiment, so none of them is
+  // left running behind a deleted row.
+  const experimentIds = [...new Set(plans.map(getPlanExperimentId).filter(Boolean))];
+  if (deleteLinkedTests && experimentIds.length === 1) {
+    try {
+      const swept = await deleteSmartPricingExperiment(shopDomain, experimentIds[0]);
+      deletedTestIds.push(...(swept?.archived_test_ids || []));
+    } catch (err) {
+      errors.push(err?.message || 'Could not delete every test in this experiment.');
+    }
+  }
+
   if (deleteLinkedTests && testIds.length) {
-    for (const testId of testIds) {
+    for (const testId of testIds.filter(id => !deletedTestIds.includes(id))) {
       try {
         await apiDelete(`/tests/${encodeURIComponent(testId)}`);
         deletedTestIds.push(testId);
@@ -118,7 +135,7 @@ export async function deleteClassicExperimentSynchronized(
     deletedPlanIds.length === planIds.length &&
     readInboxPlans(shopDomain).every(plan => !planIdSet.has(plan.id));
   const testsRemoved =
-    !deleteLinkedTests || !testIds.length || deletedTestIds.length === testIds.length;
+    !deleteLinkedTests || testIds.every(id => deletedTestIds.includes(id));
 
   return {
     ok: plansRemoved && testsRemoved && errors.length === 0,

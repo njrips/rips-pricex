@@ -63,8 +63,62 @@ function buildCheckoutEventNamePrefixCondition(alias = 'e') {
   return `LEFT(${alias}.event_name, ${CHECKOUT_EVENT_NAME_PREFIX.length}) = '${CHECKOUT_EVENT_NAME_PREFIX}'`;
 }
 
+/**
+ * Where visitors are counted from. `counted_test_assignments` (migration 010)
+ * holds only the assignments a test counts: every one for a test launched
+ * before exposure tracking, and only shoppers shown the tested price after.
+ * Until that migration has run, the raw table is the answer. A failed probe is
+ * not remembered, so the switch happens once the database can say.
+ */
+let countedAssignmentsSource = 'test_assignments';
+let countedAssignmentsProbe = null;
+let countedAssignmentsCheckedAt = 0;
+const COUNTED_ASSIGNMENTS_RECHECK_MS = 5 * 60 * 1000;
+
+function countedAssignments() {
+  return countedAssignmentsSource;
+}
+
+async function resolveCountedAssignments() {
+  if (countedAssignmentsSource !== 'test_assignments') return;
+  if (!countedAssignmentsProbe) {
+    if (Date.now() - countedAssignmentsCheckedAt < COUNTED_ASSIGNMENTS_RECHECK_MS) return;
+    countedAssignmentsCheckedAt = Date.now();
+    countedAssignmentsProbe = query(
+      "SELECT to_regclass('counted_test_assignments') IS NOT NULL AS ready"
+    )
+      .then(result => {
+        if (result?.rows?.[0]?.ready === true) {
+          countedAssignmentsSource = 'counted_test_assignments';
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        countedAssignmentsProbe = null;
+      });
+  }
+  await countedAssignmentsProbe;
+}
+
+/**
+ * A purchase that counts towards a test's result. Cancelled and fully refunded
+ * orders are out.
+ * So are orders placed after the test stopped: by then every visitor sees the
+ * same price, and letting those orders land on whichever arm the shopper was
+ * once assigned to drags the arms towards each other. The half hour covers
+ * checkouts that were already under way when the test stopped. `stopped_at`
+ * survives a resume, so it is only read while the test is not running.
+ */
 function buildPrimaryConversionCondition(alias = 'e') {
-  return `(${alias}.event_name IS NULL OR NOT (${buildCheckoutEventNamePrefixCondition(alias)}))`;
+  return `((${alias}.event_name IS NULL OR NOT (${buildCheckoutEventNamePrefixCondition(alias)}))
+        AND NOT (COALESCE(${alias}.metadata, '{}'::jsonb) ?| ARRAY['cancelled_at', 'refunded_in_full_at'])
+        AND NOT EXISTS (
+          SELECT 1 FROM tests stopped_test
+          WHERE stopped_test.id = ${alias}.test_id
+            AND stopped_test.status IN ('stopped', 'completed', 'paused', 'archived')
+            AND stopped_test.stopped_at IS NOT NULL
+            AND ${alias}.created_at > stopped_test.stopped_at + INTERVAL '30 minutes'
+        ))`;
 }
 
 class AnalyticsModel {
@@ -149,6 +203,7 @@ class AnalyticsModel {
    * @returns {Promise<Array>} Analytics by variant
    */
   async getTestAnalytics(testId, shopDomain, options = {}) {
+    await resolveCountedAssignments();
     const { conversionWindowDays, conversionUrl, start_date, end_date } = options;
 
     const runQuery = async (device, country) => {
@@ -182,13 +237,13 @@ class AnalyticsModel {
         ta.variant_id,
         ta.variant_name,
         COUNT(DISTINCT ta.user_id) as visitors
-      FROM test_assignments ta
+      FROM ${countedAssignments()} ta
       WHERE ${visitorWhere}
       GROUP BY ta.variant_id, ta.variant_name
     `;
 
       const convJoin =
-        'JOIN test_assignments ta ON ta.test_id = e.test_id AND ta.user_id = e.user_id AND LOWER(TRIM(ta.shop_domain)) = LOWER(TRIM(e.shop_domain)) AND ta.variant_id = e.variant_id';
+        `JOIN ${countedAssignments()} ta ON ta.test_id = e.test_id AND ta.user_id = e.user_id AND LOWER(TRIM(ta.shop_domain)) = LOWER(TRIM(e.shop_domain)) AND ta.variant_id = e.variant_id`;
       const conversionParams = [testId, (shopDomain || '').toLowerCase().trim()];
       let convIdx = 3;
       let convExtra = '';
@@ -349,6 +404,7 @@ class AnalyticsModel {
    * @returns {Promise<Object>} { eventName: { variant_id: { count, sum } } }
    */
   async getSecondaryEventMetrics(testId, shopDomain, eventNames = [], options = {}) {
+    await resolveCountedAssignments();
     if (!eventNames || eventNames.length === 0) {
       return {};
     }
@@ -374,7 +430,7 @@ class AnalyticsModel {
 
     if (device || country) {
       joinClause =
-        'JOIN test_assignments ta ON ta.test_id = e.test_id AND ta.user_id = e.user_id AND LOWER(TRIM(ta.shop_domain)) = LOWER(TRIM(e.shop_domain)) AND ta.variant_id = e.variant_id';
+        `JOIN ${countedAssignments()} ta ON ta.test_id = e.test_id AND ta.user_id = e.user_id AND LOWER(TRIM(ta.shop_domain)) = LOWER(TRIM(e.shop_domain)) AND ta.variant_id = e.variant_id`;
       if (device) {
         conditions.push(`ta.device = $${params.length + 1}`);
         params.push(device);
@@ -715,6 +771,7 @@ class AnalyticsModel {
    * @returns {Promise<Object>} { steps, byVariant: { variant_id: { stepId: count } } }
    */
   async getFunnelMetrics(testId, shopDomain, options = {}) {
+    await resolveCountedAssignments();
     const defaultSteps = [
       { id: 'visitors', label: 'Visitors', type: 'visitors' },
       { id: 'add_to_cart', label: 'Add to Cart', type: 'event', event_name: 'add_to_cart' },
@@ -781,7 +838,7 @@ class AnalyticsModel {
 
     const visitorsSql = `
       SELECT variant_id, variant_name, COUNT(DISTINCT user_id) as count
-      FROM test_assignments ta
+      FROM ${countedAssignments()} ta
       WHERE ${visitorWhere}
       GROUP BY variant_id, variant_name
     `;
@@ -836,7 +893,7 @@ class AnalyticsModel {
       const ctes = [
         `assigned AS (
           SELECT user_id, variant_id, assigned_at
-          FROM test_assignments ta
+          FROM ${countedAssignments()} ta
           WHERE ${visitorWhere}
         )`,
       ];
@@ -987,7 +1044,7 @@ class AnalyticsModel {
       queries.push({
         key: step.id,
         sql: `SELECT e.variant_id, COUNT(DISTINCT e.user_id) as count FROM events e
-          JOIN test_assignments ta ON ta.test_id = e.test_id AND ta.user_id = e.user_id AND LOWER(TRIM(ta.shop_domain)) = LOWER(TRIM(e.shop_domain)) AND ta.variant_id = e.variant_id
+          JOIN ${countedAssignments()} ta ON ta.test_id = e.test_id AND ta.user_id = e.user_id AND LOWER(TRIM(ta.shop_domain)) = LOWER(TRIM(e.shop_domain)) AND ta.variant_id = e.variant_id
           WHERE ${cond.join(' AND ')} GROUP BY e.variant_id`,
         params: p,
       });
@@ -1040,7 +1097,7 @@ class AnalyticsModel {
       queries.push({
         key: conversionStepId,
         sql: `SELECT e.variant_id, COUNT(DISTINCT e.user_id) as count FROM events e
-          JOIN test_assignments ta ON ta.test_id = e.test_id AND ta.user_id = e.user_id AND LOWER(TRIM(ta.shop_domain)) = LOWER(TRIM(e.shop_domain)) AND ta.variant_id = e.variant_id
+          JOIN ${countedAssignments()} ta ON ta.test_id = e.test_id AND ta.user_id = e.user_id AND LOWER(TRIM(ta.shop_domain)) = LOWER(TRIM(e.shop_domain)) AND ta.variant_id = e.variant_id
           WHERE ${cond.join(' AND ')} GROUP BY e.variant_id`,
         params: p,
       });
@@ -1106,6 +1163,7 @@ class AnalyticsModel {
    * @returns {Promise<{ events: Array, total: number }>}
    */
   async getEventsList(testId, shopDomain, options = {}) {
+    await resolveCountedAssignments();
     const {
       limit = 50,
       offset = 0,
@@ -1123,7 +1181,7 @@ class AnalyticsModel {
     let joinClause = '';
     if (device || country) {
       joinClause =
-        'JOIN test_assignments ta ON ta.test_id = e.test_id AND ta.user_id = e.user_id AND LOWER(TRIM(ta.shop_domain)) = LOWER(TRIM(e.shop_domain)) AND ta.variant_id = e.variant_id';
+        `JOIN ${countedAssignments()} ta ON ta.test_id = e.test_id AND ta.user_id = e.user_id AND LOWER(TRIM(ta.shop_domain)) = LOWER(TRIM(e.shop_domain)) AND ta.variant_id = e.variant_id`;
       if (device) {
         conditions.push(`ta.device = $${idx}`);
         params.push(device);
@@ -1202,6 +1260,7 @@ class AnalyticsModel {
    * Get distinct event types and names for a test (for filters)
    */
   async getEventTypesForTest(testId, shopDomain, options = {}) {
+    await resolveCountedAssignments();
     const { start_date, end_date, device, country, variant_id } = options;
     const conditions = ['e.test_id = $1', 'LOWER(TRIM(e.shop_domain)) = LOWER(TRIM($2))'];
     const params = [testId, normalizeShopDomain(shopDomain)];
@@ -1209,7 +1268,7 @@ class AnalyticsModel {
     let joinClause = '';
     if (device || country) {
       joinClause =
-        'JOIN test_assignments ta ON ta.test_id = e.test_id AND ta.user_id = e.user_id AND LOWER(TRIM(ta.shop_domain)) = LOWER(TRIM(e.shop_domain)) AND ta.variant_id = e.variant_id';
+        `JOIN ${countedAssignments()} ta ON ta.test_id = e.test_id AND ta.user_id = e.user_id AND LOWER(TRIM(ta.shop_domain)) = LOWER(TRIM(e.shop_domain)) AND ta.variant_id = e.variant_id`;
       if (device) {
         conditions.push(`ta.device = $${idx}`);
         params.push(device);
@@ -1250,7 +1309,14 @@ class AnalyticsModel {
   }
 
   async getAssignmentCohorts(testId, shopDomain, options = {}) {
+    await resolveCountedAssignments();
     const granularity = options.granularity === 'day' ? 'day' : 'week';
+    // A visitor's day is when they first saw the product. Before migration 010
+    // there is no exposure column, and the assignment is the only date there is.
+    const seenAt =
+      countedAssignments() === 'test_assignments'
+        ? 'ta.assigned_at'
+        : 'COALESCE(ta.exposed_at, ta.assigned_at)';
     const params = [testId, normalizeShopDomain(shopDomain)];
     const assignmentWhere = [
       'ta.test_id = $1',
@@ -1275,40 +1341,40 @@ class AnalyticsModel {
     }
     if (options.start_date) {
       params.push(options.start_date);
-      assignmentWhere.push(`ta.assigned_at >= $${params.length}`);
+      assignmentWhere.push(`${seenAt} >= $${params.length}`);
       conversionWhere.push(`e.created_at >= $${params.length}`);
     }
     if (options.end_date) {
       params.push(options.end_date);
-      assignmentWhere.push(`ta.assigned_at < $${params.length}`);
+      assignmentWhere.push(`${seenAt} < $${params.length}`);
       conversionWhere.push(`e.created_at < $${params.length}`);
     }
 
     const sql = `
       WITH assignment_cohorts AS (
         SELECT
-          date_trunc('${granularity}', ta.assigned_at AT TIME ZONE 'UTC')::date AS cohort_period,
+          date_trunc('${granularity}', ${seenAt} AT TIME ZONE 'UTC')::date AS cohort_period,
           ta.variant_id,
           MAX(ta.variant_name) AS variant_name,
           COUNT(DISTINCT ta.user_id)::integer AS visitors
-        FROM test_assignments ta
+        FROM ${countedAssignments()} ta
         WHERE ${assignmentWhere.join(' AND ')}
-        GROUP BY date_trunc('${granularity}', ta.assigned_at AT TIME ZONE 'UTC')::date, ta.variant_id
+        GROUP BY date_trunc('${granularity}', ${seenAt} AT TIME ZONE 'UTC')::date, ta.variant_id
       ),
       conversion_cohorts AS (
         SELECT
-          date_trunc('${granularity}', ta.assigned_at AT TIME ZONE 'UTC')::date AS cohort_period,
+          date_trunc('${granularity}', ${seenAt} AT TIME ZONE 'UTC')::date AS cohort_period,
           e.variant_id,
           COUNT(DISTINCT e.user_id)::integer AS conversions,
           COALESCE(SUM(e.event_value), 0)::float AS revenue
         FROM events e
-        INNER JOIN test_assignments ta
+        INNER JOIN ${countedAssignments()} ta
           ON ta.test_id = e.test_id
           AND ta.user_id = e.user_id
           AND LOWER(TRIM(ta.shop_domain)) = LOWER(TRIM(e.shop_domain))
           AND ta.variant_id = e.variant_id
         WHERE ${conversionWhere.join(' AND ')}
-        GROUP BY date_trunc('${granularity}', ta.assigned_at AT TIME ZONE 'UTC')::date, e.variant_id
+        GROUP BY date_trunc('${granularity}', ${seenAt} AT TIME ZONE 'UTC')::date, e.variant_id
       )
       SELECT
         ac.cohort_period,
@@ -1355,6 +1421,7 @@ class AnalyticsModel {
    * @returns {Promise<Map<string, Array>>} Map of testId -> [{ variant_id, variant_name, visitors, conversions, revenue }]
    */
   async getBatchVariantMetrics(testIds, shopDomain) {
+    await resolveCountedAssignments();
     if (!testIds || testIds.length === 0) {
       return new Map();
     }
@@ -1365,7 +1432,7 @@ class AnalyticsModel {
     const visitorsSql = `
       SELECT ta.test_id, ta.variant_id, ta.variant_name,
         COUNT(DISTINCT ta.user_id)::int as visitors
-      FROM test_assignments ta
+      FROM ${countedAssignments()} ta
       WHERE LOWER(TRIM(ta.shop_domain)) = LOWER(TRIM($1))
         AND ta.test_id IN (${placeholders})
       GROUP BY ta.test_id, ta.variant_id, ta.variant_name
@@ -1375,7 +1442,7 @@ class AnalyticsModel {
         COUNT(DISTINCT e.user_id)::int as conversions,
         COALESCE(SUM(e.event_value), 0)::float as revenue
       FROM events e
-      INNER JOIN test_assignments ta
+      INNER JOIN ${countedAssignments()} ta
         ON ta.test_id = e.test_id AND ta.user_id = e.user_id
         AND LOWER(TRIM(ta.shop_domain)) = LOWER(TRIM(e.shop_domain))
         AND ta.variant_id = e.variant_id

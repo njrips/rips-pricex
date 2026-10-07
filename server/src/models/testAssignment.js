@@ -6,6 +6,16 @@
 
 const { query } = require('../utils/database');
 
+/**
+ * Two first visits racing each other both insert, and the loser lands here.
+ * Restamping the time on that path moved the visitor to a later day in the
+ * daily cohorts and shortened their conversion window, though nothing about
+ * their assignment changed. The loser keeps the winner's arm too: only new
+ * visitors are saved, so a conflict is always that race, and letting the later
+ * write switch arms would split one visitor's events across two variations.
+ */
+const KEEP_FIRST_ASSIGNED_AT = `COALESCE(test_assignments.assigned_at, EXCLUDED.assigned_at)`;
+
 class TestAssignmentModel {
   /**
    * Get user's variant assignment for a test
@@ -51,9 +61,9 @@ class TestAssignmentModel {
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
       ON CONFLICT (test_id, user_id, shop_domain)
       DO UPDATE SET
-        variant_id = EXCLUDED.variant_id,
-        variant_name = EXCLUDED.variant_name,
-        assigned_at = EXCLUDED.assigned_at,
+        variant_id = test_assignments.variant_id,
+        variant_name = test_assignments.variant_name,
+        assigned_at = ${KEEP_FIRST_ASSIGNED_AT},
         device = COALESCE(EXCLUDED.device, test_assignments.device),
         country = COALESCE(EXCLUDED.country, test_assignments.country)
       RETURNING *
@@ -67,9 +77,9 @@ class TestAssignmentModel {
       VALUES ($1, $2, $3, $4, $5, $6)
       ON CONFLICT (test_id, user_id, shop_domain)
       DO UPDATE SET
-        variant_id = EXCLUDED.variant_id,
-        variant_name = EXCLUDED.variant_name,
-        assigned_at = EXCLUDED.assigned_at
+        variant_id = test_assignments.variant_id,
+        variant_name = test_assignments.variant_name,
+        assigned_at = ${KEEP_FIRST_ASSIGNED_AT}
       RETURNING *
     `;
 

@@ -4,6 +4,7 @@ const {
   flattenCatalogRows,
   calibrateShopConversionRate,
   buildProductQueries,
+  buildProductSearchClause,
 } = require('../catalogMetricsService');
 
 describe('catalogMetricsService', () => {
@@ -100,16 +101,42 @@ describe('catalogMetricsService', () => {
     expect(rows).toHaveLength(0);
   });
 
+  it('carries each product\'s collections onto its rows for the picker', () => {
+    const rows = flattenCatalogRows([
+      {
+        id: 'gid://shopify/Product/1',
+        title: 'Tee',
+        collections: [{ id: 'gid://shopify/Collection/9', title: 'Summer' }],
+        variants: [{ id: 'gid://shopify/ProductVariant/11', price: '20.00', title: 'S' }],
+      },
+    ]);
+    expect(rows[0].collection_ids).toEqual(['gid://shopify/Collection/9']);
+    expect(rows[0].collections).toEqual([{ id: 'gid://shopify/Collection/9', title: 'Summer' }]);
+  });
+
   it('builds collection-scoped product queries', () => {
     expect(
       buildProductQueries({
         focusCollectionIds: ['gid://shopify/Collection/123'],
         productSearch: 'hoodie',
       })
-    ).toEqual(['status:active collection_id:123 title:*hoodie*']);
+    ).toEqual(['status:active collection_id:123 (title:hoodie* OR sku:hoodie*)']);
   });
 
   it('builds a single active catalog query when no collection is set', () => {
-    expect(buildProductQueries({ productSearch: 'tee' })).toEqual(['status:active title:*tee*']);
+    expect(buildProductQueries({ productSearch: 'tee' })).toEqual([
+      'status:active (title:tee* OR sku:tee*)',
+    ]);
+  });
+
+  it('requires every searched word on the title or SKU and strips query syntax', () => {
+    expect(buildProductSearchClause('red shirt')).toBe(
+      '(title:red* OR sku:red*) (title:shirt* OR sku:shirt*)'
+    );
+    expect(buildProductSearchClause('Tee: (Large) -sale OR vendor:x')).toBe(
+      '(title:Tee* OR sku:Tee*) (title:Large* OR sku:Large*) (title:sale* OR sku:sale*) (title:vendor* OR sku:vendor*) (title:x* OR sku:x*)'
+    );
+    expect(buildProductSearchClause('  ')).toBe('');
+    expect(buildProductQueries({ productSearch: '***' })).toEqual(['status:active']);
   });
 });

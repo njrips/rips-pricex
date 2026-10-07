@@ -26,12 +26,14 @@ import {
   priceOverrideKey,
   productGroupKey,
   resolvePricingRows,
+  limitSelectionToProducts,
   variantIdsMatch,
   resolveMaxPriceChangeRaise,
   resolveRaiseForAttempt,
   splitTitleParts,
 } from './productsStepReadiness';
 import {
+  buildAllProductsCapHelp,
   buildAllProductsSelectionCountLabel,
   buildCatalogTruncatedHelp,
   buildManualSelectionCountLabel,
@@ -395,7 +397,11 @@ export default function ProductsPricingStepPanel({
     const missing = siblingIds.filter(id => !isSelectedId(id));
     if (!missing.length) return;
     const existing = (selectedIds || []).map(id => String(id));
-    const next = Array.from(new Set([...existing, ...missing.map(String)])).slice(0, maxSelection);
+    const next = limitSelectionToProducts(
+      opportunities,
+      [...existing, ...missing.map(String)],
+      maxSelection
+    );
     const unchanged =
       next.length === existing.length && next.every((id, index) => id === existing[index]);
     if (unchanged) return;
@@ -798,8 +804,8 @@ export default function ProductsPricingStepPanel({
   // Both modes stop at the cap, and both used to do it in silence: "All
   // products" quietly priced the first N and Select all just went grey. If the
   // catalog is bigger than one experiment holds, the step has to say so.
-  const productsOverCap = availableProductCount > maxSelection;
-  const productsLeftOut = productsOverCap ? availableProductCount - maxSelection : 0;
+  const allProductsCapHelp =
+    pickMode === 'all' ? buildAllProductsCapHelp({ availableProductCount, maxSelection }) : '';
   const withheldCount = Number(withheldByOtherTests?.total) || 0;
   const withheldDetail = buildWithheldDetail(withheldByOtherTests);
   const catalogTruncatedHelp = buildCatalogTruncatedHelp({
@@ -988,11 +994,8 @@ export default function ProductsPricingStepPanel({
         <p className={styles.help}>{productsStepEmptyMessage}</p>
       ) : null}
 
-      {productsOverCap && !loading && !loadError ? (
-        <p className={styles.help}>
-          One test covers up to {maxSelection} products, so {productsLeftOut} of your{' '}
-          {availableProductCount} available here are left out. Run a second test for the rest.
-        </p>
+      {allProductsCapHelp && !loading && !loadError ? (
+        <p className={styles.help}>{allProductsCapHelp}</p>
       ) : null}
 
       {/* A big catalog is loaded in part. Saying which part beats letting a

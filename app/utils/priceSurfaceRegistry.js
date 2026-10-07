@@ -340,26 +340,6 @@ export function inferPriceSurfaceFromHref(href) {
   }
 }
 
-export function resolveListingPriceSurfaceKeys(pathname) {
-  const primary = inferPriceSurfaceFromPath(pathname);
-  if (primary === 'plp') {
-    return ['plp', 'recommendation', 'global'];
-  }
-  if (primary === 'search') {
-    return ['search', 'recommendation', 'global'];
-  }
-  if (primary === 'home') {
-    return ['home', 'recommendation', 'global'];
-  }
-  if (primary === 'pdp') {
-    return ['pdp', 'quickview', 'recommendation', 'global'];
-  }
-  if (primary === 'cart') {
-    return ['cart', 'global'];
-  }
-  return ['plp', 'search', 'home', 'recommendation', 'global'];
-}
-
 export function inferPriceSurfaceRoleFromPickerHints({ selector, roleHint } = {}) {
   const hintedRole = normalizePriceSurfaceRole(String(roleHint || '').trim(), '');
   if (PRICE_SURFACE_ROLES.includes(hintedRole)) {

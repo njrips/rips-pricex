@@ -210,6 +210,63 @@ describe('smartPricingAiSuggestService', () => {
     expect(result.fallback_pair_count).toBe(0);
   });
 
+  describe("the model's best price", () => {
+    const tee = {
+      variants: [{ variant_id: 'v1', title: 'Tee', current_price: 40, margin_percent: 60 }],
+      minPct: 10,
+      maxPct: 20,
+      guardrails: { min_margin_percent: 35, max_price_change_percent: 20 },
+    };
+
+    beforeEach(() => hasOpenAiKey.mockReturnValue(true));
+
+    it('puts a single variation at the price the model expects to earn most', async () => {
+      chatJson.mockResolvedValue({ bands: [{ v: 0, lo: 10, hi: 20, best: 18 }] });
+      const result = await suggestPrices({ ...tee, arms: [{ id: 'var_a' }] });
+
+      expect(result.suggestions[0].ai_best_delta_percent).toBe(18);
+      // The middle of the band would be +15%.
+      expect(result.suggestions[0].delta_percent).toBeGreaterThan(16);
+      expect(result.suggestions[0].delta_percent).toBeLessThanOrEqual(20);
+    });
+
+    it('keeps the best price inside the band', async () => {
+      chatJson.mockResolvedValue({ bands: [{ v: 0, lo: 10, hi: 20, best: 45 }] });
+      const result = await suggestPrices({ ...tee, arms: [{ id: 'var_a' }] });
+
+      expect(result.suggestions[0].ai_best_delta_percent).toBe(20);
+      expect(result.suggestions[0].delta_percent).toBeLessThanOrEqual(20);
+    });
+
+    it('still spreads several variations across the band', async () => {
+      chatJson.mockResolvedValue({ bands: [{ v: 0, lo: 10, hi: 20, best: 18 }] });
+      const result = await suggestPrices({ ...tee, arms: [{ id: 'var_a' }, { id: 'var_b' }] });
+
+      const [a, b] = result.suggestions;
+      expect(a.price).not.toBe(b.price);
+      expect(a.ai_best_delta_percent).toBe(18);
+    });
+
+    it('works as before when the model gives no best price', async () => {
+      chatJson.mockResolvedValue({ bands: [{ v: 0, lo: 10, hi: 20 }] });
+      const result = await suggestPrices({ ...tee, arms: [{ id: 'var_a' }] });
+
+      expect(result.suggestions[0].ai_best_delta_percent).toBeNull();
+      expect(result.source).toBe('openai');
+    });
+
+    it('asks for general pricing knowledge without inventing market data', async () => {
+      chatJson.mockResolvedValue({ bands: [{ v: 0, lo: 10, hi: 20, best: 15 }] });
+      await suggestPrices({ ...tee, arms: [{ id: 'var_a' }] });
+      const { systemPrompt } = chatJson.mock.calls[0][0];
+
+      expect(systemPrompt).toContain('"best"');
+      expect(systemPrompt).toMatch(/beyond this shop's data/i);
+      expect(systemPrompt).toMatch(/Never quote or invent competitor prices/);
+      expect(systemPrompt).toMatch(/measured shop data wins/);
+    });
+  });
+
   it('suggestPrices asks for enough output tokens to answer the whole request', async () => {
     hasOpenAiKey.mockReturnValue(true);
     chatJson.mockResolvedValue({ bands: [{ v: 0, lo: 10, hi: 20 }] });
@@ -232,20 +289,24 @@ describe('smartPricingAiSuggestService', () => {
     // A fixed ceiling used to cut the reply in half for a large request: the
     // JSON came back truncated, parsed to nothing, and the merchant silently
     // got the deterministic spread while still paying for the call.
-    const large = await askFor(40);
-    const small = await askFor(10);
+    const full = await askFor(20);
+    const small = await askFor(5);
 
-    expect(large).toBeGreaterThan(900);
+    expect(full).toBeGreaterThan(900);
     // Scales with the request rather than being one figure for every size.
-    expect(large).toBeGreaterThan(small * 2);
+    expect(full).toBeGreaterThan(small * 2);
+    expect(full).toBeLessThan(4000);
   });
 
   it('suggestPrices says how many prices the model did not return', async () => {
     hasOpenAiKey.mockReturnValue(true);
-    chatJson.mockResolvedValue({
-      summary: 'Raised the tee.',
-      bands: [{ v: 0, lo: 10, hi: 15 }],
-    });
+    chatJson
+      .mockResolvedValueOnce({
+        summary: 'Raised the tee.',
+        bands: [{ v: 0, lo: 10, hi: 15 }],
+      })
+      // Asked again, the mug still gets no answer.
+      .mockResolvedValue({ bands: [] });
     const result = await suggestPrices({
       variants: [
         { variant_id: 'v1', title: 'Tee', current_price: 20, margin_percent: 50 },
@@ -258,7 +319,145 @@ describe('smartPricingAiSuggestService', () => {
     expect(result.ai_pair_count).toBe(1);
     expect(result.fallback_pair_count).toBe(1);
     expect(result.summary).toContain('spread');
+    expect(result.summary).toMatch(/1 product the AI did not answer/);
     expect(result.suggestions).toHaveLength(2);
+  });
+
+  /**
+   * Every product the merchant selected is priced by the model.
+   *
+   * One call used to carry the whole selection and stop at 45 products, so a
+   * merchant who picked 100 got AI prices on fewer than half and the even
+   * spread on the rest.
+   */
+  describe('a large selection', () => {
+    const answerEveryProduct = ({ userPrompt }) =>
+      Promise.resolve({
+        bands: JSON.parse(userPrompt).products.map(p => ({ v: p.v, lo: 10, hi: 16, best: 12 })),
+      });
+    const products = count =>
+      Array.from({ length: count }, (_, i) => ({
+        variant_id: `v${i}`,
+        product_id: `p${i}`,
+        title: `Product ${i}`,
+        current_price: 20 + i,
+        margin_percent: 55,
+      }));
+    const sentTitles = () =>
+      chatJson.mock.calls.flatMap(([call]) => JSON.parse(call.userPrompt).products.map(p => p.title));
+
+    beforeEach(() => hasOpenAiKey.mockReturnValue(true));
+
+    it('sends every product to the model, in calls of at most 20', async () => {
+      chatJson.mockImplementation(answerEveryProduct);
+      const result = await suggestPrices({ variants: products(100), arms: [{ id: 'a' }], minPct: 10, maxPct: 20 });
+
+      expect(chatJson).toHaveBeenCalledTimes(5);
+      chatJson.mock.calls.forEach(([call]) =>
+        expect(JSON.parse(call.userPrompt).products.length).toBeLessThanOrEqual(20)
+      );
+      expect(new Set(sentTitles()).size).toBe(100);
+      expect(result.ai_product_count).toBe(100);
+      expect(result.fallback_pair_count).toBe(0);
+      expect(result.suggestions.every(s => s.from_ai)).toBe(true);
+    });
+
+    it('runs the calls side by side rather than one after another', async () => {
+      let inFlight = 0;
+      let most = 0;
+      chatJson.mockImplementation(async args => {
+        inFlight += 1;
+        most = Math.max(most, inFlight);
+        await new Promise(resolve => setTimeout(resolve, 10));
+        inFlight -= 1;
+        return answerEveryProduct(args);
+      });
+      await suggestPrices({ variants: products(60), arms: [{ id: 'a' }], minPct: 10, maxPct: 20 });
+
+      expect(most).toBe(3);
+    });
+
+    it('asks again about products a reply left out', async () => {
+      chatJson
+        .mockResolvedValueOnce({ bands: [{ v: 0, lo: 10, hi: 16 }] })
+        .mockImplementation(answerEveryProduct);
+      const result = await suggestPrices({ variants: products(2), arms: [{ id: 'a' }], minPct: 10, maxPct: 20 });
+
+      expect(chatJson).toHaveBeenCalledTimes(2);
+      expect(JSON.parse(chatJson.mock.calls[1][0].userPrompt).products.map(p => p.title)).toEqual([
+        'Product 1',
+      ]);
+      expect(result.fallback_pair_count).toBe(0);
+    });
+
+    it('leaves retrying to its own pass and keeps each call inside the time budget', async () => {
+      chatJson.mockImplementation(answerEveryProduct);
+      await suggestPrices({ variants: products(1), arms: [{ id: 'a' }], minPct: 10, maxPct: 20 });
+
+      expect(chatJson.mock.calls[0][0].maxRetries).toBe(0);
+      expect(chatJson.mock.calls[0][0].timeoutMs).toBeLessThanOrEqual(20000);
+    });
+
+    it("does not let one reply's sentence speak for products it never saw", async () => {
+      chatJson.mockImplementation(async args => ({
+        ...(await answerEveryProduct(args)),
+        summary: 'Raise the hoodie.',
+      }));
+      const result = await suggestPrices({ variants: products(30), arms: [{ id: 'a' }], minPct: 10, maxPct: 20 });
+
+      expect(result.summary).not.toContain('hoodie');
+      expect(result.summary).toMatch(/for 30 products/);
+    });
+  });
+
+  describe('a product with several variants', () => {
+    const sizes = ['S', 'M', 'L'].map((size, i) => ({
+      variant_id: `tee-${size}`,
+      product_id: 'tee',
+      title: 'Tee',
+      current_price: 20 + i * 2,
+      margin_percent: 50 + i * 5,
+      units_sold_30d: 10 * (i + 1),
+    }));
+
+    beforeEach(() => hasOpenAiKey.mockReturnValue(true));
+
+    it('is one entry for the model, standing for every variant', async () => {
+      chatJson.mockResolvedValue({ bands: [{ v: 0, lo: 10, hi: 16 }] });
+      await suggestPrices({ variants: sizes, arms: [{ id: 'a' }], minPct: 10, maxPct: 20 });
+
+      const sent = JSON.parse(chatJson.mock.calls[0][0].userPrompt).products;
+      expect(sent).toHaveLength(1);
+      expect(sent[0].variant_count).toBe(3);
+      expect(sent[0].monthly_units).toBe(60);
+      expect(sent[0].current_price).toBe(22);
+      expect(chatJson.mock.calls[0][0].systemPrompt).toMatch(/variant_count above 1/);
+    });
+
+    it('gives every variant the same range, priced from its own price', async () => {
+      chatJson.mockResolvedValue({ bands: [{ v: 0, lo: 10, hi: 16 }] });
+      const result = await suggestPrices({ variants: sizes, arms: [{ id: 'a' }], minPct: 10, maxPct: 20 });
+
+      expect(result.suggestions).toHaveLength(3);
+      expect(new Set(result.suggestions.map(s => JSON.stringify(s.ai_band))).size).toBe(1);
+      result.suggestions.forEach((s, i) => expect(s.price).toBeGreaterThan(sizes[i].current_price));
+      expect(result.fallback_pair_count).toBe(0);
+    });
+
+    it('never merges rows that have no product id', async () => {
+      chatJson.mockResolvedValue({ bands: [{ v: 0, lo: 10, hi: 16 }, { v: 1, lo: 10, hi: 16 }] });
+      await suggestPrices({
+        variants: [
+          { variant_id: 'a', title: 'Tee', current_price: 20 },
+          { variant_id: 'b', title: 'Tee', current_price: 20 },
+        ],
+        arms: [{ id: 'a' }],
+        minPct: 10,
+        maxPct: 20,
+      });
+
+      expect(JSON.parse(chatJson.mock.calls[0][0].userPrompt).products).toHaveLength(2);
+    });
   });
 
   it('suggestPrices ignores a row position it never sent', async () => {
@@ -423,7 +622,36 @@ describe('what the price suggestion prompt asks for', () => {
     await suggestPrices(oneProduct);
     const { systemPrompt } = chatJson.mock.calls[0][0];
 
-    expect(systemPrompt).toMatch(/margin_percent null[\s\S]*unknown rather than good/);
+    expect(systemPrompt).toMatch(/margin_percent null\) means no cost was recorded: the margin is unknown rather than good/);
+  });
+
+  it('tells the model what the test is judged on, in words', async () => {
+    const promptFor = async objective => {
+      chatJson.mockClear();
+      await suggestPrices({ ...oneProduct, objective });
+      return chatJson.mock.calls[0][0].systemPrompt;
+    };
+
+    expect(await promptFor('revenue_per_visitor')).toMatch(/judged on revenue per visitor/);
+    expect(await promptFor('conversion_rate')).toMatch(/judged on conversion rate/);
+    expect(await promptFor('aov')).toMatch(/judged on average order value/);
+    // An unknown goal is still named rather than dropped.
+    expect(await promptFor('custom_goal')).toMatch(/judged on custom_goal\./);
+  });
+
+  it('only names fields the model is actually sent', async () => {
+    await suggestPrices(oneProduct);
+    const { systemPrompt, userPrompt } = chatJson.mock.calls[0][0];
+    const sentFields = Object.keys(JSON.parse(userPrompt).products[0]);
+    const named = [
+      ...new Set(systemPrompt.match(/\b[a-z]+(?:_[a-z0-9]+)+\b/g) || []),
+    ].filter(word => !['max_price_change_percent'].includes(word));
+    const productFieldLike = named.filter(word =>
+      /(_tier|_units|_data|_signal|_score|_scenario|_hint|_direction|_price|_percent|_type|_\d+d)$/.test(word)
+    );
+
+    expect(productFieldLike).toEqual(expect.arrayContaining(['margin_tier', 'heuristic_direction']));
+    productFieldLike.forEach(field => expect(sentFields).toContain(field));
   });
 
   it('distinguishes a product with no sales from one with no sales data', async () => {
@@ -670,7 +898,7 @@ describe('a band that may lower the price', () => {
     await suggestPrices(eitherWayProduct);
     const { systemPrompt } = chatJson.mock.calls[0][0];
 
-    expect(systemPrompt).toMatch(/Never propose a cut on a product whose margin_percent is thin or null/i);
+    expect(systemPrompt).toMatch(/Never propose a cut when margin_tier is thin or unknown/i);
   });
 
   it('says the direction is the model to choose only when it is', async () => {

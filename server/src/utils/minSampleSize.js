@@ -1,6 +1,7 @@
 /**
  * Merchant-configured per-variation floors for calling a result.
- * Only applied when a value was stored on the test or plan — do not invent 5000.
+ * The visitor floor applies only when a value was stored on the test or plan —
+ * do not invent 5000. The conversion floor below always applies.
  */
 
 /**
@@ -77,7 +78,6 @@ function applyMinSampleSizeGate(significance, variants = [], minSampleSize, minC
   const requiredVisitors = firstPositiveInt(minSampleSize);
   const requestedConversions = firstPositiveInt(minConversions);
   const base = significance && typeof significance === 'object' ? { ...significance } : {};
-  if (!requiredVisitors && !requestedConversions) return base;
 
   const requiredConversions = Math.max(
     requestedConversions || 0,

@@ -19,15 +19,7 @@ import {
 } from './variationsStepHelpers';
 import { isOfferExperimentType } from './offerSelection';
 
-export {
-  createDefaultVariations,
-  getVariationsStepContinueState,
-  nextChallengerLetter,
-  setVariationTraffic,
-  splitEvenly,
-  trafficRemaining,
-  trafficTotal,
-} from './variationsStepHelpers';
+export { createDefaultVariations } from './variationsStepHelpers';
 
 /** Whole numbers up to 100; anything after a decimal point is dropped. */
 function percentDraft(raw) {

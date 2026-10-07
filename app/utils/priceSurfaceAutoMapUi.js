@@ -20,6 +20,7 @@ export function summarizeAutoMapResult(result) {
   const missing = surfaces.filter(row => row.status === 'missing');
   return {
     matchedCount: matched.length,
+    verifiedCount: matched.filter(row => row.verification === 'price_match').length,
     ambiguousCount: ambiguous.length,
     missingCount: missing.length,
     total: surfaces.length,
@@ -53,13 +54,6 @@ const ROLE_FRIENDLY = {
   savings: 'Savings label',
 };
 
-/** Rows to show in the simplified modal (gaps only unless technical expand). */
-export function filterAutoMapModalSurfaces(surfaces = [], { showTechnical = false } = {}) {
-  const list = Array.isArray(surfaces) ? surfaces : [];
-  if (showTechnical) return list;
-  return list.filter(row => row.status === 'missing' || row.status === 'ambiguous');
-}
-
 export function formatAutoMapRowLabel(surface, role, surfaceLabels = {}) {
   const place =
     surfaceLabels[surface] ||
@@ -70,81 +64,85 @@ export function formatAutoMapRowLabel(surface, role, surfaceLabels = {}) {
   return `${place} · ${kind}`;
 }
 
-export function buildAutoMapModalIntro(result, summary) {
-  const themeName = result?.theme?.name ? String(result.theme.name) : '';
-  const themeBit = themeName ? ` on theme “${themeName}”` : '';
-  const scanned = Number(result?.theme_files?.scanned) || 0;
-  const fileBit = scanned
-    ? ` Read ${scanned} theme file${scanned === 1 ? '' : 's'} and`
-    : '';
-  const pages =
-    'your product, collection, cart, home, and search pages';
+/** Badge for one row: found (verified or not), needs a check, or not found. */
+export function autoMapRowBadge(row) {
+  if (row?.status === 'matched' && String(row.selector || '').trim()) {
+    return row.verification === 'price_match'
+      ? { tone: 'success', label: 'Verified' }
+      : { tone: 'info', label: 'Found' };
+  }
+  if (row?.status === 'ambiguous') {
+    return { tone: 'attention', label: 'Check' };
+  }
+  return { tone: undefined, label: 'Not found' };
+}
 
-  let body = `Priceify${fileBit} opened ${pages} on your live storefront${themeBit} to find where prices appear.`;
-  const { matchedCount, missingCount, ambiguousCount } = summary || {};
-
-  if (matchedCount && !missingCount && !ambiguousCount) {
-    return `${body} Everything we checked matched — you can save in one step.`;
+/** One-line headline for the scan result. */
+export function buildAutoMapHeadline(summary) {
+  const { matchedCount = 0, total = 0 } = summary || {};
+  if (!total) return 'No price locations were scanned.';
+  if (matchedCount === total) {
+    return `Found all ${total} price locations on your store.`;
   }
   if (matchedCount) {
-    body += ` ${matchedCount} location${matchedCount === 1 ? ' is' : 's are'} ready`;
-    if (missingCount || ambiguousCount) {
-      const gaps = missingCount + ambiguousCount;
-      body += `; ${gaps} still need Pick on your storefront.`;
-    } else {
-      body += '.';
-    }
-    return body;
+    return `Found ${matchedCount} of ${total} price locations on your store.`;
   }
-  return `${body} We could not auto-locate prices yet — use Pick on the rows below.`;
+  return 'We could not find prices automatically. Pick them on your store instead.';
+}
+
+/** What the scan compared against, so "Verified" has a clear meaning. */
+export function buildAutoMapCheckedLine(result) {
+  const base = buildAutoMapCheckedBase(result);
+  const aiCount = Array.isArray(result?.ai_assisted_slots) ? result.ai_assisted_slots.length : 0;
+  if (!aiCount) return base;
+  return `${base} AI helped choose ${aiCount} location${aiCount === 1 ? '' : 's'} that the price check could not settle.`;
+}
+
+function buildAutoMapCheckedBase(result) {
+  const check = result?.price_check || {};
+  const title = check.product_title ? `“${check.product_title}”` : 'a sample product';
+  if (check.product) {
+    const pages = ['product page'];
+    if (check.listing) pages.push('collection, home and search pages');
+    if (check.cart) pages.push('cart');
+    const list =
+      pages.length > 1 ? `${pages.slice(0, -1).join(', ')} and ${pages[pages.length - 1]}` : pages[0];
+    return `Verified means the price shown on your ${list} matched the real price of ${title}.`;
+  }
+  return 'We read your live storefront pages and theme files to find where prices appear.';
 }
 
 export function friendlyGapReason(row) {
-  if (row?.status === 'ambiguous') {
-    return 'More than one price matched here. Pick the right one on your storefront, or choose an alternative below.';
-  }
   const probe = String(row?.probe?.reason || '').replace(/_/g, ' ');
   if (/password/i.test(probe) || /password/i.test(String(row?.rationale || ''))) {
-    return 'Your storefront is password-protected. Enter the password above, then scan again.';
+    return 'Your storefront is password-protected. Enter the password, then scan again.';
+  }
+  if (row?.status === 'ambiguous') {
+    return 'A price was found here, but it did not match your product. Pick it on your store to be sure.';
+  }
+  if (row?.verification === 'not_on_sale') {
+    return 'The sample product is not on sale, so there was no compare-at price to find.';
   }
   if (probe) {
-    return 'This page could not be loaded for a live check. Try Pick on your storefront instead.';
+    return 'This page could not be loaded. Pick the price on your store instead.';
   }
-  return (
-    row?.rationale ||
-    'No verified price found on this page. Pick the price on your storefront to map it.'
-  );
+  return 'No price found on this page. Pick it on your store if this page shows prices.';
 }
 
-export function autoMapPrimaryActionLabel(result, acceptedCount) {
+/** Second line under a row label. */
+export function describeAutoMapRow(row) {
+  if (row?.status === 'matched' && String(row.selector || '').trim()) {
+    const sample = String(row.sample_text || '').trim();
+    if (row.verification === 'price_match') {
+      return sample ? `Shows ${sample}, which matches your product.` : 'Matches your product price.';
+    }
+    return sample ? `Shows ${sample}` : 'Found on the page.';
+  }
+  return friendlyGapReason(row);
+}
+
+export function autoMapPrimaryActionLabel(_result, acceptedCount) {
   const n = Number(acceptedCount) || 0;
   if (n === 0) return 'Nothing to save yet';
-  if (result?.ready_to_save) {
-    return `Save ${n} location${n === 1 ? '' : 's'}`;
-  }
-  if (n > 0) {
-    return `Add ${n} to price table`;
-  }
-  return 'Add to price table';
-}
-
-export function autoMapModalIntroTooltip(result) {
-  const parts = [];
-  if (result?.theme?.name) {
-    parts.push(
-      `Theme: ${result.theme.name} (${result.confidence || 'unknown'} confidence).`
-    );
-  }
-  if (result?.rationale) parts.push(String(result.rationale));
-  if (result?.theme_files?.scanned) {
-    parts.push(
-      `Scanned ${result.theme_files.scanned} theme file${
-        result.theme_files.scanned === 1 ? '' : 's'
-      } for price snippets.`
-    );
-  }
-  if (result?.ai_enabled) {
-    parts.push('AI ranking chose among live-verified selectors (never invents CSS).');
-  }
-  return parts.join(' ') || 'Live storefront pages were probed; only selectors found on real HTML are proposed.';
+  return `Save ${n} location${n === 1 ? '' : 's'}`;
 }

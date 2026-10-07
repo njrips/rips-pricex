@@ -8,6 +8,9 @@ const logger = require('../../utils/logger');
 const {
   isStaffEmail,
   normalizeStaffEmail,
+  staffLoginBlocked,
+  recordStaffLoginFailure,
+  clearStaffLoginFailures,
 } = require('./staffAuth');
 const {
   isSupportMailerConfigured,
@@ -29,12 +32,13 @@ function maskEmail(email) {
   return value ? `${value.slice(0, 3)}…` : '';
 }
 
+// The stub writes the code to the logs, so production never uses it.
 function shouldStubStaffLoginMail() {
+  if (process.env.NODE_ENV === 'production') return false;
   const stub = String(process.env.RIPSPRICEX_STAFF_LOGIN_STUB || '').toLowerCase();
   if (stub === 'true' || stub === '1' || stub === 'on') return true;
   if (stub === 'false' || stub === '0' || stub === 'off') return false;
-  if (isSupportMailerConfigured()) return false;
-  return process.env.NODE_ENV !== 'production';
+  return !isSupportMailerConfigured();
 }
 
 function runQuery(sql, params, deps = {}) {
@@ -150,10 +154,17 @@ async function requestStaffLoginCode(email, deps = {}) {
   return { ok: true, email: normalized, sent: true, message: SENT_MESSAGE };
 }
 
+// The caller's per-client limit keys on X-Forwarded-For, which a client can set,
+// so wrong guesses are also counted against the email being signed in.
 async function verifyStaffLoginCode(email, code, deps = {}) {
   const normalized = normalizeStaffEmail(email);
   if (!normalized || !isStaffEmail(normalized)) return null;
-  return consumeCode(normalized, code, deps);
+  const emailKey = `email:${normalized}`;
+  if (staffLoginBlocked(emailKey)) return null;
+  const payload = await consumeCode(normalized, code, deps);
+  if (payload) clearStaffLoginFailures(emailKey);
+  else recordStaffLoginFailure(emailKey);
+  return payload;
 }
 
 module.exports = {

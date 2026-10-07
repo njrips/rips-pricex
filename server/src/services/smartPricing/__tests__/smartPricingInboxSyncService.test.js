@@ -66,4 +66,15 @@ describe('smartPricingInboxSyncService', () => {
       })
     ).toBe('completed');
   });
+
+  it('keeps a half-published auto-apply open so it can be applied again', () => {
+    const test = {
+      status: 'stopped',
+      personalization_mode: null,
+      goal: { auto_decision: 'challenger', auto_apply: { published: false, error_count: 3 } },
+    };
+    expect(resolveInboxPlanStatus(test, { sampleReady: true, significant: true })).toBe(
+      'winner_ready'
+    );
+  });
 });

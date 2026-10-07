@@ -35,12 +35,33 @@ const THEME_FILE_ALLOWLIST = Object.freeze([
   'assets/section-main-product.css',
 ]);
 
+/** `files(filenames:)` accepts `*` wildcards, so one call finds price files in any theme size. */
+const THEME_FILE_DISCOVERY_PATTERNS = Object.freeze([
+  'snippets/*price*',
+  'snippets/*card*',
+  'snippets/*cart*',
+  'snippets/*money*',
+  'blocks/*price*',
+  'blocks/*card*',
+  'sections/*product*',
+  'sections/*cart*',
+  'sections/*collection*',
+  'sections/*search*',
+  'assets/*price*.css',
+  'assets/*card*.css',
+  'assets/*cart*.css',
+]);
+
 const THEME_FILES_QUERY = `
-  query ripxThemePriceFiles($themeId: ID!, $filenames: [String!]!) {
+  query ripxThemePriceFiles($themeId: ID!, $filenames: [String!]!, $cursor: String) {
     theme(id: $themeId) {
       id
       name
-      files(filenames: $filenames) {
+      files(filenames: $filenames, first: 50, after: $cursor) {
+        pageInfo {
+          hasNextPage
+          endCursor
+        }
         nodes {
           filename
           contentType
@@ -62,9 +83,9 @@ const THEME_FILES_QUERY = `
 `;
 
 const THEME_FILE_LIST_QUERY = `
-  query ripxThemeFileList($themeId: ID!, $cursor: String) {
+  query ripxThemeFileList($themeId: ID!, $patterns: [String!]!, $cursor: String) {
     theme(id: $themeId) {
-      files(first: 50, after: $cursor) {
+      files(filenames: $patterns, first: 250, after: $cursor) {
         nodes {
           filename
         }
@@ -92,6 +113,24 @@ function uniqueFilenames(list) {
   return out;
 }
 
+function themeFileRelevance(filename) {
+  const f = String(filename || '').toLowerCase();
+  let score = THEME_FILE_ALLOWLIST.includes(f) ? 40 : 0;
+  if (isPriceRelatedFilename(f)) score += 30;
+  if (/price|money/.test(f)) score += 25;
+  if (/main-product|main-cart|cart-item|card-product|product-card/.test(f)) score += 20;
+  if (/card|cart|collection|search/.test(f)) score += 8;
+  if (f.endsWith('.css')) score -= 6;
+  return score;
+}
+
+/** Most price-relevant first, so the 50-name fetch cap drops the least useful files. */
+function rankThemeFilenames(list) {
+  return [...list].sort(
+    (a, b) => themeFileRelevance(b) - themeFileRelevance(a) || String(a).localeCompare(String(b))
+  );
+}
+
 function textBody(node) {
   const body = node?.body;
   if (!body || typeof body !== 'object') return '';
@@ -102,7 +141,7 @@ async function listPriceRelatedThemeFilenames(shopDomain, accessToken, themeGid)
   const found = [];
   let cursor = null;
   for (let page = 0; page < 4; page += 1) {
-    const variables = { themeId: themeGid };
+    const variables = { themeId: themeGid, patterns: [...THEME_FILE_DISCOVERY_PATTERNS] };
     if (cursor) {
       variables.cursor = cursor;
     }
@@ -116,7 +155,7 @@ async function listPriceRelatedThemeFilenames(shopDomain, accessToken, themeGid)
     const nodes = Array.isArray(connection?.nodes) ? connection.nodes : [];
     nodes.forEach(node => {
       const filename = String(node?.filename || '').replace(/\\/g, '/');
-      if (isPriceRelatedFilename(filename)) {
+      if (/\.(liquid|css)$/i.test(filename)) {
         found.push(filename);
       }
     });
@@ -142,16 +181,29 @@ async function fetchAllowlistedThemeFiles(shopDomain, accessToken, themeId) {
       message: error?.message || String(error),
     });
   }
-  const filenames = uniqueFilenames([...THEME_FILE_ALLOWLIST, ...discovered]);
+  // Discovered names all exist, so they replace allowlist guesses that may not;
+  // the allowlist is the fallback when discovery fails.
+  const filenames = discovered.length
+    ? uniqueFilenames(rankThemeFilenames(discovered))
+    : uniqueFilenames(THEME_FILE_ALLOWLIST);
   try {
-    const response = await shopifyService.requestAdminGraphql(
-      shopDomain,
-      accessToken,
-      THEME_FILES_QUERY,
-      { themeId: gid, filenames }
-    );
-    const connection = response?.data?.theme?.files;
-    const nodes = Array.isArray(connection?.nodes) ? connection.nodes : [];
+    const nodes = [];
+    const userErrors = [];
+    let cursor = null;
+    // Shopify may return fewer files than asked to stay under its payload limit.
+    for (let page = 0; page < 4; page += 1) {
+      const response = await shopifyService.requestAdminGraphql(
+        shopDomain,
+        accessToken,
+        THEME_FILES_QUERY,
+        cursor ? { themeId: gid, filenames, cursor } : { themeId: gid, filenames }
+      );
+      const connection = response?.data?.theme?.files;
+      if (Array.isArray(connection?.nodes)) nodes.push(...connection.nodes);
+      if (Array.isArray(connection?.userErrors)) userErrors.push(...connection.userErrors);
+      if (!connection?.pageInfo?.hasNextPage || !connection?.pageInfo?.endCursor) break;
+      cursor = connection.pageInfo.endCursor;
+    }
     const files = nodes
       .map(node => ({
         filename: String(node?.filename || '').replace(/\\/g, '/'),
@@ -167,7 +219,7 @@ async function fetchAllowlistedThemeFiles(shopDomain, accessToken, themeId) {
       scanned: files.length,
       requested: filenames.length,
       discovered: discovered.length,
-      userErrors: Array.isArray(connection?.userErrors) ? connection.userErrors : [],
+      userErrors,
     };
   } catch (error) {
     logger.warn('Theme file scan failed', {
@@ -202,6 +254,8 @@ async function scanThemePriceFiles(shopDomain, accessToken, themeId) {
 
 module.exports = {
   THEME_FILE_ALLOWLIST,
+  THEME_FILE_DISCOVERY_PATTERNS,
+  rankThemeFilenames,
   toThemeGid,
   isPriceRelatedFilename,
   fetchAllowlistedThemeFiles,

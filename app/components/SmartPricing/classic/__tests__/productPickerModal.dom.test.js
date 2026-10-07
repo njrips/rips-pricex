@@ -142,6 +142,41 @@ describe('what the picker lists', () => {
   });
 });
 
+describe('collections', () => {
+  const inCollections = [
+    { ...CATALOG[0], collections: [{ id: 'gid://shopify/Collection/9', title: 'Running' }], collection_ids: ['gid://shopify/Collection/9'] },
+    { ...CATALOG[1], collections: [{ id: 'gid://shopify/Collection/9', title: 'Running' }], collection_ids: ['gid://shopify/Collection/9'] },
+    { ...CATALOG[2], collections: [], collection_ids: [] },
+  ];
+
+  it('lists the collections the products are in, not the first 40 in the shop', () => {
+    renderPicker({
+      opportunities: inCollections,
+      collectionOptions: [
+        { label: 'All products', value: '' },
+        { label: 'Empty sale', value: 'gid://shopify/Collection/1' },
+      ],
+    });
+    expect(document.body.textContent).toContain('Running');
+    expect(document.body.textContent).not.toContain('Empty sale');
+  });
+
+  it('filters by real membership rather than by a name that looks alike', () => {
+    renderPicker({
+      opportunities: inCollections.map(row =>
+        row.product_id === 'p2' ? { ...row, product_type: 'Running hats' } : row
+      ),
+    });
+    const running = Array.from(document.querySelectorAll('button')).find(
+      node => node.textContent.trim().startsWith('Running')
+    );
+    act(() => running.click());
+    // Only the shoe is in the collection; the hat's type merely mentions it.
+    expect(rowCheckboxes()).toHaveLength(1);
+    expect(document.body.textContent).toContain('Runner Shoe');
+  });
+});
+
 describe('choosing a product', () => {
   it('selects every variant of it, because a test covers the product', () => {
     const onSelectedIdsChange = vi.fn();
@@ -219,5 +254,20 @@ describe('a catalog too big to load in one go', () => {
   it('says it is searching, so an empty list does not look like an answer', () => {
     renderPicker({ onCatalogSearch: vi.fn(), catalogSearching: true });
     expect(document.body.textContent).toContain('Searching the rest of your catalog');
+  });
+});
+
+describe('keyboard', () => {
+  it('moves focus into the picker and closes it on Escape', () => {
+    const onClose = vi.fn();
+    renderPicker({ onClose });
+    const dialog = document.querySelector('[role="dialog"]');
+    expect(dialog.contains(document.activeElement)).toBe(true);
+    act(() => {
+      document.activeElement.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })
+      );
+    });
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 });

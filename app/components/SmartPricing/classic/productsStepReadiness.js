@@ -224,11 +224,6 @@ export function describeAiPriceCalculationTooltip({ unit = 'percent' } = {}) {
   return 'AI picks a test range per product from sales, margin, and traffic signals; variations are spaced for statistical power, then capped by your guardrails and rounded to realistic price endings. Hover ℹ on a price for the breakdown.';
 }
 
-/** @deprecated Use describeAiPriceCalculationTooltip in UI tooltips only. */
-export function describeAiPriceCalculationOverview(options = {}) {
-  return describeAiPriceCalculationTooltip(options);
-}
-
 export function describeAiBandDirectionTooltip(direction) {
   switch (direction) {
     case 'down':
@@ -245,11 +240,13 @@ export function describeAiBandDirectionTooltip(direction) {
 function shortenAiSuggestError(message = '') {
   const text = String(message || '').trim();
   if (!text) return '';
-  const limitMatch = text.match(/cannot exceed (\d+)[^\d]*(?:\(received (\d+)\)|received (\d+))/i);
+  const limitMatch = text.match(
+    /(?:cannot exceed|cannot cover more than) (\d+)\s*(products|rows|variations)?[^\d]*?received (\d+)/i
+  );
   if (limitMatch) {
-    const max = limitMatch[1];
-    const got = limitMatch[2] || limitMatch[3];
-    return `Too many products (${got}). Max ${max} per suggest.`;
+    const [, max, unit = 'products', got] = limitMatch;
+    const noun = { rows: 'variants', variations: 'variations' }[unit.toLowerCase()] || 'products';
+    return `Too many ${noun} (${got}). Max ${max} per suggest.`;
   }
   if (text.length <= 96) return text;
   return `${text.slice(0, 93).trim()}…`;

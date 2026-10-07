@@ -8,9 +8,9 @@
  * clearly forged or clearly impossible, and keep one bad post from deciding a
  * test on its own.
  *
- * The authoritative fix is to take conversions from Shopify's order webhooks
- * rather than from the browser. That is a feature, not a guard, and it is not
- * built yet.
+ * Purchases now also arrive from Shopify's order webhook
+ * (services/orderConversionService.js), which replaces the browser's report of
+ * the same order. The browser path stays for custom events and older checkouts.
  */
 
 const { verifyPriceAssignmentSignature } = require('./priceAssignmentSignature');

@@ -108,6 +108,17 @@ describe('the ranking request', () => {
     expect(payload[1].sales_data).toBe('none_recorded');
   });
 
+  it('labels each margin the way the price-suggestion prompt does', () => {
+    const payload = buildCompactCandidatePayload([
+      { variant_id: 'a', margin_percent: 62 },
+      { variant_id: 'b', margin_percent: 40 },
+      { variant_id: 'c', margin_percent: 20 },
+      { variant_id: 'd', margin_percent: null },
+    ]);
+
+    expect(payload.map(row => row.margin_tier)).toEqual(['strong', 'healthy', 'thin', 'unknown']);
+  });
+
   it('flags a recent price change instead of shipping every product tag', () => {
     const payload = buildCompactCandidatePayload([
       { variant_id: 'a', title: 'Moved', tags: ['sale', 'price_recently_changed'] },
@@ -297,6 +308,81 @@ describe('enriching an opportunity list', () => {
     expect(result.ai_source).toBe('deterministic');
     expect(result.opportunities).toEqual(opportunities);
     expect(writes).toHaveLength(0);
+  });
+
+  describe('the system prompt', () => {
+    async function promptFor(guardrails = {}) {
+      const service = load();
+      chatJsonMock.mockResolvedValue(null);
+      await service.enrichOpportunitiesWithAiRanking({
+        shopDomain: 'demo.myshopify.com',
+        opportunities: opportunities.map(row => ({
+          ...row,
+          current_price: 40,
+          margin_percent: 55,
+          units_sold_30d: 30,
+          confidence_level: 'high',
+        })),
+        guardrails,
+      });
+      return chatJsonMock.mock.calls[0][0];
+    }
+
+    it('names the goal in words rather than as a metric key', async () => {
+      expect((await promptFor({ objective: 'conversion_rate' })).systemPrompt).toMatch(
+        /judged on conversion rate: the share of visitors who buy/
+      );
+      expect((await promptFor({ objective: 'aov' })).systemPrompt).toMatch(
+        /judged on average order value/
+      );
+      expect((await promptFor()).systemPrompt).toMatch(/judged on revenue per visitor/);
+    });
+
+    it("states the shop's own limits", async () => {
+      const { systemPrompt } = await promptFor({
+        min_margin_percent: 40,
+        max_price_change_percent: 10,
+      });
+
+      expect(systemPrompt).toMatch(/will not sell below a 40% margin/);
+      expect(systemPrompt).toMatch(/at most 10%/);
+    });
+
+    it('never lets a recent price change be excused by margin', async () => {
+      // The test would still measure two price moves at once, however good
+      // the margin is.
+      const { systemPrompt } = await promptFor();
+
+      expect(systemPrompt).toMatch(/price_recently_changed true: rank it down/);
+      expect(systemPrompt).not.toMatch(/exceptional/);
+    });
+
+    it('says an unrecorded cost is an unknown margin, not a good one', async () => {
+      const { systemPrompt } = await promptFor();
+
+      expect(systemPrompt).toMatch(/margin_percent null\) means no cost was recorded/);
+      expect(systemPrompt).toMatch(/unknown rather than good/);
+    });
+
+    it('only names fields the model is actually sent', async () => {
+      const { systemPrompt, userPrompt } = await promptFor();
+      const sentFields = Object.keys(JSON.parse(userPrompt).candidates[0]);
+      const named = [...new Set(systemPrompt.match(/\b[a-z]+(?:_[a-z0-9]+)+\b/g) || [])];
+      const fieldLike = named.filter(word =>
+        /(_tier|_units|_data|_score|_level|_changed|_percent|_\d+d)$/.test(word)
+      );
+
+      expect(fieldLike).toEqual(
+        expect.arrayContaining(['margin_tier', 'confidence_level', 'price_recently_changed'])
+      );
+      fieldLike.forEach(field => expect(sentFields).toContain(field));
+    });
+
+    it('asks for JSON only once', async () => {
+      const { systemPrompt } = await promptFor();
+
+      expect(systemPrompt.match(/JSON only|prose outside/g)).toHaveLength(1);
+    });
   });
 
   it('keeps the deterministic order when the call fails outright', async () => {

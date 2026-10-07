@@ -58,21 +58,18 @@ export function buildStoreCatalogStatusText({
   if (withheld > 0) {
     parts.push(`${withheld} in other tests`);
   }
+  // The store count includes gift cards and products with no price above zero,
+  // which never become rows. Left unsaid, the line does not add up.
+  const untestable = store > 0 ? store - available - withheld : 0;
+  if (untestable > 0) {
+    parts.push(`${untestable} can’t be tested (gift cards or no price)`);
+  }
 
   let line = parts.length ? `${headline} · ${parts.join(' · ')}` : headline;
   if (catalogTruncated && store > 0) {
     line += '. Search in Browse products for products beyond this list';
   }
   return line;
-}
-
-export function buildStoreCatalogTotalLabel(totalProductCount = 0, { catalogTruncated = false } = {}) {
-  return buildStoreCatalogStatusText({
-    storeProductCount: totalProductCount,
-    availableProductCount: totalProductCount,
-    withheldCount: 0,
-    catalogTruncated,
-  });
 }
 
 export function buildCatalogTruncatedHelp({
@@ -96,12 +93,30 @@ export function buildWithheldSummary(withheldCount = 0) {
 export function buildWithheldDetail(withheldByOtherTests = null) {
   const withheldCount = Number(withheldByOtherTests?.total) || 0;
   if (withheldCount <= 0) return '';
+  const withheldSummary = buildWithheldSummary(withheldCount);
+  const experiments = (withheldByOtherTests?.experiments || []).filter(row => row?.title);
+  if (experiments.length) {
+    const shown = experiments
+      .slice(0, 3)
+      .map(row => {
+        const n = Number(row.products) || 0;
+        const state = row.live ? 'running' : 'paused';
+        return n > 0
+          ? `${row.title} (${n} product${n === 1 ? '' : 's'}, ${state})`
+          : `${row.title} (${state})`;
+      })
+      .join('; ');
+    const more = experiments.length - 3;
+    const single = experiments.length === 1;
+    return `${withheldSummary}: ${shown}${more > 0 ? `; and ${more} more` : ''}. End ${
+      single ? 'that test' : 'those tests'
+    } on the Tests page to reuse ${withheldCount === 1 ? 'it' : 'them'} here.`;
+  }
   const withheldTestNames = (withheldByOtherTests?.tests || [])
     .slice(0, 2)
     .map(row => row?.name)
     .filter(Boolean)
     .join(', ');
-  const withheldSummary = buildWithheldSummary(withheldCount);
   return `${withheldSummary}: ${
     withheldCount === 1 ? 'it is' : 'they are'
   } in another test${
@@ -191,13 +206,21 @@ export function buildManualSelectionCountLabel(selectedCount = 0, availableProdu
 
 export function buildAllProductsSelectionCountLabel({
   availableProductCount = 0,
-  maxSelection = 250,
+  maxSelection = 500,
 } = {}) {
   const available = Number(availableProductCount) || 0;
   if (available > maxSelection) {
-    return `First ${maxSelection} of ${available} products`;
+    return `Top ${maxSelection} of ${available} products`;
   }
   return `All ${available} products`;
+}
+
+/** Why the "All products" scope stops short, and which products it keeps. */
+export function buildAllProductsCapHelp({ availableProductCount = 0, maxSelection = 500 } = {}) {
+  const available = Number(availableProductCount) || 0;
+  if (available <= maxSelection) return '';
+  const leftOut = available - maxSelection;
+  return `One test covers up to ${maxSelection} products, so this test takes the ${maxSelection} with the best mix of traffic, margin and sales and leaves ${leftOut} out. Once it launches, those ${maxSelection} are held, so a second All products test picks up the other ${leftOut}.`;
 }
 
 export function shouldShowCatalogTruncatedHelp({

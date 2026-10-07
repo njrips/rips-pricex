@@ -12,20 +12,17 @@ const { getShopSession } = require('../models/shopSession');
 const { HTTP_STATUS } = require('../constants');
 const { SCRIPT_VERSION } = require('../utils/storefrontScriptRuntime');
 const { titleLooksLikeAppFunction } = require('../utils/appBrandTitles');
+const {
+  clearSmartPricingCheckoutReadinessCache,
+} = require('../services/smartPricing/smartPricingCheckoutReadinessService');
 
+/** Checkout readiness caches cart-transform state, so every install outcome must drop it. */
 function clearShopInstallStateCaches(shopDomain) {
   const normalized = String(shopDomain || '')
     .trim()
     .toLowerCase();
   if (!normalized) return;
-  try {
-    const { clearShopCapabilityCache } = require('../services/priceTestCheckoutResolve');
-    if (typeof clearShopCapabilityCache === 'function') {
-      clearShopCapabilityCache(normalized);
-    }
-  } catch {
-    // optional in slim API
-  }
+  clearSmartPricingCheckoutReadinessCache(normalized);
 }
 
 function escapeHtmlAttr(str) {
@@ -55,18 +52,27 @@ function pickCartTransformFunction(functionsList = []) {
 }
 
 async function fetchShopifyFunctions(shopDomain, accessToken) {
-  const fnQuery = `
+  const withHandle = `
     query rpxShopifyFunctions {
       shopifyFunctions(first: 50) {
         nodes {
           id
+          handle
           title
           apiType
         }
       }
     }
   `;
-  const fnResp = await shopifyService.requestAdminGraphql(shopDomain, accessToken, fnQuery);
+  // `handle` only exists from 2026-01; an older pinned version still lists ids.
+  const withoutHandle = withHandle.replace(/\n\s*handle\n/, '\n');
+  let fnResp;
+  try {
+    fnResp = await shopifyService.requestAdminGraphql(shopDomain, accessToken, withHandle);
+  } catch (err) {
+    if (!/handle/i.test(String(err?.message || ''))) throw err;
+    fnResp = await shopifyService.requestAdminGraphql(shopDomain, accessToken, withoutHandle);
+  }
   return fnResp?.data?.shopifyFunctions?.nodes || [];
 }
 
@@ -301,7 +307,7 @@ router.post(
       );
     }
 
-    // Current Admin API expects String for cartTransformCreate.functionId; keep ID! fallback.
+    // Older Admin API versions took functionId as String, some as ID!.
     const createMutationString = `
       mutation rpxCreateCartTransform($functionId: String!) {
         cartTransformCreate(functionId: $functionId) {
@@ -332,78 +338,124 @@ router.post(
         }
       }
     `;
-    let createResp;
-    try {
-      createResp = await shopifyService.requestAdminGraphql(
-        shopDomain,
-        accessToken,
-        createMutationString,
-        { functionId: chosenFunctionId }
-      );
-    } catch (createErr) {
-      if (isCartTransformFunctionIdTypeMismatchError(createErr)) {
-        try {
-          createResp = await shopifyService.requestAdminGraphql(
-            shopDomain,
-            accessToken,
-            createMutationId,
-            { functionId: chosenFunctionId }
+    // Shopify dropped `functionId` from cartTransformCreate; current versions
+    // take only the extension handle. The id forms below are for older versions.
+    const handleMutation = `
+      mutation rpxCreateCartTransformHandle($functionHandle: String!) {
+        cartTransformCreate(functionHandle: $functionHandle) {
+          cartTransform {
+            id
+            functionId
+            blockOnFailure
+          }
+          userErrors {
+            field
+            message
+          }
+        }
+      }
+    `;
+    const chosenFunctionHandle = String(chosenFunction.handle || '').trim();
+    let createResp = null;
+    if (chosenFunctionHandle) {
+      try {
+        createResp = await shopifyService.requestAdminGraphql(
+          shopDomain,
+          accessToken,
+          handleMutation,
+          { functionHandle: chosenFunctionHandle }
+        );
+      } catch (handleErr) {
+        if (isWriteCartTransformsScopeError(handleErr)) {
+          return sendError(
+            res,
+            403,
+            'Missing checkout pricing permissions. Re-open Priceify from Shopify Admin, then click Check and install on Store setup.',
+            {
+              function: {
+                id: chosenFunction.id,
+                title: chosenFunction.title || null,
+                apiType: chosenFunction.apiType || null,
+              },
+            }
           );
-        } catch (idErr) {
-          if (isCartTransformFunctionIdTypeMismatchError(idErr)) {
-            const compatMutation = `
-              mutation rpxCreateCartTransformCompat {
-                cartTransformCreate(functionId: ${JSON.stringify(chosenFunctionId)}) {
-                  cartTransform {
-                    id
-                    functionId
-                    blockOnFailure
-                  }
-                  userErrors {
-                    field
-                    message
-                  }
-                }
-              }
-            `;
+        }
+        if (!/functionHandle/i.test(String(handleErr?.message || ''))) throw handleErr;
+      }
+    }
+    if (!createResp) {
+      try {
+        createResp = await shopifyService.requestAdminGraphql(
+          shopDomain,
+          accessToken,
+          createMutationString,
+          { functionId: chosenFunctionId }
+        );
+      } catch (createErr) {
+        if (isCartTransformFunctionIdTypeMismatchError(createErr)) {
+          try {
             createResp = await shopifyService.requestAdminGraphql(
               shopDomain,
               accessToken,
-              compatMutation,
-              {}
+              createMutationId,
+              { functionId: chosenFunctionId }
             );
-          } else if (isWriteCartTransformsScopeError(idErr)) {
-            return sendError(
-              res,
-              403,
-              'Missing checkout pricing permissions. Re-open Priceify from Shopify Admin, then click Check and install on Store setup.',
-              {
-                function: {
-                  id: chosenFunction.id,
-                  title: chosenFunction.title || null,
-                  apiType: chosenFunction.apiType || null,
-                },
-              }
-            );
-          } else {
-            throw idErr;
+          } catch (idErr) {
+            if (isCartTransformFunctionIdTypeMismatchError(idErr)) {
+              const compatMutation = `
+                mutation rpxCreateCartTransformCompat {
+                  cartTransformCreate(functionId: ${JSON.stringify(chosenFunctionId)}) {
+                    cartTransform {
+                      id
+                      functionId
+                      blockOnFailure
+                    }
+                    userErrors {
+                      field
+                      message
+                    }
+                  }
+                }
+              `;
+              createResp = await shopifyService.requestAdminGraphql(
+                shopDomain,
+                accessToken,
+                compatMutation,
+                {}
+              );
+            } else if (isWriteCartTransformsScopeError(idErr)) {
+              return sendError(
+                res,
+                403,
+                'Missing checkout pricing permissions. Re-open Priceify from Shopify Admin, then click Check and install on Store setup.',
+                {
+                  function: {
+                    id: chosenFunction.id,
+                    title: chosenFunction.title || null,
+                    apiType: chosenFunction.apiType || null,
+                  },
+                }
+              );
+            } else {
+              throw idErr;
+            }
           }
+        } else if (isWriteCartTransformsScopeError(createErr)) {
+          return sendError(
+            res,
+            403,
+            'Missing checkout pricing permissions. Re-open Priceify from Shopify Admin, then click Check and install on Store setup.',
+            {
+              function: {
+                id: chosenFunction.id,
+                title: chosenFunction.title || null,
+                apiType: chosenFunction.apiType || null,
+              },
+            }
+          );
+        } else {
+          throw createErr;
         }
-      } else if (isWriteCartTransformsScopeError(createErr)) {
-        return sendError(
-          res,
-          403,
-          'Missing checkout pricing permissions. Re-open Priceify from Shopify Admin, then click Check and install on Store setup.',
-          {
-            function: {
-              id: chosenFunction.id,
-              title: chosenFunction.title || null,
-              apiType: chosenFunction.apiType || null,
-            },
-          }
-        );
-      } else {
-        throw createErr;
       }
     }
     const payload = createResp?.data?.cartTransformCreate;
@@ -448,14 +500,6 @@ router.post(
     }
 
     clearShopInstallStateCaches(shopDomain);
-    try {
-      const {
-        clearSmartPricingCheckoutReadinessCache,
-      } = require('../services/smartPricing/smartPricingCheckoutReadinessService');
-      clearSmartPricingCheckoutReadinessCache?.(shopDomain);
-    } catch {
-      // optional
-    }
     return res.json({
       success: true,
       created: true,
@@ -559,9 +603,6 @@ router.post(
     const {
       ensureOfferCheckoutDiscount,
     } = require('../services/smartPricing/offerCheckoutDiscountService');
-    const {
-      clearSmartPricingCheckoutReadinessCache,
-    } = require('../services/smartPricing/smartPricingCheckoutReadinessService');
 
     try {
       const result = await ensureOfferCheckoutDiscount({

@@ -163,7 +163,7 @@ export async function pushEntitlementToExpress(
   shop: string,
   entitlement: SubscriptionEntitlement,
 ): Promise<void> {
-  await fetch(`${expressApiBase()}/api/billing/sync-entitlement`, {
+  const res = await fetch(`${expressApiBase()}/api/billing/sync-entitlement`, {
     method: "POST",
     headers: internalServiceHeaders(shop),
     body: JSON.stringify({
@@ -173,4 +173,7 @@ export async function pushEntitlementToExpress(
     }),
     signal: AbortSignal.timeout(8000),
   });
+  if (!res.ok) {
+    throw new Error(`sync-entitlement answered HTTP ${res.status}`);
+  }
 }

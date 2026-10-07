@@ -129,6 +129,12 @@ export type BuyerIdentity = {
    * Used to manage and track purchases made by businesses rather than individual customers.
    */
   purchasingCompany?: Maybe<PurchasingCompany>;
+  /**
+   * Represents the [Shop User](https://help.shopify.com/en/manual/online-sales-channels/shop/sign-in-features)
+   *  corresponding to the customer within the shop, if the buyer is a Shop User. Can be used to request [Shop User
+   *  metafields](https://shopify.dev/docs/api/shop-user-custom-data).
+   */
+  shopUser?: Maybe<ShopUser>;
 };
 
 /**
@@ -143,6 +149,8 @@ export type Cart = HasMetafields & {
    * gift wrapping requests, or custom product details. Attributes are stored as key-value pairs.
    */
   attribute?: Maybe<Attribute>;
+  /** The billing address associated with the cart. */
+  billingAddress?: Maybe<MailingAddress>;
   /**
    * Information about the customer that's interacting with the cart. It includes details such as the
    * customer's email and phone number, and the total amount of money the customer has spent in the store.
@@ -210,6 +218,8 @@ export type CartLine = {
    * the same t-shirt to their cart, then each size is represented as a separate cart line.
    */
   cost: CartLineCost;
+  /** The discounts that have been applied to the cart line. */
+  discountAllocations: Array<DiscountAllocation>;
   /** The ID of the cart line. */
   id: Scalars['ID']['output'];
   /** The item that the customer intends to purchase. */
@@ -995,7 +1005,10 @@ export enum CurrencyCode {
   All = 'ALL',
   /** Armenian Dram (AMD). */
   Amd = 'AMD',
-  /** Netherlands Antillean Guilder. */
+  /**
+   * Netherlands Antillean Guilder.
+   * @deprecated Use `XCG` instead.
+   */
   Ang = 'ANG',
   /** Angolan Kwanza (AOA). */
   Aoa = 'AOA',
@@ -1308,6 +1321,8 @@ export enum CurrencyCode {
   Xaf = 'XAF',
   /** East Caribbean Dollar (XCD). */
   Xcd = 'XCD',
+  /** Caribbean Guilder (XCG). */
+  Xcg = 'XCG',
   /** West African CFA franc (XOF). */
   Xof = 'XOF',
   /** CFP Franc (XPF). */
@@ -1424,6 +1439,76 @@ export type CustomerMetafieldArgs = {
   key: Scalars['String']['input'];
   namespace?: InputMaybe<Scalars['String']['input']>;
 };
+
+/** The discount application and the amount applied. */
+export type DiscountAllocation = {
+  __typename?: 'DiscountAllocation';
+  /** The discount that was applied. */
+  discountApplication: DiscountApplication;
+  /** The amount that was discounted. */
+  discountedAmount: MoneyV2;
+};
+
+/** Discount that has been applied to the cart. */
+export type DiscountApplication = HasMetafields & {
+  __typename?: 'DiscountApplication';
+  /** The method by which the discount's value is allocated to its entitled items. */
+  allocationMethod: DiscountApplicationAllocationMethod;
+  /**
+   * A [custom field](https://shopify.dev/docs/apps/build/custom-data) that stores additional information
+   * about a Shopify resource, such as products, orders, and
+   * [many more](https://shopify.dev/docs/api/admin-graphql/latest/enums/MetafieldOwnerType).
+   * Using [metafields with Shopify Functions](https://shopify.dev/docs/apps/build/functions/input-output/metafields-for-input-queries)
+   * enables you to customize the checkout experience.
+   */
+  metafield?: Maybe<Metafield>;
+  /** The lines on the cart targeted by the discount. */
+  targetSelection: DiscountApplicationTargetSelection;
+  /** The type of line (i.e. line item or shipping line) on a cart that the discount is applicable towards. */
+  targetType: DiscountApplicationTarget;
+  /** The total allocated amount of the discount across all items. */
+  totalAllocatedAmount: MoneyV2;
+  /** The value of the discount. */
+  value: PricingValue;
+};
+
+
+/** Discount that has been applied to the cart. */
+export type DiscountApplicationMetafieldArgs = {
+  key: Scalars['String']['input'];
+  namespace?: InputMaybe<Scalars['String']['input']>;
+};
+
+/** The method by which the discount's value is allocated onto its entitled lines. */
+export enum DiscountApplicationAllocationMethod {
+  /** The value is spread across all entitled lines. */
+  Across = 'ACROSS',
+  /** The value is applied onto every entitled line. */
+  Each = 'EACH'
+}
+
+/** The type of line on an order that the discount is applicable towards. */
+export enum DiscountApplicationTarget {
+  /** The discount applies onto line items. */
+  LineItem = 'LINE_ITEM',
+  /** The discount applies onto shipping lines. */
+  ShippingLine = 'SHIPPING_LINE'
+}
+
+/**
+ * The lines on the order to which the discount is applied, of the type defined by
+ * the discount application's `targetType`. For example, the value `ENTITLED`, combined with a `targetType` of
+ * `LINE_ITEM`, applies the discount on all line items that are entitled to the discount.
+ * The value `ALL`, combined with a `targetType` of `SHIPPING_LINE`, applies the discount on all shipping lines.
+ */
+export enum DiscountApplicationTargetSelection {
+  /** The discount is allocated onto all the lines. */
+  All = 'ALL',
+  /** The discount is allocated onto only the lines that it's entitled for. */
+  Entitled = 'ENTITLED',
+  /** The discount is allocated onto explicitly chosen lines. */
+  Explicit = 'EXPLICIT'
+}
 
 /**
  * An operation that expands a single cart line item to form a
@@ -2143,7 +2228,8 @@ export type Localization = {
    */
   language: Language;
   /**
-   * The market of the active localized experience.
+   * The market that applies to the buyer's country. In cases where multiple
+   * markets match, this returns the most-specific country region market.
    * @deprecated This `market` field will be removed in a future version of the API.
    */
   market: Market;
@@ -2203,6 +2289,43 @@ export type LocationAddress = {
   /** The code for the province, state, or district of the address of the location. */
   provinceCode?: Maybe<Scalars['String']['output']>;
   /** The ZIP code of the location. */
+  zip?: Maybe<Scalars['String']['output']>;
+};
+
+/** Represents a mailing address. */
+export type MailingAddress = {
+  __typename?: 'MailingAddress';
+  /** The first line of the address. Typically the street address or PO Box number. */
+  address1?: Maybe<Scalars['String']['output']>;
+  /** The second line of the address. Typically the number of the apartment, suite, or unit. */
+  address2?: Maybe<Scalars['String']['output']>;
+  /** The name of the city, district, village, or town. */
+  city?: Maybe<Scalars['String']['output']>;
+  /** The name of the customer's company or organization. */
+  company?: Maybe<Scalars['String']['output']>;
+  /** The two-letter code for the country of the address. For example, US. */
+  countryCode?: Maybe<CountryCode>;
+  /** The first name of the customer. */
+  firstName?: Maybe<Scalars['String']['output']>;
+  /** The last name of the customer. */
+  lastName?: Maybe<Scalars['String']['output']>;
+  /** The approximate latitude of the address. */
+  latitude?: Maybe<Scalars['Float']['output']>;
+  /** The approximate longitude of the address. */
+  longitude?: Maybe<Scalars['Float']['output']>;
+  /**
+   * The market that applies to the address's country. In cases where multiple
+   * markets match, this returns the most-specific country region market.
+   * @deprecated This `market` field will be removed in a future version of the API.
+   */
+  market?: Maybe<Market>;
+  /** The full name of the customer, based on firstName and lastName. */
+  name?: Maybe<Scalars['String']['output']>;
+  /** A unique phone number for the customer. Formatted using E.164 standard. For example, +16135551111. */
+  phone?: Maybe<Scalars['String']['output']>;
+  /** The alphanumeric code for the region. For example, ON. */
+  provinceCode?: Maybe<Scalars['String']['output']>;
+  /** The zip or postal code of the address. */
   zip?: Maybe<Scalars['String']['output']>;
 };
 
@@ -2340,6 +2463,44 @@ export type Metafield = {
   value: Scalars['String']['output'];
 };
 
+/** An instance of custom structured data defined by a MetaobjectDefinition. */
+export type Metaobject = {
+  __typename?: 'Metaobject';
+  /** The field for an object key, or null if the key has no field definition. */
+  field?: Maybe<MetaobjectField>;
+  /** The unique handle of the metaobject, useful as a custom ID. */
+  handle: Scalars['String']['output'];
+  /** The type of the metaobject. */
+  type: Scalars['String']['output'];
+};
+
+
+/** An instance of custom structured data defined by a MetaobjectDefinition. */
+export type MetaobjectFieldArgs = {
+  key: Scalars['String']['input'];
+};
+
+/** Provides a field definition and the data value assigned to it. */
+export type MetaobjectField = {
+  __typename?: 'MetaobjectField';
+  /** The assigned field value in JSON format. */
+  jsonValue?: Maybe<Scalars['JSON']['output']>;
+  /** The object key of this field. */
+  key: Scalars['String']['output'];
+  /** The type of the field. */
+  type: Scalars['String']['output'];
+  /** The assigned field value, always stored as a string regardless of the field type. */
+  value?: Maybe<Scalars['String']['output']>;
+};
+
+/** The input fields for retrieving a metaobject by handle. */
+export type MetaobjectHandleInput = {
+  /** The handle of the metaobject to retrieve. */
+  handle: Scalars['String']['input'];
+  /** The type of the metaobject. Must match an existing metaobject definition type. */
+  type: Scalars['String']['input'];
+};
+
 /**
  * A precise monetary value and its associated currency. Combines a decimal amount
  * with a three-letter currency code to express prices, costs, and other financial
@@ -2434,6 +2595,16 @@ export type PriceAdjustmentValue = {
   /** The value of the price adjustment. */
   value: Scalars['Decimal']['input'];
 };
+
+/** The percentage value of a discount. */
+export type PricingPercentageValue = {
+  __typename?: 'PricingPercentageValue';
+  /** The percentage value of the discount. */
+  value: Scalars['Decimal']['output'];
+};
+
+/** The price value for a discount application. */
+export type PricingValue = MoneyV2 | PricingPercentageValue;
 
 /**
  * The goods and services that merchants offer to customers. Products can include details such as
@@ -2580,6 +2751,26 @@ export type ProductVariant = HasMetafields & {
    */
   id: Scalars['ID']['output'];
   /**
+   * Whether the product variant is in any of the specified collections. The variant must be in at least one
+   * collection from the list to return `true`. A variant is considered to be in a collection when the variant
+   * itself is a member of the collection, or when its product is a member of the collection.
+   *
+   * A collection is a group of products that can be displayed in online stores and other sales channels in
+   * categories, which makes it easy for customers to find them. For example, an athletics store might create
+   * different collections for running attire and accessories.
+   */
+  inAnyCollection: Scalars['Boolean']['output'];
+  /**
+   * Whether the product variant is in each of the specified collections. A variant is considered to be in a
+   * collection when the variant itself is a member of the collection, or when its product is a member of the
+   * collection.
+   *
+   * A collection is a group of products that can be displayed in online stores and other sales channels in
+   * categories, which makes it easy for customers to find them. For example, an athletics store might create
+   * different collections for running attire and accessories.
+   */
+  inCollections: Array<CollectionMembership>;
+  /**
    * A [custom field](https://shopify.dev/docs/apps/build/custom-data) that stores additional information
    * about a Shopify resource, such as products, orders, and
    * [many more](https://shopify.dev/docs/api/admin-graphql/latest/enums/MetafieldOwnerType).
@@ -2612,6 +2803,26 @@ export type ProductVariant = HasMetafields & {
   weight?: Maybe<Scalars['Float']['output']>;
   /** The unit of measurement for weight. */
   weightUnit: WeightUnit;
+};
+
+
+/**
+ * A specific version of a product that comes in more than one option, such as size or color. For example,
+ * if a merchant sells t-shirts with options for size and color, then a small, blue t-shirt would be one
+ * product variant and a large, blue t-shirt would be another.
+ */
+export type ProductVariantInAnyCollectionArgs = {
+  ids?: Array<Scalars['ID']['input']>;
+};
+
+
+/**
+ * A specific version of a product that comes in more than one option, such as size or color. For example,
+ * if a merchant sells t-shirts with options for size and color, then a small, blue t-shirt would be one
+ * product variant and a large, blue t-shirt would be another.
+ */
+export type ProductVariantInCollectionsArgs = {
+  ids?: Array<Scalars['ID']['input']>;
 };
 
 
@@ -2727,6 +2938,11 @@ export type Shop = HasMetafields & {
    * enables you to customize the checkout experience.
    */
   metafield?: Maybe<Metafield>;
+  /**
+   * Fetch a specific Metaobject by one of its unique identifiers. Only app-owned
+   * metaobjects with the $app reserved prefix are accessible to functions.
+   */
+  metaobject?: Maybe<Metaobject>;
 };
 
 
@@ -2735,6 +2951,36 @@ export type Shop = HasMetafields & {
  * and custom data stored in [metafields](https://shopify.dev/docs/apps/build/custom-data).
  */
 export type ShopMetafieldArgs = {
+  key: Scalars['String']['input'];
+  namespace?: InputMaybe<Scalars['String']['input']>;
+};
+
+
+/**
+ * Information about the store, including the store's timezone setting
+ * and custom data stored in [metafields](https://shopify.dev/docs/apps/build/custom-data).
+ */
+export type ShopMetaobjectArgs = {
+  handle?: InputMaybe<MetaobjectHandleInput>;
+  id?: InputMaybe<Scalars['ID']['input']>;
+};
+
+/** Represents information about the buyer that is interacting with the cart. */
+export type ShopUser = HasMetafields & {
+  __typename?: 'ShopUser';
+  /**
+   * A [custom field](https://shopify.dev/docs/apps/build/custom-data) that stores additional information
+   * about a Shopify resource, such as products, orders, and
+   * [many more](https://shopify.dev/docs/api/admin-graphql/latest/enums/MetafieldOwnerType).
+   * Using [metafields with Shopify Functions](https://shopify.dev/docs/apps/build/functions/input-output/metafields-for-input-queries)
+   * enables you to customize the checkout experience.
+   */
+  metafield?: Maybe<Metafield>;
+};
+
+
+/** Represents information about the buyer that is interacting with the cart. */
+export type ShopUserMetafieldArgs = {
   key: Scalars['String']['input'];
   namespace?: InputMaybe<Scalars['String']['input']>;
 };

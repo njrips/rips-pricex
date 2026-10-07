@@ -2,12 +2,7 @@ import {
   compactInboxPlan,
   compactInboxPlans,
 } from '../components/SmartPricing/classic/classicWizardDraftSize';
-import { apiGet, apiPost, apiPut, apiDelete, apiPatch, unwrapData } from './api';
-
-export async function getSmartPricingStatus(domain) {
-  const res = await apiGet('/smart-pricing/status', domain ? { domain } : {});
-  return unwrapData(res);
-}
+import { apiGet, apiPost, apiPut, apiDelete, unwrapData } from './api';
 
 export async function getSmartPricingGuardrails(domain) {
   const res = await apiGet('/smart-pricing/guardrails', domain ? { domain } : {});
@@ -46,70 +41,12 @@ export async function getSmartPricingOpportunities(
   return unwrapData(res);
 }
 
-export async function refreshSmartPricingOpportunities(domain, body = {}) {
-  const res = await apiPost(
-    '/smart-pricing/opportunities/refresh',
-    body,
-    domain ? { params: { domain } } : {}
-  );
-  return unwrapData(res);
-}
-
 export async function createSmartPricingBatch(domain, body) {
   const res = await apiPost(
     '/smart-pricing/batches/create',
     body,
     domain ? { params: { domain } } : {}
   );
-  return unwrapData(res);
-}
-
-export async function applySmartPricingPriceArms(domain, plan, armPrices = {}) {
-  const res = await apiPost(
-    '/smart-pricing/plans/apply-price-arms',
-    { plan, arm_prices: armPrices },
-    domain ? { params: { domain } } : {}
-  );
-  return unwrapData(res);
-}
-
-export async function previewSmartPricingPlan(domain, body) {
-  const res = await apiPost(
-    '/smart-pricing/plans/preview',
-    body,
-    domain ? { params: { domain } } : {}
-  );
-  return unwrapData(res);
-}
-
-export async function getSmartPricingDemoBatch(domain) {
-  const res = await apiGet('/smart-pricing/plans/demo-batch', domain ? { domain } : {});
-  return unwrapData(res);
-}
-
-export async function getSmartPricingVariantOptions(domain, body) {
-  const res = await apiPost(
-    '/smart-pricing/variant-options',
-    body,
-    domain ? { params: { domain } } : {}
-  );
-  return unwrapData(res);
-}
-
-export async function quickStartSmartPricing(domain, body = {}) {
-  const res = await apiPost(
-    '/smart-pricing/quick-start',
-    body,
-    domain ? { params: { domain } } : {}
-  );
-  return unwrapData(res);
-}
-
-export async function getSmartPricingLaunchCapacity(domain, { count = 0 } = {}) {
-  const res = await apiGet('/smart-pricing/launch-capacity', {
-    ...(domain ? { domain } : {}),
-    count: String(count),
-  });
   return unwrapData(res);
 }
 
@@ -136,29 +73,6 @@ export async function launchSmartPricingPlan(
     }
     throw err;
   }
-}
-
-export async function previewSmartPricingScenario(domain, body) {
-  const res = await apiPost(
-    '/smart-pricing/scenario-preview',
-    body,
-    domain ? { params: { domain } } : {}
-  );
-  return unwrapData(res);
-}
-
-export async function getSmartPricingCogs(domain) {
-  const res = await apiGet('/smart-pricing/cogs', domain ? { domain } : {});
-  return unwrapData(res);
-}
-
-export async function importSmartPricingCogs(domain, csvText) {
-  const res = await apiPost(
-    '/smart-pricing/cogs/import',
-    { csv: csvText },
-    domain ? { params: { domain } } : {}
-  );
-  return unwrapData(res);
 }
 
 export async function previewSmartPricingWinner(domain, testId) {
@@ -276,6 +190,15 @@ export async function getSmartPricingProductReport(domain, planId) {
   return unwrapData(res);
 }
 
+/** Day-by-day visitors, orders and revenue per variation for one product. */
+export async function getSmartPricingProductDaily(domain, planId) {
+  const res = await apiGet(
+    `/smart-pricing/products/${encodeURIComponent(planId)}/daily`,
+    domain ? { domain } : {}
+  );
+  return unwrapData(res);
+}
+
 export async function getSmartPricingProductEvents(domain, planId, { limit = 100 } = {}) {
   const res = await apiGet(`/smart-pricing/products/${encodeURIComponent(planId)}/events`, {
     ...(domain ? { domain } : {}),
@@ -289,15 +212,6 @@ export async function applyReadySmartPricingProducts(domain, testIds = []) {
   const res = await apiPost(
     '/smart-pricing/products/apply-ready',
     { test_ids: testIds },
-    domain ? { params: { domain } } : {}
-  );
-  return unwrapData(res);
-}
-
-export async function syncSmartPricingInbox(domain, plans = []) {
-  const res = await apiPost(
-    '/smart-pricing/inbox/sync',
-    { plans },
     domain ? { params: { domain } } : {}
   );
   return unwrapData(res);
@@ -322,15 +236,6 @@ export async function getSmartPricingInboxPlan(domain, planId) {
   const res = await apiGet(
     `/smart-pricing/inbox/plans/${encodeURIComponent(planId)}`,
     domain ? { domain } : {}
-  );
-  return unwrapData(res);
-}
-
-export async function patchSmartPricingInboxPlan(domain, planId, patch = {}) {
-  const res = await apiPatch(
-    `/smart-pricing/inbox/plans/${encodeURIComponent(planId)}`,
-    patch,
-    domain ? { params: { domain } } : {}
   );
   return unwrapData(res);
 }
@@ -414,6 +319,25 @@ export async function getSmartPricingTestAnalytics(domain, testId) {
 export async function deleteSmartPricingInboxPlan(domain, planId) {
   const res = await apiDelete(
     `/smart-pricing/inbox/plans/${encodeURIComponent(planId)}`,
+    domain ? { params: { domain } } : {}
+  );
+  return unwrapData(res);
+}
+
+/** The experiment's tests that are not deleted, as `{ id, status, product_id, plan_id }`. */
+export async function getSmartPricingExperimentTests(domain, experimentId) {
+  const res = await apiGet(
+    `/smart-pricing/experiments/${encodeURIComponent(experimentId)}/tests`,
+    domain ? { domain } : {}
+  );
+  const data = unwrapData(res);
+  return Array.isArray(data?.tests) ? data.tests : [];
+}
+
+/** Archives every test launched from the experiment and removes its inbox plans. */
+export async function deleteSmartPricingExperiment(domain, experimentId) {
+  const res = await apiDelete(
+    `/smart-pricing/experiments/${encodeURIComponent(experimentId)}`,
     domain ? { params: { domain } } : {}
   );
   return unwrapData(res);

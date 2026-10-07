@@ -1,5 +1,5 @@
 const crypto = require('crypto');
-const { STAFF_SUPPORT_PREFIX, safeStaffNext, staffNextTicketId } = require('./staffNextPath');
+const { safeStaffNext, staffNextTicketId } = require('./staffNextPath');
 
 const STAFF_COOKIE_NAME = 'rpx_staff_support';
 const STAFF_COOKIE_MAX_AGE_SEC = 7 * 24 * 60 * 60;
@@ -18,10 +18,6 @@ function normalizeStaffEmail(value) {
     .toLowerCase();
   if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return '';
   return email;
-}
-
-function staffEmailDomain() {
-  return STAFF_EMAIL_DOMAIN;
 }
 
 function isStaffEmail(value) {
@@ -78,12 +74,20 @@ function isValidStaffRequest(req) {
   return isValidStaffCookieValue(cookies[STAFF_COOKIE_NAME]);
 }
 
+function staffCookieSecureFlag(secure) {
+  const useSecure =
+    secure === true || (secure !== false && process.env.NODE_ENV === 'production');
+  return useSecure ? '; Secure' : '';
+}
+
 function staffSetCookieHeader({ secure } = {}) {
   const token = staffToken();
   if (!token) return null;
-  const useSecure =
-    secure === true || (secure !== false && process.env.NODE_ENV === 'production');
-  return `${STAFF_COOKIE_NAME}=${cookieValueForToken(token)}; Path=/staff; HttpOnly; SameSite=Lax; Max-Age=${STAFF_COOKIE_MAX_AGE_SEC}${useSecure ? '; Secure' : ''}`;
+  return `${STAFF_COOKIE_NAME}=${cookieValueForToken(token)}; Path=/staff; HttpOnly; SameSite=Lax; Max-Age=${STAFF_COOKIE_MAX_AGE_SEC}${staffCookieSecureFlag(secure)}`;
+}
+
+function staffClearCookieHeader({ secure } = {}) {
+  return `${STAFF_COOKIE_NAME}=; Path=/staff; HttpOnly; SameSite=Lax; Max-Age=0${staffCookieSecureFlag(secure)}`;
 }
 
 function staffClientKeyFromHeaders(getHeader) {
@@ -119,19 +123,12 @@ function clearStaffLoginFailures(clientKey) {
   staffLoginFailures.delete(String(clientKey || 'unknown'));
 }
 
-function staffClearCookieHeader({ secure } = {}) {
-  const useSecure =
-    secure === true || (secure !== false && process.env.NODE_ENV === 'production');
-  return `${STAFF_COOKIE_NAME}=; Path=/staff; HttpOnly; SameSite=Lax; Max-Age=0${useSecure ? '; Secure' : ''}`;
-}
-
 module.exports = {
   STAFF_COOKIE_NAME,
   STAFF_COOKIE_MAX_AGE_SEC,
   staffToken,
   normalizeStaffEmail,
   STAFF_EMAIL_DOMAIN,
-  staffEmailDomain,
   isStaffEmail,
   isStaffLoginConfigured,
   timingSafeEqualString,
@@ -142,11 +139,10 @@ module.exports = {
   isValidStaffRequest,
   staffSetCookieHeader,
   staffClearCookieHeader,
+  staffClientKeyFromHeaders,
   safeStaffNext,
   staffNextTicketId,
-  STAFF_SUPPORT_PREFIX,
   STAFF_LOGIN_MAX_FAILURES,
-  staffClientKeyFromHeaders,
   staffLoginBlocked,
   recordStaffLoginFailure,
   clearStaffLoginFailures,

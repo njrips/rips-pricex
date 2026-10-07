@@ -4,7 +4,11 @@
 
 const { query, getClient } = require('../utils/database');
 
-const MAX_PLANS_PER_SHOP = 200;
+// A classic experiment writes one plan per product and launches up to 500
+// products, so this has to hold many experiments at once. Over it, a save is
+// refused rather than trimmed: trimming deleted the plans past the cut while
+// their tests went on running, with nothing left in the list to stop them.
+const MAX_PLANS_PER_SHOP = 5000;
 
 function normalizeShopDomain(shopDomain) {
   return String(shopDomain || '')
@@ -252,10 +256,15 @@ async function saveInboxPlans(
     }
   }
 
-  const normalized = (Array.isArray(plans) ? plans : [])
-    .map(normalizePlanJson)
-    .filter(Boolean)
-    .slice(0, MAX_PLANS_PER_SHOP);
+  const normalized = (Array.isArray(plans) ? plans : []).map(normalizePlanJson).filter(Boolean);
+  if (normalized.length > MAX_PLANS_PER_SHOP) {
+    const err = new Error(
+      `An inbox holds at most ${MAX_PLANS_PER_SHOP} plans. Archive or delete finished tests first.`
+    );
+    err.isValidation = true;
+    err.errors = [err.message];
+    throw err;
+  }
 
   const keepIds = normalized.map(plan => plan.id);
   const deleteIds = (Array.isArray(deletedPlanIds) ? deletedPlanIds : [])
@@ -271,13 +280,18 @@ async function saveInboxPlans(
   try {
     await client.query('BEGIN');
 
-    if (keepIds.length === 0) {
-      await client.query('DELETE FROM smart_pricing_inbox_plans WHERE shop_domain = $1', [domain]);
-    } else {
+    // The array is the caller's view of the inbox, and that view can be stale:
+    // a browser whose local copy stopped updating, or one that never loaded
+    // the whole list. Pruning what it leaves out is limited to plans that never
+    // launched. A plan linked to a test is the only way the merchant can reach
+    // that test, so it goes only when named in deletedPlanIds.
+    if (keepIds.length > 0) {
       await client.query(
         `DELETE FROM smart_pricing_inbox_plans
          WHERE shop_domain = $1
-           AND plan_id <> ALL($2::varchar[])`,
+           AND plan_id <> ALL($2::varchar[])
+           AND test_id IS NULL
+           AND COALESCE(plan_json->>'test_id', '') = ''`,
         [domain, keepIds]
       );
     }
@@ -717,8 +731,180 @@ async function linkInboxPlanToTest(shopDomain, planId, testId, { status = 'runni
   return patched.get(id) || null;
 }
 
+const SMART_PRICING_TEST_NAME_PREFIX = 'Smart Pricing · ';
+
+function firstVariantIdOfTest(variants) {
+  const rows = Array.isArray(variants) ? variants : [];
+  for (const row of rows) {
+    const byProduct = row?.config?.byProduct;
+    if (!byProduct || typeof byProduct !== 'object') continue;
+    for (const product of Object.values(byProduct)) {
+      const ids = Object.keys(product?.byVariant || {});
+      if (ids.length) return ids[0];
+    }
+  }
+  return null;
+}
+
+/** The inbox plan a live Smart Pricing test was launched from, rebuilt from the test. */
+function planFromOrphanedTest(test) {
+  const metadata = test.metadata && typeof test.metadata === 'object' ? test.metadata : {};
+  const rawName = String(test.name || '').trim();
+  const title = rawName.startsWith(SMART_PRICING_TEST_NAME_PREFIX)
+    ? rawName.slice(SMART_PRICING_TEST_NAME_PREFIX.length).trim()
+    : rawName;
+  const sep = title.indexOf(' · ');
+  const experimentTitle = String(metadata.experiment_title || '').trim() || (sep > 0 ? title.slice(0, sep).trim() : '');
+  const experimentType =
+    metadata.experiment_type || (String(test.type || '') === 'offer' ? 'offer_test' : 'price_test');
+  const iso = value => (value ? new Date(value).toISOString() : null);
+  return {
+    id: String(metadata.smart_pricing_plan_id || '').trim() || `SP-restored-${test.id}`,
+    title: title || 'Untitled test',
+    product_title: sep > 0 ? title.slice(sep + 3).trim() : title,
+    status: String(test.status || '') === 'paused' ? 'paused' : 'running',
+    test_id: String(test.id),
+    test_type: test.type || null,
+    experiment_type: experimentType,
+    product_id: test.target_id || null,
+    variant_id: firstVariantIdOfTest(test.variants),
+    current_price: metadata.current_price ?? null,
+    currency: metadata.currency || null,
+    price_arms: Array.isArray(metadata.price_arms) ? metadata.price_arms : [],
+    statistical_design: metadata.statistical_design || null,
+    goal: test.goal || null,
+    launched_at: iso(test.started_at),
+    created_at: iso(test.created_at),
+    updated_at: iso(test.updated_at),
+    restored_from_test: true,
+    metadata: {
+      experiment_id: String(metadata.experiment_id || '').trim() || null,
+      experiment_title: experimentTitle || null,
+      experiment_type: experimentType,
+    },
+  };
+}
+
+/**
+ * Puts back the plan for every running Smart Pricing test that has lost it.
+ *
+ * The inbox is the only place the merchant can see a test and stop it, and the
+ * product step counts these tests' products as taken. A test running with no
+ * plan was pricing shoppers from nowhere the merchant could reach, so each one
+ * is restored as a plan in the experiment it was launched from. Insert-only:
+ * a plan that exists is never touched.
+ */
+async function restoreOrphanedLivePlans(shopDomain) {
+  const domain = normalizeShopDomain(shopDomain);
+  if (!domain) return { restored: 0 };
+  const result = await query(
+    `SELECT t.id, t.name, t.type, t.status, t.target_id, t.variants, t.goal, t.metadata,
+            t.started_at, t.created_at, t.updated_at
+       FROM tests t
+      WHERE LOWER(TRIM(t.shop_domain)) = $1
+        AND t.status IN ('running', 'paused')
+        AND (t.source = 'smart_pricing' OR t.metadata->>'smart_pricing_source' = 'smart_pricing')
+        AND NOT EXISTS (
+          SELECT 1 FROM smart_pricing_inbox_plans p
+           WHERE p.shop_domain = $1
+             AND (p.test_id = t.id OR p.plan_id = t.metadata->>'smart_pricing_plan_id')
+        )
+      ORDER BY t.created_at ASC
+      LIMIT $2`,
+    [domain, MAX_PLANS_PER_SHOP]
+  );
+  const plans = (result.rows || []).map(planFromOrphanedTest);
+  let restored = 0;
+  for (const plan of plans) {
+    const row = await upsertInboxPlan(domain, plan);
+    if (row) restored += 1;
+  }
+  return { restored, test_ids: plans.map(plan => plan.test_id) };
+}
+
+/**
+ * Every test launched from an experiment that has not been deleted, read from
+ * the tests themselves rather than the inbox. Pause, Stop and Resume act on
+ * these, so a test whose plan is missing from the browser is still reached.
+ */
+async function listExperimentTests(shopDomain, experimentId) {
+  const domain = normalizeShopDomain(shopDomain);
+  const id = String(experimentId || '').trim();
+  if (!domain || !id) return [];
+  const result = await query(
+    `SELECT id, status, target_id, metadata->>'smart_pricing_plan_id' AS plan_id
+       FROM tests
+      WHERE LOWER(TRIM(shop_domain)) = $1
+        AND metadata->>'experiment_id' = $2
+        AND status <> 'archived'
+      ORDER BY created_at ASC`,
+    [domain, id]
+  );
+  return (result.rows || []).map(row => ({
+    id: String(row.id),
+    status: row.status,
+    product_id: row.target_id || null,
+    plan_id: row.plan_id || null,
+  }));
+}
+
+/**
+ * Deletes an experiment by its id: archives every test launched from it and
+ * removes every inbox plan under it.
+ *
+ * Deleting used to archive only the tests the browser had plans for. Any test
+ * whose plan the browser lacked -- dropped by the old 200-plan cap, or missing
+ * from a stale local copy -- was left running, and came back on the list as
+ * soon as its plan was restored. Asking the database for the experiment's tests
+ * reaches all of them.
+ */
+async function deleteExperimentEverywhere(shopDomain, experimentId) {
+  const domain = normalizeShopDomain(shopDomain);
+  const id = String(experimentId || '').trim();
+  if (!domain || !id) {
+    return { archived_test_ids: [], deleted_plan_ids: [] };
+  }
+  const client = await getClient();
+  try {
+    await client.query('BEGIN');
+    const archived = await client.query(
+      `UPDATE tests
+          SET status = 'archived', updated_at = NOW()
+        WHERE LOWER(TRIM(shop_domain)) = $1
+          AND metadata->>'experiment_id' = $2
+          AND status <> 'archived'
+      RETURNING id`,
+      [domain, id]
+    );
+    const archivedIds = (archived.rows || []).map(row => String(row.id));
+    const deleted = await client.query(
+      `DELETE FROM smart_pricing_inbox_plans
+        WHERE shop_domain = $1
+          AND (plan_json->'metadata'->>'experiment_id' = $2
+               OR plan_json->>'experiment_id' = $2
+               OR test_id::text = ANY($3::text[]))
+      RETURNING plan_id`,
+      [domain, id, archivedIds]
+    );
+    await client.query('COMMIT');
+    return {
+      archived_test_ids: archivedIds,
+      deleted_plan_ids: (deleted.rows || []).map(row => row.plan_id),
+    };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 module.exports = {
   listInboxPlans,
+  restoreOrphanedLivePlans,
+  deleteExperimentEverywhere,
+  listExperimentTests,
+  planFromOrphanedTest,
   saveInboxPlans,
   deleteInboxPlan,
   patchInboxPlan,

@@ -7,9 +7,20 @@ const shopifyService = require('./shopifyService');
 const { suggestShopPriceSurfaceMappings } = require('./priceSurfaceSuggestService');
 const {
   fetchStorefrontPreviewHtml,
+  fetchStorefrontJson,
   unlockShopifyStorefrontSession,
 } = require('../utils/storefrontPasswordPreview');
-const { evaluateSelector, discoverPriceCandidates } = require('../utils/priceSurfaceHtmlProbe');
+const {
+  evaluateSelector,
+  discoverPriceCandidates,
+  anchorSelectorToPrices,
+  extractMainProductSection,
+  extractCartItemsSection,
+  findPriceElements,
+  candidatesFromPriceElements,
+  moneyCentsInText,
+  looksLikePriceSample,
+} = require('../utils/priceSurfaceHtmlProbe');
 const { filterThemeFileCandidatesForTarget } = require('../utils/priceSurfaceThemeExtract');
 const { scanThemePriceFiles } = require('./priceSurfaceThemeFileService');
 const { chatJson, hasOpenAiKey } = require('./smartPricing/smartPricingAiProvider');
@@ -149,6 +160,196 @@ async function probePage(url, storefrontPassword, signal, cookie = '') {
   };
 }
 
+function centsFrom(value, unit) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) {
+    return null;
+  }
+  return unit === 'major' ? Math.round(n * 100) : Math.round(n);
+}
+
+function collectVariantPrices(variants, unit, into) {
+  (Array.isArray(variants) ? variants : []).forEach(variant => {
+    const price = centsFrom(variant?.price, unit);
+    const compare = centsFrom(variant?.compare_at_price, unit);
+    if (price) {
+      into.regular.add(price);
+    }
+    if (compare && (!price || compare > price)) {
+      into.compare.add(compare);
+    }
+  });
+  return into;
+}
+
+/** Real prices of the sample product (`/products/<handle>.js` amounts are minor units). */
+async function loadSampleProductPrices(origin, productPath, cookie, signal) {
+  if (!productPath) {
+    return null;
+  }
+  const res = await fetchStorefrontJson(`${origin}${productPath}.js`, { cookie, signal }).catch(
+    () => null
+  );
+  const product = res?.ok ? res.json : null;
+  if (!product || !Array.isArray(product.variants) || !product.variants.length) {
+    return null;
+  }
+  const prices = collectVariantPrices(product.variants, 'minor', {
+    regular: new Set(),
+    compare: new Set(),
+  });
+  const buyable = product.variants.find(v => v?.available) || null;
+  return { ...prices, variantId: buyable?.id || null, title: String(product.title || '') };
+}
+
+/** Prices of the first listing products (`products.json` amounts are major units). */
+async function loadListingPrices(origin, collectionPath, cookie, signal) {
+  const res = await fetchStorefrontJson(`${origin}${collectionPath}/products.json?limit=50`, {
+    cookie,
+    signal,
+  }).catch(() => null);
+  const into = { regular: new Set(), compare: new Set(), products: [] };
+  const products = res?.ok && Array.isArray(res.json?.products) ? res.json.products : [];
+  products.forEach(product => {
+    collectVariantPrices(product?.variants, 'major', into);
+    const variants = Array.isArray(product?.variants) ? product.variants : [];
+    if (product?.handle && variants.length) {
+      into.products.push({
+        handle: String(product.handle),
+        available: variants.some(v => v?.available !== false),
+        onSale: variants.some(v => {
+          const price = centsFrom(v?.price, 'major');
+          const compare = centsFrom(v?.compare_at_price, 'major');
+          return Boolean(price && compare && compare > price && v?.available !== false);
+        }),
+        giftCard: String(product.product_type || '').toLowerCase() === 'gift card',
+      });
+    }
+  });
+  return into;
+}
+
+/**
+ * A product the storefront really shows: in stock (so the cart can be seeded) and,
+ * when possible, on sale (so compare-at prices can be verified too).
+ */
+function pickSampleProductPath(products) {
+  const list = (Array.isArray(products) ? products : []).filter(p => p.handle && !p.giftCard);
+  const pick =
+    list.find(p => p.available && p.onSale) || list.find(p => p.available) || list[0] || null;
+  return pick ? `/products/${encodeURIComponent(pick.handle)}` : '';
+}
+
+const STOREFRONT_STEP_TIMEOUT_MS = 9000;
+
+function boundedSignal(signal, ms) {
+  const timeout = AbortSignal.timeout(ms);
+  return signal ? AbortSignal.any([signal, timeout]) : timeout;
+}
+
+function timeoutReason(error) {
+  return error?.name === 'AbortError' || error?.name === 'TimeoutError'
+    ? 'timeout'
+    : 'fetch_error';
+}
+
+/**
+ * An anonymous `/cart` is empty, so put the sample variant in a throwaway cart session
+ * (no checkout is started) and probe that cart instead. Quantity 2 makes the line
+ * total differ from the unit price, so the two cart slots cannot be confused; a
+ * low-stock variant falls back to quantity 1.
+ * @returns {Promise<{ cookie: string, unit: Set<number>, line: Set<number> } | null>}
+ */
+async function seedSampleCart(origin, variantId, cookie, signal) {
+  if (!variantId) {
+    return null;
+  }
+  for (const quantity of [2, 1]) {
+    const res = await fetchStorefrontJson(`${origin}/cart/add.js`, {
+      method: 'POST',
+      body: { items: [{ id: Number(variantId), quantity }] },
+      cookie,
+      signal,
+    }).catch(() => null);
+    if (!res?.ok || !res.cookie) {
+      continue;
+    }
+    const item = Array.isArray(res.json?.items) ? res.json.items[0] : res.json;
+    const unit = new Set(
+      [item?.final_price, item?.price].map(v => centsFrom(v, 'minor')).filter(Boolean)
+    );
+    const line = new Set(
+      [item?.final_line_price, item?.line_price].map(v => centsFrom(v, 'minor')).filter(Boolean)
+    );
+    return { cookie: res.cookie, unit, line };
+  }
+  return null;
+}
+
+function unionSets(...sets) {
+  const out = new Set();
+  sets.forEach(set => set?.forEach(value => out.add(value)));
+  return out;
+}
+
+function knownPricesForTarget(target, { product, listing, cartSeeded }) {
+  const productRegular = product?.regular || new Set();
+  const productCompare = product?.compare || new Set();
+  if (target.surface === 'pdp') {
+    return target.role === 'compare_at' ? productCompare : productRegular;
+  }
+  if (target.surface === 'cart') {
+    if (!cartSeeded) return new Set();
+    const seeded = typeof cartSeeded === 'object' ? cartSeeded : null;
+    if (target.role === 'cart_line') {
+      return seeded?.line?.size ? seeded.line : productRegular;
+    }
+    return seeded?.unit?.size ? seeded.unit : productRegular;
+  }
+  if (target.role === 'compare_at') {
+    return unionSets(listing?.compare, productCompare);
+  }
+  return unionSets(listing?.regular, productRegular);
+}
+
+/**
+ * Score a candidate by whether its text shows a price the store really charges.
+ * Unreadable text (JS-rendered) leaves the pattern score alone.
+ */
+function anchorCandidate(candidate, html, known) {
+  const anchor = anchorSelectorToPrices(html, candidate.selector, known);
+  if (anchor.checked) {
+    candidate.real_price_hits = anchor.hits;
+    candidate.other_amounts = anchor.misses;
+  }
+  if (anchor.matched) {
+    // Elements that also show other amounts (a struck-through compare price,
+    // another product) are riskier to repaint than ones that only show this price.
+    candidate.score += 70 - Math.round((25 * anchor.misses) / (anchor.hits + anchor.misses));
+    candidate.verified = true;
+    candidate.sample_text = anchor.sample_text;
+    if (candidate.status === 'ambiguous') {
+      candidate.status = 'matched';
+    }
+  } else if (anchor.checked) {
+    candidate.score -= 45;
+    candidate.verified = false;
+    candidate.price_mismatch = true;
+    if (candidate.status === 'matched') {
+      candidate.status = 'ambiguous';
+    }
+  }
+  return candidate;
+}
+
+function searchPathForProduct(productPath) {
+  const handle = decodeURIComponent(String(productPath || '').split('/products/')[1] || '');
+  const words = handle.replace(/[-_]+/g, ' ').trim();
+  return words
+    ? `/search?q=${encodeURIComponent(words.slice(0, 60))}&type=product`
+    : '/search?q=a';
+}
+
 function persistAutoMapSource(source) {
   const key = String(source || '')
     .trim()
@@ -201,8 +402,25 @@ function buildAlternatives(html, primarySelector, limit = 4) {
     }));
 }
 
+const SLOT_DESCRIPTIONS = Object.freeze({
+  'pdp:regular': 'the price a shopper pays, in the main product area of the product page',
+  'pdp:compare_at': 'the struck-through "was" price shown next to a sale price on the product page',
+  'plp:regular': 'the price on each product card in a collection grid',
+  'plp:compare_at': 'the struck-through "was" price on collection product cards',
+  'cart:regular': 'the unit price of a line in the cart',
+  'cart:cart_line': 'the line total (unit price × quantity) of a line in the cart',
+  'home:regular': 'the price on product cards on the home page',
+  'search:regular': 'the price on product cards in search results',
+});
+
+function formatCentsForPrompt(cents) {
+  return (Number(cents) / 100).toFixed(2);
+}
+
 /**
- * One OpenAI call for all surfaces (cheaper/faster than per-surface).
+ * One OpenAI call for every slot the rules could not settle. The model sees each
+ * candidate's DOM path, sample text and real-price evidence, may only answer with
+ * a candidate index (or -1 for "none of these is right"), and never writes CSS.
  * @returns {Promise<Record<string, { index: number, rationale: string }>>}
  */
 async function maybeRankAllSurfacesWithOpenAi({ themeName, surfaceBuckets }) {
@@ -211,32 +429,46 @@ async function maybeRankAllSurfacesWithOpenAi({ themeName, surfaceBuckets }) {
   }
   const compactBuckets = surfaceBuckets
     .filter(bucket => Array.isArray(bucket.candidates) && bucket.candidates.length > 0)
-    .map(bucket => ({
-      key: `${bucket.surface}:${bucket.role}`,
-      surface: bucket.surface,
-      role: bucket.role,
-      candidates: bucket.candidates.slice(0, 5).map((c, index) => ({
-        index,
-        selector: c.selector,
-        sample_text: String(c.sample_text || '').slice(0, 60),
-        score: c.score,
-        source: c.source || 'heuristic',
-        file_hint: c.file_hint || null,
-      })),
-    }));
+    .map(bucket => {
+      const key = `${bucket.surface}:${bucket.role}`;
+      return {
+        key,
+        looking_for: SLOT_DESCRIPTIONS[key] || `${bucket.role} price on ${bucket.surface}`,
+        expected_prices: [...(bucket.knownPrices || [])].slice(0, 6).map(formatCentsForPrompt),
+        candidates: bucket.candidates.slice(0, 6).map((c, index) => ({
+          index,
+          selector: c.selector,
+          sample_text: String(c.sample_text || '').slice(0, 60),
+          dom_path: c.dom_path ? String(c.dom_path).slice(0, 200) : null,
+          source: c.source || 'heuristic',
+          file_hint: c.file_hint || null,
+          shows_expected_price: c.verified === true,
+          elements_with_expected_price: c.real_price_hits ?? null,
+          elements_with_other_amounts: c.other_amounts ?? null,
+        })),
+      };
+    });
   if (!compactBuckets.length) {
     return {};
   }
 
   const parsed = await chatJson({
-    systemPrompt:
-      'You help merchants map Shopify theme price CSS selectors. For each surface, choose only from that surface\'s candidates by index. Prefer source theme_file or theme_pack over generic .price when sample_text looks like money. Return JSON: { "picks": { "<surface>:<role>": { "index": number, "rationale": string } } }. Never invent selectors.',
-    userPrompt: JSON.stringify({
-      theme: themeName || null,
-      surfaces: compactBuckets,
-    }),
-    temperature: 0.1,
-    maxTokens: 700,
+    systemPrompt: [
+      'You map where prices appear in a Shopify storefront so an app can repaint them.',
+      'For each slot, read "looking_for" and pick the candidate whose element is that price.',
+      'Evidence, strongest first: shows_expected_price=true; few elements_with_other_amounts;',
+      'a dom_path inside a price wrapper (e.g. .price, .product__price, .card__information);',
+      'source theme_file/theme_pack; tag s/del/strike or a compare/was class only for compare_at slots.',
+      'Reject savings badges ("Save $5"), unit prices ("/100g"), cart counts, subtotals for line slots,',
+      'and visually-hidden labels. If no candidate fits, answer index -1.',
+      'Answer only with candidate indexes; never write or modify CSS.',
+      'Return JSON: { "picks": { "<slot key>": { "index": number, "rationale": "short reason" } } }.',
+    ].join(' '),
+    userPrompt: JSON.stringify({ theme: themeName || null, slots: compactBuckets }),
+    temperature: 0,
+    maxTokens: 900,
+    timeoutMs: 8000,
+    label: 'price_surface_auto_map',
   });
   if (!parsed || typeof parsed !== 'object') {
     return {};
@@ -249,7 +481,7 @@ async function maybeRankAllSurfacesWithOpenAi({ themeName, surfaceBuckets }) {
       continue;
     }
     const index = Number(pick.index);
-    if (!Number.isInteger(index) || index < 0 || index >= bucket.candidates.length) {
+    if (!Number.isInteger(index) || index < -1 || index >= bucket.candidates.length) {
       continue;
     }
     out[bucket.key] = {
@@ -297,52 +529,70 @@ async function autoMapShopPriceSurfaces(shopDomain, options = {}) {
   const signal = options.signal;
   const accessToken = options.accessToken || '';
 
-  const [suggestion, previousThemeMeta] = await Promise.all([
+  const stepSignal = () => boundedSignal(signal, STOREFRONT_STEP_TIMEOUT_MS);
+
+  const suggestionPromise = Promise.all([
     suggestShopPriceSurfaceMappings(domain, { accessToken }),
     getPriceSurfaceThemeMeta(domain),
   ]);
-  const packMappings = suggestion.mappings || [];
-  const themeDrift = buildThemeDrift(previousThemeMeta, suggestion.theme);
-  const themeScanPromise =
-    accessToken && suggestion.theme?.id
-      ? scanThemePriceFiles(domain, accessToken, suggestion.theme.id)
-      : Promise.resolve({
+  const themeScanPromise = suggestionPromise.then(([found]) =>
+    accessToken && found.theme?.id
+      ? scanThemePriceFiles(domain, accessToken, found.theme.id)
+      : {
           ok: false,
           reason: accessToken ? 'missing_theme' : 'no_token',
           scanned: 0,
           candidateCount: 0,
           files: [],
           candidates: [],
-        });
+        }
+  );
+  const unlockPromise =
+    storefrontPassword && /\.myshopify\.com$/i.test(domain)
+      ? unlockShopifyStorefrontSession(new URL(`${origin}/`), storefrontPassword, stepSignal())
+      : Promise.resolve(null);
 
-  const productPath = await resolveSampleProductPath(domain, accessToken, options.productPath);
-  const collectionPath = normalizeProductPath(options.collectionPath) || '/collections/all';
+  const [[suggestion, previousThemeMeta], unlock] = await Promise.all([
+    suggestionPromise,
+    unlockPromise.catch(error => ({ ok: false, reason: timeoutReason(error) })),
+  ]);
+  const packMappings = suggestion.mappings || [];
+  const themeDrift = buildThemeDrift(previousThemeMeta, suggestion.theme);
 
   let sharedCookie = '';
   let unlockFailure = null;
-  if (storefrontPassword && /\.myshopify\.com$/i.test(domain)) {
-    const unlock = await unlockShopifyStorefrontSession(
-      new URL(`${origin}/`),
-      storefrontPassword,
-      signal
-    );
-    if (unlock.ok && unlock.cookie) {
-      sharedCookie = unlock.cookie;
-    } else {
-      unlockFailure = {
-        reason: unlock.reason || 'invalid_password',
-        retryAfterSeconds: unlock.retryAfterSeconds,
-      };
-    }
+  if (unlock?.ok && unlock.cookie) {
+    sharedCookie = unlock.cookie;
+  } else if (unlock) {
+    unlockFailure = {
+      reason: unlock.reason || 'invalid_password',
+      retryAfterSeconds: unlock.retryAfterSeconds,
+    };
   }
+
+  const collectionPath = normalizeProductPath(options.collectionPath) || '/collections/all';
+  const canReachStorefront = unlockFailure?.reason !== 'rate_limited';
+  const listingPrices = canReachStorefront
+    ? await loadListingPrices(origin, collectionPath, sharedCookie, stepSignal()).catch(() => null)
+    : null;
+  const explicitPath = normalizeProductPath(options.productPath);
+  const productPath =
+    (explicitPath.includes('/products/') && explicitPath) ||
+    pickSampleProductPath(listingPrices?.products) ||
+    (await resolveSampleProductPath(domain, accessToken, options.productPath));
 
   const probePlan = {
     pdp: productPath ? `${origin}${productPath}` : null,
     plp: `${origin}${collectionPath}`,
     cart: `${origin}/cart`,
     home: `${origin}/`,
-    search: `${origin}/search?q=a`,
+    search: `${origin}${searchPathForProduct(productPath)}`,
   };
+
+  const productPricesPromise = canReachStorefront
+    ? loadSampleProductPrices(origin, productPath, sharedCookie, stepSignal()).catch(() => null)
+    : Promise.resolve(null);
+  let cartSeeded = null;
 
   const probeEntries = await Promise.all(
     Object.entries(probePlan).map(async ([key, url]) => {
@@ -370,7 +620,21 @@ async function autoMapShopPriceSurfaces(shopDomain, options = {}) {
         ];
       }
       try {
-        const probed = await probePage(url, storefrontPassword, signal, sharedCookie);
+        let cookie = sharedCookie;
+        if (key === 'cart') {
+          const product = await productPricesPromise;
+          const seeded = await seedSampleCart(
+            origin,
+            product?.variantId,
+            sharedCookie,
+            stepSignal()
+          );
+          if (seeded) {
+            cookie = seeded.cookie;
+            cartSeeded = seeded;
+          }
+        }
+        const probed = await probePage(url, storefrontPassword, stepSignal(), cookie);
         return [key, probed];
       } catch (error) {
         return [
@@ -378,7 +642,7 @@ async function autoMapShopPriceSurfaces(shopDomain, options = {}) {
           {
             ok: false,
             url,
-            reason: error?.name === 'AbortError' ? 'timeout' : 'fetch_error',
+            reason: timeoutReason(error),
             html: '',
           },
         ];
@@ -398,10 +662,23 @@ async function autoMapShopPriceSurfaces(shopDomain, options = {}) {
     ? scannedThemeFiles.candidates
     : [];
 
+  const productPrices = await productPricesPromise;
+  const scopedHtml = {
+    pdp: extractMainProductSection(probes.pdp?.html || ''),
+    cart: extractCartItemsSection(probes.cart?.html || ''),
+  };
+
   const surfaceBuckets = [];
   for (const target of AUTO_MAP_TARGETS) {
-    const html = probes[target.surface]?.html || '';
-    const probeOk = Boolean(probes[target.surface]?.ok && html);
+    const pageHtml = probes[target.surface]?.html || '';
+    const probeOk = Boolean(probes[target.surface]?.ok && pageHtml);
+    const scoped = scopedHtml[target.surface];
+    const html = scoped && discoverPriceCandidates(scoped, 1).length ? scoped : pageHtml;
+    const knownPrices = knownPricesForTarget(target, {
+      product: productPrices,
+      listing: listingPrices,
+      cartSeeded,
+    });
     const packRow = packMappingForTarget(packMappings, target.surface, target.role);
     if (!probeOk) {
       surfaceBuckets.push({
@@ -474,6 +751,36 @@ async function autoMapShopPriceSurfaces(shopDomain, options = {}) {
         });
       }
     );
+    const priceElements = findPriceElements(
+      html,
+      knownPrices.size
+        ? text => moneyCentsInText(text).some(cents => knownPrices.has(cents))
+        : looksLikePriceSample,
+      { limit: 60 }
+    );
+    candidatesFromPriceElements(priceElements, { role: target.role })
+      .slice(0, 8)
+      .forEach(row => {
+        const existing = candidatePool.find(c => c.selector === row.selector);
+        if (existing) {
+          existing.dom_path = existing.dom_path || row.dom_path;
+          existing.score += 8;
+          return;
+        }
+        const evaluated = evaluateSelector(html, row.selector);
+        if (evaluated.status === 'missing') {
+          return;
+        }
+        candidatePool.push({
+          selector: row.selector,
+          sample_text: evaluated.sample_text || row.sample_text,
+          score: evaluated.score + row.score,
+          status: evaluated.status,
+          source: knownPrices.size ? 'price_match' : 'heuristic',
+          dom_path: row.dom_path,
+        });
+      });
+    candidatePool.forEach(candidate => anchorCandidate(candidate, html, knownPrices));
     candidatePool.sort((a, b) => b.score - a.score);
 
     surfaceBuckets.push({
@@ -481,24 +788,31 @@ async function autoMapShopPriceSurfaces(shopDomain, options = {}) {
       packRow,
       probeOk: true,
       html,
+      knownPrices,
       candidates: candidatePool,
     });
   }
 
   const aiPicks = await maybeRankAllSurfacesWithOpenAi({
     themeName: suggestion.theme?.name,
+    // A price-verified top pick or a single candidate leaves the model nothing
+    // to decide, so those slots skip the call (and its latency and cost).
     surfaceBuckets: surfaceBuckets
-      .filter(bucket => bucket.probeOk && bucket.candidates.length)
+      .filter(
+        bucket =>
+          bucket.probeOk && bucket.candidates.length > 1 && !bucket.candidates[0].verified
+      )
       .map(bucket => ({
         surface: bucket.target.surface,
         role: bucket.target.role,
+        knownPrices: bucket.knownPrices,
         candidates: bucket.candidates,
       })),
   });
 
   const surfaces = [];
   for (const bucket of surfaceBuckets) {
-    const { target, packRow, probeOk, html, candidates } = bucket;
+    const { target, packRow, probeOk, html, candidates, knownPrices } = bucket;
     if (!probeOk) {
       const probeReason = probes[target.surface]?.reason || 'unavailable';
       let rationale = `Could not load ${target.surface} HTML for verification.`;
@@ -536,18 +850,22 @@ async function autoMapShopPriceSurfaces(shopDomain, options = {}) {
     let rationale = '';
     const slotKey = `${target.surface}:${target.role}`;
     const aiPick = aiPicks[slotKey];
-    if (aiPick && candidates[aiPick.index]) {
-      const liveCheck = evaluateSelector(html, candidates[aiPick.index].selector);
-      if (liveCheck.status !== 'missing') {
-        chosen = {
-          ...candidates[aiPick.index],
-          sample_text: liveCheck.sample_text || candidates[aiPick.index].sample_text,
-          status: liveCheck.status,
-          source: 'openai',
-        };
-        rationale = aiPick.rationale;
-      }
+    const aiCandidate = aiPick ? candidates[aiPick.index] : null;
+    // The model may only override the top pick when it does not trade a
+    // price-verified selector for an unverified one.
+    if (aiCandidate && (aiCandidate.verified || !chosen?.verified)) {
+      chosen = { ...aiCandidate, source: 'openai' };
+      rationale = aiPick.rationale;
+    } else if (aiPick?.index === -1 && chosen && !chosen.verified) {
+      chosen = { ...chosen, status: 'ambiguous' };
+      rationale = aiPick.rationale || 'None of the prices found here looked right.';
     }
+
+    const verification = chosen?.verified
+      ? 'price_match'
+      : target.role === 'compare_at' && knownPrices && !knownPrices.size && productPrices
+        ? 'not_on_sale'
+        : 'pattern';
 
     if (chosen) {
       surfaces.push({
@@ -559,9 +877,29 @@ async function autoMapShopPriceSurfaces(shopDomain, options = {}) {
         source: chosen.source,
         file_hint: chosen.file_hint || null,
         score: chosen.score,
-        alternatives: buildAlternatives(html, chosen.selector, 4),
+        verification,
+        alternatives: candidates
+          .filter(row => row.selector !== chosen.selector && row.status !== 'missing')
+          .slice(0, 3)
+          .map(row => ({
+            selector: row.selector,
+            sample_text: row.sample_text || '',
+            score: row.score,
+            source: row.source,
+            verified: row.verified === true,
+          }))
+          .concat(buildAlternatives(html, chosen.selector, 4))
+          .filter(
+            (row, index, list) => list.findIndex(other => other.selector === row.selector) === index
+          )
+          .slice(0, 4),
         rationale:
           rationale ||
+          (chosen.verified
+            ? `Shows ${chosen.sample_text}, which matches a real price in your store.`
+            : chosen.price_mismatch
+              ? 'Found a price here, but it did not match the product price. Check it on the storefront.'
+              : null) ||
           (chosen.source === 'theme_file'
             ? `Matched a selector from theme file ${chosen.file_hint || 'source'} on the live page.`
             : chosen.source === 'theme_pack'
@@ -582,6 +920,7 @@ async function autoMapShopPriceSurfaces(shopDomain, options = {}) {
         sample_text: '',
         source: packRow ? 'theme_pack' : 'heuristic',
         score: 0,
+        verification,
         alternatives: buildAlternatives(html, '', 4),
         rationale: 'No price-like selector matched the live page HTML.',
         probe: {
@@ -608,7 +947,8 @@ async function autoMapShopPriceSurfaces(shopDomain, options = {}) {
     pdpRegular &&
       pdpRegular.status === 'matched' &&
       String(pdpRegular.selector || '').trim() &&
-      (suggestion.confidence === 'high' ||
+      (pdpRegular.verification === 'price_match' ||
+        suggestion.confidence === 'high' ||
         suggestion.confidence === 'medium' ||
         themeFileVerifiedPdp)
   );
@@ -667,6 +1007,13 @@ async function autoMapShopPriceSurfaces(shopDomain, options = {}) {
         : { ok: true, reason: null },
     password_gate: Boolean(passwordGate),
     ai_enabled: hasOpenAiKey(),
+    ai_assisted_slots: Object.keys(aiPicks),
+    price_check: {
+      product: Boolean(productPrices?.regular?.size),
+      product_title: productPrices?.title || null,
+      listing: Boolean(listingPrices?.regular?.size),
+      cart: Boolean(cartSeeded),
+    },
     theme_files: {
       ok: Boolean(scannedThemeFiles.ok),
       reason: scannedThemeFiles.reason || null,
@@ -689,4 +1036,8 @@ module.exports = {
   savePriceSurfaceThemeMeta,
   buildThemeDrift,
   persistAutoMapSource,
+  pickSampleProductPath,
+  knownPricesForTarget,
+  anchorCandidate,
+  searchPathForProduct,
 };

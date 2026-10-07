@@ -74,30 +74,8 @@ function sendValidationError(res, errors) {
   return sendError(res, HTTP_STATUS.BAD_REQUEST, ERROR_MESSAGES.VALIDATION_FAILED, errors);
 }
 
-/**
- * Send not found error response
- *
- * @param {Object} res - Express response object
- * @param {string} resource - Resource name (e.g., 'Test')
- */
-function sendNotFound(res, resource = 'Resource') {
-  return sendError(res, HTTP_STATUS.NOT_FOUND, `${resource} not found`);
-}
-
-/**
- * Send unauthorized error response
- *
- * @param {Object} res - Express response object
- * @param {string} message - Optional custom message
- */
-function sendUnauthorized(res, message = ERROR_MESSAGES.UNAUTHORIZED) {
-  return sendError(res, HTTP_STATUS.UNAUTHORIZED, message);
-}
-
 module.exports = {
   sendSuccess,
   sendError,
   sendValidationError,
-  sendNotFound,
-  sendUnauthorized,
 };

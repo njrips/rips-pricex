@@ -203,9 +203,11 @@ function formatEventDetail(event) {
       : null;
   }
   if (event.event_type === 'rerun_queued') {
-    return payload.follow_up_plan_id
-      ? `Queued ${payload.follow_up_plan_id} (round ${payload.learning_round || '?'})`
-      : null;
+    return payload.learning_round
+      ? `Round ${payload.learning_round} queued, ready to review and launch.`
+      : payload.follow_up_plan_id
+        ? 'A follow-up round was queued, ready to review and launch.'
+        : null;
   }
   if (event.event_type === 'guardrail_stopped') {
     const product = productTitleFromEventPayload(payload);

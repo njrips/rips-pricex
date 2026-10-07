@@ -54,24 +54,9 @@ function extractGidNumericId(gid) {
   return match ? match[1] : '';
 }
 
-function variantGidsMatch(a, b) {
-  const left = normalizeVariantGid(a);
-  const right = normalizeVariantGid(b);
-  if (!left || !right) {
-    return false;
-  }
-  return left === right || extractGidNumericId(left) === extractGidNumericId(right);
-}
-
 function parseMoney(value) {
   const num = Number.parseFloat(String(value ?? '').trim());
   return Number.isFinite(num) ? num : 0;
-}
-
-function daysAgoIso(days) {
-  const date = new Date();
-  date.setUTCDate(date.getUTCDate() - Math.max(0, Number(days) || 0));
-  return date.toISOString().slice(0, 10);
 }
 
 /** Unique Shopify products represented in SKU / opportunity rows. */
@@ -115,9 +100,7 @@ module.exports = {
   normalizeProductGid,
   normalizeCollectionGid,
   extractGidNumericId,
-  variantGidsMatch,
   parseMoney,
-  daysAgoIso,
   isExcludedProductType,
   countUniqueCatalogProducts,
 };

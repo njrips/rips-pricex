@@ -10,14 +10,6 @@
 // and Shopify client. They are required lazily inside buildBatchPreviewLaunch so
 // the pure audience/goal helpers in this module stay importable on their own.
 
-const DEFAULT_SEGMENTS = Object.freeze({
-  device: 'all',
-  customer: 'all',
-  countries: [],
-  exclude_bots: true,
-  exclude_internal_ips: true,
-});
-
 function suggestGoalForPlan(plan = {}, guardrails = {}) {
   const defaultGoal = guardrails.default_goal_template || guardrails.defaultGoalTemplate || {};
   const margin =
@@ -314,7 +306,6 @@ async function buildBatchPreviewLaunch({
 }
 
 module.exports = {
-  DEFAULT_SEGMENTS,
   suggestGoalForPlan,
   suggestGoalsForPlans,
   buildBatchPreviewLaunch,

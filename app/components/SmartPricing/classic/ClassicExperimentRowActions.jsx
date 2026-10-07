@@ -27,6 +27,10 @@ import {
   buildClassicExperimentDeleteConfirmMessage,
   deleteClassicExperimentSynchronized,
 } from './classicExperimentDelete';
+import {
+  stopPausedTestsBeforeArchive,
+  withUnlistedExperimentTests,
+} from './classicExperimentTestScope';
 import { classicCreateStepId } from './classicCreateSteps';
 import { duplicateClassicExperimentAsDraft } from './classicExperimentDuplicate';
 import styles from './SmartPricingClassic.module.css';
@@ -233,7 +237,12 @@ export default function ClassicExperimentRowActions({
     runBusy('pause', async () => {
       // A product whose winner is already applied is not part of what Pause
       // acts on: its price is published and its traffic is no longer split.
-      const testIds = collectExperimentTestIds(experiment?.plans, { skipSettled: true });
+      const testIds = await withUnlistedExperimentTests(
+        shopDomain,
+        experiment?.plans,
+        collectExperimentTestIds(experiment?.plans, { skipSettled: true }),
+        { statuses: ['running'] }
+      );
       if (!testIds.length) {
         throw new Error('No linked test to pause.');
       }
@@ -274,7 +283,12 @@ export default function ClassicExperimentRowActions({
    */
   const handleStop = () =>
     runBusy('stop', async () => {
-      const testIds = collectExperimentTestIds(experiment?.plans, { skipSettled: true });
+      const testIds = await withUnlistedExperimentTests(
+        shopDomain,
+        experiment?.plans,
+        collectExperimentTestIds(experiment?.plans, { skipSettled: true }),
+        { statuses: ['running', 'paused'] }
+      );
       if (!testIds.length) {
         throw new Error('No linked test to stop.');
       }
@@ -315,7 +329,12 @@ export default function ClassicExperimentRowActions({
       // its traffic would undo the decision. The per-product resume refuses
       // this outright; neither preflight catches it, because such a test is
       // its own holder and so reads as free.
-      const testIds = collectExperimentTestIds(experiment?.plans, { skipSettled: true });
+      const testIds = await withUnlistedExperimentTests(
+        shopDomain,
+        experiment?.plans,
+        collectExperimentTestIds(experiment?.plans, { skipSettled: true }),
+        { statuses: ['paused'] }
+      );
       if (!testIds.length) {
         throw new Error('No linked test to resume.');
       }
@@ -366,9 +385,19 @@ export default function ClassicExperimentRowActions({
         at,
         actor: experiment?.representative?.owner_name || experiment?.representative?.created_by_name || 'You',
       });
-      await patchExperimentPlans(plan =>
-        appendActivityToPlans([{ ...plan, archived: true, archived_at: at }], archiveEntry)[0]
+      const stopped = new Set(
+        await stopPausedTestsBeforeArchive(shopDomain, experiment?.plans, ids =>
+          postToEachTest(ids, 'stop')
+        )
       );
+      await patchExperimentPlans(plan => {
+        const planTestId = String(plan?.test_id || plan?.metadata?.test_id || '').trim();
+        const ended = stopped.has(planTestId) ? { status: CLASSIC_STOPPED_PLAN_STATUS } : {};
+        return appendActivityToPlans(
+          [{ ...plan, ...ended, archived: true, archived_at: at }],
+          archiveEntry
+        )[0];
+      });
       notify('success', 'Test archived.');
       await refreshList({ preferLocalIds: planIds, quiet: true });
     });

@@ -41,7 +41,10 @@ function resolveControlRetained(test = {}) {
 function resolveAutoCompleted(test = {}) {
   if (resolveWinnerApplied(test)) return false;
   if (resolveControlRetained(test)) return true;
-  return resolveAutoDecision(test) === 'challenger';
+  if (resolveAutoDecision(test) !== 'challenger') return false;
+  // Shopify refused some of the winner's prices, so the catalog is half
+  // written. Closing the plan here would hide the one action that repairs it.
+  return test?.goal?.auto_apply?.published !== false;
 }
 
 function resolveInboxPlanStatus(test = {}, significance = {}) {

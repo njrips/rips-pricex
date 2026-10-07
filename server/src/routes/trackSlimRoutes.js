@@ -29,8 +29,11 @@ const {
   jsTargetingOverridesFromQuery,
 } = require('../utils/storefrontAssignmentContext');
 const logger = require('../utils/logger');
+const { createTrackRateLimit } = require('../middleware/trackRateLimit');
 
 const router = express.Router();
+const trackRateLimit = createTrackRateLimit();
+router.use((req, res, next) => (req.method === 'POST' ? trackRateLimit(req, res, next) : next()));
 
 function loadScriptBody() {
   const p = path.resolve(__dirname, '../../../storefront/storefront-script.js');
@@ -294,6 +297,48 @@ router.get(['/preview-launch', '/preview-launch/'], async (req, res) => {
   }
 });
 
+const EXPOSURE_TEST_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * The storefront showed this shopper a product these tests price. Product
+ * price tests launched since migration 010 count a visitor from here rather
+ * than from the assignment, which every page view makes. Only the first
+ * exposure is kept, and only for an assignment that already exists.
+ */
+router.post('/exposure', async (req, res) => {
+  try {
+    const shop = resolveShop(req);
+    const body = req.body || {};
+    const userId = String(body.user_id || body.userId || '').trim();
+    const testIds = [
+      ...new Set(
+        (Array.isArray(body.test_ids) ? body.test_ids : [])
+          .map(id => String(id || '').trim().toLowerCase())
+          .filter(id => EXPOSURE_TEST_ID_RE.test(id))
+      ),
+    ].slice(0, MAX_BATCH_TEST_IDS);
+    if (!shop || !userId || !testIds.length) {
+      return res.status(400).json({ error: 'shop, user_id, test_ids required' });
+    }
+    const result = await query(
+      `UPDATE test_assignments
+       SET exposed_at = NOW()
+       WHERE exposed_at IS NULL
+         AND user_id = $1
+         AND LOWER(TRIM(shop_domain)) = $2
+         AND test_id = ANY($3::uuid[])`,
+      [userId, String(shop).toLowerCase().trim(), testIds]
+    ).catch(err => {
+      // Before migration 010 there is no column to stamp, and nothing reads it.
+      if (err?.code === '42703') return { rowCount: 0 };
+      throw err;
+    });
+    res.json({ ok: true, exposed: result.rowCount || 0 });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.post('/catalog-product-view', async (req, res) => {
   try {
     const shop = resolveShop(req);
@@ -302,7 +347,11 @@ router.post('/catalog-product-view', async (req, res) => {
       return res.status(400).json({ error: 'shop and product_id required' });
     }
     const day = new Date().toISOString().slice(0, 10);
-    const sessionKey = String(req.body?.session_key || req.body?.user_id || 'anon');
+    // The storefront sends `visitor_key`. Reading only the other two names put
+    // every shopper under 'anon', so each product counted one visitor a day.
+    const sessionKey = String(
+      req.body?.visitor_key || req.body?.session_key || req.body?.user_id || 'anon'
+    );
     // The session row goes first so the day's rollup knows whether this view
     // came from a visitor it has already counted. The rollup used to set
     // sessions to 1 on insert and never touch it again, leaving a column that

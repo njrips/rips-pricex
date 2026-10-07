@@ -11,19 +11,26 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   console.log(`Received ${topic} webhook for ${shop}`);
 
-  // Pause running tests + clear entitlement via Express API (cancel/uninstall policy)
+  if (session) {
+    await db.session.deleteMany({ where: { shop } });
+  }
+
+  // Pause running tests + clear entitlement via Express API (cancel/uninstall
+  // policy). A failure answers 500 so Shopify redelivers; swallowing it left
+  // tests pricing shoppers until the background sweep next ran.
   try {
-    await fetch(`${expressApiBase()}/api/shops/uninstall`, {
+    const res = await fetch(`${expressApiBase()}/api/shops/uninstall`, {
       method: "POST",
       headers: internalServiceHeaders(shop),
       body: "{}",
     });
+    if (!res.ok) {
+      console.error(`Uninstall for ${shop} failed in the API with ${res.status}`);
+      return new Response(null, { status: 500 });
+    }
   } catch (err) {
     console.error("Failed to notify API of uninstall", err);
-  }
-
-  if (session) {
-    await db.session.deleteMany({ where: { shop } });
+    return new Response(null, { status: 500 });
   }
 
   return new Response();

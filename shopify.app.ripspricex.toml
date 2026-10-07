@@ -26,8 +26,13 @@ use_legacy_install_flow = false
 redirect_urls = [ "https://jim-pride-scout-ultimately.trycloudflare.com/auth/callback", "https://jim-pride-scout-ultimately.trycloudflare.com/auth/shopify/callback", "https://jim-pride-scout-ultimately.trycloudflare.com/api/auth/callback" ]
 
 [webhooks]
-# Keep in sync with app/shopify.server.ts ApiVersion.October25
-api_version = "2025-10"
+# Keep in sync with app/shopify.server.ts ApiVersion.July26
+api_version = "2026-07"
+
+  # Mandatory for App Store apps: Shopify rejects a submission without them.
+  [[webhooks.subscriptions]]
+  compliance_topics = ["customers/data_request", "customers/redact", "shop/redact"]
+  uri = "/webhooks/compliance"
 
   [[webhooks.subscriptions]]
   topics = ["app/uninstalled"]
@@ -46,6 +51,16 @@ api_version = "2025-10"
   [[webhooks.subscriptions]]
   topics = ["app_subscriptions/update"]
   uri = "/webhooks/app/subscriptions_update"
+
+  # Purchases are recorded from these: Shopify no longer runs the storefront
+  # script on the order-status page. Orders are protected customer data
+  # (level 1: no name, email, phone or address fields are read), so Shopify
+  # rejects this subscription until the Partner Dashboard request
+  # (API access requests > Protected customer data access) is approved.
+  # Uncomment once approved.
+  # [[webhooks.subscriptions]]
+  # topics = ["orders/create", "orders/cancelled", "refunds/create"]
+  # uri = "/webhooks/orders"
 
 # Relative: CLI tunnel → Vite /api proxy → Express :3456
 # Base must be /api/proxy (not .../script.js) so /apps/ripspricex/script.js maps correctly

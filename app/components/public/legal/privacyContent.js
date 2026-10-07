@@ -2,7 +2,7 @@
  * Product-practice privacy page for the App Store listing URL.
  * Not legal advice — keep statements aligned with as-built scopes and runtime.
  */
-export const PRIVACY_UPDATED = '24 August 2026';
+export const PRIVACY_UPDATED = '29 September 2026';
 
 export const PRIVACY_INTRO =
   'This page describes how Priceify handles data when a merchant installs the app from Shopify. It is a product-practice notice for the App Store listing, not legal advice.';
@@ -19,6 +19,7 @@ export const PRIVACY_SECTIONS = [
     title: 'What we collect through Shopify APIs',
     paragraphs: [
       'With the scopes requested at install we read products, variants, orders, inventory, locations, themes, pages, markets, and reports so we can build price tests, map price locations, and measure results. We write products only when a merchant applies a winning price. We read and write checkout pricing functions so checkout can honor the assigned test price on Plus / development stores.',
+      'Shopify notifies us when an order is placed, cancelled or refunded. From an order that includes a product in a running test we keep the order number, its merchandise subtotal and currency, and the hidden test fields on its lines. We do not store the customer’s name, email, phone or address, and orders with no tested product are discarded.',
     ],
   },
   {
@@ -45,8 +46,9 @@ export const PRIVACY_SECTIONS = [
   {
     title: 'Storage, processors, and retention',
     paragraphs: [
-      'Shop-scoped records live in our application database (Postgres). Hosting and Shopify itself are processors for install, Admin, and App Pricing. If AI features are enabled, the configured model provider may receive the minimum prompt needed to rank a suggestion.',
-      'When the app is uninstalled we revoke the session, pause running tests, and delete that shop’s support tickets. Merchants can use Contact to request deletion of remaining shop-scoped records. Mandatory Shopify customer-privacy webhooks are on the App Store compliance roadmap if listing requires them.',
+      'Shop-scoped records live in our application database (Postgres). Hosting and Shopify itself are processors for install, Admin, and App Pricing. If AI features are enabled, OpenAI receives product data to suggest test prices and rank products: titles, product types, prices, margins, and sales and product-page visit counts. No customer data, shop domain or Shopify ids are sent. OpenAI does not train on data sent through its API, and keeps it for up to 30 days for abuse monitoring.',
+      'When the app is uninstalled we revoke the session, pause running tests, and delete that shop’s support tickets. When Shopify sends its shop erasure request, 48 hours after uninstall, we delete every remaining record for that shop: tests, results, settings, and plans.',
+      'The only customer-linked data we keep is the Shopify order number recorded with a test conversion. When Shopify forwards a customer’s erasure request we remove those order numbers and keep the anonymous conversion, so test results do not change. When a customer asks for their data, we can tell the merchant which of the customer’s orders a test recorded.',
     ],
   },
   {

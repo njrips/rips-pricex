@@ -5,9 +5,11 @@ import {
   Banner,
   BlockStack,
   Button,
+  Checkbox,
   InlineStack,
   Modal,
   Select,
+  Spinner,
   Text,
   TextField,
 } from '@shopify/polaris';
@@ -33,19 +35,16 @@ import {
   resolveStorefrontPasswordForPreview,
 } from '../../utils/previewUrl';
 import {
-  autoMapModalIntroTooltip,
   autoMapPrimaryActionLabel,
+  autoMapRowBadge,
+  buildAutoMapCheckedLine,
+  buildAutoMapHeadline,
   buildDefaultAcceptedSlots,
-  buildAutoMapModalIntro,
-  filterAutoMapModalSurfaces,
+  describeAutoMapRow,
   formatAutoMapRowLabel,
-  friendlyGapReason,
   shouldAutoPersistAutoMapResult,
   summarizeAutoMapResult,
 } from '../../utils/priceSurfaceAutoMapUi';
-import { IconInfo } from '../SmartPricing/classic/classicIcons';
-import classicStyles from '../SmartPricing/classic/SmartPricingClassic.module.css';
-
 // Saving shop defaults is one small PUT, so on a warm connection the spinner
 // can come and go inside a single frame and the click reads as a no-op. Hold
 // the button in its loading state long enough to be seen, then confirm with a
@@ -334,6 +333,7 @@ export default function PriceSurfaceMappingsPanel({
   const [pickerModalUrl, setPickerModalUrl] = useState('');
   const [saveFlash, setSaveFlash] = useState(null);
   const lastAutoMapTokenRef = useRef(0);
+  const autoMapCancelledRef = useRef(false);
   const saveFlashTokenRef = useRef(0);
   // Keyed on a token rather than the message so saving twice with the same
   // copy restarts the timer instead of leaving the first one to expire.
@@ -616,7 +616,7 @@ export default function PriceSurfaceMappingsPanel({
     onStatusChange?.(registryStatus);
   }, [onStatusChange, registryStatus]);
 
-  const startQuickPick = async surface => {
+  const startQuickPick = async (surface, role = 'regular') => {
     if (needsStorefrontPassword) {
       setPreviewPickError(
         'Set RIPX_DEV_STOREFRONT_PASSWORD (and VITE_RIPX_DEV_STOREFRONT_PASSWORD) in .env for local/dev, restart the app, then pick again.'
@@ -624,16 +624,21 @@ export default function PriceSurfaceMappingsPanel({
       return;
     }
     const rows = shopRows;
-    const emptyIndex = rows.findIndex(row => !String(row.selector || '').trim());
+    const emptyIndex = rows.findIndex(
+      row =>
+        !String(row.selector || '').trim() &&
+        (row.surface || 'pdp') === surface &&
+        (row.role || 'regular') === role
+    );
     if (emptyIndex >= 0) {
-      await beginVisualPick(emptyIndex);
+      await beginVisualPick('shop', emptyIndex);
       return;
     }
     if (rows.length >= MAX_PRICE_SURFACE_MAPPINGS) {
       setError(`You can save up to ${MAX_PRICE_SURFACE_MAPPINGS} mappings.`);
       return;
     }
-    const created = createEmptyPriceSurfaceMapping({ surface, role: 'regular', source: 'visual' });
+    const created = createEmptyPriceSurfaceMapping({ surface, role, source: 'visual' });
     const nextIndex = rows.length;
     setShopMappings([...rows, created]);
     if (onPrepareVisualPick) {
@@ -735,6 +740,10 @@ export default function PriceSurfaceMappingsPanel({
     setError('');
     setNotice('');
     setPreviewPickError('');
+    setAutoMapResult(null);
+    setAutoMapShowTechnical(false);
+    setAutoMapOpen(true);
+    autoMapCancelledRef.current = false;
     try {
       const base = priceSurfaceSettingsPath();
       const autoMapPath = base.includes('?')
@@ -744,9 +753,13 @@ export default function PriceSurfaceMappingsPanel({
         storefront_password: storefrontPassword || undefined,
         product_path: productPath || undefined,
       });
+      if (autoMapCancelledRef.current) {
+        return;
+      }
       const result = unwrapData(response) || response;
       const surfaces = Array.isArray(result?.surfaces) ? result.surfaces : [];
       if (!surfaces.length) {
+        setAutoMapOpen(false);
         setError('Auto-detect found no prices to map. Add a row and use Pick instead.');
         return;
       }
@@ -759,18 +772,17 @@ export default function PriceSurfaceMappingsPanel({
         if (saved !== false) {
           setNoticeTitle('Theme prices mapped');
           setNotice(
-            `Saved ${summary.matchedCount} verified price location${
+            `Saved ${summary.matchedCount} price location${
               summary.matchedCount === 1 ? '' : 's'
-            }${summary.missingCount ? '. Use Pick for remaining gaps.' : '.'}`
+            }${summary.missingCount ? '. Use Pick for the rest.' : '.'}`
           );
         }
         return;
       }
       setAcceptedSlots(accepted);
       setAutoMapResult(result);
-      setAutoMapShowTechnical(false);
-      setAutoMapOpen(true);
     } catch (autoMapError) {
+      setAutoMapOpen(false);
       setError(autoMapError?.message || 'Could not auto-map theme prices.');
     } finally {
       setAutoMapping(false);
@@ -796,7 +808,7 @@ export default function PriceSurfaceMappingsPanel({
     });
   };
 
-  const chooseAlternative = (surface, role, selector, sampleText) => {
+  const chooseAlternative = (surface, role, selector, sampleText, verification) => {
     if (!autoMapResult) return;
     setAutoMapResult(prev => {
       if (!prev) return prev;
@@ -810,6 +822,7 @@ export default function PriceSurfaceMappingsPanel({
                 sample_text: sampleText || row.sample_text,
                 status: 'matched',
                 source: 'heuristic',
+                verification: verification || 'pattern',
               }
             : row
         ),
@@ -832,17 +845,12 @@ export default function PriceSurfaceMappingsPanel({
     ).length;
   }, [autoMapResult, acceptedSlots]);
 
-  const autoMapModalSurfaces = useMemo(
-    () =>
-      filterAutoMapModalSurfaces(autoMapResult?.surfaces, {
-        showTechnical: autoMapShowTechnical,
-      }),
-    [autoMapResult, autoMapShowTechnical]
-  );
-  const autoMapIntro = useMemo(
-    () => buildAutoMapModalIntro(autoMapResult, autoMapSummary),
-    [autoMapResult, autoMapSummary]
-  );
+  const closeAutoMap = () => {
+    if (autoMapping) {
+      autoMapCancelledRef.current = true;
+    }
+    setAutoMapOpen(false);
+  };
 
   return (
     <div
@@ -968,225 +976,160 @@ export default function PriceSurfaceMappingsPanel({
       </div>
       <Modal
         open={autoMapOpen}
-        onClose={() => setAutoMapOpen(false)}
+        onClose={closeAutoMap}
         title="Auto-detect prices"
         primaryAction={{
-          content: autoMapPrimaryActionLabel(autoMapResult, acceptedMatchedCount),
-          loading: savingShop,
-          disabled: acceptedMatchedCount === 0,
-          onAction: () =>
-            applyAutoMapToShop({ save: Boolean(autoMapResult?.ready_to_save) }),
+          content: autoMapping
+            ? 'Scanning…'
+            : autoMapPrimaryActionLabel(autoMapResult, acceptedMatchedCount),
+          loading: savingShop || autoMapping,
+          disabled: autoMapping || acceptedMatchedCount === 0,
+          onAction: () => applyAutoMapToShop({ save: true }),
         }}
         secondaryActions={[
           {
-            content: 'Not now',
-            onAction: () => setAutoMapOpen(false),
+            content: autoMapping ? 'Cancel' : 'Scan again',
+            disabled: savingShop,
+            onAction: autoMapping ? closeAutoMap : runAutoMap,
           },
         ]}
       >
         <Modal.Section>
-          <BlockStack gap="400">
-            <InlineStack gap="200" blockAlign="start" wrap={false}>
-              <Text as="p" variant="bodyMd">
-                {autoMapIntro}
-              </Text>
-              <TooltipWrapper
-                content={autoMapModalIntroTooltip(autoMapResult)}
-                accessibilityLabel="How the scan works"
-              >
-                <button
-                  type="button"
-                  className={classicStyles.infoIconLink}
-                  aria-label="How the scan works"
-                >
-                  <IconInfo size={14} />
-                </button>
-              </TooltipWrapper>
+          {autoMapping || !autoMapResult ? (
+            <InlineStack gap="300" blockAlign="center" wrap={false}>
+              <Spinner size="small" accessibilityLabel="Scanning your store" />
+              <BlockStack gap="050">
+                <Text as="p" variant="bodyMd" fontWeight="semibold">
+                  Scanning your store for prices…
+                </Text>
+                <Text as="p" variant="bodySm" tone="subdued">
+                  Checking your product, collection, cart, home and search pages. This usually
+                  takes 10 to 20 seconds.
+                </Text>
+              </BlockStack>
             </InlineStack>
-            {autoMapSummary.matchedCount > 0 ? (
-              <Banner tone="success" title="Found automatically">
-                <p>
-                  {autoMapSummary.matchedCount} price location
-                  {autoMapSummary.matchedCount === 1 ? '' : 's'} on your shop
-                  {acceptedMatchedCount === autoMapSummary.matchedCount
-                    ? ' will be saved when you continue.'
-                    : ' — some are excluded; open technical details to change.'}
-                </p>
-              </Banner>
-            ) : null}
-            <Button
-              size="slim"
-              variant="plain"
-              onClick={() => setAutoMapShowTechnical(prev => !prev)}
-            >
-              {autoMapShowTechnical ? 'Hide technical details' : 'Show technical details'}
-            </Button>
-            {autoMapResult?.theme_drift?.detected ? (
-              <Banner tone="warning" title="Theme changed since last Auto-detect">
-                <p>
-                  {autoMapResult.theme_drift.message ||
-                    'Your published theme looks different from the last mapped theme. Re-check selectors before saving.'}
-                </p>
-              </Banner>
-            ) : null}
-            {autoMapResult?.password_gate || autoMapResult?.unlock?.ok === false ? (
-              <Banner tone="critical" title="Storefront unlock issue">
-                <p>
-                  {autoMapResult?.unlock?.reason === 'rate_limited'
-                    ? 'Shopify temporarily blocked password unlock attempts. Wait a few minutes, then retry Auto-detect.'
-                    : 'Enter the Online Store password above, then retry Auto-detect. Probes cannot verify selectors behind the password gate.'}
-                </p>
-              </Banner>
-            ) : null}
-            {!autoMapModalSurfaces.length &&
-            autoMapSummary.matchedCount > 0 &&
-            !autoMapShowTechnical ? (
-              <Text as="p" variant="bodySm" tone="subdued">
-                No gaps left on this scan. Save to apply the locations we found on your shop.
-              </Text>
-            ) : null}
-            {(autoMapSummary.missingCount > 0 || autoMapSummary.ambiguousCount > 0) &&
-            !autoMapShowTechnical ? (
-              <Text as="span" variant="bodySm" fontWeight="semibold">
-                Needs your storefront
-              </Text>
-            ) : null}
-            {autoMapModalSurfaces.map(row => {
-              const slot = `${row.surface}:${row.role}`;
-              const accepted = acceptedSlots.has(slot);
-              const label = formatAutoMapRowLabel(
-                row.surface,
-                row.role,
-                PRICE_SURFACE_LABELS
-              );
-              const isGap = row.status === 'missing' || row.status === 'ambiguous';
-
-              if (!autoMapShowTechnical && isGap) {
-                return (
-                  <div key={slot} className={styles.priceSurfaceAutoMapCard || undefined}>
-                    <Text as="p" variant="bodyMd" fontWeight="semibold">
-                      {label}
-                    </Text>
-                    <Text as="p" variant="bodySm" tone="subdued">
-                      {friendlyGapReason(row)}
-                    </Text>
-                    <InlineStack gap="200">
-                      <Button
-                        size="slim"
-                        onClick={() => {
-                          setAutoMapOpen(false);
-                          startQuickPick(row.surface || 'pdp');
-                        }}
-                      >
-                        Pick on storefront
-                      </Button>
-                      {row.status === 'ambiguous' &&
-                      Array.isArray(row.alternatives) &&
-                      row.alternatives[0] ? (
-                        <Button
-                          size="slim"
-                          variant="plain"
-                          onClick={() =>
-                            chooseAlternative(
+          ) : (
+            <BlockStack gap="300">
+              <BlockStack gap="100">
+                <Text as="p" variant="bodyMd" fontWeight="semibold">
+                  {buildAutoMapHeadline(autoMapSummary)}
+                </Text>
+                <Text as="p" variant="bodySm" tone="subdued">
+                  {buildAutoMapCheckedLine(autoMapResult)}
+                </Text>
+              </BlockStack>
+              {autoMapResult.password_gate || autoMapResult.unlock?.ok === false ? (
+                <Banner tone="critical">
+                  <p>
+                    {autoMapResult.unlock?.reason === 'rate_limited'
+                      ? 'Shopify paused storefront password attempts. Wait a few minutes, then scan again.'
+                      : 'Your storefront is password-protected. Enter the Online Store password, then scan again.'}
+                  </p>
+                </Banner>
+              ) : null}
+              {autoMapResult.theme_drift?.detected ? (
+                <Banner tone="warning">
+                  <p>
+                    {autoMapResult.theme_drift.message ||
+                      'Your theme changed since the last scan. Check the prices below before saving.'}
+                  </p>
+                </Banner>
+              ) : null}
+              <div className={styles.priceSurfaceAutoMapList}>
+                {(autoMapResult.surfaces || []).map(row => {
+                  const slot = `${row.surface}:${row.role}`;
+                  const found = row.status === 'matched' && String(row.selector || '').trim();
+                  const badge = autoMapRowBadge(row);
+                  const verifiedAlternative =
+                    row.status === 'ambiguous' && Array.isArray(row.alternatives)
+                      ? row.alternatives.find(alt => alt.verified) || null
+                      : null;
+                  const alternative =
+                    verifiedAlternative ||
+                    (row.status === 'ambiguous' && String(row.selector || '').trim()
+                      ? { selector: row.selector, sample_text: row.sample_text, keep: true }
+                      : null);
+                  return (
+                    <div key={slot} className={styles.priceSurfaceAutoMapRow}>
+                      <div className={styles.priceSurfaceAutoMapRowMain}>
+                        {found ? (
+                          <Checkbox
+                            label={formatAutoMapRowLabel(
                               row.surface,
                               row.role,
-                              row.alternatives[0].selector,
-                              row.alternatives[0].sample_text
-                            )
-                          }
-                        >
-                          Use suggested match
-                        </Button>
-                      ) : null}
-                    </InlineStack>
-                  </div>
-                );
-              }
-
-              if (!autoMapShowTechnical) return null;
-
-              const tone =
-                row.status === 'matched'
-                  ? 'success'
-                  : row.status === 'ambiguous'
-                    ? 'attention'
-                    : 'critical';
-              return (
-                <div key={slot} className={styles.priceSurfaceAutoMapCard || undefined}>
-                  <InlineStack align="space-between" blockAlign="center" gap="300" wrap={false}>
-                    <InlineStack gap="200" blockAlign="center">
-                      <Badge tone={tone}>{String(row.status || 'missing').toUpperCase()}</Badge>
-                      <Text as="span" variant="bodyMd" fontWeight="semibold">
-                        {label}
-                      </Text>
-                    </InlineStack>
-                    {row.status === 'matched' ? (
-                      accepted ? (
-                        <Button
-                          size="slim"
-                          variant="plain"
-                          onClick={() => toggleAcceptedSlot(row.surface, row.role)}
-                        >
-                          Exclude
-                        </Button>
-                      ) : (
-                        <Button
-                          size="slim"
-                          onClick={() => toggleAcceptedSlot(row.surface, row.role)}
-                        >
-                          Include
-                        </Button>
-                      )
-                    ) : (
-                      <Button
-                        size="slim"
-                        onClick={() => {
-                          setAutoMapOpen(false);
-                          startQuickPick(row.surface || 'pdp');
-                        }}
-                      >
-                        Pick on storefront
-                      </Button>
-                    )}
-                  </InlineStack>
-                  <Text as="p" variant="bodySm" tone="subdued">
-                    {row.selector && row.status !== 'missing' ? (
-                      <>
-                        CSS: <code>{row.selector}</code>
-                        {row.sample_text ? ` · Example: ${row.sample_text}` : ''}
-                      </>
-                    ) : (
-                      friendlyGapReason(row)
-                    )}
-                  </Text>
-                  {Array.isArray(row.alternatives) && row.alternatives.length > 0 ? (
-                    <InlineStack gap="200" wrap>
-                      {row.alternatives.slice(0, 3).map(alt => (
-                        <Button
-                          key={`${slot}:${alt.selector}`}
-                          size="slim"
-                          variant="plain"
-                          onClick={() =>
-                            chooseAlternative(row.surface, row.role, alt.selector, alt.sample_text)
-                          }
-                        >
-                          {alt.selector}
-                        </Button>
-                      ))}
-                    </InlineStack>
-                  ) : null}
-                </div>
-              );
-            })}
-            {!autoMapResult?.ready_to_save && acceptedMatchedCount > 0 ? (
-              <Banner tone="info" title="Save from the table">
-                <p>
-                  We found some prices, but the product-page check did not pass for one-click save.
-                  Continue to add them to the table, finish gaps with Pick, then Save.
-                </p>
-              </Banner>
-            ) : null}
-          </BlockStack>
+                              PRICE_SURFACE_LABELS
+                            )}
+                            labelHidden
+                            checked={acceptedSlots.has(slot)}
+                            onChange={() => toggleAcceptedSlot(row.surface, row.role)}
+                          />
+                        ) : null}
+                        <BlockStack gap="050">
+                          <InlineStack gap="200" blockAlign="center">
+                            <Text as="span" variant="bodyMd" fontWeight="medium">
+                              {formatAutoMapRowLabel(row.surface, row.role, PRICE_SURFACE_LABELS)}
+                            </Text>
+                            <Badge tone={badge.tone} size="small">
+                              {badge.label}
+                            </Badge>
+                          </InlineStack>
+                          <Text as="span" variant="bodySm" tone="subdued">
+                            {describeAutoMapRow(row)}
+                          </Text>
+                          {autoMapShowTechnical && row.selector ? (
+                            <code className={styles.priceSurfaceAutoMapCode}>{row.selector}</code>
+                          ) : null}
+                        </BlockStack>
+                      </div>
+                      {found ? null : (
+                        <InlineStack gap="100" wrap={false}>
+                          {alternative ? (
+                            <Button
+                              size="slim"
+                              onClick={() =>
+                                chooseAlternative(
+                                  row.surface,
+                                  row.role,
+                                  alternative.selector,
+                                  alternative.sample_text,
+                                  alternative.keep ? 'pattern' : 'price_match'
+                                )
+                              }
+                            >
+                              {alternative.keep
+                                ? 'Use anyway'
+                                : alternative.sample_text
+                                  ? `Use ${alternative.sample_text}`
+                                  : 'Use match'}
+                            </Button>
+                          ) : null}
+                          <Button
+                            size="slim"
+                            variant={alternative ? 'plain' : undefined}
+                            onClick={() => {
+                              setAutoMapOpen(false);
+                              startQuickPick(row.surface || 'pdp', row.role || 'regular');
+                            }}
+                          >
+                            Pick on store
+                          </Button>
+                        </InlineStack>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              <InlineStack>
+                <Button
+                  size="slim"
+                  variant="plain"
+                  onClick={() => setAutoMapShowTechnical(prev => !prev)}
+                >
+                  {autoMapShowTechnical ? 'Hide CSS selectors' : 'Show CSS selectors'}
+                </Button>
+              </InlineStack>
+            </BlockStack>
+          )}
         </Modal.Section>
       </Modal>
       <Modal

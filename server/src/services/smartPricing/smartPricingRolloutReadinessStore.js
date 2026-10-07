@@ -178,28 +178,10 @@ function foldReadiness(existing = {}, decisions = {}, options = {}) {
   return { map, becameReady };
 }
 
-async function markRolloutNotified(shopDomain, testIds = [], state = null) {
-  const shop = normalizeShop(shopDomain);
-  const ids = (Array.isArray(testIds) ? testIds : []).map(String).filter(Boolean);
-  if (!shop || ids.length === 0) return {};
-  const current = await getShopRolloutReadiness(shop);
-  const stamp = new Date().toISOString();
-  ids.forEach(testId => {
-    current[testId] = {
-      ready_since: current[testId]?.ready_since || stamp,
-      ready_state: current[testId]?.ready_state || state,
-      notified_at: stamp,
-      notified_state: state,
-    };
-  });
-  return saveShopRolloutReadiness(shop, current);
-}
-
 module.exports = {
   getShopRolloutReadiness,
   saveShopRolloutReadiness,
   foldReadiness,
-  markRolloutNotified,
   orderByStaleness,
   MAX_TRACKED_TESTS,
 };

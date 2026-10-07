@@ -42,7 +42,6 @@ describe('Priceify landing copy (Figma brochure)', () => {
     );
     assert.deepEqual(LANDING_SECTION_ORDER, [
       'hero',
-      'logo-cloud',
       'price-test-demo',
       'platform',
       'features',

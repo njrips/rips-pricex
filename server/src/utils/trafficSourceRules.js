@@ -119,23 +119,6 @@ function matchesLegacyTrafficSource(trafficSource, contextSource) {
   return contextMatchesTrafficSourceValue(normalizedSource, contextSource);
 }
 
-function summarizeTrafficSourceRules(rules = []) {
-  const normalized = normalizeTrafficSourceRules(rules);
-  if (normalized.length === 0) {
-    return '';
-  }
-  const includes = normalized.filter(rule => rule.type === 'include');
-  const excludes = normalized.filter(rule => rule.type === 'exclude');
-  const parts = [];
-  if (includes.length > 0) {
-    parts.push(`include ${includes.map(rule => rule.value.replace(/_/g, ' ')).join(', ')}`);
-  }
-  if (excludes.length > 0) {
-    parts.push(`exclude ${excludes.map(rule => rule.value.replace(/_/g, ' ')).join(', ')}`);
-  }
-  return parts.join(' · ');
-}
-
 module.exports = {
   TRAFFIC_SOURCE_GROUPS,
   VALID_TRAFFIC_SOURCE_VALUES,
@@ -143,5 +126,4 @@ module.exports = {
   normalizeTrafficSourceRules,
   matchesTrafficSourceRules,
   matchesLegacyTrafficSource,
-  summarizeTrafficSourceRules,
 };

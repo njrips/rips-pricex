@@ -237,7 +237,7 @@ function buildDefaultSelectedVariantIds(opportunities = []) {
  */
 async function withholdEnrolledProducts(shopDomain, opportunities = []) {
   const rows = Array.isArray(opportunities) ? opportunities : [];
-  const empty = { live: 0, paused: 0, total: 0, tests: [] };
+  const empty = { live: 0, paused: 0, total: 0, tests: [], experiments: [] };
   if (!rows.length) {
     return { opportunities: rows, withheld: empty };
   }
@@ -256,6 +256,7 @@ async function withholdEnrolledProducts(shopDomain, opportunities = []) {
   }
 
   const testNames = new Map();
+  const experiments = new Map();
   const kept = [];
   let live = 0;
   let paused = 0;
@@ -281,6 +282,20 @@ async function withholdEnrolledProducts(shopDomain, opportunities = []) {
     if (!testNames.has(hold.test_id)) {
       testNames.set(hold.test_id, { test_id: hold.test_id, name: hold.test_name, live: hold.live });
     }
+    // A classic experiment is one test per product, so naming tests reads as
+    // a list of products. The experiment is what the merchant can find and end.
+    const experimentKey = hold.experiment_id || `test:${hold.test_id}`;
+    if (!experiments.has(experimentKey)) {
+      experiments.set(experimentKey, {
+        experiment_id: hold.experiment_id || null,
+        title: hold.experiment_title || hold.test_name,
+        live: false,
+        products: new Set(),
+      });
+    }
+    const experiment = experiments.get(experimentKey);
+    if (hold.live) experiment.live = true;
+    if (key) experiment.products.add(key);
   });
 
   return {
@@ -290,6 +305,9 @@ async function withholdEnrolledProducts(shopDomain, opportunities = []) {
       paused,
       total: withheldProducts.size,
       tests: [...testNames.values()],
+      experiments: [...experiments.values()]
+        .map(row => ({ ...row, products: row.products.size }))
+        .sort((a, b) => b.products - a.products),
     },
   };
 }

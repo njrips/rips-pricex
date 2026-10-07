@@ -495,10 +495,6 @@ async function getObservedCounts(shopDomain, eventNames = []) {
   }
 }
 
-async function refreshGoalMetricEventRollups() {
-  return { allTimeRows: 0, dailyRows: 0, shopDomain: null };
-}
-
 async function listGoalMetricDefinitions(shopDomain) {
   const result = await query(
     `
@@ -625,5 +621,4 @@ module.exports = {
   listGoalMetricDefinitions,
   upsertGoalMetricDefinition,
   deleteGoalMetricDefinition,
-  refreshGoalMetricEventRollups,
 };
