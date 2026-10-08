@@ -20,7 +20,7 @@ describe('classic checkout diagnostics', () => {
       previous[key] = process.env[key];
     });
     process.env.NODE_ENV = 'production';
-    process.env.APP_URL = 'https://pricefy.echologyx.com';
+    process.env.APP_URL = 'https://priceify.echologyx.com';
     delete process.env.RIPX_PRICE_RESOLVE_BATCH_URL;
     delete process.env.RIPX_CHECKOUT_PRICE_SECRET;
     delete process.env.RIPX_PRICE_ASSIGNMENT_SIGNATURE_SECRET;

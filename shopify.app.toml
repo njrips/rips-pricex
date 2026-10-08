@@ -5,7 +5,7 @@
 
 name = "Priceify"
 client_id = "1427bfea71317ff9999f4ad85b59675b"
-application_url = "https://pricefy.echologyx.com"
+application_url = "https://priceify.echologyx.com"
 embedded = true
 
 [build]
@@ -18,9 +18,9 @@ use_legacy_install_flow = false
 
 [auth]
 redirect_urls = [
-  "https://pricefy.echologyx.com/auth/callback",
-  "https://pricefy.echologyx.com/auth/shopify/callback",
-  "https://pricefy.echologyx.com/api/auth/callback"
+  "https://priceify.echologyx.com/auth/callback",
+  "https://priceify.echologyx.com/auth/shopify/callback",
+  "https://priceify.echologyx.com/api/auth/callback"
 ]
 
 [webhooks]
@@ -60,7 +60,7 @@ api_version = "2026-07"
   # uri = "/webhooks/orders"
 
 [app_proxy]
-url = "https://pricefy.echologyx.com/api/proxy"
+url = "https://priceify.echologyx.com/api/proxy"
 subpath = "ripspricex"
 prefix = "apps"
 

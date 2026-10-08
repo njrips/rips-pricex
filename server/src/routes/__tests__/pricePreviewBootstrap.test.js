@@ -7,7 +7,7 @@ function html(prefetchError) {
     targetUrl:
       'https://splitter-plus.myshopify.com/products/the-inventory-not-tracked-snowboard?ab_preview=1',
     appProxyScriptUrl: 'https://splitter-plus.myshopify.com/apps/ripspricex/script.js?v=1',
-    directScriptUrl: 'https://pricefy.echologyx.com/api/track/script.js?shop=splitter-plus.myshopify.com',
+    directScriptUrl: 'https://priceify.echologyx.com/api/track/script.js?shop=splitter-plus.myshopify.com',
     prefetchError,
   });
 }
