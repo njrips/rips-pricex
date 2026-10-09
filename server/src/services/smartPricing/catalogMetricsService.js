@@ -118,21 +118,18 @@ function prioritizeSkuRows(rows = []) {
 
 function isLiveStoreProduct(product) {
   const status = String(product?.status || '').trim().toUpperCase();
-  if (status && status !== 'ACTIVE') return false;
-  // The catalog fetch always requests this field. Treat an explicit null as
-  // unpublished from Online Store, while allowing older test/cache fixtures
-  // that predate the field.
-  if (
-    Object.prototype.hasOwnProperty.call(product || {}, 'onlineStoreUrl') &&
-    !String(product?.onlineStoreUrl || '').trim()
-  ) {
-    return false;
-  }
-  return true;
+  // `onlineStoreUrl` is nullable even for sellable variants (for example when
+  // Shopify cannot resolve a canonical storefront URL). It is presentation
+  // metadata, not an eligibility signal; using it here emptied entire valid
+  // catalogs. The product query already asks for active products, and this
+  // check protects callers and fixtures that supply a broader list.
+  return !status || status === 'ACTIVE';
 }
 
 function isSellableVariant(variant) {
   if (variant?.availableForSale === false) return false;
+  if (variant?.availableForSale === true) return true;
+  if (variant?.inventoryTracked === false) return true;
   const quantity =
     variant?.inventoryQuantity === null || variant?.inventoryQuantity === undefined
       ? null
@@ -236,6 +233,10 @@ function flattenCatalogRows(
             ? Number(variant.inventoryQuantity)
             : null,
         inventory_policy: String(variant.inventoryPolicy || '').trim().toUpperCase() || null,
+        inventory_tracked:
+          typeof variant.inventoryTracked === 'boolean' ? variant.inventoryTracked : null,
+        available_for_sale:
+          typeof variant.availableForSale === 'boolean' ? variant.availableForSale : null,
         product_status: String(product.status || '').trim().toUpperCase() || null,
         online_store_url: String(product.onlineStoreUrl || '').trim() || null,
         product_type: product.productType || '',

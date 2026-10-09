@@ -739,14 +739,16 @@ class ShopifyService {
                     updatedAt
                     inventoryQuantity
                     inventoryPolicy
-                    ${
-                      withUnitCost
-                        ? `inventoryItem {
-                      unitCost {
+                    availableForSale
+                    inventoryItem {
+                      tracked
+                      ${
+                        withUnitCost
+                          ? `unitCost {
                         amount
+                      }`
+                          : ''
                       }
-                    }`
-                        : ''
                     }
                   }
                 }
@@ -816,6 +818,11 @@ class ShopifyService {
                   ? Number(ve.node.inventoryQuantity)
                   : null,
               inventoryPolicy: ve.node.inventoryPolicy || '',
+              availableForSale: ve.node.availableForSale !== false,
+              inventoryTracked:
+                typeof ve.node.inventoryItem?.tracked === 'boolean'
+                  ? ve.node.inventoryItem.tracked
+                  : null,
             })),
           });
         });

@@ -101,7 +101,7 @@ describe('catalogMetricsService', () => {
     expect(rows).toHaveLength(0);
   });
 
-  it('excludes products that are inactive or not published on the Online Store', () => {
+  it('excludes inactive products without treating a missing storefront URL as inactive', () => {
     const products = [
       {
         id: 'gid://shopify/Product/1',
@@ -130,11 +130,12 @@ describe('catalogMetricsService', () => {
     ];
 
     expect(flattenCatalogRows(products).map(row => row.product_id)).toEqual([
+      'gid://shopify/Product/3',
       'gid://shopify/Product/4',
     ]);
   });
 
-  it('excludes sold-out variants unless Shopify is configured to continue selling', () => {
+  it('uses Shopify availability and inventory tracking instead of raw quantity alone', () => {
     const rows = flattenCatalogRows([
       {
         id: 'gid://shopify/Product/1',
@@ -166,6 +167,21 @@ describe('catalogMetricsService', () => {
             inventoryQuantity: 10,
             inventoryPolicy: 'DENY',
           },
+          {
+            id: 'gid://shopify/ProductVariant/15',
+            price: '20.00',
+            inventoryTracked: false,
+            inventoryQuantity: 0,
+            inventoryPolicy: 'DENY',
+          },
+          {
+            id: 'gid://shopify/ProductVariant/16',
+            price: '20.00',
+            availableForSale: true,
+            inventoryTracked: true,
+            inventoryQuantity: 0,
+            inventoryPolicy: 'DENY',
+          },
         ],
       },
     ]);
@@ -173,6 +189,8 @@ describe('catalogMetricsService', () => {
     expect(rows.map(row => row.variant_id)).toEqual([
       'gid://shopify/ProductVariant/12',
       'gid://shopify/ProductVariant/13',
+      'gid://shopify/ProductVariant/15',
+      'gid://shopify/ProductVariant/16',
     ]);
   });
 
