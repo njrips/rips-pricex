@@ -111,14 +111,8 @@ function requireShopifySession(req, res, next) {
   req.shopDomain = payload.shopDomain;
   req.shopSessionVerified = true;
   req.shopifySession = payload;
-
-  if (req.body?.access_token || req.body?.accessToken) {
-    req.shopifyAccessToken = req.body.access_token || req.body.accessToken;
-  }
-  if (req.get('X-Shopify-Access-Token')) {
-    req.shopifyAccessToken = req.get('X-Shopify-Access-Token');
-  }
-
+  // Admin API tokens are not accepted from the browser. Install sync sends
+  // them only on the internal-service path below.
   return next();
 }
 

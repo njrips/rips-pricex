@@ -101,6 +101,81 @@ describe('catalogMetricsService', () => {
     expect(rows).toHaveLength(0);
   });
 
+  it('excludes products that are inactive or not published on the Online Store', () => {
+    const products = [
+      {
+        id: 'gid://shopify/Product/1',
+        status: 'DRAFT',
+        onlineStoreUrl: 'https://shop.example/products/draft',
+        variants: [{ id: 'gid://shopify/ProductVariant/11', price: '20.00' }],
+      },
+      {
+        id: 'gid://shopify/Product/2',
+        status: 'ARCHIVED',
+        onlineStoreUrl: 'https://shop.example/products/archived',
+        variants: [{ id: 'gid://shopify/ProductVariant/21', price: '20.00' }],
+      },
+      {
+        id: 'gid://shopify/Product/3',
+        status: 'ACTIVE',
+        onlineStoreUrl: null,
+        variants: [{ id: 'gid://shopify/ProductVariant/31', price: '20.00' }],
+      },
+      {
+        id: 'gid://shopify/Product/4',
+        status: 'ACTIVE',
+        onlineStoreUrl: 'https://shop.example/products/live',
+        variants: [{ id: 'gid://shopify/ProductVariant/41', price: '20.00' }],
+      },
+    ];
+
+    expect(flattenCatalogRows(products).map(row => row.product_id)).toEqual([
+      'gid://shopify/Product/4',
+    ]);
+  });
+
+  it('excludes sold-out variants unless Shopify is configured to continue selling', () => {
+    const rows = flattenCatalogRows([
+      {
+        id: 'gid://shopify/Product/1',
+        status: 'ACTIVE',
+        onlineStoreUrl: 'https://shop.example/products/tee',
+        variants: [
+          {
+            id: 'gid://shopify/ProductVariant/11',
+            price: '20.00',
+            inventoryQuantity: 0,
+            inventoryPolicy: 'DENY',
+          },
+          {
+            id: 'gid://shopify/ProductVariant/12',
+            price: '20.00',
+            inventoryQuantity: -2,
+            inventoryPolicy: 'CONTINUE',
+          },
+          {
+            id: 'gid://shopify/ProductVariant/13',
+            price: '20.00',
+            inventoryQuantity: null,
+            inventoryPolicy: 'DENY',
+          },
+          {
+            id: 'gid://shopify/ProductVariant/14',
+            price: '20.00',
+            availableForSale: false,
+            inventoryQuantity: 10,
+            inventoryPolicy: 'DENY',
+          },
+        ],
+      },
+    ]);
+
+    expect(rows.map(row => row.variant_id)).toEqual([
+      'gid://shopify/ProductVariant/12',
+      'gid://shopify/ProductVariant/13',
+    ]);
+  });
+
   it('carries each product\'s collections onto its rows for the picker', () => {
     const rows = flattenCatalogRows([
       {

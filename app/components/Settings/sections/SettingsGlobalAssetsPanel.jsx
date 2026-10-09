@@ -111,6 +111,15 @@ export default function SettingsGlobalAssetsPanel({
 
   return (
     <div>
+      <div style={{ marginBottom: 16 }}>
+        <Banner tone="warning" title="Runs on your live storefront">
+          <p>
+            The Priceify app embed delivers these snippets on every page. CSS loads before
+            Priceify starts; JavaScript runs once after the page is ready. Storefront caching can
+            briefly delay saved changes.
+          </p>
+        </Banner>
+      </div>
       {message ? (
         <div style={{ marginBottom: 16 }}>
           <Banner tone="success" title={message} />

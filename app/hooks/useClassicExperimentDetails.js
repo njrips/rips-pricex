@@ -425,8 +425,8 @@ export function useClassicExperimentDetails(shopDomain, planId) {
     [plan, test, analytics, qaRuns, experimentPlans, serverEvents]
   );
   const settings = useMemo(
-    () => buildSettingsSummary(plan, test, shopGuardrails),
-    [plan, test, shopGuardrails]
+    () => buildSettingsSummary(plan, test, shopGuardrails, experiment),
+    [plan, test, shopGuardrails, experiment]
   );
 
   // Read the id out first: closing over `plan` itself would tie this callback
@@ -465,14 +465,14 @@ export function useClassicExperimentDetails(shopDomain, planId) {
     async (nextPlans, { persist = true } = {}) => {
       const updates = (Array.isArray(nextPlans) ? nextPlans : []).filter(row => row?.id);
       if (!updates.length || !shopDomain) {
-        throw new Error('No plans to update.');
+        throw new Error('No products to update.');
       }
       setAllPlans(prev => mergeInboxPlansById(prev, updates));
       const current = readInboxPlans(shopDomain) || [];
       const baseline = current.length ? current : updates;
       const next = mergeInboxPlansById(baseline, updates);
       if (!next.length) {
-        throw new Error('No plans to update.');
+        throw new Error('No products to update.');
       }
       writeInboxPlans(shopDomain, next, { persist: false });
       if (persist) {

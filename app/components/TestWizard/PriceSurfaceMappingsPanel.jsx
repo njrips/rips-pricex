@@ -26,6 +26,7 @@ import {
   createEmptyPriceSurfaceMapping,
   normalizePriceSurfaceMappingsForEditor,
   priceSurfacePageUrlError,
+  priceSurfacePagePath,
   validatePriceSurfaceMappingsForEditor,
 } from '../../utils/priceSurfaceRegistry';
 import { isShopifyStoreDomain } from '../../utils/shopifyAdmin';
@@ -59,8 +60,20 @@ function buildSurfaceOptions() {
   }));
 }
 
+const PRICE_ROLE_LABELS = {
+  regular: 'Regular price',
+  compare_at: 'Compare‑at price',
+  unit: 'Unit price',
+  installment: 'Instalment price',
+  savings: 'Savings amount',
+  cart_line: 'Cart line price',
+};
+
 function buildRoleOptions() {
-  return PRICE_SURFACE_ROLES.map(value => ({ label: value.replace(/_/g, ' '), value }));
+  return PRICE_SURFACE_ROLES.map(value => ({
+    label: PRICE_ROLE_LABELS[value] || value.replace(/_/g, ' '),
+    value,
+  }));
 }
 
 function isUrlRow(row) {
@@ -71,7 +84,9 @@ function isUrlRow(row) {
 function buildMappingKey(row) {
   // The page is part of the identity of a url row: the same selector on two
   // different landing pages is two mappings, not a duplicate.
-  const scopeKey = isUrlRow(row) ? String(row.pageUrl || '') : row.role;
+  const scopeKey = isUrlRow(row)
+    ? priceSurfacePagePath(row.pageUrl) || String(row.pageUrl || '')
+    : row.role;
   return `${row.surface}:${scopeKey}:${row.selector}`;
 }
 
@@ -85,7 +100,7 @@ async function fetchShopMappings(settingsPath) {
   } catch (loadError) {
     return {
       mappings: null,
-      error: loadError?.message || 'Could not load shop price location mappings.',
+      error: loadError?.message || 'Could not load price locations.',
     };
   }
 }
@@ -100,7 +115,7 @@ export function formatThemeDefaultsHeaderLabel(registryStatus) {
   const label = String(registryStatus?.label || '').trim() || 'Shop defaults active';
   const configuredShop = Number(registryStatus?.configuredShop) || 0;
   let status = label;
-  if (label === 'Shop defaults active' && configuredShop > 0) {
+  if (label !== 'Picking a price' && configuredShop > 0) {
     status = `Shop defaults active (${configuredShop} selector${
       configuredShop === 1 ? '' : 's'
     } found)`;
@@ -119,8 +134,8 @@ function PriceSurfaceRowToggle({ styles, enabled, rowNumber: _rowNumber, onChang
     <TooltipWrapper
       content={
         enabled
-          ? 'Include this price in tests.'
-          : "Turn off if you don't want Priceify to change this price."
+          ? "Turn off if you don't want Priceify to change this price."
+          : 'Include this price in tests.'
       }
     >
       <button
@@ -159,11 +174,11 @@ function PriceSurfaceMappingRows({
         </div>
         <div>
           <Text as="p" variant="bodySm" fontWeight="semibold">
-            No selectors mapped yet
+            No price locations yet
           </Text>
           <Text as="p" variant="bodySm" tone="subdued">
-            Add a row, choose where the price shows, then pick it on your storefront or paste a CSS
-            selector.
+            Click Add location, choose where the price shows, then pick it on your storefront or
+            paste a CSS selector.
           </Text>
         </div>
       </div>
@@ -243,7 +258,7 @@ function PriceSurfaceMappingRows({
                 onChange={value => onUpdate(index, { selector: value })}
                 autoComplete="off"
                 disabled={!rowEnabled}
-                placeholder=".product__price"
+                placeholder="CSS selector, e.g. .price-item--regular"
                 error={duplicate ? 'Duplicate selector.' : undefined}
               />
             </div>
@@ -391,7 +406,7 @@ export default function PriceSurfaceMappingsPanel({
         )
       );
       setNoticeTitle('Captured');
-      setNotice('Shop selector captured. Save shop defaults to persist.');
+      setNotice('Selector captured. Click Save to keep it.');
     });
     return () => onRegisterShopPickHandler(null);
   }, [onRegisterShopPickHandler]);
@@ -473,7 +488,7 @@ export default function PriceSurfaceMappingsPanel({
   const addShopMapping = (overrides = {}) => {
     const current = normalizePriceSurfaceMappingsForEditor(shopMappings);
     if (current.length >= MAX_PRICE_SURFACE_MAPPINGS) {
-      setError(`You can save up to ${MAX_PRICE_SURFACE_MAPPINGS} shop mappings.`);
+      setError(`You can save up to ${MAX_PRICE_SURFACE_MAPPINGS} price locations.`);
       return;
     }
     setShopMappings([...current, createEmptyPriceSurfaceMapping(overrides)]);
@@ -513,7 +528,7 @@ export default function PriceSurfaceMappingsPanel({
         return true;
       } catch (saveError) {
         setError(
-          saveError?.message || errorFallback || 'Could not save shop price location mappings.'
+          saveError?.message || errorFallback || 'Could not save price locations.'
         );
         return false;
       } finally {
@@ -528,6 +543,17 @@ export default function PriceSurfaceMappingsPanel({
 
   const saveShopDefaults = async () => {
     const rows = normalizePriceSurfaceMappingsForEditor(shopMappings);
+    const missingSelector = rows.findIndex(row => !String(row.selector || '').trim());
+    if (missingSelector >= 0) {
+      setError(
+        `Row ${missingSelector + 1}: add a theme selector or use Pick on site before saving.`
+      );
+      return;
+    }
+    if (duplicateKeys.size > 0) {
+      setError('Each page and price type can use a theme selector only once.');
+      return;
+    }
     // The server refuses a url mapping with no usable page, and would drop the
     // row rather than store a selector that could never be found. Say so here
     // instead of letting the row quietly disappear on save.
@@ -541,7 +567,7 @@ export default function PriceSurfaceMappingsPanel({
       setError(`Row ${badPage + 1}: ${priceSurfacePageUrlError(rows[badPage].pageUrl)}`);
       return;
     }
-    await persistShopMappings(rows, { flash: 'Shop price locations saved' });
+    await persistShopMappings(rows, { flash: 'Price locations saved' });
   };
 
   const beginVisualPick = async (scope, index) => {
@@ -570,7 +596,7 @@ export default function PriceSurfaceMappingsPanel({
   };
 
 
-  const duplicateKeys = useMemo(() => {
+  const duplicateKeys = (() => {
     const counts = new Map();
     shopRows.forEach(row => {
       if (!row.selector.trim()) {
@@ -580,7 +606,7 @@ export default function PriceSurfaceMappingsPanel({
       counts.set(key, (counts.get(key) || 0) + 1);
     });
     return new Set([...counts.entries()].filter(([, count]) => count > 1).map(([key]) => key));
-  }, [shopRows]);
+  })();
 
   // The registry helpers take per-test overrides ahead of shop defaults. This
   // editor only ever edits the shop defaults, so there are no overrides to pass.
@@ -635,7 +661,7 @@ export default function PriceSurfaceMappingsPanel({
       return;
     }
     if (rows.length >= MAX_PRICE_SURFACE_MAPPINGS) {
-      setError(`You can save up to ${MAX_PRICE_SURFACE_MAPPINGS} mappings.`);
+      setError(`You can save up to ${MAX_PRICE_SURFACE_MAPPINGS} price locations.`);
       return;
     }
     const created = createEmptyPriceSurfaceMapping({ surface, role, source: 'visual' });
@@ -718,7 +744,7 @@ export default function PriceSurfaceMappingsPanel({
       setAutoMapOpen(false);
       if (!save) {
         setNoticeTitle('Applied');
-        setNotice('Auto-detect selectors applied to the editor. Save to persist them.');
+        setNotice('Detected prices added to the table. Click Save to keep them.');
         return true;
       }
       return persistShopMappings(normalized, {
@@ -728,8 +754,8 @@ export default function PriceSurfaceMappingsPanel({
               name: resolvedResult.theme.name || null,
             }
           : null,
-        flash: 'Auto-detect selectors saved',
-        errorFallback: 'Applied to the editor but the save failed. Try Save.',
+        flash: 'Detected prices saved',
+        errorFallback: 'Detected prices were added to the table but could not be saved. Click Save to try again.',
       });
     },
     [acceptedSlots, autoMapResult, persistShopMappings, shopMappings]
@@ -760,7 +786,7 @@ export default function PriceSurfaceMappingsPanel({
       const surfaces = Array.isArray(result?.surfaces) ? result.surfaces : [];
       if (!surfaces.length) {
         setAutoMapOpen(false);
-        setError('Auto-detect found no prices to map. Add a row and use Pick instead.');
+        setError('Auto-detect found no prices. Click Add location, then use Pick on site.');
         return;
       }
       const accepted = buildDefaultAcceptedSlots(surfaces);
@@ -783,7 +809,7 @@ export default function PriceSurfaceMappingsPanel({
       setAutoMapResult(result);
     } catch (autoMapError) {
       setAutoMapOpen(false);
-      setError(autoMapError?.message || 'Could not auto-map theme prices.');
+      setError(autoMapError?.message || 'Could not auto-detect theme prices.');
     } finally {
       setAutoMapping(false);
     }
@@ -869,7 +895,7 @@ export default function PriceSurfaceMappingsPanel({
             </Badge>
           ) : null}
         </span>
-        <TooltipWrapper content="Shop defaults apply to every price test. When a visitor is bucketed, Priceify paints these selectors on the storefront.">
+        <TooltipWrapper content="These price locations apply to every price test. Priceify updates the prices they point to for visitors in a test.">
           <span className={styles.priceSurfaceHeaderHint}>{registryStatus.hint}</span>
         </TooltipWrapper>
       </div>
@@ -937,7 +963,7 @@ export default function PriceSurfaceMappingsPanel({
         ) : null}
         {loading ? (
           <Text as="p" variant="bodySm" tone="subdued">
-            Loading shop defaults…
+            Loading price locations…
           </Text>
         ) : (
           <PriceSurfaceMappingRows
@@ -1111,7 +1137,7 @@ export default function PriceSurfaceMappingsPanel({
                               startQuickPick(row.surface || 'pdp', row.role || 'regular');
                             }}
                           >
-                            Pick on store
+                            Pick on site
                           </Button>
                         </InlineStack>
                       )}

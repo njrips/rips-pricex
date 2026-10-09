@@ -31,11 +31,11 @@ export function buildClassicExperimentDeleteConfirmMessage(experiment) {
         : 'This throws away the unfinished setup.'
     );
   } else if (productCount > 1) {
-    parts.push(`This removes ${productCount} inbox plans.`);
+    parts.push(`This removes all ${productCount} products in it.`);
   }
   if (testIds.length) {
     parts.push(
-      `Also deletes ${testIds.length} linked Priceify test${testIds.length === 1 ? '' : 's'}.`
+      `Also deletes results for ${testIds.length} product${testIds.length === 1 ? '' : 's'}.`
     );
   }
   parts.push('This cannot be undone.');
@@ -101,7 +101,7 @@ export async function deleteClassicExperimentSynchronized(
       if (result?.ok) {
         deletedPlanIds.push(planId);
       } else {
-        errors.push(result?.error || persistErr?.message || `Could not delete inbox plan ${planId}.`);
+        errors.push(result?.error || persistErr?.message || 'Could not remove every product from this test.');
       }
     }
   }
@@ -116,7 +116,7 @@ export async function deleteClassicExperimentSynchronized(
       const swept = await deleteSmartPricingExperiment(shopDomain, experimentIds[0]);
       deletedTestIds.push(...(swept?.archived_test_ids || []));
     } catch (err) {
-      errors.push(err?.message || 'Could not delete every test in this experiment.');
+      errors.push(err?.message || 'Could not delete every product test linked to this test.');
     }
   }
 
@@ -126,7 +126,7 @@ export async function deleteClassicExperimentSynchronized(
         await apiDelete(`/tests/${encodeURIComponent(testId)}`);
         deletedTestIds.push(testId);
       } catch (err) {
-        errors.push(err?.message || `Could not delete linked test ${testId}.`);
+        errors.push(err?.message || 'Could not delete results for every product in this test.');
       }
     }
   }

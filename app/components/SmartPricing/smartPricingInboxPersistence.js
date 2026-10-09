@@ -241,11 +241,11 @@ export function buildPlanFieldConflicts(localPlan = {}, serverPlan = {}) {
   if (localArms !== serverArms) {
     fields.push({
       key: 'price_arms',
-      label: 'price arms',
+      label: 'price variations',
       local: localPlan?.price_arms,
       server: serverPlan?.price_arms,
-      local_label: `${(localPlan?.price_arms || []).length} arm(s)`,
-      server_label: `${(serverPlan?.price_arms || []).length} arm(s)`,
+      local_label: `${(localPlan?.price_arms || []).length} variation(s)`,
+      server_label: `${(serverPlan?.price_arms || []).length} variation(s)`,
       complex: true,
     });
   }

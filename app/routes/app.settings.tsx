@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useOutletContext, useSearchParams } from 'react-router';
+import { Button } from '@shopify/polaris';
 import type { AppOutletContext } from '../lib/api.client';
 import { rpxApi } from '../lib/api.client';
 import { getShopDomain } from '../services/api';
@@ -26,8 +27,7 @@ const TABS: { id: TabId; label: string; title: string; subtitle: string }[] = [
     id: 'plan',
     label: 'Plan & usage',
     title: 'Plan & usage',
-    subtitle:
-      'Your plan is active. You can create and run price and offer tests.',
+    subtitle: 'Billing and visitor limits.',
   },
   {
     id: 'stats',
@@ -94,7 +94,10 @@ export default function SettingsPage() {
   const [error, setError] = useKeyedState<TabId, string | null>(tab, null);
   const [saving, setSaving] = useState(false);
   const [guardrailsLoading, setGuardrailsLoading] = useKeyedState(target, true);
+  const [guardrailsLoaded, setGuardrailsLoaded] = useKeyedState(target, false);
+  const [settingsRetry, setSettingsRetry] = useState(0);
   const [globalAssetsLoading, setGlobalAssetsLoading] = useKeyedState(target, true);
+  const [globalAssetsLoaded, setGlobalAssetsLoaded] = useKeyedState(target, false);
   const [globalCss, setGlobalCss] = useState('');
   const [globalJs, setGlobalJs] = useState('');
   const [globalCssEnabled, setGlobalCssEnabled] = useState(true);
@@ -147,7 +150,10 @@ export default function SettingsPage() {
   }, [tab, automap, setSearchParams]);
 
   useEffect(() => {
+    if (tab !== 'stats') return undefined;
     let cancelled = false;
+    setError(null);
+    setGuardrailsLoading(true);
     rpxApi
       .getGuardrails(target)
       .then((data: unknown) => {
@@ -158,18 +164,31 @@ export default function SettingsPage() {
         if (g.min_sample_size_per_variation != null) {
           setMinSampleSize(String(g.min_sample_size_per_variation));
         }
+        setGuardrailsLoaded(true);
       })
-      .catch(() => {})
+      .catch((loadError: unknown) => {
+        if (cancelled) return;
+        setGuardrailsLoaded(false);
+        setError(
+          loadError instanceof Error
+            ? loadError.message
+            : 'Could not load results settings.'
+        );
+      })
       .finally(() => {
         if (!cancelled) setGuardrailsLoading(false);
       });
     return () => {
       cancelled = true;
     };
-  }, [target, setGuardrailsLoading]);
+  }, [tab, target, settingsRetry, setError, setGuardrailsLoading, setGuardrailsLoaded]);
 
   useEffect(() => {
+    if (tab !== 'global-assets') return undefined;
     let cancelled = false;
+    setError(null);
+    setGlobalAssetsLoaded(false);
+    setGlobalAssetsLoading(true);
     rpxApi
       .getGlobalAssets(target)
       .then((data: unknown) => {
@@ -179,20 +198,35 @@ export default function SettingsPage() {
           limits?: { max_css_chars?: number; max_js_chars?: number };
         };
         const assets = (root?.global_assets || {}) as Record<string, unknown>;
-        if (typeof assets.css === 'string') setGlobalCss(assets.css);
-        if (typeof assets.js === 'string') setGlobalJs(assets.js);
-        if (assets.css_enabled != null) setGlobalCssEnabled(assets.css_enabled !== false);
-        if (assets.js_enabled != null) setGlobalJsEnabled(assets.js_enabled !== false);
+        setGlobalCss(typeof assets.css === 'string' ? assets.css : '');
+        setGlobalJs(typeof assets.js === 'string' ? assets.js : '');
+        setGlobalCssEnabled(assets.css_enabled !== false);
+        setGlobalJsEnabled(assets.js_enabled !== false);
         if (root?.limits) setGlobalAssetLimits(root.limits);
+        setGlobalAssetsLoaded(true);
       })
-      .catch(() => {})
+      .catch((loadError: unknown) => {
+        if (cancelled) return;
+        setError(
+          loadError instanceof Error
+            ? loadError.message
+            : 'Could not load global snippets. Nothing was changed.'
+        );
+      })
       .finally(() => {
         if (!cancelled) setGlobalAssetsLoading(false);
       });
     return () => {
       cancelled = true;
     };
-  }, [target, setGlobalAssetsLoading]);
+  }, [
+    tab,
+    target,
+    settingsRetry,
+    setError,
+    setGlobalAssetsLoaded,
+    setGlobalAssetsLoading,
+  ]);
 
   const setTab = useCallback(
     (next: TabId) => {
@@ -232,7 +266,7 @@ export default function SettingsPage() {
       const assets = (result?.global_assets || {}) as Record<string, unknown>;
       if (typeof assets.css === 'string') setGlobalCss(assets.css);
       if (typeof assets.js === 'string') setGlobalJs(assets.js);
-      setMessage('Saved.');
+      setMessage('Saved. Storefront caching can briefly delay the change.');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Save failed');
     } finally {
@@ -243,6 +277,16 @@ export default function SettingsPage() {
   const saveStatSettings = async () => {
     setMessage(null);
     setError(null);
+    const parsedMinSampleSize = Number(minSampleSize);
+    if (
+      !String(minSampleSize).trim() ||
+      !Number.isFinite(parsedMinSampleSize) ||
+      parsedMinSampleSize < 1 ||
+      parsedMinSampleSize > 1000000
+    ) {
+      setError('Enter minimum visitors between 1 and 1,000,000.');
+      return;
+    }
     setSaving(true);
     try {
       // Only the two stat settings are sent. The server merges a patch onto the
@@ -250,7 +294,7 @@ export default function SettingsPage() {
       // value it already had rather than being reset by the save.
       const payload = {
         confidence_level: Number(confidenceLevel),
-        min_sample_size_per_variation: Number(minSampleSize),
+        min_sample_size_per_variation: parsedMinSampleSize,
       };
       const result = (await rpxApi.saveGuardrails(target, payload)) as {
         guardrails?: Record<string, unknown>;
@@ -300,7 +344,7 @@ export default function SettingsPage() {
             onClick: () => void saveStatSettings(),
             busy: saving || guardrailsLoading,
             busyLabel: saving ? 'Saving…' : 'Loading…',
-            disabled: guardrailsLoading,
+            disabled: guardrailsLoading || !guardrailsLoaded,
           }
         : tab === 'global-assets'
           ? {
@@ -308,7 +352,7 @@ export default function SettingsPage() {
               onClick: () => void saveGlobalAssets(),
               busy: saving || globalAssetsLoading,
               busyLabel: saving ? 'Saving…' : 'Loading…',
-              disabled: globalAssetsLoading,
+              disabled: globalAssetsLoading || !globalAssetsLoaded,
             }
           : null;
 
@@ -316,14 +360,9 @@ export default function SettingsPage() {
     tab === 'plan' && planState.needsSetup && !planState.loading
       ? {
           label: 'Open setup checklist',
-          onClick: () => navigate('/app/setup'),
+          onClick: () => navigate(withCurrentEmbeddedSearch(searchParams, '/app/setup')),
         }
-      : tab === 'price-surfaces'
-        ? {
-            label: 'Open setup checklist',
-            onClick: () => navigate('/app/setup'),
-          }
-        : undefined;
+      : undefined;
 
   const settingsBootstrapping =
     (tab === 'stats' && guardrailsLoading) ||
@@ -353,6 +392,15 @@ export default function SettingsPage() {
           }
         />
       ) : null}
+      {!settingsBootstrapping &&
+      error &&
+      ((tab === 'stats' && !guardrailsLoaded) ||
+        (tab === 'global-assets' && !globalAssetsLoaded)) ? (
+        <div style={{ marginBottom: 12 }}>
+          <Button onClick={() => setSettingsRetry(count => count + 1)}>Try again</Button>
+        </div>
+      ) : null}
+
       {!settingsBootstrapping && tab === 'plan' ? (
         <SettingsPlanPanel ctx={ctx} planState={planState} />
       ) : null}

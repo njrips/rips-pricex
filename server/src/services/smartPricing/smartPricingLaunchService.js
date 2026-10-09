@@ -2,6 +2,7 @@ const abTestEngine = require('../abTestEngine');
 const { createTest } = require('../../models/test');
 const { buildPriceTestPayloadFromPlan } = require('./planToPriceTestService');
 const { buildOfferTestPayloadFromPlan, isOfferPlan } = require('./planToOfferTestService');
+const { applyPriceArmOverrides } = require('./testPlanService');
 const { getShopSmartPricingGuardrails } = require('./smartPricingGuardrailsService');
 const { findPriceChangeViolations } = require('./priceBandService');
 const { assertCanLaunchPriceTests } = require('./smartPricingLaunchGuardService');
@@ -25,6 +26,7 @@ async function launchSmartPricingPlanAsTest(
 ) {
   const guardrails = await getShopSmartPricingGuardrails(shopDomain).catch(() => ({}));
   const offerPlan = isOfferPlan(plan);
+  let validatedPlan = plan;
 
   if (!offerPlan) {
     const violations = findPriceChangeViolations(
@@ -40,11 +42,32 @@ async function launchSmartPricingPlanAsTest(
       err.errors = violations;
       throw err;
     }
+
+    // Wizard edits rebuild arms after the initial plan preview. Recompute from
+    // the final prices and enforce the margin floor here, at the last server
+    // boundary before a test can start.
+    if (
+      Number(plan?.current_price ?? plan?.currentPrice) > 0 &&
+      (plan?.price_arms ?? plan?.priceArms)?.length >= 2
+    ) {
+      validatedPlan = applyPriceArmOverrides(plan, {}, guardrails);
+      const marginCheck = (validatedPlan.guardrail_checks || []).find(
+        check => check?.id === 'margin_floor'
+      );
+      if (marginCheck?.passed === false) {
+        const err = new Error(
+          `A variation falls below the minimum margin (${marginCheck.actual}). Raise that price before launch.`
+        );
+        err.isValidation = true;
+        err.errors = [err.message];
+        throw err;
+      }
+    }
   }
 
   const payload = offerPlan
     ? buildOfferTestPayloadFromPlan(plan, { guardrails })
-    : buildPriceTestPayloadFromPlan(plan, { guardrails });
+    : buildPriceTestPayloadFromPlan(validatedPlan, { guardrails });
   payload.shop_domain = shopDomain;
   payload.status = status === 'running' ? 'draft' : status;
 

@@ -5,7 +5,7 @@ This Shopify Function powers `Direct Price Override` for RipX price tests on:
 - Shopify Plus stores
 - development stores
 
-It reads RipX line item properties already injected by `shopify/storefront-script.js` and applies
+It reads RipX line item properties already injected by `storefront/storefront-script.js` and applies
 `lineUpdate` operations with `fixedPricePerUnit`.
 
 ## What it reads
@@ -38,15 +38,9 @@ assignment proof fields are present.
 From repo root:
 
 ```bash
-npm run shopify:cart-transform:install
-npm run shopify:cart-transform:typegen
-npm run shopify:cart-transform:build
-```
-
-Or full prep:
-
-```bash
-npm run shopify:cart-transform:prepare
+npm --prefix extensions/ripspricex-cart-transform install
+npm --prefix extensions/ripspricex-cart-transform run typegen
+npm --prefix extensions/ripspricex-cart-transform run build
 ```
 
 Then deploy with your app extensions as usual:

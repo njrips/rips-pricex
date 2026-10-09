@@ -32,11 +32,7 @@ export default function SetupStepPanel({
           requiredIndicator
           value={name}
           onChange={onNameChange}
-          placeholder={
-            experimentType === 'offer_test'
-              ? 'e.g. Summer offer — 10% off'
-              : 'e.g. Growth plan – £39 price test'
-          }
+          placeholder="e.g. Growth plan – £39 price test"
           autoComplete="off"
         />
       </div>

@@ -51,7 +51,8 @@ describe('POST /track/exposure', () => {
     });
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true, exposed: 2 });
-    const [sql, params] = query.mock.calls[0];
+    const updateCall = query.mock.calls.find(([sql]) => String(sql).includes('exposed_at'));
+    const [sql, params] = updateCall;
     expect(sql).toMatch(/SET exposed_at = NOW\(\)/);
     expect(sql).toMatch(/WHERE exposed_at IS NULL/);
     expect(params).toEqual(['user_1', 'demo.myshopify.com', [TEST_A, TEST_B]]);
@@ -66,7 +67,10 @@ describe('POST /track/exposure', () => {
   });
 
   it('is a no-op on a database without the exposure column', async () => {
-    query.mockRejectedValueOnce(Object.assign(new Error('column does not exist'), { code: '42703' }));
+    query.mockImplementation(async sql => {
+      if (String(sql).includes('shop_sessions')) return { rowCount: 1, rows: [] };
+      throw Object.assign(new Error('column does not exist'), { code: '42703' });
+    });
     const res = await post({ shop_domain: 'demo.myshopify.com', user_id: 'u', test_ids: [TEST_A] });
     expect(await res.json()).toEqual({ ok: true, exposed: 0 });
   });

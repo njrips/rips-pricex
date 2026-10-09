@@ -14,6 +14,30 @@ export function withEmbeddedSearch(request, path, extra = {}) {
   return qs ? `${path}?${qs}` : path;
 }
 
+/**
+ * Keeps the Shopify embed params that are already on this browser URL.
+ * Internal `/app` links otherwise drop `shop` and `host` on the next page.
+ */
+export function preserveEmbeddedSearch(path) {
+  if (typeof window === 'undefined') return path;
+  const raw = String(path || '');
+  const hashIndex = raw.indexOf('#');
+  const hash = hashIndex >= 0 ? raw.slice(hashIndex) : '';
+  const withoutHash = hashIndex >= 0 ? raw.slice(0, hashIndex) : raw;
+  const queryIndex = withoutHash.indexOf('?');
+  const pathname = queryIndex >= 0 ? withoutHash.slice(0, queryIndex) : withoutHash;
+  const params = new URLSearchParams(queryIndex >= 0 ? withoutHash.slice(queryIndex + 1) : '');
+  const current = new URLSearchParams(window.location.search);
+  for (const key of KEEP_PARAMS) {
+    if (!params.has(key)) {
+      const value = current.get(key);
+      if (value) params.set(key, value);
+    }
+  }
+  const qs = params.toString();
+  return `${pathname}${qs ? `?${qs}` : ''}${hash}`;
+}
+
 export function withCurrentEmbeddedSearch(searchParams, path, extra = {}) {
   const source =
     searchParams instanceof URLSearchParams

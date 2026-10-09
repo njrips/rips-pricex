@@ -58,11 +58,14 @@ export function buildStoreCatalogStatusText({
   if (withheld > 0) {
     parts.push(`${withheld} in other tests`);
   }
-  // The store count includes gift cards and products with no price above zero,
-  // which never become rows. Left unsaid, the line does not add up.
+  // The store count includes active products that cannot be sold in the Online
+  // Store, gift cards, and products with no usable price. Those never become
+  // rows, so explain the difference instead of making the totals look broken.
   const untestable = store > 0 ? store - available - withheld : 0;
   if (untestable > 0) {
-    parts.push(`${untestable} can’t be tested (gift cards or no price)`);
+    parts.push(
+      `${untestable} can’t be tested (unpublished, sold out, gift cards, or no price)`
+    );
   }
 
   let line = parts.length ? `${headline} · ${parts.join(' · ')}` : headline;
@@ -201,7 +204,7 @@ export function buildProductPickerEmptyMessage({
 export function buildManualSelectionCountLabel(selectedCount = 0, availableProductCount = 0) {
   const selected = Number(selectedCount) || 0;
   const available = Number(availableProductCount) || 0;
-  return `${selected} of ${available} products`;
+  return `${selected} of ${available} products selected`;
 }
 
 export function buildAllProductsSelectionCountLabel({
@@ -220,7 +223,7 @@ export function buildAllProductsCapHelp({ availableProductCount = 0, maxSelectio
   const available = Number(availableProductCount) || 0;
   if (available <= maxSelection) return '';
   const leftOut = available - maxSelection;
-  return `One test covers up to ${maxSelection} products, so this test takes the ${maxSelection} with the best mix of traffic, margin and sales and leaves ${leftOut} out. Once it launches, those ${maxSelection} are held, so a second All products test picks up the other ${leftOut}.`;
+  return `One test covers up to ${maxSelection} products, so this test takes the ${maxSelection} with the best mix of traffic and sales and leaves ${leftOut} out. Once it launches, those ${maxSelection} are held, so a second All products test picks up the other ${leftOut}.`;
 }
 
 export function shouldShowCatalogTruncatedHelp({

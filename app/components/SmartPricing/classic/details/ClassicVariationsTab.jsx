@@ -695,7 +695,7 @@ function VariationCard({
           </>
         ) : (
           <p className={styles.help} style={{ margin: 0 }}>
-            Preview available after this arm is linked to a running test.
+            Preview available after this variation is linked to a running test.
           </p>
         )}
       </div>
@@ -1212,7 +1212,7 @@ export default function ClassicVariationsTab({
       <div className={styles.statCard}>
         <h3 className={styles.panelTitle}>Variations</h3>
         <p className={styles.help}>
-          {isOfferTest ? 'No offer variations on this test yet.' : 'No price arms on this test yet.'}
+          {isOfferTest ? 'No offer variations on this test yet.' : 'No price variations on this test yet.'}
         </p>
       </div>
     );

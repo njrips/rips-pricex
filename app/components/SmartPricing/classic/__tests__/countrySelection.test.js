@@ -98,7 +98,7 @@ describe('countrySelection', () => {
 
   it('formats include and exclude together for review', () => {
     expect(formatSplitCountryAudienceLabel(['US'], [])).toBe('Include: US');
-    expect(formatSplitCountryAudienceLabel([], ['GB'])).toBe('All countries · Exclude: GB');
+    expect(formatSplitCountryAudienceLabel([], ['GB'])).toBe('Exclude: GB');
     expect(formatSplitCountryAudienceLabel(['US', 'CA'], ['GB'])).toBe(
       'Include: US, CA · Exclude: GB'
     );

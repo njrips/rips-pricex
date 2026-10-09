@@ -1,5 +1,6 @@
 import { TitleBar } from "@shopify/app-bridge-react";
 import { useNavigate } from "react-router";
+import { preserveEmbeddedSearch } from "../utils/shopifyEmbeddedSearch";
 import ClassicExperimentOverview from "../components/SmartPricing/classic/ClassicExperimentOverview";
 import "../styles/classic-theme.css";
 
@@ -8,7 +9,7 @@ export default function ExperimentDetails() {
   return (
     <>
       <TitleBar title="Test">
-        <button type="button" variant="breadcrumb" onClick={() => navigate("/app")}>
+        <button type="button" variant="breadcrumb" onClick={() => navigate(preserveEmbeddedSearch("/app"))}>
           Tests
         </button>
       </TitleBar>

@@ -155,7 +155,11 @@ const text = () => container.textContent || '';
 function stepTitles() {
   return Array.from(container.querySelectorAll('p'))
     .map(node => node.textContent || '')
-    .filter(value => /^\d+\.\s/.test(value));
+    .filter(value =>
+      ['Theme connection', 'Checkout pricing functions', 'Price locations on your site'].includes(
+        value
+      )
+    );
 }
 
 function buttonByLabel(label) {
@@ -212,12 +216,12 @@ describe('Setup checklist', () => {
     /** The selectors badge, which sits in the step 3 heading. */
     function surfaceBadge() {
       const heading = Array.from(container.querySelectorAll('p')).find(
-        node => (node.textContent || '') === '3. Price locations on your site'
+        node => (node.textContent || '') === 'Price locations on your site'
       );
       const head = heading?.parentElement?.parentElement;
       return Array.from(head?.querySelectorAll('span') || [])
         .map(node => (node.textContent || '').trim())
-        .find(value => value.length > 0 && !value.startsWith('3.'));
+        .find(value => value.length > 0 && value !== 'Price locations on your site');
     }
 
     it('says it is checking while the request is still out', async () => {
@@ -272,9 +276,9 @@ describe('Setup checklist', () => {
   it('holds both checkout functions in one step, each with its own status', async () => {
     await render();
     expect(stepTitles()).toEqual([
-      '1. Theme connection',
-      '2. Checkout pricing functions',
-      '3. Price locations on your site',
+      'Theme connection',
+      'Checkout pricing functions',
+      'Price locations on your site',
     ]);
     expect(text()).toContain('Dynamic cart prices (for price tests)');
     expect(text()).toContain('Checkout discounts (for offer tests)');
@@ -291,7 +295,7 @@ describe('Setup checklist', () => {
       return Promise.resolve({ data: {} });
     });
     await render();
-    const button = buttonByLabel('Check and install');
+    const button = buttonByLabel('Refresh status');
     expect(button).toBeDefined();
     await act(async () => {
       button.click();
@@ -317,7 +321,7 @@ describe('Setup checklist', () => {
     expect(text()).not.toContain('Partly installed');
     expect(text()).toContain('Enabled');
     expect(text()).toContain('Not enabled');
-    expect(buttonByLabel('Check and install')).toBeDefined();
+    expect(buttonByLabel('Refresh status')).toBeDefined();
   });
 
   it('reports both checkout functions as enabled rather than in two vocabularies', async () => {
@@ -331,10 +335,11 @@ describe('Setup checklist', () => {
     expect(badges.length).toBeGreaterThanOrEqual(2);
   });
 
-  it('offers a re-check rather than an install once both are in place', async () => {
+  it('labels the one button Refresh status whatever the state', async () => {
     await render();
     expect(buttonByLabel('Refresh status')).toBeDefined();
     expect(buttonByLabel('Check and install')).toBeUndefined();
+    expect(text()).toContain('Enabled');
   });
 
   it('re-checks by reading, so a healthy shop is not written to for nothing', async () => {
@@ -357,7 +362,7 @@ describe('Setup checklist', () => {
     });
     await render();
     await act(async () => {
-      buttonByLabel('Check and install').click();
+      buttonByLabel('Refresh status').click();
     });
     const posted = apiPost.mock.calls.map(call => String(call[0]));
     expect(posted).toEqual(['/settings/checkout-discount/ensure']);
@@ -390,7 +395,10 @@ describe('Setup checklist', () => {
     checkoutReadiness.mockResolvedValue(readiness({ theme_embed: { status: 'disabled' } }));
     await render({ entitled: false });
     await act(async () => {
-      buttonByLabel('Re-check readiness').click();
+      const matches = Array.from(container.querySelectorAll('button')).filter(node =>
+        (node.textContent || '').includes('Refresh status')
+      );
+      matches[matches.length - 1].click();
     });
     expect(checkoutReadiness).toHaveBeenLastCalledWith(expect.anything(), {
       refresh: true,
@@ -403,9 +411,9 @@ describe('Setup checklist', () => {
       node.getAttribute('aria-label')
     );
     expect(tips).toEqual([
-      'About 1. Theme connection',
-      'About 2. Checkout pricing functions',
-      'About 3. Price locations on your site',
+      'About Theme connection',
+      'About Checkout pricing functions',
+      'About Price locations on your site',
     ]);
   });
 
@@ -424,7 +432,7 @@ describe('Setup checklist', () => {
 
   it('holds back the scope-update advice until an install actually fails', async () => {
     await render();
-    expect(text()).not.toContain('Check and install again');
+    expect(text()).not.toContain('Refresh status again');
   });
 
   it('offers the permission-update advice once an install fails', async () => {
@@ -433,7 +441,7 @@ describe('Setup checklist', () => {
       return Promise.resolve(cartStatus({ installed: true }));
     });
     await render();
-    expect(text()).toContain('Check and install again');
+    expect(text()).toContain('Refresh status again');
     expect(text()).toContain('Shopify Admin');
   });
 
@@ -444,7 +452,7 @@ describe('Setup checklist', () => {
     expect(text()).not.toContain('Locked');
     // The gate itself is real, so an unentitled shop still has to be told
     // where Create is -- just not with a step of its own.
-    expect(text()).toContain('unlock Create under Settings → Plan');
+    expect(text()).toContain('choose a plan in Plan & usage to create tests');
     expect(text()).toContain('Check these three items once');
   });
 

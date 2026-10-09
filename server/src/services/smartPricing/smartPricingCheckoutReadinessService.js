@@ -21,6 +21,34 @@ const {
 
 const readinessCache = new Map();
 
+const CONTACT_SUPPORT_CHECKOUT =
+  'Priceify cannot connect to your checkout yet. Contact support so we can finish the setup.';
+
+// Merchants see failed checks on Store setup and at launch; the diagnostics
+// text names env vars and API routes, which is operator detail.
+const MERCHANT_CHECK_MESSAGES = {
+  batch_url_configured: CONTACT_SUPPORT_CHECKOUT,
+  batch_path_matches_ripx_handler: CONTACT_SUPPORT_CHECKOUT,
+  https_public_url: CONTACT_SUPPORT_CHECKOUT,
+  tunnel_stability: CONTACT_SUPPORT_CHECKOUT,
+  assignment_signature_enforcement: CONTACT_SUPPORT_CHECKOUT,
+  checkout_secret_consistency: CONTACT_SUPPORT_CHECKOUT,
+  shopify_admin_api_auth:
+    'Shopify did not accept Priceify’s access. Re-open Priceify from Shopify Admin, then click Refresh status.',
+  shopify_admin_api_functions:
+    'Could not check Checkout pricing functions. Click Refresh status to try again.',
+  discount_function_available:
+    'Checkout discounts (for offer tests) are not available on your store yet. Contact support.',
+  cart_transform_function_available:
+    'Dynamic cart prices (for price tests) are not available on your store yet. Contact support.',
+  cart_transform_installed:
+    'Dynamic cart prices (for price tests) are not enabled. Click Refresh status to enable them.',
+  cart_transform_install_check_scope:
+    'Priceify needs updated permissions to check Dynamic cart prices. Re-open Priceify from Shopify Admin, then click Refresh status.',
+  cart_transform_install_check_error:
+    'Could not check Dynamic cart prices. Click Refresh status to try again.',
+};
+
 function normalizeShopDomain(shopDomain) {
   return String(shopDomain || '')
     .trim()
@@ -60,7 +88,10 @@ function resolveExtensionConfigInput() {
   if (skipExt) {
     return { source: 'omit' };
   }
-  return extensionConfigInputFromReadResult(readRipxCheckoutExtensionConfigFile());
+  const read = extensionConfigInputFromReadResult(readRipxCheckoutExtensionConfigFile());
+  // extensions/ripx-checkout-discount/src/ripxConfig.js is not part of this app.
+  if (!read || read.source === 'missing') return { source: 'omit' };
+  return read;
 }
 
 async function fetchShopifyFunctions(shopDomain, accessToken) {
@@ -181,8 +212,9 @@ async function resolveSmartPricingCheckoutReadiness(
 
   const failedChecks = (diagnostics.checklist || [])
     .filter(row => !row.ok)
-    .slice(0, 6)
-    .map(row => row.message);
+    .map(row => MERCHANT_CHECK_MESSAGES[row.id] || CONTACT_SUPPORT_CHECKOUT)
+    .filter((message, index, all) => all.indexOf(message) === index)
+    .slice(0, 6);
 
   let priceSurface = {
     ready: true,
@@ -209,7 +241,7 @@ async function resolveSmartPricingCheckoutReadiness(
       // and deleted the rest was left wondering what the other four had been for.
       message: surfaceReady
         ? 'The product page price is mapped, which is all a price test needs. Other locations are optional.'
-        : `Map the product page price under ${SETTINGS_PRICE_SURFACES_TAB} so bucketed visitors see test prices. It is the only surface a price test requires.`,
+        : `Map the product page price under ${SETTINGS_PRICE_SURFACES_TAB} so visitors in a test see test prices. It is the only location a price test requires.`,
       action_path: SETTINGS_PRICE_SURFACES_TAB,
     };
   } catch (_surfaceError) {
@@ -290,17 +322,15 @@ async function resolveSmartPricingCheckoutReadiness(
       : 0,
     cart_transforms_lookup_status: live.cartTransformsLookupStatus,
     message: ready
-      ? live.live_api_checked
-        ? 'Checkout price override path looks configured (live Shopify check).'
-        : 'Checkout price override path looks configured.'
-      : failedChecks[0] || 'Checkout price function needs attention before launch.',
+      ? 'Checkout pricing functions are ready for price tests.'
+      : failedChecks[0] || 'Checkout pricing functions need attention before you launch a price test.',
     offer_message: !live.live_api_checked
-      ? 'Offer checkout will be verified after you re-open the app from Shopify Admin.'
+      ? 'Checkout discounts will be checked after you re-open Priceify from Shopify Admin.'
       : discountFunctionAvailable
         ? automaticDiscountAvailable
-          ? 'Checkout discount function is attached for offer tests.'
-          : 'Checkout discount function is deployed. Launch will attach the automatic discount.'
-        : 'Offer tests need Checkout pricing functions on Store setup. Use Check and install, then refresh status.',
+          ? 'Checkout discounts are enabled for offer tests.'
+          : 'Checkout discounts are installed. Launching an offer test turns them on.'
+        : 'Offer tests need Checkout pricing functions in Store setup. Click Refresh status to install them.',
     offer_ready:
       live.live_api_checked !== true ||
       discountFunctionAvailable === true ||

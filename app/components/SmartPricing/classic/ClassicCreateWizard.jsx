@@ -7,6 +7,7 @@ import { Banner, Button } from '@shopify/polaris';
 import PageShell from '../../shared/PageShell';
 import ClassicPageLoader from '../../shared/ClassicPageLoader';
 import { ROUTES } from '../../../constants';
+import { preserveEmbeddedSearch } from '../../../utils/shopifyEmbeddedSearch';
 import { apiGet } from '../../../services';
 import useClassicShopDomain from '../../../hooks/useClassicShopDomain';
 import { useHydrated } from '../../../hooks/useHydrated';
@@ -124,8 +125,8 @@ import {
   createEmptyAudienceSegments,
   normalizeAudienceSegments,
   normalizeClassicAudienceTargeting,
+  normalizeClassicCreatePrimaryMetric,
   normalizeCustomGoals,
-  normalizePrimaryMetric,
   normalizeSecondaryEvents,
 } from '../targeting/smartPricingAudienceHelpers';
 import ClassicWizardShell from './ClassicWizardShell';
@@ -534,7 +535,7 @@ export default function ClassicCreateWizard({ onTitleChange }) {
     window.open(path, '_blank');
   };
   const openPriceSurfaceSettings = () => {
-    const path = `${ROUTES.appSettings(shopDomain)}?tab=price-surfaces&automap=1`;
+    const path = preserveEmbeddedSearch('/app/settings?tab=price-surfaces&automap=1');
     if (typeof navigate === 'function') {
       navigate(path);
       return;
@@ -818,12 +819,10 @@ export default function ClassicCreateWizard({ onTitleChange }) {
           ...createDefaultAudienceState(),
           ...snapshot.audience,
           ...normalizeClassicAudienceTargeting(snapshot.audience),
-          primaryMetric: normalizePrimaryMetric(snapshot.audience.primaryMetric),
+          primaryMetric: normalizeClassicCreatePrimaryMetric(snapshot.audience.primaryMetric),
           secondaryMetrics: normalizeSecondaryEvents(snapshot.audience.secondaryMetrics),
           customGoals: normalizeCustomGoals(snapshot.audience.customGoals),
-          primaryCustomGoal: snapshot.audience.primaryCustomGoal
-            ? normalizeCustomGoals([snapshot.audience.primaryCustomGoal])[0] || null
-            : null,
+          primaryCustomGoal: null,
           guardrails: ensureRevenueGuardrailRows(snapshot.audience.guardrails),
         };
         setAudience(nextAudience);
@@ -888,14 +887,14 @@ export default function ClassicCreateWizard({ onTitleChange }) {
                 ...(first.audience || {}),
                 ...first.metadata.audience_ui,
               }),
-              primaryMetric: normalizePrimaryMetric(first.metadata.audience_ui.primaryMetric),
+              primaryMetric: normalizeClassicCreatePrimaryMetric(
+                first.metadata.audience_ui.primaryMetric
+              ),
               secondaryMetrics: normalizeSecondaryEvents(
                 first.metadata.audience_ui.secondaryMetrics
               ),
               customGoals: normalizeCustomGoals(first.metadata.audience_ui.customGoals),
-              primaryCustomGoal: first.metadata.audience_ui.primaryCustomGoal
-                ? normalizeCustomGoals([first.metadata.audience_ui.primaryCustomGoal])[0] || null
-                : null,
+              primaryCustomGoal: null,
               guardrails: ensureRevenueGuardrailRows(first.metadata.audience_ui.guardrails),
             };
             setAudience(nextAudience);
@@ -1275,7 +1274,7 @@ export default function ClassicCreateWizard({ onTitleChange }) {
             audience?.customGoals
           );
           goalMap[plan.id] = {
-            primary_metric: normalizePrimaryMetric(
+            primary_metric: normalizeClassicCreatePrimaryMetric(
               audience?.primaryMetric || plan.objective || 'revenue_per_visitor'
             ),
             secondary_events: secondaryPayload.secondary_events,
@@ -1310,6 +1309,8 @@ export default function ClassicCreateWizard({ onTitleChange }) {
       const rawAudienceState = audience || createDefaultAudienceState();
       const audienceState = {
         ...rawAudienceState,
+        primaryMetric: normalizeClassicCreatePrimaryMetric(rawAudienceState.primaryMetric),
+        primaryCustomGoal: null,
         // Secondary metrics are no longer offered. A draft saved before that,
         // or a test duplicated from an older one, still carries them, and
         // nothing on screen would say they were about to launch.
@@ -1350,7 +1351,11 @@ export default function ClassicCreateWizard({ onTitleChange }) {
         const planEstimate = durationEstimate.perSkuEstimates?.find(
           row => row.key === String(plan.variant_id || plan.id || '')
         );
-        const stats = stampStatisticalFields(plan, shopGuardrails);
+        // A saved draft is not a launched test. Results settings apply when a
+        // new test launches, so refresh the full statistical policy together
+        // instead of keeping stale confidence while updating only its sample
+        // floor.
+        const stats = stampStatisticalFields({}, shopGuardrails);
         const planGoal = goalByPlan[plan.id] || {};
         return {
           ...plan,
@@ -1504,7 +1509,16 @@ export default function ClassicCreateWizard({ onTitleChange }) {
       // Spread across every variation so each keeps its own slot in the band,
       // then keep only the ones being priced: spread alone, two variations
       // given the same band would land on the same price.
-      const spreadOpts = { rows, targetArms: spreadArms, min, max, unit, maxChangePct };
+      const spreadOpts = {
+        rows,
+        targetArms: spreadArms,
+        min,
+        max,
+        unit,
+        maxChangePct,
+        minMarginPct: shopGuardrails.min_margin_percent,
+        defaultCogsPct: shopGuardrails.default_cogs_percent,
+      };
       const keep = keepArmKeys(targetArms);
       const localPatch = keep(buildAiBandPriceOverrides(spreadOpts));
       if (!Object.keys(localPatch).length) return false;
@@ -1556,7 +1570,7 @@ export default function ClassicCreateWizard({ onTitleChange }) {
           ...prev,
           source: null,
           summary: !rows.length
-            ? 'Select products first, then re-suggest prices.'
+            ? 'Select products first, then click Suggest.'
             : 'Add a test variation before requesting AI prices.',
           busy: false,
         }));
@@ -1584,7 +1598,7 @@ export default function ClassicCreateWizard({ onTitleChange }) {
         band,
       });
       const fallbackLine = painted
-        ? `Local ${describeAiBandRange(min, max, unit)} band fallback (AI unavailable).`
+        ? `Even spread across your ${describeAiBandRange(min, max, unit)} band (AI unavailable).`
         : 'Could not build local prices — check product prices and try again.';
       const { status, detail } = composeAiSuggestBanner({
         source: 'deterministic',
@@ -1635,7 +1649,7 @@ export default function ClassicCreateWizard({ onTitleChange }) {
         setAiPriceMeta({
           source: null,
           summary: !rows.length
-            ? 'Select products first, then re-suggest prices.'
+            ? 'Select products first, then click Suggest.'
             : 'Add a test variation before requesting AI prices.',
           detail: null,
           busy: false,
@@ -1760,7 +1774,7 @@ export default function ClassicCreateWizard({ onTitleChange }) {
             const { status, detail } = composeAiSuggestBanner({
               source: 'deterministic',
               bandNotice: describeAiBandCap(band, { unit }),
-              fallbackLine: `Local ${describeAiBandRange(min, max, unit)} band fallback (AI unavailable).`,
+              fallbackLine: `Even spread across your ${describeAiBandRange(min, max, unit)} band (AI unavailable).`,
               unit,
             });
             setAiPriceMeta({
@@ -1824,7 +1838,7 @@ export default function ClassicCreateWizard({ onTitleChange }) {
           const { status, detail } = composeAiSuggestBanner({
             source: 'deterministic',
             bandNotice: describeAiBandCap(band, { unit }),
-            fallbackLine: `Local ${describeAiBandRange(min, max, unit)} band fallback (AI unavailable).`,
+            fallbackLine: `Even spread across your ${describeAiBandRange(min, max, unit)} band (AI unavailable).`,
             errorMessage: apiMessage,
             unit,
           });
@@ -2189,7 +2203,7 @@ export default function ClassicCreateWizard({ onTitleChange }) {
         const detail =
           checkoutReadiness?.message ||
           (Array.isArray(checkoutReadiness?.failed_checks) && checkoutReadiness.failed_checks[0]) ||
-          'Fix Setup before launching.';
+          'Fix Store setup before launching.';
         setMessage(
           isOfferTest
             ? `Offer checkout is not ready. ${getOfferCheckoutBlockReason(checkoutReadiness)}`
@@ -2225,7 +2239,7 @@ export default function ClassicCreateWizard({ onTitleChange }) {
         setMessageType('warning');
         setMessage(
           persistErr?.message ||
-            'Could not sync the inbox to your account. Launch will still try with this test.'
+            'Could not save this test to your account. Launch will still try with this test.'
         );
       }
       try {
@@ -2379,8 +2393,8 @@ export default function ClassicCreateWizard({ onTitleChange }) {
         disabled: true,
         code: 'checkout',
         reason: isOfferTest
-          ? 'Offer checkout is not ready. Fix Setup before launching.'
-          : 'Checkout is not ready. Fix Setup before launching.',
+          ? 'Offer checkout is not ready. Fix Store setup before launching.'
+          : 'Checkout is not ready. Fix Store setup before launching.',
       };
     }
     // enrichPlansForLaunch maps these one for one, so the count it would
@@ -2512,7 +2526,7 @@ export default function ClassicCreateWizard({ onTitleChange }) {
         continueBusy={busy || launching}
         showCancel={step === 0}
         onCancel={backToList}
-        onSaveDraft={saveDraft}
+        onSaveDraft={step === 4 ? undefined : saveDraft}
         saveDraftLabel="Save draft"
         saveDraftBusy={savingDraft}
         saveDraftDisabled={!shopGuardrailsReady}

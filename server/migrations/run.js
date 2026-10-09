@@ -21,6 +21,11 @@ async function run() {
     );
   `);
 
+  // Two app boots must not apply the same file. The existence check used to
+  // sit outside the write transaction, so both could pass it.
+  const lockClient = await pool.connect();
+  await lockClient.query('SELECT pg_advisory_lock($1)', [867530901]);
+  try {
   for (const file of files) {
     const { rows } = await pool.query(
       'SELECT 1 FROM schema_migrations WHERE filename = $1',
@@ -47,6 +52,10 @@ async function run() {
     } finally {
       client.release();
     }
+  }
+  } finally {
+    await lockClient.query('SELECT pg_advisory_unlock($1)', [867530901]).catch(() => {});
+    lockClient.release();
   }
   await pool.end();
   console.log('Migrations complete');

@@ -57,6 +57,16 @@ async function api<T = unknown>(
     ) as Error & { status?: number; payload?: unknown };
     err.status = res.status;
     err.payload = data;
+    if (res.status === 402 && typeof window !== "undefined") {
+      window.dispatchEvent(
+        new CustomEvent("ripspricex:payment-required", {
+          detail: {
+            upgradeUrl:
+              (data as { upgradeUrl?: string }).upgradeUrl || "",
+          },
+        }),
+      );
+    }
     throw err;
   }
   return data as T;

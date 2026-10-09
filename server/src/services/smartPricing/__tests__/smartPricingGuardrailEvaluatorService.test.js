@@ -73,8 +73,8 @@ describe('a guardrail the experiment switched off', () => {
       // A breach on any reading: control earns far more per visitor.
       analytics: {
         variants: [
-          { id: 'control', role: 'control', visitors: 5000, revenue: 50000 },
-          { id: 'var_a', role: 'challenger', visitors: 5000, revenue: 10000 },
+          { id: 'control', role: 'control', visitors: 5000, conversions: 100, revenue: 50000 },
+          { id: 'var_a', role: 'challenger', visitors: 5000, conversions: 100, revenue: 10000 },
         ],
       },
     });

@@ -711,6 +711,9 @@ class ShopifyService {
               id
               title
               handle
+              status
+              publishedAt
+              onlineStoreUrl
               productType
               tags
               featuredImage {
@@ -735,6 +738,7 @@ class ShopifyService {
                     compareAtPrice
                     updatedAt
                     inventoryQuantity
+                    inventoryPolicy
                     ${
                       withUnitCost
                         ? `inventoryItem {
@@ -784,6 +788,9 @@ class ShopifyService {
             id: node.id,
             title: node.title || '(Untitled)',
             handle: node.handle || '',
+            status: node.status || '',
+            publishedAt: node.publishedAt || null,
+            onlineStoreUrl: node.onlineStoreUrl || null,
             productType: node.productType || '',
             tags: Array.isArray(node.tags) ? node.tags : [],
             imageUrl: node.featuredImage?.url || null,
@@ -808,6 +815,7 @@ class ShopifyService {
                 ve.node.inventoryQuantity !== null && ve.node.inventoryQuantity !== undefined
                   ? Number(ve.node.inventoryQuantity)
                   : null,
+              inventoryPolicy: ve.node.inventoryPolicy || '',
             })),
           });
         });

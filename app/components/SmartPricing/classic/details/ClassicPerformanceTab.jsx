@@ -203,7 +203,7 @@ export default function ClassicPerformanceTab({
   if (analyticsLoading && !arms.length && !averages.length && !productPerformanceRows.length) {
     return (
       <div className={styles.statCard}>
-        <p className={styles.help}>Loading arm performance…</p>
+        <p className={styles.help}>Loading variation performance…</p>
       </div>
     );
   }
@@ -213,7 +213,7 @@ export default function ClassicPerformanceTab({
       <div className={styles.statCard}>
         <h3 className={styles.panelTitle}>Product performance by variation</h3>
         <p className={styles.help}>
-          Live arm analytics appear once this test is launched and collecting visitors.
+          Variation results appear once this test is launched and collecting visitors.
         </p>
       </div>
     );
@@ -294,7 +294,7 @@ export default function ClassicPerformanceTab({
           </p>
         </Banner>
       ) : null}
-      {!overviewMode && showGuardrailStop ? (
+      {showGuardrailStop ? (
         <Banner tone="warning" title="Stopped by guardrail">
           <p>{formatGuardrailStopMessage(revenueRail)}</p>
         </Banner>
@@ -383,9 +383,9 @@ export default function ClassicPerformanceTab({
       {arms.length ? (
         <div className={styles.statCard}>
           <div className={styles.reviewHead}>
-            <h3 className={styles.panelTitle}>Arm rollup</h3>
+            <h3 className={styles.panelTitle}>Results by variation</h3>
             <span className={styles.productSub}>
-              {analytics?.multi_test ? 'Merged across product tests' : 'Test arms'}
+              {analytics?.multi_test ? 'Merged across product tests' : 'Test variations'}
             </span>
           </div>
           <div className={styles.detailTableWrap}>

@@ -95,6 +95,22 @@ describe('ClassicWizardShell stepper labels', () => {
     expect(normalized).toMatch(/Audience\s*&\s*goals/);
     expect(normalized).toMatch(/Review\s*&\s*launch/);
   });
+
+  it('shows the required Step 1 and Step 2 titles and navigation labels', async () => {
+    await renderShell({ stepIndex: 0, showCancel: true });
+    expect(container.querySelector('h1').textContent).toBe('Set up your test');
+    expect(container.textContent).toContain('Cancel');
+    expect(container.querySelector('.Polaris-Button--variantPrimary').textContent).toContain(
+      'Continue'
+    );
+
+    await renderShell({ stepIndex: 1 });
+    expect(container.querySelector('h1').textContent).toBe('Traffic & variations');
+    expect(container.textContent).toContain('Back');
+    expect(container.querySelector('.Polaris-Button--variantPrimary').textContent).toContain(
+      'Continue'
+    );
+  });
 });
 
 /**

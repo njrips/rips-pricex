@@ -45,8 +45,8 @@ describe('smartPricingRevenueGuardrail', () => {
       thresholdPercent: 10,
       minVisitors: 100,
       variants: [
-        { name: 'Control', visitors: 40, revenuePerVisitor: 2 },
-        { name: 'A', visitors: 40, revenuePerVisitor: 1 },
+        { name: 'Control', visitors: 40, conversions: 20, revenuePerVisitor: 2 },
+        { name: 'A', visitors: 40, conversions: 20, revenuePerVisitor: 1 },
       ],
     });
     assert.equal(verdict.ready, false);
@@ -58,8 +58,8 @@ describe('smartPricingRevenueGuardrail', () => {
       thresholdPercent: 10,
       minVisitors: 100,
       variants: [
-        { name: 'A', visitors: 120, revenuePerVisitor: 2 },
-        { name: 'B', visitors: 40, revenuePerVisitor: 1 },
+        { name: 'A', visitors: 120, conversions: 20, revenuePerVisitor: 2 },
+        { name: 'B', visitors: 40, conversions: 20, revenuePerVisitor: 1 },
       ],
     });
     assert.equal(verdict.ready, false);
@@ -72,8 +72,14 @@ describe('smartPricingRevenueGuardrail', () => {
       thresholdPercent: 10,
       minVisitors: 100,
       variants: [
-        { id: 'c', name: 'Control', visitors: 120, revenuePerVisitor: 2 },
-        { id: 'a', name: 'Variation A', visitors: 120, revenuePerVisitor: 1.6 },
+        { id: 'c', name: 'Control', visitors: 120, conversions: 20, revenuePerVisitor: 2 },
+        {
+          id: 'a',
+          name: 'Variation A',
+          visitors: 120,
+          conversions: 20,
+          revenuePerVisitor: 1.6,
+        },
       ],
     });
     assert.equal(verdict.ready, true);
@@ -87,8 +93,8 @@ describe('smartPricingRevenueGuardrail', () => {
       thresholdPercent: 10,
       minVisitors: 100,
       variants: [
-        { name: 'Control', visitors: 200, revenuePerVisitor: 2 },
-        { name: 'A', visitors: 200, revenuePerVisitor: 1.9 },
+        { name: 'Control', visitors: 200, conversions: 20, revenuePerVisitor: 2 },
+        { name: 'A', visitors: 200, conversions: 20, revenuePerVisitor: 1.9 },
       ],
     });
     assert.equal(verdict.breached, false);
@@ -101,6 +107,21 @@ describe('smartPricingRevenueGuardrail', () => {
     assert.equal(config.auto_stop, true);
     assert.equal(config.max_revenue_drop_percent, 12);
     assert.equal(config.metric, 'revenue_per_visitor');
+    assert.equal(config.min_visitors_per_variant, 5000);
+    assert.equal(config.min_conversions_per_variant, 10);
+  });
+
+  it('does not stop on a noisy revenue estimate before enough conversions', () => {
+    const verdict = evaluateRevenueDrop({
+      thresholdPercent: 10,
+      minVisitors: 100,
+      variants: [
+        { name: 'Control', visitors: 500, conversions: 3, revenuePerVisitor: 2 },
+        { name: 'A', visitors: 500, conversions: 2, revenuePerVisitor: 1 },
+      ],
+    });
+    assert.equal(verdict.ready, false);
+    assert.equal(verdict.reason, 'insufficient_control_sample');
   });
 
   // enabled:false is what makes models/test.js store guardrail_config as NULL,

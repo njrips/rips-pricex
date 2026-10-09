@@ -7,6 +7,7 @@ import {
   CLASSIC_SOURCE_OPTIONS,
   customGoalTriggerSummary,
   normalizeClassicAudienceTargeting,
+  normalizeClassicCreatePrimaryMetric,
   normalizeCustomGoals,
   normalizePrimaryMetric,
 } from '../targeting/smartPricingAudienceHelpers';
@@ -26,6 +27,7 @@ import {
   MIN_REVENUE_DROP_PERCENT,
   DEFAULT_MAX_REVENUE_DROP_PERCENT,
   MIN_VISITORS_FOR_REVENUE_GUARDRAIL,
+  MIN_CONVERSIONS_FOR_REVENUE_GUARDRAIL,
   parseRevenueDropThreshold,
 } from './revenueGuardrail';
 import { formatPracticalDurationRange } from './estimateSignificanceDuration';
@@ -171,15 +173,19 @@ export default function AudienceSuccessStepPanel({
     significanceEstimate?.trafficEvidence
   );
   const durationNotFeasible = significanceEstimate?.durationFeasibility === 'not_feasible';
-  const primaryMetric = primaryCustomGoal?.event_name
-    ? String(primaryCustomGoal.event_name).trim().toLowerCase()
-    : normalizePrimaryMetric(state.primaryMetric, 'revenue_per_visitor');
+  const primaryMetric = showTrafficAllocation
+    ? primaryCustomGoal?.event_name
+      ? String(primaryCustomGoal.event_name).trim().toLowerCase()
+      : normalizePrimaryMetric(state.primaryMetric, 'revenue_per_visitor')
+    : normalizeClassicCreatePrimaryMetric(state.primaryMetric);
   // Profit per visitor is no longer offered, but an experiment already running
   // on it keeps its pill so editing the audience does not re-goal the test.
   const legacyPrimaryOptions = classicMetricOptionsFor([primaryMetric]).filter(
     opt => !GOAL_METRIC_OPTIONS.some(goal => goal.value === opt.value)
   );
-  const primaryMetricOptions = [...GOAL_METRIC_OPTIONS, ...legacyPrimaryOptions];
+  const primaryMetricOptions = showTrafficAllocation
+    ? [...GOAL_METRIC_OPTIONS, ...legacyPrimaryOptions]
+    : GOAL_METRIC_OPTIONS;
 
   const patch = partial => {
     if (disabled) return;
@@ -388,7 +394,11 @@ export default function AudienceSuccessStepPanel({
             return (
               <SelectablePill
                 key={`primary-${metric.value}`}
-                label={metric.label}
+                label={
+                  metric.value === 'revenue_per_visitor'
+                    ? `${metric.label} (recommended)`
+                    : metric.label
+                }
                 active={active}
                 disabled={disabled}
                 onClick={() => selectPrimaryMetric(metric.value)}
@@ -397,7 +407,7 @@ export default function AudienceSuccessStepPanel({
           })}
           {/* Custom goals are no longer offered; a test already launched on
               one keeps its pill so editing does not silently re-goal it. */}
-          {primaryCustomGoal ? (
+          {showTrafficAllocation && primaryCustomGoal ? (
             <SelectablePill
               key={primaryCustomGoal.event_name}
               label={primaryCustomGoal.label}
@@ -409,7 +419,9 @@ export default function AudienceSuccessStepPanel({
               title={`${customGoalTriggerSummary(primaryCustomGoal)} · click to clear custom primary`}
             />
           ) : null}
-        </div>      </div>
+        </div>
+        <p className={styles.help}>Choose one metric to optimise for this test.</p>
+      </div>
       </div>
 
       {/* Last on the step: a safety net for the experiment above it, which only
@@ -474,15 +486,15 @@ export default function AudienceSuccessStepPanel({
               </span>
               <span>
                 below that product&rsquo;s control, once each variation has about{' '}
-                {MIN_VISITORS_FOR_REVENUE_GUARDRAIL} visitors. The other products keep running.
+                {MIN_VISITORS_FOR_REVENUE_GUARDRAIL.toLocaleString()} visitors and at least{' '}
+                {MIN_CONVERSIONS_FOR_REVENUE_GUARDRAIL} conversions. The other products keep
+                running.
               </span>
             </div>
             <p className={styles.guardrailHint} id="revenue-guardrail-help">
-              This is a safety net. It does not declare a winner; it only prevents a bad
-              variation from running for too long. This test owns the threshold (
-              {MIN_REVENUE_DROP_PERCENT}%–{effectiveRevenueDropMax}%; default{' '}
-              {DEFAULT_MAX_REVENUE_DROP_PERCENT}%). Max price change and margin floors are checked
-              on Products & prices, not while the test runs.
+              This is a safety net. It doesn&rsquo;t declare a winner; it only prevents a bad
+              variation from running for too long. Set {MIN_REVENUE_DROP_PERCENT}%–
+              {effectiveRevenueDropMax}% (default {DEFAULT_MAX_REVENUE_DROP_PERCENT}%).
             </p>
           </>
         ) : (

@@ -3,6 +3,7 @@ import { AppProvider } from '@shopify/shopify-app-react-router/react';
 import { AppProvider as PolarisAppProvider, Banner, Button } from '@shopify/polaris';
 import enTranslations from '@shopify/polaris/locales/en.json';
 import { resolveShopifyApiKey } from '../../utils/themeEmbedUrl';
+import { preserveEmbeddedSearch } from '../../utils/shopifyEmbeddedSearch';
 
 function EmbeddedShell({ children }) {
   return (
@@ -44,7 +45,7 @@ export function EmbeddedAppErrorFallback({
           <p>{message}</p>
         </Banner>
         <div style={{ marginTop: 16 }}>
-          <Link to="/app">
+          <Link to={preserveEmbeddedSearch('/app')}>
             <Button>Back to tests</Button>
           </Link>
         </div>

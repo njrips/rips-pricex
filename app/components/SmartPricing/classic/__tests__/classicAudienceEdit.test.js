@@ -17,6 +17,7 @@ import {
 import {
   GOAL_METRIC_OPTIONS,
   classicMetricOptionsFor,
+  normalizeClassicCreatePrimaryMetric,
   normalizePrimaryMetric,
   primaryMetricLabel,
 } from '../../targeting/smartPricingAudienceHelpers';
@@ -339,6 +340,13 @@ describe('profit per visitor, after it stopped being offered', () => {
 
   it('survives being read back rather than resetting to revenue', () => {
     expect(normalizePrimaryMetric('profit_per_visitor')).toBe('profit_per_visitor');
+  });
+
+  it('cannot return to the create wizard as a fourth primary option', () => {
+    expect(normalizeClassicCreatePrimaryMetric('profit_per_visitor')).toBe(
+      'revenue_per_visitor'
+    );
+    expect(normalizeClassicCreatePrimaryMetric('aov')).toBe('aov');
   });
 
   it('still names itself on an experiment that uses it', () => {

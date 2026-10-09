@@ -4,6 +4,8 @@ import fs from 'node:fs';
 import {
   FAQ_ITEMS,
   FEATURES_SECTION,
+  FINAL_CTA,
+  PRICE_TEST_DEMO,
   FOOTER_BRAND_TAGLINE,
   FOOTER_COPYRIGHT,
   FOOTER_LINK_SECTIONS,
@@ -30,12 +32,13 @@ import {
 describe('Priceify landing copy (Figma brochure)', () => {
   it('matches hero, nav, sections, and FAQ from the updated design', () => {
     assert.equal(HERO.badge, 'A/B PRICE TESTING FOR SHOPIFY');
-    assert.match(HERO.title, /Growth Test/);
+    assert.equal(HERO.title, 'Turn your Shopify pricing into a growth test');
     assert.equal(HERO.primaryCta, 'Add to Shopify');
     assert.equal(FAQ_ITEMS.length, 6);
     assert.match(FAQ_ITEMS[0].q, /slow down/);
-    assert.match(FAQ_ITEMS[2].a, /Theme connection/);
-    assert.match(FAQ_ITEMS[2].a, /Store setup/);
+    assert.match(FAQ_ITEMS[0].a, /Theme connection and Checkout pricing functions/);
+    assert.match(FAQ_ITEMS[2].a, /Store setup to connect your theme and checkout/);
+    assert.match(FAQ_ITEMS[4].a, /revenue guardrail stops testing that product/);
     assert.deepEqual(
       PUBLIC_HEADER_NAV.map(item => item.label),
       ['Features', 'How it works', 'Pricing', 'Guides', 'FAQ']
@@ -51,17 +54,17 @@ describe('Priceify landing copy (Figma brochure)', () => {
       'final-cta',
     ]);
     assert.equal(GET_STARTED_SECTION.cards.length, 3);
-    assert.equal(GET_STARTED_SECTION.cards[1].title, 'Discover Resources');
+    assert.equal(GET_STARTED_SECTION.cards[1].title, 'Discover resources');
     assert.equal(FEATURES_SECTION.items.length, 6);
     assert.equal(PRICING_SECTION.tiers.length, 3);
     assert.equal(PRICING_SECTION.tiers[1].badge, 'MOST POPULAR');
-    assert.equal(PRICING_SECTION.tiers[2].features[0], 'Everything in Growth');
+    assert.equal(PRICING_SECTION.tiers[2].features[0], 'Everything in Pro');
     assert.equal(PRICING_SECTION.seeAllPlansLabel, 'See All Plans');
     assert.deepEqual(
       PLATFORM_SECTION.steps.map(step => step.title),
       ['Choose products', 'Split traffic', 'Create price variations', 'Measure the results']
     );
-    assert.equal(FOOTER_BRAND_TAGLINE, 'Test Your Way to Better Pricing.');
+    assert.equal(FOOTER_BRAND_TAGLINE, 'Test your way to prices that grow revenue.');
     assert.equal(FOOTER_NEWSLETTER.title, 'Join our newsletter');
     assert.equal(FOOTER_COPYRIGHT, 'Copyright © Priceify. All rights reserved.');
     assert.deepEqual(
@@ -116,6 +119,27 @@ describe('Priceify landing copy (Figma brochure)', () => {
     ].join('\n');
     assert.equal(PUBLIC_COPY_FORBIDDEN.test(publicCopy), false);
     assert.equal(PUBLIC_NAMING_FORBIDDEN.test(publicCopy), false);
+  });
+
+  it('describes a single revenue guardrail and the three KPIs, not margins', () => {
+    // Priceify does not track margin and watches one revenue guardrail; "six
+    // guardrails" and margin-protection copy described a different product.
+    const landingCopy = JSON.stringify([
+      HERO,
+      PLATFORM_SECTION,
+      FEATURES_SECTION,
+      PRICING_SECTION,
+      FAQ_ITEMS,
+      GET_STARTED_SECTION,
+      FINAL_CTA,
+    ]);
+    assert.doesNotMatch(landingCopy, /\bsix\b|\b6 guardrails|margin|profit/i);
+    assert.doesNotMatch(landingCopy, /\bguardrails\b/i);
+    for (const kpi of [/revenue per visitor/, /conversion rate/, /average order value/]) {
+      assert.match(HERO.lead, kpi);
+      assert.match(PRICE_TEST_DEMO.lead, kpi);
+    }
+    assert.match(FINAL_CTA.lead, /revenue guardrail/);
   });
 
   it('exposes FAQPage JSON-LD for crawlers', () => {

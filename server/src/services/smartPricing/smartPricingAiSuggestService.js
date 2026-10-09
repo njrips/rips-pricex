@@ -7,7 +7,11 @@
  * set the audience themselves, so there is no model in that path any more.
  */
 
-const { chatJson, hasOpenAiKey } = require('./smartPricingAiProvider');
+const { chatJson, webSearchJson, hasOpenAiKey } = require('./smartPricingAiProvider');
+const {
+  PRICE_SUGGEST_RESPONSE_SCHEMA,
+  buildPriceSuggestionSystemPrompt,
+} = require('./smartPricingAiSuggestPrompt');
 const { buildGuardrailBand, roundPrice, clampPrice } = require('./priceBandService');
 const {
   resolveAiPriceLiftBand,
@@ -27,6 +31,12 @@ const {
 } = require('./smartPricingAiSuggestFeatures');
 function round2(n) {
   return Math.round(Number(n) * 100) / 100;
+}
+
+function finiteOrNull(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
 }
 
 /**
@@ -53,37 +63,56 @@ const AI_CALL_TIMEOUT_MS = 20000;
 const MIN_TIME_FOR_AI_CALL_MS = 6000;
 
 /**
+ * Search one product per request. Requiring the tool once for a multi-product
+ * request proves only that some search ran, not that every product benchmark
+ * came from current results.
+ */
+const WEB_SEARCH_PRODUCTS_PER_CALL = 1;
+const WEB_SEARCH_ROUND_MS = 22000;
+/** Bound one click's billable AI work; remaining products use the safe spread. */
+const MAX_AI_PRODUCTS_PER_REQUEST = 25;
+
+/** Description, image and stock lookups give up after this; the prompt works without them. */
+const PRODUCT_CONTEXT_TIMEOUT_MS = 5000;
+
+/**
+ * What the catalog rows lack, keyed by product id; empty when there is no
+ * loader, it fails, or it is slower than the budget allows.
+ */
+async function loadContextWithinBudget(loadProductContext, groups) {
+  if (typeof loadProductContext !== 'function') return new Map();
+  const productIds = Array.from(
+    new Set(groups.map(group => group.product.product_id).filter(Boolean))
+  );
+  if (!productIds.length) return new Map();
+  let timer;
+  try {
+    const result = await Promise.race([
+      Promise.resolve(loadProductContext(productIds)),
+      new Promise(resolve => {
+        timer = setTimeout(() => resolve(null), PRODUCT_CONTEXT_TIMEOUT_MS);
+      }),
+    ]);
+    return result instanceof Map ? result : new Map();
+  } catch {
+    return new Map();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
  * Room for the reply this request actually needs.
  *
  * A fixed ceiling is either wasteful for three products or fatal for thirty:
  * a reply cut off at the limit is truncated JSON, which parses to nothing and
  * falls back silently. One row is the band, the best change, direction,
- * confidence and a rationale of up to 120 characters -- around 56 tokens, and
- * not growing with the number of variations -- plus the summary and braces.
+ * confidence, the market read and a rationale of up to 150 characters --
+ * around 100 tokens, and not growing with the number of variations -- plus
+ * the summary and braces.
  */
 function estimateSuggestionTokens(variantCount) {
-  return Math.max(300, Math.round(variantCount * 56 * 1.4) + 160);
-}
-
-/**
- * The test's goal in words, so "best" means the same thing to the model as to
- * the test. The goal is the merchant's primary metric, and a cut that wins on
- * conversion rate can lose on revenue per visitor.
- */
-const OBJECTIVE_FOR_MODEL = {
-  revenue_per_visitor:
-    'revenue per visitor: price times how often visitors buy. A higher price that loses too many orders loses; a lower price that wins enough extra orders wins.',
-  conversion_rate:
-    'conversion rate: the share of visitors who buy. Prices at or below today usually help it, so favour small rises and well-founded cuts, never at the expense of the margin limit.',
-  aov:
-    'average order value. Higher prices raise it directly, but a rise that drives buyers away still fails the test, so keep rises believable for the category.',
-};
-
-function describeObjectiveForModel(objective) {
-  const key = String(objective || '')
-    .trim()
-    .toLowerCase();
-  return OBJECTIVE_FOR_MODEL[key] || `${key || 'revenue_per_visitor'}.`;
+  return Math.max(400, Math.round(variantCount * 100 * 1.4) + 160);
 }
 
 /**
@@ -171,13 +200,15 @@ function normalizeModelBand(item, { min, max, minWidth }) {
 /**
  * One product as the model sees it.
  *
- * The bare catalog row was ambiguous in two ways that both mattered. A
- * `units_sold_30d` of 0 could mean the product sells nothing or that no order
- * covering it was ever fetched, and the model has to treat those differently:
- * one is a dead SKU, the other is a SKU it knows nothing about. And a null
- * `margin_percent` looks like a missing field when it is really a statement --
- * this shop has not recorded a cost -- which is the case where assuming
- * headroom is most expensive.
+ * A `units_sold_30d` of 0 could mean the product sells nothing or that no
+ * order covering it was ever fetched, and the model has to treat those
+ * differently: one is a dead SKU, the other is a SKU it knows nothing about.
+ *
+ * Margin is deliberately absent. Most merchants never record a cost, so a
+ * prompt that reasons from margin reasons from a blank for most shops; the
+ * judgement rests on perceived value, the market and live revenue per
+ * visitor instead. A shop that did set a margin floor still has it enforced
+ * on every price in code.
  *
  * The currency goes too. Without it the model is comparing bare numbers, and
  * 1200 is an impulse purchase in yen and a considered one in dollars.
@@ -190,27 +221,123 @@ function revenueSignal(row) {
   return 'low';
 }
 
-function describeProductForModel(row, index) {
+/** Live revenue per visitor over 30 days, or null when visits were not measured. */
+function revenuePerVisitor30d(row) {
+  const visitors = Number(row.visitors_30d);
+  const revenue = Number(row.revenue_30d);
+  if (!Number.isFinite(visitors) || visitors <= 0 || !Number.isFinite(revenue)) return null;
+  return round2(Math.max(0, revenue) / visitors);
+}
+
+function hasMeasuredSalesHistory(row) {
+  if (row?.sales_data === 'measured') return true;
+  if (row?.sales_data === 'none_recorded') return false;
+  return (
+    Number(row?.units_sold_30d) > 0 ||
+    Number(row?.revenue_30d) > 0 ||
+    Number(row?.visitors_30d) > 0
+  );
+}
+
+function describeProductForModel(
+  row,
+  index,
+  context = null,
+  { withImage = false, allowRowImageFallback = true } = {}
+) {
   const units = Number(row.units_sold_30d);
-  const measured = Number.isFinite(units) && units > 0;
-  const margin = Number(row.margin_percent);
+  const measured = hasMeasuredSalesHistory(row);
   const scenario = String(row.recommended_scenario_preset || 'recommended').trim() || 'recommended';
   const hint = String(row.ai_reason || row.scenario_rationale || '').trim();
+  const inventory = finiteOrNull(context?.inventory ?? row.inventory_quantity);
+  const signals = enrichProductSignalsForPriceSuggest(row);
   return {
     v: index,
     title: row.title,
+    description: context?.description || null,
+    vendor: context?.vendor || null,
+    has_image:
+      withImage && Boolean(productImageUrl(row, context, { allowRowFallback: allowRowImageFallback })),
     current_price: row.current_price,
     currency: row.currency || 'USD',
-    margin_percent: Number.isFinite(margin) && margin > 0 ? round2(margin) : null,
     monthly_units: measured ? units : 0,
     sales_data: measured ? 'measured' : 'none_recorded',
     revenue_signal: revenueSignal(row),
+    visitors_30d: Number(row.visitors_30d) > 0 ? Math.round(Number(row.visitors_30d)) : null,
+    rpv_30d: revenuePerVisitor30d(row),
+    inventory: inventory === null ? null : Math.round(inventory),
     opportunity_score: row.opportunity_score,
     recommended_scenario: scenario,
     catalog_hint: hint ? hint.slice(0, 160) : null,
     ...(row.variant_count > 1 ? { variant_count: row.variant_count } : {}),
-    ...enrichProductSignalsForPriceSuggest(row),
+    price_tier: signals.price_tier,
+    traffic_tier: signals.traffic_tier,
+    heuristic_direction: signals.heuristic_direction,
+    daily_visitors: signals.daily_visitors,
+    product_type: signals.product_type,
   };
+}
+
+/** The resized admin image when it was fetched, else the catalog's own. */
+function productImageUrl(row, context, { allowRowFallback = true } = {}) {
+  const url = String(context?.image_url || (allowRowFallback ? row?.image_url : '') || '').trim();
+  return /^https:\/\//i.test(url) ? url : null;
+}
+
+function imagesEnabled() {
+  return !/^(0|false|off|no)$/i.test(String(process.env.OPENAI_PRICE_SUGGEST_IMAGES || '').trim());
+}
+
+function webSearchEnabled() {
+  // Competitor research is part of the documented pricing method, not an
+  // optional enhancement. Operators can still turn it off for cost or outage
+  // control, in which case the model clearly receives an estimated-market
+  // prompt rather than pretending its memory is live research.
+  return !/^(0|false|off|no)$/i.test(
+    String(process.env.OPENAI_PRICE_SUGGEST_WEB_SEARCH || '').trim()
+  );
+}
+
+const POSITIONING_VALUES = new Set(['underpriced', 'fairly_positioned', 'overpriced']);
+const PERCEIVED_TIERS = new Set(['budget', 'mid_market', 'premium']);
+
+/**
+ * The market read behind a band, kept only when it is well-formed.
+ *
+ * The figures are the model's estimate, not quotes, so they are shown as
+ * context for the range and never used to set a price.
+ */
+function sanitizeMarketBenchmarks(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const price = value => {
+    const n = Number(String(value ?? '').replace(/[^0-9.-]/g, ''));
+    return Number.isFinite(n) && n > 0 ? round2(n) : null;
+  };
+  const positioning = String(raw.positioning || '')
+    .toLowerCase()
+    .trim()
+    .replace(/_relative_to_market$/, '');
+  const tier = String(raw.perceived_tier || '')
+    .toLowerCase()
+    .trim();
+  const out = {
+    market_low_price: price(raw.market_low_price),
+    market_avg_price: price(raw.market_avg_price),
+    market_high_price: price(raw.market_high_price),
+    positioning: POSITIONING_VALUES.has(positioning) ? positioning : null,
+    perceived_tier: PERCEIVED_TIERS.has(tier) ? tier : null,
+  };
+  const prices = [out.market_low_price, out.market_avg_price, out.market_high_price];
+  if (
+    prices.every(value => value !== null) &&
+    !(out.market_low_price <= out.market_avg_price && out.market_avg_price <= out.market_high_price)
+  ) {
+    out.market_low_price = null;
+    out.market_avg_price = null;
+    out.market_high_price = null;
+    out.positioning = null;
+  }
+  return Object.values(out).some(value => value !== null) ? out : null;
 }
 
 /**
@@ -288,9 +415,13 @@ function normalizeVariantRows(variants = []) {
       title: String(row.title || row.product_title || 'Product').trim(),
       current_price: Number(row.current_price ?? row.price) || 0,
       currency: row.currency || 'USD',
-      margin_percent: Number(row.margin_percent) || null,
+      margin_percent: finiteOrNull(row.margin_percent),
       units_sold_30d: Number(row.units_sold_30d) || 0,
       revenue_30d: Number(row.revenue_30d) || 0,
+      sales_data:
+        row.sales_data === 'measured' || row.sales_data === 'none_recorded'
+          ? row.sales_data
+          : null,
       daily_visitors: Number(row.daily_visitors) || 0,
       visitors_30d: Number(row.visitors_30d) || 0,
       product_type: row.product_type ? String(row.product_type) : null,
@@ -298,6 +429,8 @@ function normalizeVariantRows(variants = []) {
       recommended_scenario_preset: row.recommended_scenario_preset || 'recommended',
       ai_reason: row.ai_reason || null,
       scenario_rationale: row.scenario_rationale || null,
+      image_url: row.image_url ? String(row.image_url) : null,
+      inventory_quantity: finiteOrNull(row.inventory_quantity),
     }))
     .filter(row => row.variant_id && row.current_price > 0);
 }
@@ -345,14 +478,18 @@ function groupRowsByProduct(rows = []) {
         withMargin.reduce((total, row) => total + weight(row), 0)
       : null;
     const scores = variants.map(row => row.opportunity_score).filter(Number.isFinite);
+    const stocked = variants.filter(row => row.inventory_quantity !== null);
     return {
       variants,
       product: {
         ...lead,
+        image_url: lead.image_url || variants.find(row => row.image_url)?.image_url || null,
+        inventory_quantity: stocked.length ? sum('inventory_quantity') : null,
         current_price: round2(median(variants.map(row => row.current_price))),
         margin_percent: margin === null ? null : round2(margin),
         units_sold_30d: sum('units_sold_30d'),
         revenue_30d: sum('revenue_30d'),
+        sales_data: variants.some(hasMeasuredSalesHistory) ? 'measured' : 'none_recorded',
         daily_visitors: largest('daily_visitors'),
         visitors_30d: largest('visitors_30d'),
         opportunity_score: scores.length ? Math.max(...scores) : null,
@@ -644,7 +781,16 @@ async function suggestPricesForAllArms({
   useAi = true,
   regenerate = false,
   attempt = 0,
+  loadProductContext = null,
 } = {}) {
+  const normalizedObjective = String(objective || '')
+    .trim()
+    .toLowerCase();
+  const selectedObjective = ['revenue_per_visitor', 'conversion_rate', 'aov'].includes(
+    normalizedObjective
+  )
+    ? normalizedObjective
+    : 'revenue_per_visitor';
   const rows = normalizeVariantRows(variants);
   const testArms = (Array.isArray(arms) ? arms : []).filter(
     arm => arm && arm.id && arm.id !== 'control' && arm.role !== 'control'
@@ -661,7 +807,7 @@ async function suggestPricesForAllArms({
   });
 
   if (!rows.length || !testArms.length) {
-    return { ...fallback, suggestions: [], summary: 'No variants or test arms to price.' };
+    return { ...fallback, suggestions: [], summary: 'No products or test variations to price.' };
   }
 
   // The model reasons in percent uplift, which cannot express one flat cash
@@ -685,6 +831,7 @@ async function suggestPricesForAllArms({
   );
   const armCatalog = testArms.map(a => ({ id: a.id, label: a.label || a.name || a.id }));
   const groups = groupRowsByProduct(rows);
+  const aiGroups = groups.slice(0, MAX_AI_PRODUCTS_PER_REQUEST);
 
   const minBandWidth = computeMinDetectableBandWidth(min, max, testArms.length);
   const minGapHint =
@@ -711,57 +858,44 @@ async function suggestPricesForAllArms({
    * two numbers per product however many variations there are, so the reply
    * stays well clear of the ceiling that used to truncate it.
    */
-  const systemPrompt = `You are a pricing scientist planning Shopify A/B price tests in Priceify.
-The test is judged on ${describeObjectiveForModel(objective)} Do not assume higher is better.
+  const deadline = Date.now() + AI_SUGGEST_BUDGET_MS;
+  const contextByProduct = await loadContextWithinBudget(loadProductContext, groups);
+  const contextFor = group => contextByProduct.get(group.product.product_id) || null;
+  const sendImages = imagesEnabled();
+  const searchWeb = webSearchEnabled();
+  // The runtime loader returns Shopify's 1024px transform. If that lookup was
+  // attempted but failed, omit the image instead of silently sending the
+  // catalog thumbnail at an unknown size while claiming the input was resized.
+  const allowRowImageFallback = typeof loadProductContext !== 'function';
 
-For each product, return a RANGE of percent changes to test against its current price, which always runs alongside as the control. Priceify places the test prices inside your range and rounds them to realistic price points, so give one range per product, not one price per variation.
+  const systemPromptFor = (currency, withWebSearch) =>
+    buildPriceSuggestionSystemPrompt({
+      objective: selectedObjective,
+      currency,
+      min,
+      max,
+      minBandWidth,
+      minGapHint,
+      withWebSearch,
+    });
 
-Return strict JSON only, with no other text:
-{
-  "summary": "one sentence for the merchant, max 200 chars",
-  "bands": [
-    { "v": 0, "lo": 8, "hi": 16, "best": 12, "direction": "rise", "confidence": "medium", "rationale": "max 120 chars, plain language" }
-  ]
-}
-
-Rules:
-- "v" is the product's index in the input products array. Include every product exactly once, each with its own range judged on its own data.
-- variant_count above 1 means the entry stands for that many variants of one product, and current_price is their typical price. The range applies to all of them.
-- "lo" and "hi" are percent changes with lo < hi: positive raises the price, negative lowers it (-12 = 12% cheaper).
-- "best" is the change inside lo..hi you expect to do best on the goal.
-- lo, hi and best stay inside [${min}, ${max}], never more than ${shopMax}% in either direction.
-- hi - lo is at least ${minBandWidth}, so the ${testArms.length} test price(s) sit about ${minGapHint}% or more apart; closer prices cannot be told apart at typical Shopify traffic.
-- "direction" is cut | rise | either | hold. "confidence" is low | medium | high.
-
-Direction${
-      direction === 'both'
-        ? ' (the allowed range spans both, so this is yours to decide per product)'
-        : ''
-    }:
-- Rise when demand looks healthy (steady monthly_units) and margin_tier is healthy or strong.
-- Cut only when the product looks overpriced (few sales despite a high opportunity_score, which runs 0 to 1, or a price above what its category usually costs) and the extra orders should more than pay for the lower margin.
-- Never propose a cut when margin_tier is thin or unknown. Unknown (margin_percent null) means no cost was recorded: the margin is unknown rather than good.
-- heuristic_direction (cut_candidate, rise_candidate, rise_cautious, hold_near, explore) and catalog_hint are Priceify's own read. Weigh them, but let the data decide.
-
-Range width:
-- monthly_units low, sales_data "none_recorded", or traffic_tier unmeasured or very_low: use a WIDE range, or the test learns nothing.
-- traffic_tier high: a narrower range is enough and puts less revenue at risk.
-- margin_tier thin or unknown: stay near the current price. Healthy or strong: may reach the far end of the range.
-- price_tier impulse tolerates bigger % moves; considered and premium need smaller ones.
-- recommended_scenario "conservative": stay near today's price. "aggressive": may go further. "recommended": balanced.
-
-Beyond this shop's data:
-- Use what you know about this kind of product (title, product_type, currency, current_price): what shoppers usually pay, how price-sensitive the category is, and which price points look normal (49 rather than 50).
-- You have no live market data. Never quote or invent competitor prices, store names or statistics.
-- When the two disagree, measured shop data wins (sales_data "measured"). General knowledge counts for more when sales_data is "none_recorded".
-- The rationale says what decided the range, e.g. "Sells steadily on a strong margin" or "Priced below what this category usually costs".`;
-
-  const askModel = async (batch, timeoutMs) => {
-    const payload = await chatJson({
-      label: 'price_suggest',
-      systemPrompt,
+  const askModel = async (batch, timeoutMs, { withWebSearch = false } = {}) => {
+    const images = sendImages
+      ? batch
+          .map((group, index) => ({
+            url: productImageUrl(group.product, contextFor(group), {
+              allowRowFallback: allowRowImageFallback,
+            }),
+            index,
+          }))
+          .filter(image => image.url)
+          .map(image => ({ label: `Image for v=${image.index}`, url: image.url }))
+      : [];
+    const request = {
+      label: withWebSearch ? 'price_suggest_web_search' : 'price_suggest',
+      systemPrompt: systemPromptFor(batch[0]?.product?.currency || 'USD', withWebSearch),
       userPrompt: JSON.stringify({
-        objective,
+        objective: selectedObjective,
         allowed_band: {
           min_pct: min,
           max_pct: max,
@@ -773,18 +907,26 @@ Beyond this shop's data:
         },
         variations_per_product: armCatalog.length,
         guardrails: {
-          min_margin_percent: guardrails.min_margin_percent ?? 35,
           max_price_change_percent: guardrails.max_price_change_percent ?? 15,
         },
-        products: batch.map((group, index) => describeProductForModel(group.product, index)),
+        products: batch.map((group, index) =>
+          describeProductForModel(group.product, index, contextFor(group), {
+            withImage: sendImages,
+            allowRowImageFallback,
+          })
+        ),
       }),
+      images,
+      responseSchema: PRICE_SUGGEST_RESPONSE_SCHEMA,
+      responseSchemaName: 'price_suggestion',
       temperature: regenerate ? 0.55 : 0.25,
       maxTokens: estimateSuggestionTokens(batch.length),
       timeoutMs,
       // Products a call misses are asked again below, in smaller calls, which
       // fits the time budget better than the SDK repeating the whole call.
       maxRetries: 0,
-    });
+    };
+    const payload = withWebSearch ? await webSearchJson(request) : await chatJson(request);
 
     const used = new Set();
     const parsed = [];
@@ -800,13 +942,12 @@ Beyond this shop's data:
     return { parsed, summary: String(payload?.summary || '').trim() };
   };
 
-  const deadline = Date.now() + AI_SUGGEST_BUDGET_MS;
   const answered = new Map();
   const replySummaries = [];
   let aiCalls = 0;
-  const ask = (batch, timeoutMs) => {
+  const ask = (batch, timeoutMs, options) => {
     aiCalls += 1;
-    return askModel(batch, timeoutMs);
+    return askModel(batch, timeoutMs, options);
   };
   // A reply that gave every product the same band did not look at them, so
   // repeats are judged within one reply, not across calls that each saw
@@ -829,11 +970,33 @@ Beyond this shop's data:
       if (reply.summary) replySummaries.push(reply.summary);
     });
 
-  collect(
-    await runWithinBudget(chunk(groups, PRODUCTS_PER_AI_CALL), AI_CALLS_IN_PARALLEL, deadline, ask)
-  );
-  const unanswered = groups.filter(group => !answered.has(group));
-  if (unanswered.length) {
+  // A search-backed call is slow and drops rows more often, so it gets small
+  // batches first. Missing rows are retried one at a time with search still
+  // required: answering from model memory after a failed search would label an
+  // estimate as the live competitor research promised by this method.
+  if (searchWeb) {
+    collect(
+      await runWithinBudget(
+        chunk(aiGroups, WEB_SEARCH_PRODUCTS_PER_CALL),
+        AI_CALLS_IN_PARALLEL,
+        Math.min(deadline, Date.now() + WEB_SEARCH_ROUND_MS),
+        (batch, timeoutMs) => ask(batch, timeoutMs, { withWebSearch: true })
+      )
+    );
+  }
+  const firstRound = aiGroups.filter(group => !answered.has(group));
+  if (firstRound.length) {
+    collect(
+      await runWithinBudget(
+        chunk(firstRound, searchWeb ? 1 : PRODUCTS_PER_AI_CALL),
+        AI_CALLS_IN_PARALLEL,
+        deadline,
+        (batch, timeoutMs) => ask(batch, timeoutMs, { withWebSearch: searchWeb })
+      )
+    );
+  }
+  const unanswered = aiGroups.filter(group => !answered.has(group));
+  if (unanswered.length && !searchWeb) {
     collect(
       await runWithinBudget(
         chunk(unanswered, Math.ceil(PRODUCTS_PER_AI_CALL / 2)),
@@ -845,7 +1008,12 @@ Beyond this shop's data:
   }
 
   if (!answered.size) {
-    return { ...fallback, ai_attempted: true, ai_calls: aiCalls };
+    return {
+      ...fallback,
+      ai_attempted: true,
+      ai_calls: aiCalls,
+      ai_skipped_product_count: Math.max(0, groups.length - aiGroups.length),
+    };
   }
 
   const varietyAttempt = regenerate ? Math.max(1, Number(attempt) || 1) : 0;
@@ -863,6 +1031,7 @@ Beyond this shop's data:
     const aiDirection = sanitizeModelDirection(item?.direction);
     const aiConfidence = sanitizeModelConfidence(item?.confidence);
     const aiBest = normalizeModelBest(item, band);
+    const aiMarket = sanitizeMarketBenchmarks(item?.market_benchmarks);
 
     // One variation is one price to test, so it goes where the model expects
     // the most. With several, they stay spread across the band: the spread is
@@ -898,6 +1067,7 @@ Beyond this shop's data:
           ai_rationale: aiRationale,
           ai_direction: aiDirection,
           ai_confidence: aiConfidence,
+          ai_market_benchmarks: aiMarket,
         });
       });
     });
@@ -928,6 +1098,7 @@ Beyond this shop's data:
     fallback_pair_count: filled,
     product_count: groups.length,
     ai_product_count: answered.size,
+    ai_skipped_product_count: Math.max(0, groups.length - aiGroups.length),
     ai_calls: aiCalls,
     summary: describeSuggestionSource({
       modelSummary,
@@ -961,7 +1132,7 @@ function describeSuggestionSource({ modelSummary, fromModel, filled, min, max, p
   const missed =
     missedProducts > 0
       ? ` for ${missedProducts} product${missedProducts === 1 ? '' : 's'} the AI did not answer in time`
-      : ' the model did not return';
+      : ' the AI did not return';
   const note = `${filled} price${filled === 1 ? '' : 's'}${missed} ${
     filled === 1 ? 'was' : 'were'
   } filled with the even ${band} spread.`;
@@ -1095,4 +1266,6 @@ module.exports = {
   suggestPrices,
   suggestPricesForRerun,
   deterministicPriceSuggestions,
+  describeProductForModel,
+  sanitizeMarketBenchmarks,
 };

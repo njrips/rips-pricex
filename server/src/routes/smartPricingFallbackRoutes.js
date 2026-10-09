@@ -113,10 +113,8 @@ router.get(
 router.get(
   '/guardrails',
   asyncHandler(async (_req, res) => {
-    res.json({
-      max_price_increase_pct: 20,
-      max_price_decrease_pct: 20,
-      min_margin_pct: 0,
+    res.status(503).json({
+      error: 'Results settings are unavailable while the Smart Pricing service is degraded.',
     });
   })
 );
@@ -137,7 +135,7 @@ router.post(
       },
     ]);
     res.status(501).json({
-      error: 'Full launch engine wiring in progress — plan saved to inbox',
+      error: 'Launching is not available right now. Your test is saved as a draft.',
       plan_id: planId,
       hint: 'Ensure smartPricingRoutes mounts successfully for live launch',
     });

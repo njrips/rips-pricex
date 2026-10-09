@@ -22,16 +22,7 @@ export default function ClassicActivityTab({ activity }) {
   const filter = requestedFilter !== 'all' && !counts[requestedFilter] ? 'all' : requestedFilter;
   const visible = useMemo(() => filterActivityItems(items, filter), [items, filter]);
   const groups = useMemo(() => groupActivityByDay(visible), [visible]);
-  const filters = ACTIVITY_FILTERS.filter(row => row.id === 'all' || counts[row.id] > 0);
-
-  if (!items.length) {
-    return (
-      <div className={styles.statCard}>
-        <h3 className={styles.panelTitle}>Test history</h3>
-        <p className={styles.help}>Log of guardrail events and test changes.</p>
-      </div>
-    );
-  }
+  const filters = ACTIVITY_FILTERS;
 
   return (
     <div className={styles.statCard}>
@@ -46,26 +37,24 @@ export default function ClassicActivityTab({ activity }) {
           </p>
         </div>
       </div>
-      {filters.length > 1 ? (
-        <div className={`${styles.pillRow} ${styles.activityFilterRow}`} role="group" aria-label="History filters">
-          {filters.map(row => {
-            const active = filter === row.id;
-            const count = counts[row.id] || 0;
-            return (
-              <button
-                key={row.id}
-                type="button"
-                aria-pressed={active}
-                className={`${styles.pill} ${active ? styles.pillActive : ''}`}
-                onClick={() => setFilter(row.id)}
-              >
-                {row.label}
-                <span className={styles.activityFilterCount}>{count}</span>
-              </button>
-            );
-          })}
-        </div>
-      ) : null}
+      <div className={`${styles.pillRow} ${styles.activityFilterRow}`} role="group" aria-label="History filters">
+        {filters.map(row => {
+          const active = filter === row.id;
+          const count = counts[row.id] || 0;
+          return (
+            <button
+              key={row.id}
+              type="button"
+              aria-pressed={active}
+              className={`${styles.pill} ${active ? styles.pillActive : ''}`}
+              onClick={() => setFilter(row.id)}
+            >
+              {row.label}
+              <span className={styles.activityFilterCount}>{count}</span>
+            </button>
+          );
+        })}
+      </div>
 
       {visible.length ? (
         <div className={styles.activityGroups}>
@@ -105,7 +94,7 @@ export default function ClassicActivityTab({ activity }) {
           ))}
         </div>
       ) : (
-        <p className={styles.help}>No events in this filter.</p>
+        <p className={styles.help}>{items.length ? 'No events in this filter.' : 'No events yet.'}</p>
       )}
     </div>
   );

@@ -20,7 +20,7 @@ function readApp(relative) {
 
 /** Phrases that must appear in code if they appear in the snapshot spec. */
 const SNAPSHOT_PHRASES = [
-  'Finish setup to start your first test.',
+  'An active Priceify plan is required to create a test.',
   'Run price and offer tests to grow revenue per visitor.',
   'Launch price tests in minutes.',
   'Log of guardrail events and test changes.',
@@ -31,7 +31,7 @@ const SNAPSHOT_PHRASES = [
   'Test resumed',
   'Winner applied to catalog',
   'Excluded by guardrail',
-  'Apply ready products',
+  'Apply all ready winners',
   'See how each product is performing and apply winners to your catalog.',
   'Test totals',
   'Status & traffic',

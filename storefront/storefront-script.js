@@ -1,6 +1,6 @@
 /**
  * Priceify Storefront Integration Script
- * @version 1.0.0
+ * @version 1.0.66
  *
  * Multi-platform: works on Shopify and standalone sites.
  * 1. Get variant assignments for users
@@ -53,7 +53,7 @@
     shopDomain: null,
     activeTests: [],
     featureFlagUrl: '',
-    heatmapCollection: { enabled: true, sampleRate: 1 },
+    heatmapCollection: { enabled: false, sampleRate: 1 },
   };
 
   const CONFIG = Object.assign({}, DEFAULT_CONFIG, window.AB_TEST_RUNTIME_CONFIG || {});
@@ -15607,68 +15607,6 @@
   };
   window.ABTestTracker = api;
   window.RipX = api;
-
-  function normalizeMerchantCssSnippet(raw) {
-    var css = String(raw || '')
-      .trim()
-      .replace(/^<style[^>]*>/i, '')
-      .replace(/<\/style>\s*$/i, '');
-    return css.trim();
-  }
-
-  function normalizeMerchantJsSnippet(raw) {
-    var js = String(raw || '')
-      .trim()
-      .replace(/^<script[^>]*>/i, '')
-      .replace(/<\/script>\s*$/i, '');
-    return js.trim();
-  }
-
-  function applyShopGlobalCustomCss() {
-    var assets = CONFIG.globalCustomAssets;
-    if (!assets || assets.css_enabled === false) return;
-    var css = normalizeMerchantCssSnippet(assets.css);
-    if (!css) return;
-    var styleId = 'ripx-shop-global-css';
-    var el = document.getElementById(styleId);
-    if (!el) {
-      el = document.createElement('style');
-      el.id = styleId;
-      el.setAttribute('data-ripx', 'global-css');
-      (document.head || document.documentElement).appendChild(el);
-    }
-    if (el.textContent !== css) {
-      el.textContent = css;
-    }
-  }
-
-  function runShopGlobalCustomJs() {
-    var assets = CONFIG.globalCustomAssets;
-    if (!assets || assets.js_enabled === false) return;
-    var js = normalizeMerchantJsSnippet(assets.js);
-    if (!js) return;
-    try {
-      var fn = new Function('window', 'document', 'Shopify', 'RipX', 'location', js);
-      fn(window, document, window.Shopify, window.RipX, window.location);
-    } catch (eGlobalJs) {
-      try {
-        if (typeof console !== 'undefined' && console.warn) {
-          console.warn('[RipX] Global custom JavaScript failed:', eGlobalJs);
-        }
-      } catch (_eLogGlobalJs) {}
-    }
-  }
-
-  function scheduleShopGlobalCustomAssets() {
-    applyShopGlobalCustomCss();
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', runShopGlobalCustomJs, { once: true });
-    } else {
-      runShopGlobalCustomJs();
-    }
-  }
-
-  scheduleShopGlobalCustomAssets();
 
   try {
     ripxTrace('S0', 'RipX storefront boot', {

@@ -270,7 +270,7 @@ describe('resolveProductRolloutDecision', () => {
     assert.equal(decision.can_apply, false);
   });
 
-  it('schedules the automatic write from when the product became ready', () => {
+  it('does not schedule the automatic write until the merchant notification succeeds', () => {
     const readySince = '2026-01-10T00:00:00.000Z';
     const decision = decide({
       sig: CHALLENGER_WIN,
@@ -278,8 +278,8 @@ describe('resolveProductRolloutDecision', () => {
       readiness: { ready_since: readySince },
     });
     assert.equal(decision.auto.permitted, true);
-    assert.equal(decision.auto.eligible, true);
-    assert.equal(decision.auto.apply_at, '2026-01-13T00:00:00.000Z');
+    assert.equal(decision.auto.eligible, false);
+    assert.equal(decision.auto.apply_at, null);
   });
 
   it('gives no automatic date when the shop has not opted in', () => {

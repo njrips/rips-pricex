@@ -22,9 +22,8 @@ database.sqlite
 
 !.env.example
 
-package-lock.json
-yarn.lock
-pnpm-lock.yaml
+# Local Shopify AI Toolkit copies. They are not part of the app runtime.
+.agents/
 
 /extensions/*/dist
 

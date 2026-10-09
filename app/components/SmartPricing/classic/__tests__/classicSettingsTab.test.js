@@ -127,8 +127,9 @@ describe('ClassicSettingsTab', () => {
     expect(details.open).toBe(false);
 
     // Present in the document, but not part of the at-a-glance surface.
-    expect(details.textContent).toContain('plan-xyz-789');
     expect(details.textContent).toContain('test-abc-123');
+    expect(details.textContent).not.toContain('plan-xyz-789');
+    expect(details.textContent).not.toContain('Plan ID');
     expect(details.textContent).toContain('Traffic evidence');
     expect(details.textContent).toContain('Max price change: ±20%');
     expect(visibleText()).not.toContain('plan-xyz-789');
@@ -148,7 +149,7 @@ describe('ClassicSettingsTab', () => {
     await render({ settings: SETTINGS, audience: AUDIENCE, metrics: METRICS, onEditMetrics });
     expect(visibleText()).toContain('Revenue guardrail');
     expect(visibleText()).toContain('10%');
-    expect(visibleText()).toMatch(/about 100 visitors/i);
+    expect(visibleText()).toMatch(/about 5,000 visitors and at least 10 conversions/i);
     const edit = buttonLabelled('Edit guardrail');
     expect(edit).toBeTruthy();
     await act(async () => {
@@ -183,15 +184,16 @@ describe('ClassicSettingsTab', () => {
     expect(text()).not.toContain('Shop defaults at launch');
     expect(text()).not.toContain('Traffic plan');
     // Identifiers are always worth keeping, so the disclosure stays.
-    expect(container.querySelector('details').textContent).toContain('Identifiers');
+    expect(container.querySelector('details').textContent).toContain('Reference & identifiers');
   });
 
   it('explains itself before the plan is saved', async () => {
     await render({ settings: null });
-    expect(text()).toContain('Launch settings will appear after the plan is saved.');
+    expect(text()).toContain('Settings will appear after the test is saved.');
   });
 
   it('shows secondary metric labels instead of object placeholders', async () => {
+    const onChangeMetric = vi.fn();
     await render({
       settings: SETTINGS,
       audience: AUDIENCE,
@@ -203,9 +205,22 @@ describe('ClassicSettingsTab', () => {
           { event_name: 'page_view', label: 'Page view' },
         ],
       },
+      onChangeMetric,
     });
     expect(visibleText()).toContain('Add to cart');
     expect(visibleText()).toContain('Page view');
+    expect(visibleText()).toContain('Change metric');
+    expect(visibleText()).not.toContain('Edit metrics');
     expect(visibleText()).not.toContain('[object Object]');
+  });
+
+  it('shows the optional secondary metric block even when none are selected', async () => {
+    await render({
+      settings: SETTINGS,
+      audience: AUDIENCE,
+      metrics: { ...METRICS, secondary: [], secondaryEvents: [] },
+    });
+    expect(visibleText()).toContain('Secondary metrics');
+    expect(visibleText()).toContain('None');
   });
 });

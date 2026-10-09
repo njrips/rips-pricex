@@ -37,7 +37,7 @@ describe('global naming principles (PDF spot checks)', () => {
     expect(list).toMatch(/Running tests/);
     expect(list).toMatch(/Winning tests/);
     expect(list).toMatch(/>\s*New test\s*</);
-    expect(list).toMatch(/label: 'Draft'/);
+    expect(list).toMatch(/label: 'Drafts'/);
     expect(list).toMatch(/label: 'Finished'/);
     expect(list).toContain('Status');
   });
@@ -57,14 +57,26 @@ describe('global naming principles (PDF spot checks)', () => {
     expect(plan).toMatch(/Open setup checklist/);
   });
 
+  it('keeps plan locking separate from setup and returns archived tests to Finished', () => {
+    const dashboard = read('../../../routes/app._index.tsx');
+    const create = read('../../../routes/app.experiments.new.tsx');
+    const overview = read('ClassicExperimentOverview.jsx');
+    expect(dashboard).toContain('An active Priceify plan is required to create a test.');
+    expect(create).toContain('An active Priceify plan is required to create a test.');
+    expect(overview).toContain('?tab=finished');
+    expect(overview).not.toContain('?tab=archived');
+  });
+
   it('aligns store setup card titles with the spec', () => {
     const setup = read('../../../routes/app.setup.tsx');
-    expect(setup).toContain('1. Theme connection');
-    expect(setup).toContain('2. Checkout pricing functions');
-    expect(setup).toContain('3. Price locations on your site');
+    expect(setup).toContain('label="Theme connection"');
+    expect(setup).toContain('label="Checkout pricing functions"');
+    expect(setup).toContain('label="Price locations on your site"');
+    expect(setup).toContain('Re‑run the checks to confirm your checkout is ready.');
+    expect(setup).not.toContain('Check and install');
     expect(setup).toContain('Auto-detect prices');
     expect(setup).toContain('Edit price locations');
-    expect(setup).toContain(
+    expect(read('../../../utils/checkoutReadinessClient.js')).toContain(
       'Complete the steps below to connect Priceify to your theme and checkout.',
     );
     const priceSurfaces = read('../../TestWizard/PriceSurfaceMappingsPanel.jsx');
@@ -75,7 +87,7 @@ describe('global naming principles (PDF spot checks)', () => {
   it('aligns public setup vocabulary with Store setup cards', () => {
     const landing = read('../../public/priceify/landingContent.js');
     const docs = read('../../public/priceify/docsContent.js');
-    expect(landing).toMatch(/Theme connection on Store setup/);
+    expect(landing).toMatch(/Store setup to connect your theme and checkout/);
     expect(docs).toMatch(/Checkout pricing functions on Store setup/);
     expect(docs).not.toMatch(/theme app embed/i);
   });
@@ -138,17 +150,17 @@ describe('global naming principles (PDF spot checks)', () => {
     expect(audience).toContain('MIN_VISITORS_FOR_REVENUE_GUARDRAIL');
     expect(audience).not.toMatch(/minimum visitors per variation is reached/i);
     expect(audience).toMatch(/This is a safety net/i);
-    expect(audience).toMatch(/does not declare a winner/i);
+    expect(audience).toMatch(/doesn(&rsquo;|’|')t declare a winner/i);
     expect(CLASSIC_CREATE_STEPS.find(step => step.id === 'audience')?.description).toBe('');
     expect(CLASSIC_CREATE_STEPS.find(step => step.id === 'review')?.description).toContain(
       'Check your settings before launching. You can pause or stop a test at any time.',
     );
-    expect(CLASSIC_CREATE_STEPS.find(step => step.id === 'review')?.description).toContain(
+    expect(CLASSIC_CREATE_STEPS.find(step => step.id === 'review')?.description).not.toContain(
       'pause variations but not edit test settings',
     );
     const review = read('ReviewLaunchStepPanel.jsx');
     expect(review).toContain('Open Store setup');
-    expect(review).toContain('Open Settings → Price locations');
+    expect(review).toContain('Open App settings → Price locations');
     expect(review).not.toMatch(/Fix setup before launching/i);
     expect(review).toContain('Traffic may be too low for a reliable result');
     expect(review).toContain('reviewOverviewLabel');
@@ -174,7 +186,7 @@ describe('global naming principles (PDF spot checks)', () => {
   it('structures the running-test Overview tab per the spec', () => {
     const overview = read('ClassicExperimentOverview.jsx');
     expect(overview).toMatch(
-      /After the minimum visitors per variation is reached, you can pause variations but\s+not edit test settings/,
+      /After the minimum visitors per variation is reached, you can\{' '\}\s+\{'pause variations but not edit test settings\.'\}/,
     );
     expect(overview).toContain('ClassicOverviewContextStrip');
     expect(overview).toContain('overviewMode');
@@ -190,6 +202,7 @@ describe('global naming principles (PDF spot checks)', () => {
     expect(perf).toContain('formatApplyAllReadyLabel');
     expect(perf).toContain('Product performance by variation');
     expect(perf).toMatch(/overviewMode \? null : \(\s*<ClassicRolloutReadinessPanel/s);
+    expect(perf).toMatch(/\{showGuardrailStop \? \(\s*<Banner tone="warning" title="Stopped by guardrail">/);
     const rolloutPanel = read('details/ClassicRolloutReadinessPanel.jsx');
     expect(rolloutPanel).toContain('Ready to apply winners');
     expect(rolloutPanel).not.toMatch(/Rollout readiness/);
@@ -234,7 +247,7 @@ describe('global naming principles (PDF spot checks)', () => {
     expect(settingsPage).toContain('These settings apply to every new test you launch.');
     expect(panel).toContain('When Priceify can call a winner.');
     expect(panel).toMatch(/80% \(faster, less strict\)/);
-    expect(panel).toContain('Both apply to every new test you launch.');
-    expect(panel.replace(/\s+/g, ' ')).toContain('when a winner can be called');
+    expect(panel).toContain('Both apply to new tests from now on.');
+    expect(panel.replace(/\s+/g, ' ')).toContain('when Priceify may call a winner');
   });
 });

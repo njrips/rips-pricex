@@ -120,6 +120,28 @@ describe('step 4 sections', () => {
     const guardrail = headingAt('Revenue guardrail');
     expect(documentOrder(metrics, guardrail)).toBe(-1);
   });
+
+  it('offers exactly the three documented primary metrics in the create flow', async () => {
+    await renderPanel({
+      showTrafficAllocation: false,
+      value: {
+        primaryMetric: 'profit_per_visitor',
+        primaryCustomGoal: {
+          label: 'Legacy custom goal',
+          event_name: 'legacy_custom_goal',
+        },
+      },
+    });
+    const metrics = container.querySelector('#classic-metrics-editor');
+    const labels = [...metrics.querySelectorAll('button')].map(node =>
+      (node.textContent || '').trim()
+    );
+    expect(labels).toEqual([
+      'Revenue per visitor (recommended)',
+      'Conversion rate',
+      'Average order value',
+    ]);
+  });
 });
 
 describe('audience segment as a radio group', () => {
@@ -257,12 +279,12 @@ describe('revenue guardrail switch', () => {
     expect(field.value).toBe('14');
   });
 
-  it('documents the ~100-visitor guardrail floor, not Results settings min sample', async () => {
+  it('documents the guardrail evidence floor', async () => {
     await renderPanel();
-    expect(container.textContent).toMatch(/about 100 visitors/i);
+    expect(container.textContent).toMatch(/about 5,000 visitors and at least 10 conversions/i);
     expect(container.textContent).not.toMatch(/minimum visitors per variation is reached/i);
     expect(container.textContent).toMatch(/This is a safety net/i);
-    expect(container.textContent).toMatch(/does not declare a winner/i);
-    expect(container.textContent).toMatch(/Products & prices, not while the test runs/i);
+    expect(container.textContent).toMatch(/doesn(&rsquo;|’|')t declare a winner/i);
+    expect(container.textContent).not.toMatch(/margin floors/i);
   });
 });

@@ -73,7 +73,10 @@ export function shopDesignFromGuardrails(guardrails = {}) {
       : guardrails && typeof guardrails === 'object'
         ? guardrails
         : {};
-  const confidenceLevel = Number(source.confidence_level) === 95 ? 95 : DEFAULT_CONFIDENCE_LEVEL;
+  const configuredConfidence = Number(source.confidence_level);
+  const confidenceLevel = [80, 90, 95].includes(configuredConfidence)
+    ? configuredConfidence
+    : DEFAULT_CONFIDENCE_LEVEL;
   const mde = Number(source.mde_percent);
   const configuredPower = Number(source.statistical_power);
   const minConversions = Number(source.min_conversions_per_variation);
@@ -109,7 +112,10 @@ export function stampStatisticalFields(plan = {}, shopGuardrails = {}) {
     asConfidenceFraction(goal.significance_level) ||
     asConfidenceFraction(design.confidence_level) ||
     shop.significanceLevel;
-  const confidenceLevel = Math.round(significanceLevel * 100) === 95 ? 95 : DEFAULT_CONFIDENCE_LEVEL;
+  const requestedConfidence = Math.round(significanceLevel * 100);
+  const confidenceLevel = [80, 90, 95].includes(requestedConfidence)
+    ? requestedConfidence
+    : DEFAULT_CONFIDENCE_LEVEL;
   const mde = Number(goal.mde_percent ?? design.mde_percent);
   const power = Number(goal.statistical_power ?? design.statistical_power);
   return {

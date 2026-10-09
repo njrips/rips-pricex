@@ -156,16 +156,16 @@ export function describeSmartPricingLaunchReadiness(readiness) {
       : [];
     const surface = priceSurfaceSummary(readiness);
     let detail =
-      'Offer tests apply at checkout and do not wait on Theme connection, Checkout pricing functions, or mapped price locations.';
+      'Offer tests can launch. They apply at checkout, so they do not need Theme connection or price locations.';
     if (!priceReady) {
       if (failed.length) {
         detail = `Offer tests can launch. Price tests: ${failed[0]}`;
       } else if (!surface.ready) {
         detail =
-          'Offer tests can launch. Price tests still need price locations (Settings → Price locations).';
+          'Offer tests can launch. Price tests still need price locations (App settings → Price locations).';
       } else {
         detail =
-          'Offer tests can launch. Price tests still need Checkout pricing functions (Store setup step 2).';
+          'Offer tests can launch. Price tests still need Checkout pricing functions in Store setup.';
       }
     }
     return {
@@ -184,7 +184,7 @@ export function describeSmartPricingLaunchReadiness(readiness) {
       title: 'Ready to launch price tests',
       detail:
         getOfferCheckoutBlockReason(readiness) ||
-        'Offer tests need Checkout pricing functions (Store setup step 2).',
+        'Offer tests need Checkout pricing functions in Store setup.',
     };
   }
   return {

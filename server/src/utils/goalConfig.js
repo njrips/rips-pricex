@@ -14,14 +14,6 @@ function parseGoalConfig(rawGoal) {
   return typeof rawGoal === 'object' && !Array.isArray(rawGoal) ? rawGoal : {};
 }
 
-function normalizeGoalMetric(rawValue) {
-  const value = String(rawValue || 'conversion_rate')
-    .trim()
-    .toLowerCase();
-  return value || 'conversion_rate';
-}
-
 module.exports = {
-  normalizeGoalMetric,
   parseGoalConfig,
 };

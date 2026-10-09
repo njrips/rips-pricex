@@ -237,6 +237,16 @@ export function normalizePrimaryMetric(raw, fallback = 'revenue_per_visitor') {
   return 'revenue_per_visitor';
 }
 
+/** Step 4 only offers the three documented primary metrics. */
+export function normalizeClassicCreatePrimaryMetric(raw, fallback = 'revenue_per_visitor') {
+  const value = normalizePrimaryMetric(raw, fallback);
+  if (GOAL_METRIC_OPTIONS.some(option => option.value === value)) return value;
+  const fallbackValue = normalizePrimaryMetric(fallback, 'revenue_per_visitor');
+  return GOAL_METRIC_OPTIONS.some(option => option.value === fallbackValue)
+    ? fallbackValue
+    : 'revenue_per_visitor';
+}
+
 export function primaryMetricLabel(raw, { primaryCustomGoal = null } = {}) {
   const custom = primaryCustomGoal?.label || primaryCustomGoal?.name;
   if (custom && primaryCustomGoal?.event_name) {

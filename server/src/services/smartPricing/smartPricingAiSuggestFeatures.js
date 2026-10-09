@@ -167,7 +167,9 @@ function resolveProductBandSlice(row = {}, merchantLo, merchantHi) {
   } else if (traffic === 'high') {
     sliceWidth = width * 0.42;
   }
-  if (margin === 'thin' || margin === 'unknown') {
+  // Only a recorded thin margin narrows the slice: most shops never enter a
+  // cost, and treating that blank as thin held every product near its price.
+  if (margin === 'thin') {
     sliceWidth = Math.min(sliceWidth, width * 0.38);
   }
   sliceWidth = Math.max(width * 0.28, Math.min(width, sliceWidth));
@@ -309,7 +311,7 @@ function inferHeuristicTestDirection(row = {}) {
   const marginTier = classifyMarginTier(row.margin_percent);
   const traffic = classifyTrafficTier(row);
   const opp = Number(row.opportunity_score);
-  if (marginTier === 'thin' || marginTier === 'unknown') {
+  if (marginTier === 'thin') {
     return traffic === 'unmeasured' || traffic === 'very_low' ? 'hold_near' : 'rise_cautious';
   }
   if (

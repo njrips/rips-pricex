@@ -46,12 +46,12 @@ export function shouldQuickSaveAutoMapResult(result) {
 }
 
 const ROLE_FRIENDLY = {
-  regular: 'Current price',
+  regular: 'Regular price',
   compare_at: 'Compare-at price',
   cart_line: 'Cart line price',
   unit: 'Unit price',
-  installment: 'Installment price',
-  savings: 'Savings label',
+  installment: 'Instalment price',
+  savings: 'Savings amount',
 };
 
 export function formatAutoMapRowLabel(surface, role, surfaceLabels = {}) {

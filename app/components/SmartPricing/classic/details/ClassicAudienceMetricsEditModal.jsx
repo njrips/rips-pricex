@@ -42,11 +42,20 @@ export default function ClassicAudienceMetricsEditModal({
   }, [draft, plans, shopGuardrails, variations]);
 
   useEffect(() => {
-    if (!open || (focus !== 'metrics' && focus !== 'guardrail')) return undefined;
+    if (
+      !open ||
+      (focus !== 'metrics' && focus !== 'guardrail' && focus !== 'traffic')
+    ) {
+      return undefined;
+    }
     const timer = window.setTimeout(() => {
       const body = document.querySelector(`.${styles.audienceEditBody}`);
       const target = document.getElementById(
-        focus === 'guardrail' ? 'classic-revenue-guardrail' : 'classic-metrics-editor'
+        focus === 'guardrail'
+          ? 'classic-revenue-guardrail'
+          : focus === 'traffic'
+            ? 'classic-audience-traffic'
+            : 'classic-metrics-editor'
       );
       if (!body || !target) return;
       const offset = target.getBoundingClientRect().top - body.getBoundingClientRect().top;
@@ -96,6 +105,8 @@ export default function ClassicAudienceMetricsEditModal({
             <h2 id="classic-audience-edit-title" className={`${styles.modalTitle} ripx-classic-sans`}>
               {focus === 'guardrail'
                 ? 'Edit revenue guardrail'
+                : focus === 'traffic'
+                  ? 'Adjust traffic'
                 : focus === 'metrics'
                   ? 'Edit metrics'
                   : 'Edit audience'}

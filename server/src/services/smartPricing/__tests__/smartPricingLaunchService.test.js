@@ -141,6 +141,44 @@ describe('smartPricingLaunchService', () => {
     expect(abTestEngine.startTest).not.toHaveBeenCalled();
   });
 
+  it('rejects final wizard prices that fall below the recorded margin floor', async () => {
+    getShopSmartPricingGuardrails.mockResolvedValue({
+      max_parallel_tests: 5,
+      max_price_change_percent: 30,
+      min_margin_percent: 35,
+      default_cogs_percent: 55,
+    });
+    const plan = {
+      id: 'plan-1',
+      current_price: 100,
+      unit_cost: 60,
+      margin_source: 'imported_cogs',
+      price_arms: [
+        {
+          id: 'control',
+          role: 'control',
+          label: 'Control',
+          price: 100,
+          delta_percent: 0,
+          allocation_percent: 50,
+        },
+        {
+          id: 'lower',
+          role: 'challenger',
+          label: 'Lower',
+          price: 90,
+          delta_percent: -10,
+          allocation_percent: 50,
+        },
+      ],
+    };
+
+    await expect(
+      launchSmartPricingPlanAsTest(plan, 'demo.myshopify.com', { autoStart: true })
+    ).rejects.toThrow(/minimum margin/i);
+    expect(createTest).not.toHaveBeenCalled();
+  });
+
   it('blocks auto-start when checkout readiness fails', async () => {
     resolveSmartPricingCheckoutReadiness.mockResolvedValueOnce({
       ready: false,
@@ -158,7 +196,7 @@ describe('smartPricingLaunchService', () => {
     ensureOfferCheckoutDiscount.mockRejectedValueOnce(
       Object.assign(
         new Error(
-          'Checkout pricing functions are not available for this app. Open Store setup and use Check and install, or contact support.'
+          'Checkout pricing functions are not available for this app. Open Store setup and click Refresh status, or contact support.'
         ),
         { code: 'FUNCTION_MISSING' }
       )

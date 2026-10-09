@@ -3,8 +3,8 @@
   Fallback: if proxy fails, load the direct public script endpoint configured in theme settings.
   Important: do not hardcode temporary local tunnel URLs in schema defaults.
   Keep fallback empty by default and set it manually only for local/dev debugging sessions.
-  target: head — the primary runtime is parser-blocking so the server bootstrap can run before body paint.
-  ?v= must stay in sync with backend storefrontScriptRuntime.js SCRIPT_VERSION (currently 1.0.65).
+  target: head — the inline guard runs before body paint while the dynamic runtime starts fetching immediately.
+  ?v= must stay in sync with backend storefrontScriptRuntime.js SCRIPT_VERSION (currently 1.0.66).
   Strict anti-flicker CSS contract: html[data-ripx-af="strict"] body{opacity:0 !important;}
 {% endcomment %}
 
@@ -12,7 +12,7 @@
   (function () {
     var storageKey = '__ripx_price_af_hint_v1__';
     var shopHost = '{{ request.host }}';
-    var version = '1.0.65';
+    var version = '1.0.66';
     var styleId = 'ripx-anti-flicker-style';
     var defaultPriceSelectors = [
       '.price',
@@ -235,8 +235,7 @@
       return true;
     }
     try {
-      installPreviewGuardIfNeeded();
-      if (!previewNeedsInlinePriceGuard()) return;
+      if (installPreviewGuardIfNeeded()) return;
       if (!window.sessionStorage || !document.documentElement) return;
       var raw = window.sessionStorage.getItem(storageKey);
       if (!raw) return;
@@ -258,8 +257,8 @@
 <script>
   (function () {
     var shopHost = '{{ request.host }}';
-    var version = '1.0.65';
-    var scriptUrl = 'https://' + shopHost + '/apps/ripspricex/script.js?v=1.0.65';
+    var version = '1.0.66';
+    var scriptUrl = 'https://' + shopHost + '/apps/ripspricex/script.js?v=1.0.66';
     try {
       var params = new URLSearchParams(window.location.search || '');
       var isPreview =
@@ -277,6 +276,14 @@
     script.crossOrigin = 'anonymous';
     script.fetchPriority = 'high';
     script.async = false;
+    script.onload = function () {
+      var cfg = window.AB_TEST_RUNTIME_CONFIG || {};
+      if (window.RipX && window.RipX.version && cfg.apiUrl) return;
+      if (script.parentNode) script.parentNode.removeChild(script);
+    };
+    script.onerror = function () {
+      if (script.parentNode) script.parentNode.removeChild(script);
+    };
     (document.head || document.documentElement || document.body).appendChild(script);
   })();
 </script>
@@ -285,7 +292,7 @@
 <script id="ripx-app-embed-config" type="application/json">
   {
     "shopHost": {{ request.host | json }},
-    "version": "1.0.65",
+    "version": "1.0.66",
     "directScriptBaseUrl": {{ block.settings.direct_script_base_url | default: "__RIPX_UNSET__" | json }}
   }
 </script>
@@ -296,8 +303,9 @@
     window.__RIPX_APP_EMBED_LOADER__ = true;
 
     var shopHost = '{{ request.host }}';
-    var version = '1.0.65';
-    var primarySrc = 'https://' + shopHost + '/apps/ripspricex/script.js?v=1.0.65';
+    var shopDomain = '{{ shop.permanent_domain | default: request.host }}';
+    var version = '1.0.66';
+    var primarySrc = 'https://' + shopHost + '/apps/ripspricex/script.js?v=1.0.66';
     var directScriptBaseUrl = {{ block.settings.direct_script_base_url | default: "__RIPX_UNSET__" | json }};
     function normalizeDirectScriptBaseUrl(value) {
       var trimmed = String(value || '').trim();
@@ -316,7 +324,7 @@
       directScriptBaseUrl && String(directScriptBaseUrl).trim()
         ? String(directScriptBaseUrl).replace(/\/+$/, '') +
           '/api/track/script.js?shop=' +
-          encodeURIComponent(shopHost) +
+          encodeURIComponent(shopDomain) +
           '&v=' +
           version
         : '';
@@ -652,12 +660,14 @@
 
     function reportInitFailure(reason) {
       try {
-        if (!directScriptBaseUrl || !shopHost) return;
-        var endpoint = String(directScriptBaseUrl).replace(/\/+$/, '') + '/api/track/client-error';
+        if (!shopHost) return;
+        var endpoint = directScriptBaseUrl
+          ? String(directScriptBaseUrl).replace(/\/+$/, '') + '/api/track/client-error'
+          : 'https://' + shopHost + '/apps/ripspricex/client-error';
         var payload = {
           error: 'ripx_storefront_init_failed',
           url: String(window.location.href || ''),
-          shop_domain: shopHost,
+          shop_domain: shopDomain,
           metadata: {
             reason: String(reason || 'unknown'),
             primarySrc: primarySrc,
@@ -738,7 +748,6 @@
 {
   "name": "Priceify App Embed",
   "target": "head",
-  "javascript": "ripspricex-app-embed-loader.js",
   "settings": [
     {
       "type": "text",

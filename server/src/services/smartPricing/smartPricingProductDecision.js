@@ -354,18 +354,18 @@ function resolveProductRolloutDecision({
   if (reviewedIndex !== null) {
     const winnerArm = findWinnerArm(arms, test, reviewedIndex, significance.winnerVariantId);
     const validated = significance.evidenceValidated === true;
-    // Auto-apply is held for a review window after the product becomes ready, so
-    // an unattended price write is never the first the merchant hears of it.
+    // Auto-apply is held for a review window after the ready notification is
+    // recorded, so delivery failures cannot consume the merchant's review time.
     // A product inside that window is still on track to be applied, so it counts
     // as eligible with a date rather than as blocked.
     const autoDue = auto.action === 'apply_variation' || auto.action === 'complete_offer';
     const autoPending = auto.reason === 'waiting_for_review_window';
     const autoEligible = autoDue || autoPending;
-    const readySince = tracked.ready_since ? Date.parse(tracked.ready_since) : null;
+    const notifiedAt = tracked.notified_at ? Date.parse(tracked.notified_at) : null;
     const applyAt =
       autoPermitted && autoEligible
         ? auto.auto_apply_at ||
-          (readySince ? new Date(readySince + delayDays * DAY_MS).toISOString() : null)
+          (notifiedAt ? new Date(notifiedAt + delayDays * DAY_MS).toISOString() : null)
         : null;
     // An offer test has no catalog price to write — the winning discount is
     // already live, so finishing it just ends the split and keeps the offer.

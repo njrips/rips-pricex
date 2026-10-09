@@ -46,6 +46,20 @@ describe('testPlanService', () => {
     expect(plan.statistical_design.min_sample_size).toBeUndefined();
   });
 
+  it('stamps an 80% confidence plan consistently', () => {
+    const plan = buildSmartPricingTestPlan({
+      shopDomain: 'demo.myshopify.com',
+      productId: 'gid://shopify/Product/101',
+      variantId: 'gid://shopify/ProductVariant/1001',
+      title: 'Classic Hoodie M',
+      currentPrice: 59,
+      dailyVisitors: 140,
+      confidenceLevel: 80,
+    });
+    expect(plan.statistical_design.confidence_level).toBe(80);
+    expect(plan.goal.significance_level).toBe(0.8);
+  });
+
   it('stamps shop min sample onto the created plan', () => {
     const plan = buildSmartPricingTestPlan({
       shopDomain: 'demo.myshopify.com',
@@ -70,7 +84,7 @@ describe('testPlanService', () => {
     expect(new Set(plans.map(p => p.product_id)).size).toBe(3);
   });
 
-  it('uses imported COGS for margin guardrail checks', () => {
+  it('uses imported COGS to prevent worsening a pre-existing low margin', () => {
     const plan = buildSmartPricingTestPlan({
       shopDomain: 'demo.myshopify.com',
       productId: 'gid://shopify/Product/101',
@@ -82,8 +96,11 @@ describe('testPlanService', () => {
       marginSource: 'imported_cogs',
     });
     const marginCheck = plan.guardrail_checks.find(c => c.id === 'margin_floor');
-    expect(marginCheck.passed).toBe(false);
+    expect(marginCheck.passed).toBe(true);
     expect(marginCheck.actual).toMatch(/imported COGS/i);
+    expect(Math.min(...plan.price_arms.map(arm => arm.price))).toBe(20);
+    expect(plan.unit_cost).toBe(16);
+    expect(plan.margin_source).toBe('imported_cogs');
   });
 
   it('applyPriceArmOverrides rebuilds guardrails and projections', () => {

@@ -3,6 +3,7 @@ const {
   buildCompactCandidatePayload,
   estimateRankingTokens,
   resolveRankingItems,
+  MAX_RECOMMENDED_CANDIDATES,
 } = require('../smartPricingAiRankingService');
 
 describe('smartPricingAiRankingService', () => {
@@ -101,22 +102,30 @@ describe('the ranking request', () => {
   it('distinguishes a product with no sales from one with no sales data', () => {
     const payload = buildCompactCandidatePayload([
       { variant_id: 'a', title: 'Busy', units_sold_30d: 90 },
-      { variant_id: 'b', title: 'Quiet', units_sold_30d: 0 },
+      { variant_id: 'b', title: 'Measured zero sales', units_sold_30d: 0, visitors_30d: 300 },
+      { variant_id: 'c', title: 'Unmeasured', units_sold_30d: 0 },
     ]);
 
     expect(payload[0].sales_data).toBe('measured');
-    expect(payload[1].sales_data).toBe('none_recorded');
+    expect(payload[1].sales_data).toBe('measured');
+    expect(payload[2].sales_data).toBe('none_recorded');
   });
 
-  it('labels each margin the way the price-suggestion prompt does', () => {
+  it('labels price point and traffic the way the price-suggestion prompt does', () => {
     const payload = buildCompactCandidatePayload([
-      { variant_id: 'a', margin_percent: 62 },
-      { variant_id: 'b', margin_percent: 40 },
-      { variant_id: 'c', margin_percent: 20 },
-      { variant_id: 'd', margin_percent: null },
+      { variant_id: 'a', current_price: 12, units_sold_30d: 40 },
+      { variant_id: 'b', current_price: 600, units_sold_30d: 0 },
     ]);
 
-    expect(payload.map(row => row.margin_tier)).toEqual(['strong', 'healthy', 'thin', 'unknown']);
+    expect(payload.map(row => row.price_tier)).toEqual(['impulse', 'premium']);
+    expect(payload.map(row => row.traffic_tier)).toEqual(['high', 'unmeasured']);
+  });
+
+  it('does not send margin, which most shops never record', () => {
+    const [row] = buildCompactCandidatePayload([{ variant_id: 'a', margin_percent: 55 }]);
+
+    expect(row).not.toHaveProperty('margin_percent');
+    expect(row).not.toHaveProperty('margin_tier');
   });
 
   it('flags a recent price change instead of shipping every product tag', () => {
@@ -198,6 +207,33 @@ describe('resolving a ranking reply onto real products', () => {
     const resolved = resolveRankingItems({ items: [{ v: 0, rank: 1, pick: 'yes' }] }, rows);
 
     expect(resolved.items[0].recommended).toBe(false);
+  });
+
+  it('keeps at most the three highest-ranked recommendations', () => {
+    const manyRows = Array.from({ length: 5 }, (_, index) => ({
+      variant_id: `gid://shopify/ProductVariant/${index + 1}`,
+      title: `Product ${index + 1}`,
+    }));
+    const resolved = resolveRankingItems(
+      {
+        items: [
+          { v: 0, rank: 5, pick: true },
+          { v: 1, rank: 2, pick: true },
+          { v: 2, rank: 1, pick: true },
+          { v: 3, rank: 4, pick: true },
+          { v: 4, rank: 3, pick: true },
+        ],
+      },
+      manyRows
+    );
+
+    expect(MAX_RECOMMENDED_CANDIDATES).toBe(3);
+    expect(
+      resolved.items
+        .filter(item => item.recommended)
+        .map(item => item.priority_rank)
+        .sort((a, b) => a - b)
+    ).toEqual([1, 2, 3]);
   });
 
   it('says nothing when the reply has no items at all', () => {
@@ -338,14 +374,23 @@ describe('enriching an opportunity list', () => {
       expect((await promptFor()).systemPrompt).toMatch(/judged on revenue per visitor/);
     });
 
-    it("states the shop's own limits", async () => {
-      const { systemPrompt } = await promptFor({
-        min_margin_percent: 40,
-        max_price_change_percent: 10,
-      });
+    it("states the shop's price change limit", async () => {
+      const { systemPrompt } = await promptFor({ max_price_change_percent: 10 });
 
-      expect(systemPrompt).toMatch(/will not sell below a 40% margin/);
       expect(systemPrompt).toMatch(/at most 10%/);
+    });
+
+    it('supplies the ranking strict JSON Schema to the chat path', async () => {
+      const request = await promptFor();
+
+      expect(request.responseSchemaName).toBe('product_ranking');
+      expect(request.responseSchema.additionalProperties).toBe(false);
+      expect(request.responseSchema.properties.items.items.required).toEqual([
+        'v',
+        'rank',
+        'pick',
+        'why',
+      ]);
     });
 
     it('never lets a recent price change be excused by margin', async () => {
@@ -357,11 +402,12 @@ describe('enriching an opportunity list', () => {
       expect(systemPrompt).not.toMatch(/exceptional/);
     });
 
-    it('says an unrecorded cost is an unknown margin, not a good one', async () => {
+    it('ranks on the gap against the market rather than on margin', async () => {
       const { systemPrompt } = await promptFor();
 
-      expect(systemPrompt).toMatch(/margin_percent null\) means no cost was recorded/);
-      expect(systemPrompt).toMatch(/unknown rather than good/);
+      expect(systemPrompt).not.toMatch(/margin/i);
+      expect(systemPrompt).toMatch(/A gap against the market/);
+      expect(systemPrompt).toMatch(/Never name competitor stores/);
     });
 
     it('only names fields the model is actually sent', async () => {
@@ -373,7 +419,7 @@ describe('enriching an opportunity list', () => {
       );
 
       expect(fieldLike).toEqual(
-        expect.arrayContaining(['margin_tier', 'confidence_level', 'price_recently_changed'])
+        expect.arrayContaining(['traffic_tier', 'price_tier', 'confidence_level', 'price_recently_changed'])
       );
       fieldLike.forEach(field => expect(sentFields).toContain(field));
     });

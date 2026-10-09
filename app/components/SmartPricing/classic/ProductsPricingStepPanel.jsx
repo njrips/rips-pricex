@@ -876,7 +876,7 @@ export default function ProductsPricingStepPanel({
           {
             id: 'all',
             title: 'All products',
-            desc: 'Include every product in your catalog.',
+            desc: 'Include every eligible product available on your live store.',
             icon: <IconCheckCircle size={16} />,
           },
         ].map(mode => {
@@ -1357,7 +1357,7 @@ export default function ProductsPricingStepPanel({
             value={tableFilter}
             onChange={setTableFilter}
             autoComplete="off"
-            placeholder="Filter selected products..."
+            placeholder="Filter selected products…"
           />
         </div>
         <div className={styles.tableCategorySelect}>
@@ -1389,7 +1389,7 @@ export default function ProductsPricingStepPanel({
               <th>Base price</th>
               <th>{testPriceColumnLabel}</th>
               <th>
-                <TooltipWrapper content="Optional. Difference vs base price when you set a test price.">
+                <TooltipWrapper content="Difference vs base price.">
                   <span className={styles.tableColumnHeaderStack}>
                     <span className={styles.tableColumnHeaderMain}>Change</span>
                     <span className={styles.tableColumnHeaderHint}>(optional)</span>

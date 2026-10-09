@@ -52,6 +52,15 @@ describe('priceBandService', () => {
     expect(thinMargin.floor).toBeGreaterThan(unspecified.floor);
   });
 
+  it('uses rise-only candidates when the current margin leaves no room to cut', () => {
+    const prices = generateCandidatePrices(100, 8, 3, {
+      maxChangePercent: 20,
+      min_margin_percent: 35,
+      marginPercent: 0,
+    });
+    expect(prices).toEqual([100, 104, 108]);
+  });
+
   it('keeps generated candidates inside a snake_case configured band', () => {
     const preset = applyScenarioPreset(100, 'aggressive', {
       max_price_change_percent: 5,

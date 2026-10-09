@@ -64,7 +64,7 @@ describe('buildReviewOverviewLines', () => {
     expect(lines.results).toBe(
       'Primary: Revenue per visitor · 90% confidence · 5,000 visitors/variation',
     );
-    expect(lines.safety).toMatch(/^Guardrail ON · Stop a product if Rev\/visitor drops >10% vs control, after 100 visitors\/variation$/);
+    expect(lines.safety).toMatch(/^Guardrail ON · Stop a product if Rev\/visitor drops >10% vs control, after 5,000 visitors\/variation$/);
   });
 
   it('uses All products scope and guardrail off copy', () => {

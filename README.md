@@ -42,7 +42,7 @@ npm --prefix server install
 # Optional: start local Postgres via Docker
 npm run db:up
 
-export DATABASE_URL=postgresql://ripspricex:ripspricex@127.0.0.1:5432/ripspricex_dev
+export DATABASE_URL=postgresql://ripspricex:ripspricex@127.0.0.1:5433/ripspricex_dev
 npm run migrate:api
 # or: npm run setup   # prisma generate + migrate + API migrations
 ```
@@ -191,11 +191,14 @@ Cart transform `lineUpdate` requires **Shopify Plus** or a **development store**
 
 For a real production host (not Cloudflare tunnel):
 
-1. Deploy Admin + Express to your host (HTTPS).
+1. Deploy Admin + Express to your host (HTTPS). The React Router app and the Express API are separate processes. Route `/api` and `/health` to Express (`server/src/app.js` listens for `GET /health`). A single container that only runs `npm run docker-start` does not start both.
 2. Set Partner app **App URL** / TOML `application_url` + `redirect_urls` to that host.
-3. Set `.env` / host env: `SHOPIFY_APP_URL`, `APP_URL`, `RIPSPRICEX_PUBLIC_API_BASE`, `DATABASE_URL`, secrets.
-4. Run `npm run setup` (or migrate) on the server, then `npm run start` + `npm run start:api` (or your process manager).
-5. `shopify app deploy` again so Shopify config + extensions match production.
+3. Set host env: `SHOPIFY_APP_URL`, `APP_URL`, `RIPSPRICEX_PUBLIC_API_BASE`, `DATABASE_URL`, secrets. Leave `RIPSPRICEX_DEV_ENTITLE_ALL` unset or false. Do not rely on `SHOPIFY_ACCESS_TOKEN`; it is ignored when `NODE_ENV=production`.
+4. Prisma SQLite (`prisma/dev.sqlite`) stores Shopify sessions. PostgreSQL stores pricing and other business data. Production needs a persistent session database; do not use an ephemeral SQLite file.
+5. Run `npm run setup` (or migrate) on the server, then start both `npm run start` and `npm run start:api`.
+6. `shopify app deploy` again so Shopify config + extensions match production.
+
+Checkout Functions can read cart line attributes that a shopper can set. Those attributes are not proof of an assignment. The functions clamp the price and discount, and order webhooks re-check the result.
 
 ---
 

@@ -59,7 +59,7 @@ const TABLE_HEADER_TOOLTIPS = {
 const FILTERS = [
   { id: 'all', label: 'All' },
   { id: 'running', label: 'Running' },
-  { id: 'draft', label: 'Draft' },
+  { id: 'draft', label: 'Drafts' },
   { id: 'paused', label: 'Paused' },
   { id: 'finished', label: 'Finished' },
 ];
@@ -102,9 +102,7 @@ function emptyFilterCopy(filter, { reachedDraftServer = true } = {}) {
 async function loadExperimentPlans(shopDomain, hydrateOptions) {
   const local = readInboxPlans(shopDomain) || [];
   try {
-    const hydrated = await hydrateInboxFromServer(shopDomain, local, hydrateOptions).catch(
-      () => null
-    );
+    const hydrated = await hydrateInboxFromServer(shopDomain, local, hydrateOptions);
     if (hydrated?.plans) {
       writeInboxPlans(shopDomain, hydrated.plans, { persist: false });
       return { plans: hydrated.plans, message: '' };
@@ -113,7 +111,7 @@ async function loadExperimentPlans(shopDomain, hydrateOptions) {
   } catch (err) {
     return {
       plans: readInboxPlans(shopDomain) || [],
-      message: err.message || 'Could not load tests.',
+      message: err?.message || 'Could not load tests.',
     };
   }
 }
@@ -713,10 +711,10 @@ export default function ClassicExperimentsList() {
 
         <div className={styles.listFooterLinks}>
           <Button variant="plain" onClick={() => navigate(ROUTES.appSettings(shopDomain))}>
-            Settings
+            App settings
           </Button>
           <Button variant="plain" onClick={() => navigate(ROUTES.appSetup(shopDomain))}>
-            Setup
+            Store setup
           </Button>
         </div>
       </div>

@@ -75,7 +75,7 @@ describe('min sample size on launch payloads', () => {
     assert.equal(payload.goal.visitors_per_variant_recommended, 12000);
   });
 
-  it('uses shop 95% confidence and min sample when the plan omits them', () => {
+  it('uses shop 95% confidence, fixed MDE, and min sample when the plan omits them', () => {
     const payload = buildPriceTestPayloadFromPlan(pricePlan, {
       guardrails: {
         confidence_level: 95,
@@ -84,7 +84,7 @@ describe('min sample size on launch payloads', () => {
       },
     });
     assert.equal(payload.goal.significance_level, 0.95);
-    assert.equal(payload.goal.mde_percent, 8);
+    assert.equal(payload.goal.mde_percent, 10);
     assert.equal(payload.goal.min_sample_size, 2200);
   });
 });

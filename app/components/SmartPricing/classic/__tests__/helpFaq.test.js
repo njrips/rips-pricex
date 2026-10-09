@@ -20,7 +20,14 @@ import {
 describe('helpFaq', () => {
   it('indexes the revenue guardrail FAQ', () => {
     const hit = filterHelpFaq(HELP_FAQ_ITEMS, 'revenue guardrail');
-    assert.ok(hit.some((item) => /Results settings/i.test(item.a) && /100 visitors/i.test(item.a)));
+    assert.ok(
+      hit.some(
+        item =>
+          /Results settings/i.test(item.a) &&
+          /at least 5,000/i.test(item.a) &&
+          /10 conversions/i.test(item.a)
+      )
+    );
   });
 
   it('uses Admin-accurate FAQ copy (Store setup checklist)', () => {
@@ -46,6 +53,14 @@ describe('helpFaq', () => {
       HELP_FAQ_ITEMS.find((item) => /apply a winner/i.test(item.q))?.a || '',
       /manual review/i
     );
+  });
+
+  it('describes the current AI suggestion payload', () => {
+    const answer = HELP_FAQ_ITEMS.find((item) => /What does Suggest send/i.test(item.q))?.a || '';
+    assert.match(answer, /1024 pixels/i);
+    assert.match(answer, /test metric/i);
+    assert.match(answer, /Product costs and margins are not sent/i);
+    assert.match(answer, /shop domain.*Shopify product ids are not sent/i);
   });
 
   it('accepts public ticket ids case-insensitively', () => {

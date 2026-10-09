@@ -1,7 +1,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { isFreeSmartPricingRequest } = require('../smartPricingRoutes');
+const { isFreeSmartPricingRequest, withSuggestRequestSlot } = require('../smartPricingRoutes');
 
 /**
  * Which Smart Pricing requests a shop without a paid plan may still make.
@@ -35,8 +35,8 @@ describe('requests that do not need a plan', () => {
     assert.equal(isFreeSmartPricingRequest('POST', '/tests/t1/release-product'), true);
   });
 
-  it('lets the wizard suggest test prices before anything is launched', () => {
-    assert.equal(isFreeSmartPricingRequest('POST', '/plans/suggest-prices'), true);
+  it('requires a plan for billable AI price suggestions', () => {
+    assert.equal(isFreeSmartPricingRequest('POST', '/plans/suggest-prices'), false);
   });
 
   it('still charges for the writes that create work', () => {
@@ -63,5 +63,23 @@ describe('requests that do not need a plan', () => {
 
   it('is not fooled by a lowercase verb', () => {
     assert.equal(isFreeSmartPricingRequest('get', '/opportunities'), true);
+  });
+});
+
+describe('price suggestion request slot', () => {
+  it('allows only one billable suggestion at a time for a shop', async () => {
+    let release;
+    const first = withSuggestRequestSlot(
+      'slot-test.myshopify.com',
+      () => new Promise(resolve => {
+        release = resolve;
+      })
+    );
+    await assert.rejects(
+      withSuggestRequestSlot('slot-test.myshopify.com', async () => null),
+      error => error?.status === 429
+    );
+    release('done');
+    assert.equal(await first, 'done');
   });
 });

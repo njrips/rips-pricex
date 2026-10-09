@@ -8,6 +8,7 @@ import {
   useLocation,
   useNavigate,
   useRouteError,
+  useSearchParams,
 } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { AppProvider } from "@shopify/shopify-app-react-router/react";
@@ -24,6 +25,7 @@ import {
   pushEntitlementToExpress,
 } from "../utils/appSubscriptionEntitlement.server";
 import ClassicRouteLoading from "../components/shared/ClassicRouteLoading";
+import PaymentRequiredNotice from "../components/PaymentRequiredNotice";
 import {
   EmbeddedAppErrorFallback,
   EmbeddedAppLoadingFallback,
@@ -265,6 +267,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
 export default function App() {
   const data = useLoaderData<typeof loader>();
+  const [searchParams] = useSearchParams();
+  const embeddedPath = (path: string) => withCurrentEmbeddedSearch(searchParams, path);
 
   // Set during render, not in an effect: React runs child effects before parent
   // effects, so an effect here would land after the child routes have already
@@ -280,16 +284,17 @@ export default function App() {
     <AppProvider embedded apiKey={data.apiKey}>
       <PolarisAppProvider i18n={enTranslations}>
         <NavMenu>
-          <Link to="/app" rel="home">
+          <Link to={embeddedPath("/app")} rel="home">
             Tests
           </Link>
-          <Link to="/app/experiments/new">New test</Link>
-          <Link to="/app/setup">Store setup</Link>
-          <Link to="/app/settings">App settings</Link>
-          <Link to="/app/help">Help & docs</Link>
+          <Link to={embeddedPath("/app/experiments/new")}>New test</Link>
+          <Link to={embeddedPath("/app/setup")}>Store setup</Link>
+          <Link to={embeddedPath("/app/settings")}>App settings</Link>
+          <Link to={embeddedPath("/app/help")}>Help & docs</Link>
         </NavMenu>
         <SupportLinkHandler />
         <div data-palette="admin">
+          <PaymentRequiredNotice upgradeUrl={data.upgradeUrl} />
           <ClassicRouteLoading />
           <Outlet context={data} />
         </div>

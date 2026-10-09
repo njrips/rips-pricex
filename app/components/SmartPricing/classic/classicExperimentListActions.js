@@ -1,3 +1,4 @@
+import { preserveEmbeddedSearch } from '../../../utils/shopifyEmbeddedSearch';
 import { canEditClassicTestSetup } from './classicAudienceEdit';
 import { getPlanExperimentId, getPlanExperimentTitle, rollupExperimentStatus } from './classicExperimentHelpers';
 import {
@@ -311,7 +312,7 @@ export function buildClassicWizardResumePath(resumeId, stepId) {
     .toLowerCase();
   if (step) params.set('step', step);
   const query = params.toString();
-  return query ? `/app/experiments/new?${query}` : '/app/experiments/new';
+  return preserveEmbeddedSearch(query ? `/app/experiments/new?${query}` : '/app/experiments/new');
 }
 
 /**

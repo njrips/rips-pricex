@@ -10,7 +10,7 @@
 | Check | Result |
 |-------|--------|
 | Theme app embed | ✅ `settings_data.json` → `ripspricex-app-embed` **`disabled: false`** |
-| Embed loader on PDP | ✅ `…/ripspricex-2/assets/ripspricex-app-embed-loader.js` |
+| Embed loader on PDP | ✅ app-embed block loaded the app-proxy script (the loader is now inline in `ripspricex-app-embed.liquid`) |
 | App proxy script | ✅ `/apps/ripspricex/script.js` returns `AB_TEST_RUNTIME_CONFIG` + running test |
 | Checkout readiness | ✅ `ready: true`, 8 price surfaces, CT installed |
 | Launch Classic price test | ✅ Running test `bf0da082-1579-40c0-94a9-f265026f487a` |

@@ -190,7 +190,7 @@ export function collectProductWarnings(analytics) {
     warnings.push({
       id: 'srm',
       tone: 'critical',
-      title: 'Traffic split does not match the plan',
+      title: 'Traffic split does not match the test',
       text:
         srm.message ||
         'Visitors are not reaching the variations in the split this test asked for, so the numbers are not comparable yet.',
@@ -212,8 +212,8 @@ export function collectProductWarnings(analytics) {
     warnings.push({
       id: 'trap',
       tone: 'warning',
-      title: 'Revenue up, profit down',
-      text: `${traps.map(arm => arm.label || 'A variation').join(', ')} brings in more revenue per visitor but less profit than control.`,
+      title: 'Revenue up, weaker result after costs',
+      text: `${traps.map(arm => arm.label || 'A variation').join(', ')} brings in more revenue per visitor but a lower result after recorded costs than control.`,
     });
   }
   return warnings;
@@ -231,7 +231,7 @@ const ROUND_STATUS = {
   archived: 'Archived',
 };
 
-export function formatRoundStatus(status) {
+function formatRoundStatus(status) {
   const key = String(status || '').trim().toLowerCase();
   return ROUND_STATUS[key] || (key ? key.charAt(0).toUpperCase() + key.slice(1) : '—');
 }

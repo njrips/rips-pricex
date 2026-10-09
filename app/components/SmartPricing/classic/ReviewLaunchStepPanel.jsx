@@ -151,7 +151,7 @@ export default function ReviewLaunchStepPanel({
             ) : null}
             {typeof onRefreshCheckout === 'function' ? (
               <Button variant="plain" onClick={onRefreshCheckout}>
-                Re-check
+                Refresh status
               </Button>
             ) : null}
           </div>
@@ -162,17 +162,17 @@ export default function ReviewLaunchStepPanel({
         <Banner tone="warning" title="Price locations recommended">
           <p>
             {priceSurface.message ||
-              'Map shop-wide PDP selectors so bucketed visitors see test prices on the product page.'}
+              'Map the product page price so visitors in a test see test prices.'}
           </p>
           <div className={styles.errorActions}>
             {typeof onFixPriceSurfaces === 'function' ? (
               <Button variant="plain" onClick={onFixPriceSurfaces}>
-                Open Settings → Price locations
+                Open App settings → Price locations
               </Button>
             ) : null}
             {typeof onRefreshCheckout === 'function' ? (
               <Button variant="plain" onClick={onRefreshCheckout}>
-                Re-check
+                Refresh status
               </Button>
             ) : null}
           </div>

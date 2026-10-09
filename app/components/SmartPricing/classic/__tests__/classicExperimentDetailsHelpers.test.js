@@ -240,6 +240,11 @@ describe('classicExperimentDetailsHelpers', () => {
       confidenceLevel: 95,
       mdePercent: 8,
     });
+    expect(
+      buildMetricsSummary({
+        goal: { significance_level: 0.8, analysis_method: 'sequential' },
+      }).confidenceLevel
+    ).toBe(80);
   });
 
   it('reads the stamped practical duration plan for post-launch details', () => {
@@ -786,6 +791,16 @@ describe('classicExperimentDetailsHelpers', () => {
     expect(settings.autoStopEnabled).toBe(false);
   });
 
+  it('uses the whole-test status in Settings for multi-product tests', () => {
+    const settings = buildSettingsSummary(
+      { id: 'p1', status: 'paused' },
+      { status: 'stopped' },
+      {},
+      { status: 'running' }
+    );
+    expect(settings.testStatus).toBe('running');
+  });
+
   it('includes the revenue drop limit and treats auto-stop as on', () => {
     const settings = buildSettingsSummary(
       { id: 'p1', audience: { traffic_allocation: 40 } },
@@ -1187,9 +1202,9 @@ describe('classicExperimentDetailsHelpers', () => {
   });
 
   it('formats bulk apply button copy', () => {
-    expect(formatApplyAllReadyLabel(0)).toBe('Apply ready products');
-    expect(formatApplyAllReadyLabel(1)).toBe('Apply 1 ready product');
-    expect(formatApplyAllReadyLabel(3)).toBe('Apply 3 ready products');
+    expect(formatApplyAllReadyLabel(0)).toBe('Apply all ready winners');
+    expect(formatApplyAllReadyLabel(1)).toBe('Apply all ready winners');
+    expect(formatApplyAllReadyLabel(3)).toBe('Apply all ready winners');
   });
 
   it('lists actionable rollout products for bulk confirm modals', () => {

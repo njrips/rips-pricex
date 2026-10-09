@@ -21,12 +21,16 @@ if (!window.matchMedia) {
   });
 }
 
+const apiMocks = vi.hoisted(() => ({
+  getGlobalAssets: vi.fn(),
+  getGuardrails: vi.fn(),
+}));
+
 vi.mock('../../lib/api.client', () => ({
   rpxApi: {
-    getGuardrails: () => Promise.resolve({ guardrails: {} }),
+    getGuardrails: (...args) => apiMocks.getGuardrails(...args),
     saveGuardrails: () => Promise.resolve({ guardrails: {} }),
-    getGlobalAssets: () =>
-      Promise.resolve({ global_assets: { css: '', js: '', css_enabled: true, js_enabled: true } }),
+    getGlobalAssets: (...args) => apiMocks.getGlobalAssets(...args),
     saveGlobalAssets: () => Promise.resolve({ global_assets: {} }),
   },
 }));
@@ -57,7 +61,7 @@ vi.mock('../../components/Settings/sections/StoreSettingsPriceSurfacesSection', 
 }));
 
 vi.mock('../../components/Settings/sections/SettingsGlobalAssetsPanel', () => ({
-  default: () => h('div', null, 'global assets panel'),
+  default: props => h('div', null, 'global assets panel', props.error || ''),
 }));
 
 let container;
@@ -69,6 +73,12 @@ let RouterProvider;
 let Outlet;
 
 beforeEach(async () => {
+  apiMocks.getGuardrails.mockReset();
+  apiMocks.getGuardrails.mockResolvedValue({ guardrails: {} });
+  apiMocks.getGlobalAssets.mockReset();
+  apiMocks.getGlobalAssets.mockResolvedValue({
+    global_assets: { css: '', js: '', css_enabled: true, js_enabled: true },
+  });
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   ({ AppProvider: PolarisAppProvider } = await import('@shopify/polaris'));
   ({ createMemoryRouter, RouterProvider, Outlet } = await import('react-router'));
@@ -121,11 +131,76 @@ describe('Settings tabs', () => {
 
   it('still offers the settings tabs that own real configuration', async () => {
     await render('/app/settings');
-    const labels = tabLabels();
-    expect(labels).toContain('Plan & usage');
-    expect(labels).toContain('Results settings');
-    expect(labels).toContain('Price locations');
-    expect(labels).toContain('Global JS/CSS');
+    const labels = Array.from(container.querySelectorAll('[role="tab"]')).map(node =>
+      (node.textContent || '').trim()
+    );
+    expect(labels).toEqual([
+      'Plan & usage',
+      'Results settings',
+      'Price locations',
+      'Global JS/CSS',
+    ]);
+  });
+
+  it('loads global snippets only when their tab opens', async () => {
+    await render('/app/settings?tab=stats');
+    expect(apiMocks.getGlobalAssets).not.toHaveBeenCalled();
+  });
+
+  it('keeps results settings unsaved until a failed load is retried', async () => {
+    apiMocks.getGuardrails.mockRejectedValueOnce(new Error('Results load failed'));
+    await render('/app/settings?tab=stats&shop=demo.myshopify.com&host=abc');
+    expect(container.textContent).toContain('Try again');
+    const save = () =>
+      Array.from(container.querySelectorAll('button')).find(
+        node => node.textContent.trim() === 'Save results settings'
+      );
+    expect(save().disabled || save().getAttribute('aria-disabled') === 'true').toBe(true);
+    apiMocks.getGuardrails.mockResolvedValueOnce({
+      guardrails: { confidence_level: '95', min_sample_size_per_variation: 5000 },
+    });
+    const retry = Array.from(container.querySelectorAll('button')).find(
+      node => node.textContent.trim() === 'Try again'
+    );
+    expect(retry).toBeTruthy();
+    await act(async () => {
+      retry.click();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(save().disabled || save().getAttribute('aria-disabled') === 'true').toBe(false);
+  });
+
+  it('disables saving when global snippets could not be loaded', async () => {
+    apiMocks.getGlobalAssets.mockRejectedValueOnce(new Error('Snippet load failed'));
+    await render('/app/settings?tab=global-assets');
+    expect(container.textContent).toContain('Snippet load failed');
+    const save = Array.from(container.querySelectorAll('button')).find(
+      node => node.textContent.trim() === 'Save global snippets'
+    );
+    expect(save).toBeTruthy();
+    expect(save.disabled || save.getAttribute('aria-disabled') === 'true').toBe(true);
+  });
+
+  it('uses the detailed-table helper copy for each documented tab', async () => {
+    await render('/app/settings?tab=plan');
+    expect(container.textContent).toContain('Billing and visitor limits.');
+    const tabs = () => Array.from(container.querySelectorAll('[role="tab"]'));
+    await act(async () => {
+      tabs()
+        .find(node => node.textContent.trim() === 'Results settings')
+        .dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(container.textContent).toContain('These settings apply to every new test you launch.');
+    await act(async () => {
+      tabs()
+        .find(node => node.textContent.trim() === 'Price locations')
+        .dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(container.textContent).toContain(
+      'Tell Priceify where prices appear on your theme so tests can safely update them.'
+    );
   });
 
   it('uses Theme price selectors as the in-tab page title while the tab stays Price locations', async () => {

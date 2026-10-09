@@ -435,7 +435,7 @@ export default function ClassicExperimentRowActions({
       if (result.ok) {
         const detail =
           result.deletedTestIds.length > 0
-            ? ` Removed ${result.deletedTestIds.length} linked test${
+            ? ` Removed results for ${result.deletedTestIds.length} product${
                 result.deletedTestIds.length === 1 ? '' : 's'
               }.`
             : '';
@@ -444,7 +444,7 @@ export default function ClassicExperimentRowActions({
         notify(
           'error',
           result.errors[0] ||
-            'Test was partially deleted. Refresh the list and retry if plans or tests remain.'
+            'Test was partially deleted. Refresh the list and delete it again if it still shows.'
         );
       }
       await refreshList({ omitIds: planIds, quiet: true });
@@ -478,7 +478,7 @@ export default function ClassicExperimentRowActions({
             notify('error', result.message);
             return;
           }
-          notify('success', 'Draft duplicated.');
+          notify('success', 'Test duplicated as a new draft.');
           await refreshList({ quiet: true });
           navigate(buildClassicWizardResumePath(result.experimentId));
         });

@@ -29,7 +29,7 @@ Research & plans for this product: **[docs/README.md](./README.md)** · **[resea
 ## Local run
 
 ```bash
-# Postgres (ripspricex_dev on 5432) + migrate
+# Postgres (ripspricex_dev on host port 5433) + migrate
 npm run migrate:api
 
 # Terminal A — API
@@ -39,7 +39,7 @@ npm run dev:api
 npm run dev
 ```
 
-Dev unlock without billing: `RIPSPRICEX_DEV_ENTITLE_ALL=true` or:
+Dev unlock without billing: `RIPSPRICEX_DEV_ENTITLE_ALL=true` (ignored when `NODE_ENV=production`) or:
 
 ```bash
 curl -X POST http://127.0.0.1:3456/api/billing/dev-entitle \

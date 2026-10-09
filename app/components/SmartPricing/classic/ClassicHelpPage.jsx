@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigation, useRevalidator, useSearchParams } from 'react-router';
 import { Banner, Button, TextField } from '@shopify/polaris';
 import LabelWithInfo from '../../Settings/primitives/LabelWithInfo';
@@ -47,9 +47,13 @@ export default function ClassicHelpPage({
   // Errors come back without saying which form failed, so remember the last one sent.
   const pendingIntent = submitting ? String(navigation.formData?.get('intent') || '') : '';
   const [submittedIntent, setSubmittedIntent] = useState('');
-  if (pendingIntent && pendingIntent !== submittedIntent) {
-    setSubmittedIntent(pendingIntent);
-  }
+  const formIntent = pendingIntent || submittedIntent;
+  useEffect(() => {
+    if (!pendingIntent || pendingIntent === submittedIntent) return undefined;
+    const intent = pendingIntent;
+    const timer = window.setTimeout(() => setSubmittedIntent(intent), 0);
+    return () => window.clearTimeout(timer);
+  }, [pendingIntent, submittedIntent]);
   const [searchParams, setSearchParams] = useSearchParams();
   const selectedId = String(searchParams.get('ticket') || selectedTicket?.public_id || '').toUpperCase();
   const attentionId = attentionTicketToPrompt(tickets, selectedId);
@@ -95,15 +99,25 @@ export default function ClassicHelpPage({
     searchParams.get('sent') === '1'
       ? `${selectedId}:${(selectedTicket?.messages || []).length}`
       : '';
-  const [clearedKeys, setClearedKeys] = useState({ created: '', sent: '' });
-  if (createdKey && clearedKeys.created !== createdKey) {
-    setClearedKeys(prev => ({ ...prev, created: createdKey }));
-    setDraft(prev => ({ ...prev, subject: '', body: '' }));
-  }
-  if (sentKey && clearedKeys.sent !== sentKey) {
-    setClearedKeys(prev => ({ ...prev, sent: sentKey }));
-    setReplyBody('');
-  }
+  const clearedKeysRef = useRef({ created: '', sent: '' });
+  useEffect(() => {
+    if (!createdKey || clearedKeysRef.current.created === createdKey) return undefined;
+    const key = createdKey;
+    const timer = window.setTimeout(() => {
+      clearedKeysRef.current = { ...clearedKeysRef.current, created: key };
+      setDraft(prev => ({ ...prev, subject: '', body: '' }));
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [createdKey]);
+  useEffect(() => {
+    if (!sentKey || clearedKeysRef.current.sent === sentKey) return undefined;
+    const key = sentKey;
+    const timer = window.setTimeout(() => {
+      clearedKeysRef.current = { ...clearedKeysRef.current, sent: key };
+      setReplyBody('');
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [sentKey]);
 
   // Scroll when a different ticket opens, not on every reply that re-renders it.
   const selectedTicketId = selectedTicket?.public_id || '';
@@ -337,7 +351,7 @@ export default function ClassicHelpPage({
           query={ticketQuery}
           onQueryChange={setTicketQuery}
           formError={formError}
-          formIntent={submittedIntent}
+          formIntent={formIntent}
         />
       ) : null}
 

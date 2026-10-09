@@ -18,6 +18,7 @@ const {
   describeCustomerData,
 } = require('../services/privacyComplianceService');
 const { clearOpportunityCache } = require('../services/smartPricing/opportunityService');
+const { publicErrorMessage } = require('../utils/publicError');
 const {
   recordOrderConversions,
   cancelOrderConversions,
@@ -106,7 +107,10 @@ router.post('/shops/install', requireShopSessionOrInternal, asyncHandler(async (
       });
     } catch (err) {
       logger.error('shop_sessions upsert failed', { message: err.message });
-      return res.status(500).json({ error: 'Failed to persist shop session', detail: err.message });
+      return res.status(500).json({
+        error: 'Failed to persist shop session',
+        detail: publicErrorMessage(err, 'Failed to persist shop session'),
+      });
     }
   } else if (scope) {
     try {

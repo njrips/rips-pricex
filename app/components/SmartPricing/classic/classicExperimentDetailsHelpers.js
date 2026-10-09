@@ -99,6 +99,18 @@ export function formatActivityStamp(value) {
   }
 }
 
+/** "Sep 3, 2026" for header and reference dates. */
+export function formatDetailDate(value) {
+  if (!value) return '';
+  const stamp = new Date(value);
+  if (Number.isNaN(stamp.getTime())) return String(value);
+  return stamp.toLocaleDateString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  });
+}
+
 export function formatActivityActorName(actor) {
   const raw = String(actor || '').trim();
   const key = raw.toLowerCase();
@@ -1436,10 +1448,8 @@ export function buildProductRolloutRows({ plans = [], analyticsByTestId = {} } =
 }
 
 /** Merchant-facing bulk apply CTA (Overview product table + rollout panel). */
-export function formatApplyAllReadyLabel(count = 0) {
-  const n = Number(count);
-  if (!Number.isFinite(n) || n <= 0) return 'Apply ready products';
-  return n === 1 ? 'Apply 1 ready product' : `Apply ${n} ready products`;
+export function formatApplyAllReadyLabel() {
+  return 'Apply all ready winners';
 }
 
 /** Map test id → rollout queue rank for product table sorting. */
@@ -1882,8 +1892,8 @@ function resolveDisplayedConfidence(plan, test, planGoal, testGoal) {
     test?.metadata?.statistical_design?.confidence_level;
   const n = Number(raw);
   if (!Number.isFinite(n) || n <= 0) return 90;
-  if (n > 1) return Math.round(n) === 95 ? 95 : 90;
-  return Math.round(n * 100) === 95 ? 95 : 90;
+  const percent = n > 1 ? Math.round(n) : Math.round(n * 100);
+  return [80, 90, 95].includes(percent) ? percent : 90;
 }
 
 export function buildMetricsSummary(plan = null, test = null) {
@@ -2116,10 +2126,10 @@ export function buildActivityTimeline({
           ? 'This product’s winning variation was written to Shopify. Other products in the test keep running until they have a result.'
           : 'This product’s winning variation was written to Shopify.',
     });
-  } else if (planStatus === 'completed') {
+  } else if (planStatus === 'completed' && plan?.control_retained_at) {
     items.push({
       id: 'control_retained',
-      at: plan?.control_retained_at || test?.stopped_at || plan?.updated_at,
+      at: plan.control_retained_at,
       title: isOffer ? 'Test completed' : 'Kept catalog price',
       kind: 'complete',
       actor,
@@ -2172,7 +2182,12 @@ export function buildActivityTimeline({
   );
 }
 
-export function buildSettingsSummary(plan = null, test = null, shopGuardrails = null) {
+export function buildSettingsSummary(
+  plan = null,
+  test = null,
+  shopGuardrails = null,
+  experiment = null
+) {
   const segments = test?.segments && typeof test.segments === 'object' ? test.segments : {};
   const audience = plan?.audience && typeof plan.audience === 'object' ? plan.audience : {};
   const goal = test?.goal && typeof test.goal === 'object' ? test.goal : plan?.goal || {};
@@ -2228,7 +2243,7 @@ export function buildSettingsSummary(plan = null, test = null, shopGuardrails = 
       ? 'checkout_discount_function'
       : test?.variants?.[0]?.config?.priceApplicationMethod || 'direct_price_override',
     experimentType: experimentType || 'price_test',
-    testStatus: test?.status || plan?.status || null,
+    testStatus: experiment?.status || test?.status || plan?.status || null,
     testId: plan?.test_id || test?.id || null,
     planId: plan?.id || null,
     createdAt: plan?.created_at || test?.created_at || null,

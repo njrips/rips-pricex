@@ -4,6 +4,7 @@ const {
   isStorefrontEmbeddedTestType,
   normalizeTestTypeForStorefront,
   mapTestToStorefrontPayload,
+  getStorefrontScriptCacheControl,
 } = require('../storefrontScriptRuntime');
 
 describe('storefront embedded test types', () => {
@@ -20,5 +21,13 @@ describe('storefront embedded test types', () => {
   it('normalizes offer_test to offer in the browser payload', () => {
     assert.equal(normalizeTestTypeForStorefront('offer_test'), 'offer');
     assert.equal(mapTestToStorefrontPayload({ id: 't1', type: 'offer_test' }).type, 'offer');
+  });
+
+  it('revalidates every page when merchant global snippets are active', () => {
+    assert.equal(
+      getStorefrontScriptCacheControl({ hasGlobalCustomAssets: true }),
+      'public, max-age=0, must-revalidate'
+    );
+    assert.match(getStorefrontScriptCacheControl(), /max-age=\d+/);
   });
 });

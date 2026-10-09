@@ -427,7 +427,7 @@ export function analyzePriceSurfaceRegistryGaps(testMappings, shopMappings) {
     severity: target.severity,
     // Named the way the Surface dropdown names it, so the gap and the row a
     // merchant would add to close it read as the same thing.
-    message: `No ${PRICE_SURFACE_LABELS[target.surface] || target.surface.toUpperCase()} ${target.role.replace(/_/g, ' ')} selector is configured.`,
+    message: `No ${PRICE_SURFACE_LABELS[target.surface] || target.surface.toUpperCase()} ${target.role === 'compare_at' ? 'compare-at' : target.role.replace(/_/g, ' ')} price location yet.`,
   }));
 }
 
@@ -452,7 +452,7 @@ export function validatePriceSurfaceMappingsForEditor(rows) {
   const warnings = [];
   const normalized = normalizePriceSurfaceMappingsForEditor(rows);
   if (normalized.length > MAX_PRICE_SURFACE_MAPPINGS) {
-    warnings.push(`Only ${MAX_PRICE_SURFACE_MAPPINGS} mappings are saved per scope.`);
+    warnings.push(`You can save up to ${MAX_PRICE_SURFACE_MAPPINGS} price locations.`);
   }
   const seen = new Map();
   normalized.forEach((row, index) => {
@@ -460,10 +460,12 @@ export function validatePriceSurfaceMappingsForEditor(rows) {
     if (!selector) {
       return;
     }
-    const key = `${row.surface}:${row.role}:${selector}`;
+    const scope =
+      row.surface === 'url' ? priceSurfacePagePath(row.pageUrl) || row.pageUrl || '' : row.role;
+    const key = `${row.surface}:${scope}:${selector}`;
     if (seen.has(key)) {
       warnings.push(
-        `Row ${index + 1} duplicates row ${seen.get(key) + 1} for the same surface and role.`
+        `Row ${index + 1} duplicates row ${seen.get(key) + 1} for the same page and price type.`
       );
     } else {
       seen.set(key, index);
@@ -477,7 +479,7 @@ export function validatePriceSurfaceMappingsForEditor(rows) {
     const selectorLower = selector.toLowerCase();
     const looksLikePrice = PRICE_SELECTOR_HINTS.some(hint => selectorLower.includes(hint));
     if (!looksLikePrice) {
-      warnings.push(`Row ${index + 1} selector may not target a price node.`);
+      warnings.push(`Row ${index + 1}: this selector may not point at a price.`);
     }
   });
   return warnings;
@@ -497,29 +499,29 @@ export function buildPriceSurfaceRegistryStatus(testMappings, shopMappings, opti
   const picking = Boolean(options.picking);
 
   let tone = 'success';
-  let label = 'Theme mapping ready';
+  let label = 'Price locations ready';
   let hint = `${configuredTest} test · ${configuredShop} shop`;
   let recommendExpand = false;
 
   if (picking) {
     tone = 'attention';
-    label = 'Picking theme price';
+    label = 'Picking a price';
     recommendExpand = true;
   } else if (highSeverityGaps.length > 0 && configuredTest === 0 && configuredShop === 0) {
     tone = 'warning';
-    label = 'Map storefront prices';
+    label = 'No price locations yet';
     hint = highSeverityGaps[0].message;
     recommendExpand = true;
   } else if (actionableGaps.length > 0) {
     tone = 'caution';
-    label = `${actionableGaps.length} mapping gap${actionableGaps.length === 1 ? '' : 's'}`;
+    label = `${actionableGaps.length} price location${actionableGaps.length === 1 ? '' : 's'} missing`;
     hint = actionableGaps[0].message;
     recommendExpand = true;
   } else if (configuredTest === 0 && configuredShop > 0) {
     label = 'Shop defaults active';
     hint = `${configuredShop} shop selector${configuredShop === 1 ? '' : 's'}`;
   } else if (gaps.length > 0) {
-    hint = `${hint} · optional compare-at mapping missing`;
+    hint = `${hint} · optional compare-at price location missing`;
   }
 
   return {

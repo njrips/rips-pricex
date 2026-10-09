@@ -176,9 +176,8 @@ export function formatSplitCountryAudienceLabel(
   const exclude = collapseCountrySelection(excludeCountries, 'exclude');
   const parts = [];
   if (include.length) parts.push(`Include: ${formatCountryCodesSummary(include, maxVisible)}`);
-  else parts.push(ALL_COUNTRIES_LABEL);
   if (exclude.length) parts.push(`Exclude: ${formatCountryCodesSummary(exclude, maxVisible)}`);
-  return parts.join(' · ');
+  return parts.length ? parts.join(' · ') : ALL_COUNTRIES_LABEL;
 }
 
 export function getCountryFieldHelp(codes, mode = 'include', blockedCodes = []) {

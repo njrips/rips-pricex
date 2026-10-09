@@ -537,8 +537,27 @@ describe('productsStepReadiness', () => {
     expect(cutPrice).toBeLessThan(90);
   });
 
+  it('does not let the local fallback worsen a recorded zero margin', () => {
+    const patch = buildAiBandPriceOverrides({
+      rows: [
+        {
+          variant_id: 'gid://shopify/ProductVariant/100',
+          current_price: 100,
+          margin_percent: 0,
+        },
+      ],
+      targetArms: [{ id: 'var_a' }],
+      min: -20,
+      max: -10,
+      unit: 'percent',
+      maxChangePct: 30,
+      minMarginPct: 35,
+    });
+    expect(Number(patch['gid://shopify/ProductVariant/100::var_a'])).toBe(100);
+  });
+
   it('explains how band spread becomes a shelf price', () => {
-    expect(describeAiPriceCalculationTooltip({ unit: 'percent' })).toMatch(/traffic signals/i);
+    expect(describeAiPriceCalculationTooltip({ unit: 'percent' })).toMatch(/market price position[\s\S]*revenue per visitor/i);
     const meta = buildLocalPriceSuggestionMeta(
       {
         rows: [{ variant_id: 'gid://shopify/ProductVariant/1', current_price: 100 }],
@@ -568,6 +587,16 @@ describe('productsStepReadiness', () => {
           delta_percent: -10.01,
           guardrail_limited: true,
           ai_band: { lo: -12, hi: -8 },
+          ai_best_delta_percent: -9,
+          ai_direction: 'cut',
+          ai_confidence: 'high',
+          ai_market_benchmarks: {
+            market_low_price: 80,
+            market_avg_price: 95,
+            market_high_price: 120,
+            positioning: 'overpriced',
+            perceived_tier: 'mid_market',
+          },
         },
       ],
       'openai'
@@ -578,6 +607,9 @@ describe('productsStepReadiness', () => {
     const tip = describePriceSuggestionTooltip(meta[metaKey], { base: 100 });
     expect(tip).toMatch(/AI chose a test range/);
     expect(tip).toMatch(/Product range: -12% to -8%/);
+    expect(tip).toMatch(/high confidence · cut direction/i);
+    expect(tip).toMatch(/expected-best change: -9\.0%/i);
+    expect(tip).toMatch(/market research range: 80\.00 \/ 95\.00 \/ 120\.00/i);
     expect(tip).toMatch(/guardrail/i);
   });
 
@@ -623,7 +655,7 @@ describe('productsStepReadiness', () => {
         hasProducts: true,
         suggested: false,
         hasArmPrices: false,
-        summary: 'Select products first, then re-suggest prices.',
+        summary: 'Select products first, then click Suggest.',
       }).body
     ).toMatch(/Select products first/);
     // No standing "set the band, then click Suggest" instruction before a run.
@@ -937,7 +969,7 @@ describe('variations still missing a test price', () => {
 });
 
 describe('resolveAiSuggestTargetArms', () => {
-  it('includes every AI variation in one suggest call', () => {
+  it('defaults to one AI variation when no active tab is supplied', () => {
     const variations = [
       { id: 'control' },
       { id: 'var_a' },
@@ -950,7 +982,7 @@ describe('resolveAiSuggestTargetArms', () => {
         var_b: { priceMode: 'ai' },
       },
     });
-    expect(arms.map(a => a.id)).toEqual(['var_a', 'var_b']);
+    expect(arms.map(a => a.id)).toEqual(['var_a']);
   });
 
   it('prices only AI arms when modes are mixed', () => {

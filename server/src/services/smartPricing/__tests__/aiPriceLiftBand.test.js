@@ -33,6 +33,13 @@ describe('AI price lift band', () => {
       60
     );
   });
+
+  it('preserves a recorded zero margin instead of replacing it with an assumption', () => {
+    assert.equal(
+      resolveSuggestionMarginPercent({ margin_percent: 0 }, { default_cogs_percent: 55 }),
+      0
+    );
+  });
 });
 
 /**

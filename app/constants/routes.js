@@ -1,23 +1,29 @@
+import { preserveEmbeddedSearch } from '../utils/shopifyEmbeddedSearch';
+
 /**
  * RipsPriceX routes — Classic Smart Pricing only (Shopify Admin main content).
  * Domain argument kept for Classic call-site compatibility; ignored in paths.
+ * Embed params on the current URL are copied so the next page stays inside Admin.
  */
+
+const embed = path => preserveEmbeddedSearch(path);
+
 export const ROUTES = {
   HOME: '/app',
-  appSmartPricing: (_domain) => '/app',
-  appSmartPricingCreate: (_domain) => '/app/experiments/new',
-  appSmartPricingWelcome: (_domain) => '/app',
+  appSmartPricing: (_domain) => embed('/app'),
+  appSmartPricingCreate: (_domain) => embed('/app/experiments/new'),
+  appSmartPricingWelcome: (_domain) => embed('/app'),
   appSmartPricingPlan: (_domain, planId) =>
-    `/app/experiments/${encodeURIComponent(planId)}`,
-  appTestDetail: (_domain, testId) => `/app/experiments/${encodeURIComponent(testId)}`,
-  appSettings: (_domain) => '/app/settings',
-  appSetup: (_domain) => '/app/setup',
+    embed(`/app/experiments/${encodeURIComponent(planId)}`),
+  appTestDetail: (_domain, testId) => embed(`/app/experiments/${encodeURIComponent(testId)}`),
+  appSettings: (_domain) => embed('/app/settings'),
+  appSetup: (_domain) => embed('/app/setup'),
   /** @deprecated Prefer appPlan — Billing folded into Settings → Plan */
-  appBilling: (_domain) => '/app/settings?tab=plan',
-  appPlan: (_domain) => '/app/settings?tab=plan',
+  appBilling: (_domain) => embed('/app/settings?tab=plan'),
+  appPlan: (_domain) => embed('/app/settings?tab=plan'),
   /** Shopify App Pricing welcome URL target (Partner Dashboard) */
-  appWelcome: (_domain) => '/app/welcome',
-  appHelp: (_domain) => '/app/help',
+  appWelcome: (_domain) => embed('/app/welcome'),
+  appHelp: (_domain) => embed('/app/help'),
 };
 
 export default ROUTES;

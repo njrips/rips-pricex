@@ -99,7 +99,11 @@ function generateCandidatePrices(currentPrice, bandPercent, count, guardrails = 
   const band = buildGuardrailBand(current, guardrails);
   const half = Number(bandPercent) / 100;
   const raw = [];
-  if (preset === 2) {
+  if (band.floor >= current) {
+    for (let index = 0; index < preset; index += 1) {
+      raw.push(current * (1 + (half * index) / Math.max(1, preset - 1)));
+    }
+  } else if (preset === 2) {
     raw.push(current * (1 - half), current);
   } else if (preset === 3) {
     raw.push(current * (1 - half), current, current * (1 + half));

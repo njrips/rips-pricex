@@ -167,6 +167,8 @@ export function spreadAiBandPriceEntries({
   max = 20,
   unit = 'percent',
   maxChangePct = 15,
+  minMarginPct = 35,
+  defaultCogsPct = 55,
 } = {}) {
   const entries = [];
   const arms = Array.isArray(targetArms) ? targetArms.filter(arm => arm?.id) : [];
@@ -181,7 +183,22 @@ export function spreadAiBandPriceEntries({
   rows.forEach(row => {
     const base = Number(row.current_price ?? row.price) || 0;
     const ceiling = base * (1 + maxChange / 100);
-    const floor = base * (1 - maxChange / 100);
+    const configuredMargin = Number(row.margin_percent);
+    const configuredCogs = Number(defaultCogsPct);
+    const currentMargin =
+      row.margin_percent !== null &&
+      row.margin_percent !== undefined &&
+      Number.isFinite(configuredMargin)
+        ? Math.max(0, Math.min(100, configuredMargin))
+        : Math.max(
+            0,
+            Math.min(100, 100 - (Number.isFinite(configuredCogs) ? configuredCogs : 55))
+          );
+    const minimumMargin = Math.max(0, Math.min(99, Number(minMarginPct) || 35));
+    const effectiveMargin = Math.min(minimumMargin, currentMargin);
+    const unitCost = base * (1 - currentMargin / 100);
+    const floorByMargin = unitCost / (1 - effectiveMargin / 100);
+    const floor = Math.max(base * (1 - maxChange / 100), Math.min(base, floorByMargin));
     const productBand =
       unit === 'amount'
         ? { min: safeMin, max: safeMax }
@@ -221,7 +238,7 @@ export function describeAiPriceCalculationTooltip({ unit = 'percent' } = {}) {
   if (unit === 'amount') {
     return 'Each suggested price starts in your min–max dollar band, is capped by max price change and minimum margin per product, then rounded to a normal price ending. Spacing follows traffic-aware rules so variations are far enough apart to learn.';
   }
-  return 'AI picks a test range per product from sales, margin, and traffic signals; variations are spaced for statistical power, then capped by your guardrails and rounded to realistic price endings. Hover ℹ on a price for the breakdown.';
+  return 'AI picks a test range per product from perceived value, market price position, sales, and revenue per visitor; variations are spaced for statistical power, then capped by your guardrails and rounded to realistic price endings. Hover ℹ on a price for the breakdown.';
 }
 
 export function describeAiBandDirectionTooltip(direction) {
@@ -229,7 +246,7 @@ export function describeAiBandDirectionTooltip(direction) {
     case 'down':
       return 'This band tests lower prices only.';
     case 'both':
-      return 'AI may suggest a cut or rise per product from sales, margin, and traffic.';
+      return 'AI may suggest a cut or rise per product from its market price position, sales, and traffic.';
     case 'up':
       return 'This band tests higher prices only.';
     default:
@@ -289,7 +306,7 @@ export function composeAiSuggestBanner({
   } else if (source === 'openai') {
     status = 'Prices applied (AI).';
   } else if (fallbackLine || source === 'deterministic') {
-    status = 'Prices applied (local spread).';
+    status = 'Prices applied (even spread across your band).';
   } else if (baseSummary) {
     status = shortenAiSuggestError(baseSummary);
   }
@@ -325,6 +342,30 @@ export function describePriceSuggestionTooltip(meta, { base: baseFallback = 0 } 
 
   if (meta.aiRationale) {
     parts.push(meta.aiRationale);
+  }
+  if (meta.aiConfidence || meta.aiDirection) {
+    const confidence = meta.aiConfidence ? `${meta.aiConfidence} confidence` : null;
+    const direction = meta.aiDirection ? `${meta.aiDirection} direction` : null;
+    parts.push([confidence, direction].filter(Boolean).join(' · '));
+  }
+  if (Number.isFinite(Number(meta.aiBestDeltaPercent))) {
+    const best = Number(meta.aiBestDeltaPercent);
+    parts.push(`AI expected-best change: ${best >= 0 ? '+' : ''}${best.toFixed(1)}%.`);
+  }
+  const market = meta.aiMarketBenchmarks;
+  if (market && typeof market === 'object') {
+    const low = Number(market.market_low_price);
+    const average = Number(market.market_avg_price);
+    const high = Number(market.market_high_price);
+    const prices = [low, average, high].filter(value => Number.isFinite(value) && value > 0);
+    if (prices.length) {
+      parts.push(`Market research range: ${prices.map(value => value.toFixed(2)).join(' / ')}.`);
+    }
+    const position = String(market.positioning || '').replace(/_/g, ' ');
+    const tier = String(market.perceived_tier || '').replace(/_/g, ' ');
+    if (position || tier) {
+      parts.push([position, tier].filter(Boolean).join(' · '));
+    }
   }
   if (meta.aiBand && Number.isFinite(meta.aiBand.lo) && Number.isFinite(meta.aiBand.hi)) {
     parts.push(
@@ -396,6 +437,13 @@ export function metaFromPriceSuggestions(suggestions = [], pricingSource = 'dete
       aiRationale: item.ai_rationale ? String(item.ai_rationale).slice(0, 160) : null,
       aiDirection: item.ai_direction || null,
       aiConfidence: item.ai_confidence || null,
+      aiBestDeltaPercent: Number.isFinite(Number(item.ai_best_delta_percent))
+        ? Number(item.ai_best_delta_percent)
+        : null,
+      aiMarketBenchmarks:
+        item.ai_market_benchmarks && typeof item.ai_market_benchmarks === 'object'
+          ? item.ai_market_benchmarks
+          : null,
       bandSpan: null,
       unit: 'percent',
       shopMaxClamped: false,
@@ -427,8 +475,8 @@ export function applyPriceSuggestionsToOverrides(priceOverrides = {}, suggestion
 }
 
 /**
- * Test arms that receive one Suggest call. AI mode spaces every AI variation
- * together; bulk/manual stay per-tab.
+ * The one test arm that receives a Suggest result. All test arms are still
+ * sent as spread context, but only the variation on screen may be changed.
  */
 export function resolveAiSuggestTargetArms({
   variations = [],
@@ -451,7 +499,8 @@ export function resolveAiSuggestTargetArms({
     const mode = pricingByArm[arm.id]?.priceMode || defaultPriceMode;
     return mode === 'ai';
   });
-  return aiArms.length ? aiArms : testArms;
+  const first = aiArms[0] || testArms[0];
+  return first ? [first] : [];
 }
 
 /**
@@ -1203,7 +1252,7 @@ export function aiSuggestBlockedReason({
   if (!hasProducts) {
     return 'Select at least one product above — Suggest stays locked until you do.';
   }
-  if (!hasBand) return 'Enter a min and max above 0 — Suggest needs a valid band.';
+  if (!hasBand) return 'Enter a min and max (not both 0) — Suggest needs a valid band.';
   return '';
 }
 

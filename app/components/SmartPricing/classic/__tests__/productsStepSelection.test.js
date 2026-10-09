@@ -197,7 +197,7 @@ describe('products step selection area', () => {
     await renderPanel({ opportunities: rows, maxSelection: 10, pickMode: 'all' });
 
     expect(container.textContent).toMatch(/up to 10 products/i);
-    expect(container.textContent).toMatch(/takes the 10 with the best mix of traffic, margin and sales/i);
+    expect(container.textContent).toMatch(/takes the 10 with the best mix of traffic and sales/i);
     expect(container.textContent).toMatch(/leaves 2 out/i);
   });
 

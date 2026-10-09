@@ -3,13 +3,17 @@ const { asyncHandler } = require('../middleware/asyncHandler');
 const { requireShop } = require('../middleware/shopContext');
 const { getShopSession } = require('../models/shopSession');
 const shopifyService = require('../services/shopifyService');
+const { publicErrorMessage } = require('../utils/publicError');
 
 const router = express.Router();
 
 async function accessToken(req) {
-  if (req.shopifyAccessToken) return req.shopifyAccessToken;
+  const { resolveShopifyAdminToken } = require('../utils/shopifyAdminToken');
   const session = await getShopSession(req.shopDomain).catch(() => null);
-  return session?.access_token || process.env.SHOPIFY_ACCESS_TOKEN || '';
+  return resolveShopifyAdminToken({
+    requestToken: req.shopifyAccessToken,
+    sessionToken: session?.access_token,
+  });
 }
 
 router.get(
@@ -51,7 +55,11 @@ router.get(
         return res.json({ success: true, resources: collections, collections });
       }
     } catch (err) {
-      return res.status(502).json({ success: false, error: err.message, resources: [] });
+      return res.status(502).json({
+        success: false,
+        error: publicErrorMessage(err, 'Shopify request failed'),
+        resources: [],
+      });
     }
     return res.json({ success: true, resources: [], collections: [] });
   })
@@ -73,7 +81,7 @@ router.get(
           : await shopifyService.getProduct(req.shopDomain, token, productId);
       return res.json({ success: true, product });
     } catch (err) {
-      return res.status(502).json({ error: err.message });
+      return res.status(502).json({ error: publicErrorMessage(err, 'Shopify request failed') });
     }
   })
 );

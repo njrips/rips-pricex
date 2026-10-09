@@ -23,7 +23,7 @@ const CHECKING = {
 };
 
 const NEEDS_INSTALL =
-  'Use Check and install on Store setup to add dynamic cart prices for price tests';
+  'Click Refresh status on Store setup to install dynamic cart prices for price tests';
 
 /** What the status payload means for the merchant, as a complete state. */
 function describeStatus(data) {
@@ -41,7 +41,7 @@ function describeStatus(data) {
   if (flag === false) {
     return {
       status: hasFunction
-        ? 'Dynamic cart prices found — click Check and install on Store setup'
+        ? 'Dynamic cart prices found — click Refresh status on Store setup'
         : NEEDS_INSTALL,
       installed: false,
       verified: true,
@@ -52,7 +52,7 @@ function describeStatus(data) {
   // Install check was inconclusive (null).
   return {
     status: hasFunction
-      ? 'Dynamic cart prices found — could not verify install; click Check and install'
+      ? 'Dynamic cart prices found — could not verify the install; click Refresh status'
       : NEEDS_INSTALL,
     installed: false,
     verified: false,
@@ -135,7 +135,7 @@ export default function useCartTransformStatus(shopDomain, { enabled = true } = 
     } catch (e) {
       setState(prev => ({
         ...prev,
-        error: e?.response?.data?.error || e?.message || 'Check and install failed',
+        error: e?.response?.data?.error || e?.message || 'Could not refresh status. Try again.',
       }));
       return null;
     } finally {

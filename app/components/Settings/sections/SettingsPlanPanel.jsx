@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo } from 'react';
-import { Link, useNavigate } from 'react-router';
+import { Link, useNavigate, useSearchParams } from 'react-router';
+import { withCurrentEmbeddedSearch } from '../../../utils/shopifyEmbeddedSearch';
 import { Badge, Banner, Button } from '@shopify/polaris';
 import { rpxApi } from '../../../lib/api.client';
 import { useUpgradeRedirect } from '../../../lib/useUpgradeRedirect';
@@ -8,6 +9,7 @@ import {
   describeSmartPricingLaunchReadiness,
   unwrapCheckoutReadiness,
 } from '../../../utils/checkoutReadinessClient';
+import TooltipWrapper from '../../shared/TooltipWrapper';
 import styles from '../../SmartPricing/classic/SmartPricingClassic.module.css';
 
 // Returns a patch rather than a whole state so a failed reload keeps whatever
@@ -127,6 +129,7 @@ export function usePlanBillingState(ctx, { enabled = true } = {}) {
  */
 export default function SettingsPlanPanel({ ctx, planState }) {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const {
     loading,
     loadError,
@@ -136,6 +139,7 @@ export default function SettingsPlanPanel({ ctx, planState }) {
     checkoutReady,
     priceReady,
     offerReady,
+    launchSummary,
     unlocked,
     upgrade,
     refresh,
@@ -153,8 +157,11 @@ export default function SettingsPlanPanel({ ctx, planState }) {
         >
           <p>
             {unlocked
-              ? 'Your plan is active. You can create and run price and offer tests.'
-              : 'Subscriptions are managed by Shopify App Pricing. Plan selection opens outside the app iframe; status lives here under Settings.'}
+              ? priceReady && offerReady
+                ? 'Your plan is active. You can create and run price and offer tests.'
+                : launchSummary.detail ||
+                  'Your plan is active. You can create and run price and offer tests.'
+              : 'Plans are billed through Shopify. Choosing a plan opens Shopify\u2019s plan page; your plan status shows here.'}
           </p>
         </Banner>
       </div>
@@ -171,9 +178,11 @@ export default function SettingsPlanPanel({ ctx, planState }) {
           </div>
           <p className={styles.adminRowBody}>
             Plan: <strong>{loading ? '…' : planHandle}</strong>
-            {!loading && remote?.status ? ` · ${remote.status}` : ''}
+            {!loading && remote?.status ? ` – ${remote.status}` : ''}
           </p>
-          <p className={styles.adminRowBody}>Shop: {ctx.shop}</p>
+          <p className={styles.adminRowBody}>
+            <strong>Shop:</strong> {ctx.shop}
+          </p>
           {(ctx.devEntitleAll || planHandle === 'dev_entitle_all') && (
             <p className={styles.help}>
               <code>RIPSPRICEX_DEV_ENTITLE_ALL</code> is on for local pilot — Create can unlock
@@ -189,7 +198,9 @@ export default function SettingsPlanPanel({ ctx, planState }) {
             <Button variant="primary" onClick={upgrade} disabled={!canOpenPricing}>
               {planCtaLabel}
             </Button>
-            <Button onClick={() => void refresh()}>Refresh status</Button>
+            <TooltipWrapper content="Check your plan status again.">
+              <Button onClick={() => void refresh()}>Refresh status</Button>
+            </TooltipWrapper>
           </div>
         </div>
 
@@ -197,25 +208,26 @@ export default function SettingsPlanPanel({ ctx, planState }) {
           <div className={styles.adminRowHead}>
             <p className={styles.adminRowTitle}>What your plan includes</p>
             <Badge tone={unlocked ? 'success' : entitled ? undefined : 'warning'}>
-              {unlocked ? 'Unlocked' : entitled ? 'Plan ok · setup pending' : 'Locked'}
+              {unlocked ? 'Unlocked' : entitled ? 'Setup pending' : 'Locked'}
             </Badge>
           </div>
           <p className={styles.adminRowBody}>• Create and run price tests</p>
           <p className={styles.adminRowBody}>• Create and run offer tests</p>
           <p className={styles.adminRowBody}>• Track revenue per visitor and test confidence</p>
           <p className={styles.adminRowBody}>
-            After upgrading, complete <Link to="/app/setup">Store setup</Link>. Offer tests need
+            After upgrading, complete{' '}
+            <Link to={withCurrentEmbeddedSearch(searchParams, '/app/setup')}>Store setup</Link>.
+            Offer tests need
             Checkout pricing functions; price tests also need Theme connection and price locations.
-            Checkout
-            readiness:{' '}
+            Store setup:{' '}
             <strong>
               {loading
                 ? '…'
                 : checkoutReady === true
                   ? offerReady && !priceReady
-                    ? 'offer ready'
+                    ? 'offer tests ready'
                     : priceReady && !offerReady
-                      ? 'price ready'
+                      ? 'price tests ready'
                       : 'ready'
                   : checkoutReady === false
                     ? 'needs attention'
@@ -225,11 +237,16 @@ export default function SettingsPlanPanel({ ctx, planState }) {
           </p>
           <div className={styles.adminRowActions}>
             {unlocked ? (
-              <Button variant="primary" onClick={() => navigate('/app/experiments/new')}>
+              <Button
+                variant="primary"
+                onClick={() => navigate(withCurrentEmbeddedSearch(searchParams, '/app/experiments/new'))}
+              >
                 New test
               </Button>
             ) : null}
-            <Button onClick={() => navigate('/app/setup')}>Open setup checklist</Button>
+            <Button onClick={() => navigate(withCurrentEmbeddedSearch(searchParams, '/app/setup'))}>
+              Open setup checklist
+            </Button>
           </div>
         </div>
       </div>

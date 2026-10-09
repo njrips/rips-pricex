@@ -31,9 +31,9 @@ export default function ClassicApplyAllReadyConfirmModal({
     <Modal
       open
       onClose={onClose}
-      title={`Apply ${actionableCount} ready product${actionableCount === 1 ? '' : 's'}?`}
+      title={`Apply all ready winners (${actionableCount})?`}
       primaryAction={{
-        content: 'Apply them',
+        content: 'Apply winners',
         loading: applyingAll,
         onAction: () => {
           onClose?.();

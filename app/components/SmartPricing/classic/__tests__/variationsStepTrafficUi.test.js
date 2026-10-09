@@ -146,6 +146,45 @@ describe('variations step traffic controls', () => {
     expect(all.indexOf(allocation)).toBeLessThan(all.indexOf(splitBanner));
   });
 
+  it('uses the required allocation floor and whole-number fields', async () => {
+    const { onTrafficAllocationChange } = await renderPanel();
+
+    const allocation = container.querySelector('#classic-variations-allocation');
+    const allocationField = fieldByLabel('Traffic allocation percent');
+    expect(allocation.min).toBe('5');
+    expect(allocation.step).toBe('1');
+    expect(allocationField.inputMode).toBe('numeric');
+
+    await typeInto(allocationField, '33.8');
+    expect(onTrafficAllocationChange).toHaveBeenCalledWith(33);
+  });
+
+  it('shows the required split, control, and limit copy for price and offer tests', async () => {
+    const fourRows = [
+      { id: 'control', letter: null, role: 'Control', name: 'Control', traffic: 25 },
+      { id: 'var_a', letter: 'A', role: 'Variation A', name: 'Variation A', traffic: 25 },
+      { id: 'var_b', letter: 'B', role: 'Variation B', name: 'Variation B', traffic: 25 },
+      { id: 'var_c', letter: 'C', role: 'Variation C', name: 'Variation C', traffic: 25 },
+    ];
+    await renderPanel({ variations: fourRows, experimentType: 'offer_test' });
+
+    expect(container.textContent).toContain(
+      'Split test traffic between your current price (control) and up to 3 price variations.'
+    );
+    expect(container.textContent).toContain('Control – current price');
+    expect(container.textContent).toContain('Keeps your current catalog price.');
+    expect(container.textContent).toContain('Current price');
+    expect(container.textContent).toContain('Up to 3 price variations plus control.');
+    expect(container.textContent).toContain(
+      'If you pause a variation, its traffic is automatically redistributed to the remaining variations.'
+    );
+    expect(
+      [...container.querySelectorAll('button')].some(node =>
+        /Add variation/.test(node.textContent || '')
+      )
+    ).toBe(false);
+  });
+
   it('opens on an even split, with nothing left to resolve', async () => {
     await renderPanel();
     expect(fieldByLabel('Control traffic').value).toBe('50');

@@ -416,8 +416,12 @@ async function resolveAccessToken(shopDomain, accessToken) {
   if (token) {
     return token;
   }
+  const { resolveShopifyAdminToken } = require('../../utils/shopifyAdminToken');
   const session = await getShopSession(shopDomain);
-  return String(session?.access_token || process.env.SHOPIFY_ACCESS_TOKEN || '').trim();
+  return resolveShopifyAdminToken({
+    requestToken: accessToken,
+    sessionToken: session?.access_token,
+  });
 }
 
 async function loadCatalogOpportunities(shopDomain, accessToken, options = {}) {

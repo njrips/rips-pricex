@@ -420,14 +420,14 @@ async function ensureOfferCheckoutDiscount({
     }
     if (!status.function?.id) {
       const err = new Error(
-        'Checkout pricing functions are not available for this app. Open Store setup and use Check and install, or contact support.'
+        'Checkout pricing functions are not available for this app. Open Store setup and click Refresh status, or contact support.'
       );
       err.code = 'FUNCTION_MISSING';
       throw err;
     }
     if (status.lookup_status === 'scope_missing') {
       const err = new Error(
-        'This shop is missing checkout discount permissions. Re-open Priceify from Shopify Admin, then click Check and install on Store setup.'
+        'This shop is missing checkout discount permissions. Re-open Priceify from Shopify Admin, then click Refresh status on Store setup.'
       );
       err.code = 'SCOPE_MISSING';
       throw err;

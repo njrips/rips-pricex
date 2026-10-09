@@ -88,7 +88,25 @@ describe('Results settings panel', () => {
 
   it('keeps the one thing neither field can say alone — that they are a sequence', async () => {
     await render();
-    expect(text()).toContain('Sample size decides when analysis can start');
+    expect(text()).toContain(
+      'Sample size decides when analysis can start; confidence decides when Priceify may call a winner. Both apply to new tests from now on.'
+    );
+  });
+
+  it('uses the detailed-table helper copy and all three confidence options', async () => {
+    await render();
+    expect(text()).toContain('When Priceify can call a winner.');
+    expect(text()).toContain('How sure the maths must be before calling a winner.');
+    expect(text()).toContain(
+      'Visitors each variation must reach before results are calculated.'
+    );
+    expect(
+      Array.from(container.querySelectorAll('select option')).map(option => option.textContent)
+    ).toEqual([
+      '80% (faster, less strict)',
+      '90% (recommended)',
+      '95% (safer, more strict)',
+    ]);
   });
 
   it('offers each field a guide rather than a paragraph', async () => {

@@ -182,6 +182,13 @@ describe('the page is only the mapping table', () => {
     expect(buttonNamed('Dawn pack')).toBeFalsy();
   });
 
+  it('adds a location inline instead of opening an Add location dialog', async () => {
+    await render();
+    await addRow();
+    expect(surfaceSelects()).toHaveLength(1);
+    expect(container.querySelector('[role="dialog"]')).toBeFalsy();
+  });
+
   // The panel used to double as a wizard step, where it collapsed behind a
   // header carrying its own Pick PDP button. Settings is now its only caller,
   // and it is always open, so that header could not render.
@@ -196,7 +203,7 @@ describe('the page is only the mapping table', () => {
 
   it('says what to do when nothing is mapped yet', async () => {
     await render();
-    expect(text()).toContain('No selectors mapped yet');
+    expect(text()).toContain('No price locations yet');
     // The old copy pointed at coverage cards that no longer exist.
     expect(text()).not.toContain('smart pick card');
   });
@@ -213,10 +220,16 @@ describe('formatThemeDefaultsHeaderLabel', () => {
     ).toBe('Use theme defaults – Shop defaults active (1 selector found)');
   });
 
+  it('keeps the selector count when some price locations are missing', () => {
+    expect(
+      formatThemeDefaultsHeaderLabel({ label: '3 price locations missing', configuredShop: 2 })
+    ).toBe('Use theme defaults – Shop defaults active (2 selectors found)');
+  });
+
   it('keeps other registry labels on the same prefix', () => {
-    expect(formatThemeDefaultsHeaderLabel({ label: '3 mapping gaps', configuredShop: 2 })).toBe(
-      'Use theme defaults – 3 mapping gaps'
-    );
+    expect(
+      formatThemeDefaultsHeaderLabel({ label: 'No price locations yet', configuredShop: 0 })
+    ).toBe('Use theme defaults – No price locations yet');
   });
 });
 
@@ -269,7 +282,7 @@ describe('a row can name a specific page', () => {
       '/pages/black-friday'
     );
     await setValue(
-      inputs().find(node => node.placeholder === '.product__price'),
+      inputs().find(node => node.placeholder === 'CSS selector, e.g. .price-item--regular'),
       '.landing-price'
     );
     await click(buttonNamed('Save'));
@@ -323,7 +336,7 @@ describe('two rows are only duplicates when they mean the same thing', () => {
       await addRow();
       await setValue(surfaceSelects().at(-1), 'url');
       await setValue(boxes('/pages/black-friday').at(-1), page);
-      await setValue(boxes('.product__price').at(-1), '.landing-price');
+      await setValue(boxes('CSS selector, e.g. .price-item--regular').at(-1), '.landing-price');
     }
     expect(boxes('/pages/black-friday')).toHaveLength(2);
     expect(text()).not.toContain('Duplicate selector.');
@@ -335,7 +348,21 @@ describe('two rows are only duplicates when they mean the same thing', () => {
       await addRow();
       await setValue(surfaceSelects().at(-1), 'url');
       await setValue(boxes('/pages/black-friday').at(-1), '/pages/one');
-      await setValue(boxes('.product__price').at(-1), '.landing-price');
+      await setValue(boxes('CSS selector, e.g. .price-item--regular').at(-1), '.landing-price');
+    }
+    expect(text()).toContain('Duplicate selector.');
+  });
+
+  it('treats full and relative URLs for the same page as duplicates', async () => {
+    await render();
+    for (const page of ['/pages/one?campaign=a', 'https://example.com/pages/one#price']) {
+      await addRow();
+      await setValue(surfaceSelects().at(-1), 'url');
+      await setValue(boxes('/pages/black-friday').at(-1), page);
+      await setValue(
+        boxes('CSS selector, e.g. .price-item--regular').at(-1),
+        '.landing-price'
+      );
     }
     expect(text()).toContain('Duplicate selector.');
   });
@@ -365,7 +392,7 @@ describe('the actions column', () => {
   it('saves the switch state', async () => {
     await render();
     await addRow();
-    await setValue(boxes('.product__price')[0], '.price');
+    await setValue(boxes('CSS selector, e.g. .price-item--regular')[0], '.price');
     await click(switches()[0]);
     await click(buttonNamed('Save'));
     expect(savedBodies.at(-1).mappings[0].enabled).toBe(false);
@@ -382,7 +409,7 @@ describe('the actions column', () => {
       { surface: 'collection', role: 'regular', selector: '.third' },
     ];
     await render();
-    const selectorValues = () => boxes('.product__price').map(node => node.value);
+    const selectorValues = () => boxes('CSS selector, e.g. .price-item--regular').map(node => node.value);
     expect(selectorValues()).toEqual(['.first', '.second', '.third']);
 
     await click(buttonLabelled(/^Remove row 2$/));
@@ -449,7 +476,7 @@ describe('saving', () => {
   it('holds the button in a loading state, then confirms over the page', async () => {
     await render();
     await addRow();
-    await setValue(boxes('.product__price')[0], '.price');
+    await setValue(boxes('CSS selector, e.g. .price-item--regular')[0], '.price');
     vi.useFakeTimers();
     try {
       await act(async () => {
@@ -485,7 +512,7 @@ describe('saving', () => {
       { surface: 'cart', role: 'regular', selector: '.third' },
     ];
     await render();
-    const selectorValues = () => boxes('.product__price').map(node => node.value);
+    const selectorValues = () => boxes('CSS selector, e.g. .price-item--regular').map(node => node.value);
     expect(selectorValues()).toEqual(['.first', '.second', '.third']);
 
     await click(buttonLabelled(/^Remove row 1$/));
@@ -520,7 +547,7 @@ describe('saving', () => {
     await click(switches()[0]);
 
     // Editing what an ignored row would paint is editing nothing.
-    expect(boxes('.product__price')[0].disabled).toBe(true);
+    expect(boxes('CSS selector, e.g. .price-item--regular')[0].disabled).toBe(true);
     expect(surfaceSelects()[0].disabled).toBe(true);
     // A disabled Pick has to say why, not just go grey.
     const offPick = buttonLabelled(/^Pick unavailable: Turn this row on/);
@@ -532,7 +559,7 @@ describe('saving', () => {
     expect(isDisabled(buttonLabelled(/^Remove row 1$/))).toBe(false);
 
     // And it really is only that row.
-    expect(boxes('.product__price')[1].disabled).toBe(false);
+    expect(boxes('CSS selector, e.g. .price-item--regular')[1].disabled).toBe(false);
     expect(surfaceSelects()[1].disabled).toBe(false);
   });
 
@@ -544,7 +571,7 @@ describe('saving', () => {
     await render();
     await click(switches()[0]);
     await click(buttonLabelled(/^Remove row 1$/));
-    expect(boxes('.product__price').map(node => node.value)).toEqual(['.second']);
+    expect(boxes('CSS selector, e.g. .price-item--regular').map(node => node.value)).toEqual(['.second']);
   });
 
   it('saves a switched-off row as off rather than dropping it', async () => {
@@ -581,16 +608,24 @@ describe('saving', () => {
     expect(savedBodies[0]?.mappings?.some(row => row.selector === '.price-item--regular')).toBe(
       true
     );
-    expect(text()).toMatch(/Theme prices mapped|verified price location|Auto-detect selectors saved/i);
+    expect(text()).toMatch(/Theme prices mapped|verified price location|Detected prices saved/i);
   });
 
   it('reports a bad URL row instead of saving it', async () => {
     await render();
     await addRow();
     await setValue(surfaceSelects()[0], 'url');
-    await setValue(boxes('.product__price')[0], '.price');
+    await setValue(boxes('CSS selector, e.g. .price-item--regular')[0], '.price');
     await click(buttonNamed('Save'));
     expect(savedBodies).toHaveLength(0);
     expect(text()).toMatch(/Row 1:/);
+  });
+
+  it('reports an unfinished inline row instead of silently dropping it', async () => {
+    await render();
+    await addRow();
+    await click(buttonNamed('Save'));
+    expect(savedBodies).toHaveLength(0);
+    expect(text()).toMatch(/Row 1: add a theme selector/i);
   });
 });

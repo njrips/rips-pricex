@@ -45,6 +45,7 @@ vi.mock('../../../../services', () => ({
 }));
 
 const inboxPlans = { current: [] };
+const hydrateInboxFromServer = vi.fn(async () => null);
 
 vi.mock('../../smartPricingConstants', () => ({
   readInboxPlans: vi.fn(() => inboxPlans.current),
@@ -56,7 +57,7 @@ vi.mock('../../smartPricingConstants', () => ({
 }));
 
 vi.mock('../../smartPricingInboxPersistence', () => ({
-  hydrateInboxFromServer: vi.fn(async () => null),
+  hydrateInboxFromServer: (...args) => hydrateInboxFromServer(...args),
   schedulePersistInboxPlans: vi.fn(),
   persistInboxPlansNow: vi.fn(async () => ({})),
   deletePersistedInboxPlan: vi.fn(async () => ({ ok: true })),
@@ -90,6 +91,7 @@ beforeEach(async () => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   localStorage.clear();
   vi.clearAllMocks();
+  hydrateInboxFromServer.mockResolvedValue(null);
   inboxPlans.current = [];
   serverDrafts.current = [];
   currentPath = '';
@@ -152,6 +154,42 @@ const draft = (over = {}) => ({
  * Drafts tab underneath said the merchant had none.
  */
 describe('unfinished drafts in the experiments list', () => {
+  it('renders the detailed dashboard labels in their specified order', async () => {
+    await renderList();
+
+    const filterLabels = Array.from(container.querySelectorAll('[role="tab"]')).map(node =>
+      (node.textContent || '').trim()
+    );
+    const headers = Array.from(container.querySelectorAll('thead th')).map(node =>
+      (node.textContent || '').trim()
+    );
+
+    expect(filterLabels).toEqual(['All', 'Running', 'Drafts', 'Paused', 'Finished']);
+    expect(headers).toEqual([
+      'Test',
+      'Status',
+      'Primary metric',
+      'Visitors',
+      'Lift',
+      'Confidence',
+      'Actions',
+    ]);
+    expect(container.textContent).toContain('Run price and offer tests to grow revenue per visitor.');
+    expect(container.textContent).toContain('Launch price tests in minutes.');
+    expect(container.textContent).toContain('Running tests');
+    expect(container.textContent).toContain('Visitors this month');
+    expect(container.textContent).toContain('Winning tests');
+  });
+
+  it('shows a failed server load instead of silently presenting it as empty', async () => {
+    hydrateInboxFromServer.mockRejectedValue(new Error('Could not load tests.'));
+
+    await renderList();
+
+    expect(container.textContent).toContain('Could not load tests.');
+    expect(container.textContent).toContain('No tests yet.');
+  });
+
   it('lists a named draft that has no products yet', async () => {
     serverDrafts.current = [draft()];
     await renderList();

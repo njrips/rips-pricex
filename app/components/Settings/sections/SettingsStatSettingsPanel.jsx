@@ -6,7 +6,7 @@ import styles from '../../SmartPricing/classic/SmartPricingClassic.module.css';
  * The two settings that decide when a test may be called.
  *
  * Confidence sits first even though the sample floor acts first, because
- * confidence is the one merchants come here to change — two options, a real
+ * confidence is the one merchants come here to change — three options, a real
  * trade-off — while the sample floor is a number most shops set once. The note
  * under both fields carries the ordering that the layout no longer implies.
  *
@@ -88,8 +88,8 @@ export default function SettingsStatSettingsPanel({
       </div>
 
       <p className={styles.help}>
-        Sample size decides when analysis can start; confidence decides when a winner can be
-        called. Both apply to every new test you launch.
+        Sample size decides when analysis can start; confidence decides when Priceify may call a
+        winner. Both apply to new tests from now on.
       </p>
     </div>
   );

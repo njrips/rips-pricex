@@ -100,6 +100,32 @@ describe('batchService', () => {
     expect(batch.plans[0].scenario_preset).toBe('conservative');
   });
 
+  it('carries the configured 80% confidence into new plans', async () => {
+    getShopSmartPricingGuardrails.mockResolvedValue({
+      default_cogs_percent: 55,
+      min_margin_percent: 35,
+      max_price_change_percent: 15,
+      confidence_level: 80,
+    });
+    getOpportunityByVariantId.mockResolvedValue({
+      product_id: 'gid://shopify/Product/101',
+      variant_id: 'gid://shopify/ProductVariant/1001',
+      title: 'Sample SKU',
+      current_price: 59,
+      currency: 'USD',
+      daily_visitors: 120,
+      baseline_conversion_rate: 0.02,
+    });
+
+    const batch = await createBatchFromSelection({
+      shopDomain: 'demo.myshopify.com',
+      variantIds: ['gid://shopify/ProductVariant/1001'],
+    });
+
+    expect(batch.plans[0].statistical_design.confidence_level).toBe(80);
+    expect(batch.plans[0].goal.significance_level).toBe(0.8);
+  });
+
   it('reports missing variant ids', async () => {
     getOpportunityByVariantId.mockResolvedValue(null);
     const batch = await createBatchFromSelection({

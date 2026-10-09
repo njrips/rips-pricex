@@ -700,11 +700,12 @@ async function buildFollowUpPlan({
   const shopConf = Number(guardrails.confidence_level);
   const shopPower = Number(guardrails.statistical_power);
   const shopMin = Number(guardrails.min_sample_size_per_variation);
-  // Only 90 and 95 are offered, so anything else means the shop has no usable
-  // value and the round that just finished is the better guide.
-  const followUpConfidence = Number.isFinite(shopConf) && shopConf > 0
-    ? (shopConf === 95 ? 95 : 90)
-    : (Number(statsInput.confidence_level) === 95 ? 95 : 90);
+  const supportedConfidence = value => {
+    const confidence = Number(value);
+    return [80, 90, 95].includes(confidence) ? confidence : null;
+  };
+  const followUpConfidence =
+    supportedConfidence(shopConf) || supportedConfidence(statsInput.confidence_level) || 90;
 
   let rebuilt = buildSmartPricingTestPlan({
     shopDomain,

@@ -13,6 +13,10 @@ import {
   PUBLIC_NAMING_FORBIDDEN,
 } from '../landingContent.js';
 import { DOCS_FAQ, DOCS_NAV_CARDS, DOCS_SECTIONS } from '../docsContent.js';
+import {
+  HELP_FAQ_ITEMS,
+  HELP_GLOSSARY_TERMS,
+} from '../../../SmartPricing/classic/helpFaq.js';
 
 const publicRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const routesRoot = join(publicRoot, '..', '..', 'routes');
@@ -70,6 +74,14 @@ describe('public naming (Priceify global principles)', () => {
         ...(section.facts || []).map(f => `${f.label} ${f.value}`),
       ]),
       ...DOCS_FAQ.map(item => `${item.q} ${item.a}`),
+    ].join('\n');
+    expect(blob).not.toMatch(PUBLIC_NAMING_FORBIDDEN);
+  });
+
+  it('keeps in-app Help on client-facing test vocabulary', () => {
+    const blob = [
+      ...HELP_GLOSSARY_TERMS.map(item => `${item.term} ${item.definition}`),
+      ...HELP_FAQ_ITEMS.map(item => `${item.q} ${item.a}`),
     ].join('\n');
     expect(blob).not.toMatch(PUBLIC_NAMING_FORBIDDEN);
   });

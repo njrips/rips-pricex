@@ -202,13 +202,28 @@ app.use((err, _req, res, _next) => {
     });
   }
   const status = err.status || err.statusCode || 500;
+  const production = String(process.env.NODE_ENV || '').toLowerCase() === 'production';
   res.status(status).json({
-    error: err.message || 'Internal error',
-    details: err.errors || undefined,
+    error: production && status >= 500 ? 'Internal error' : err.message || 'Internal error',
+    details: production ? undefined : err.errors || undefined,
   });
 });
 
+function warnUnsafeProductionConfig() {
+  if (String(process.env.NODE_ENV || '').toLowerCase() !== 'production') return;
+  if (String(process.env.SHOPIFY_ACCESS_TOKEN || '').trim()) {
+    logger.error('SHOPIFY_ACCESS_TOKEN is set in production and will be ignored');
+  }
+  if (!String(process.env.SHOPIFY_API_SECRET || '').trim()) {
+    logger.error('SHOPIFY_API_SECRET is missing; admin sessions and app proxy signatures cannot be verified');
+  }
+  if (String(process.env.RIPSPRICEX_DEV_ENTITLE_ALL || '').trim().toLowerCase() === 'true') {
+    logger.error('RIPSPRICEX_DEV_ENTITLE_ALL is set in production and must stay false');
+  }
+}
+
 if (require.main === module) {
+  warnUnsafeProductionConfig();
   const { startBackgroundJobs } = require('./jobs/backgroundJobs');
   startBackgroundJobs();
   app.listen(PORT, () => {

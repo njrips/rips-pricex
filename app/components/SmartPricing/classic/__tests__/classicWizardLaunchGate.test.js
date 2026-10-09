@@ -66,13 +66,21 @@ const HELD =
 
 /** Exposes the gate props the footer button reads, plus the step body. */
 vi.mock('../ClassicWizardShell', () => ({
-  default: ({ stepIndex, continueDisabled, continueDisabledReason, onContinue, children }) =>
+  default: ({
+    stepIndex,
+    continueDisabled,
+    continueDisabledReason,
+    onContinue,
+    onSaveDraft,
+    children,
+  }) =>
     h(
       'div',
       null,
       h('span', { 'data-testid': 'step' }, String(stepIndex)),
       h('span', { 'data-testid': 'continue-disabled' }, String(continueDisabled)),
       h('span', { 'data-testid': 'continue-reason' }, continueDisabledReason || ''),
+      h('span', { 'data-testid': 'has-save-draft' }, String(Boolean(onSaveDraft))),
       h('button', { type: 'button', 'data-testid': 'continue', onClick: onContinue }, 'Continue'),
       children
     ),
@@ -214,6 +222,11 @@ describe('the Launch button', () => {
 });
 
 describe('the review page', () => {
+  it('has only Back to edit and Launch test as footer actions', async () => {
+    await renderAtReview({ id: 'exp_review_actions' });
+    expect(read('has-save-draft')).toBe('false');
+  });
+
   it('leaves a blocked launch to the reason beside the Launch button', async () => {
     await renderAtReview({
       id: 'exp_explains',

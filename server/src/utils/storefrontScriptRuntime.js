@@ -4,7 +4,7 @@
  */
 
 /** Bump when embedded runtime config or script contract changes. Keep ?v= in sync: extensions/ripspricex-theme/blocks/ripspricex-app-embed.liquid. */
-const SCRIPT_VERSION = '1.0.65';
+const SCRIPT_VERSION = '1.0.66';
 
 /**
  * DB/API may use "pricing"; storefront logic expects "price".
@@ -159,7 +159,7 @@ function getHeatmapCollectionRuntimeConfig() {
   const sampleRateRaw = Number.parseFloat(process.env.RIPX_HEATMAP_SAMPLE_RATE || '1');
   const sampleRate = Number.isFinite(sampleRateRaw) ? Math.min(1, Math.max(0, sampleRateRaw)) : 1;
   return {
-    enabled: process.env.RIPX_HEATMAP_COLLECTION_ENABLED !== 'false',
+    enabled: process.env.RIPX_HEATMAP_COLLECTION_ENABLED === 'true',
     sampleRate,
   };
 }
@@ -221,10 +221,6 @@ function buildStorefrontRuntimeConfig(
   const appUrl = resolvePublicAppUrl(req);
   const shopMappings = normalizePriceSurfaceMappings(priceSurfaceRegistry.shopMappings);
   const runtimeSource = String(options.runtimeSource || 'unknown').trim() || 'unknown';
-  const globalCustomAssets =
-    options.globalCustomAssets && typeof options.globalCustomAssets === 'object'
-      ? options.globalCustomAssets
-      : null;
 
   return {
     apiUrl: `${appUrl}/api`,
@@ -243,16 +239,19 @@ function buildStorefrontRuntimeConfig(
       version: 1,
       shopMappings,
     },
-    ...(globalCustomAssets ? { globalCustomAssets } : {}),
   };
 }
 
 /**
  * Cache-Control for script responses that embed activeTests.
  * Use RIPX_SCRIPT_CACHE_MAX_AGE (seconds, 0–3600). Default 120. Never immutable — stale cache hides new/updated tests.
+ * @param {{ hasGlobalCustomAssets?: boolean }} [options]
  * @returns {string}
  */
-function getStorefrontScriptCacheControl() {
+function getStorefrontScriptCacheControl(options = {}) {
+  if (options.hasGlobalCustomAssets === true) {
+    return 'public, max-age=0, must-revalidate';
+  }
   const parsed = parseInt(process.env.RIPX_SCRIPT_CACHE_MAX_AGE, 10);
   let maxAge = Number.isFinite(parsed) && parsed >= 0 ? parsed : 120;
   maxAge = Math.min(maxAge, 3600);

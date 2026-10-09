@@ -42,9 +42,20 @@ describe('classicRevenueGuardrailOverview', () => {
   });
 
   it('formats stop copy without undefined percentages', () => {
-    expect(formatGuardrailStopMessage({})).toMatch(/Traffic assignment stopped/);
+    expect(formatGuardrailStopMessage({})).toMatch(
+      /Traffic assignment stopped for the affected product; other products keep running/
+    );
     expect(formatGuardrailStopMessage({ observed_drop_percent: 11, threshold_percent: 10 })).toBe(
-      'Revenue per visitor dropped 11.0% vs control (limit 10%). Traffic assignment stopped.'
+      'Revenue per visitor dropped 11.0% vs control (limit 10%). Traffic assignment stopped for the affected product; other products keep running.'
+    );
+    expect(
+      formatGuardrailStopMessage({
+        product_title: 'Gift Card',
+        observed_drop_percent: 11,
+        threshold_percent: 10,
+      })
+    ).toContain(
+      'Traffic assignment stopped for “Gift Card”; other products keep running.'
     );
   });
 

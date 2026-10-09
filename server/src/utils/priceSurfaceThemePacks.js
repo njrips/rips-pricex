@@ -1,6 +1,7 @@
 /**
  * Theme pack selector templates for shop-level price surface mapping assist.
- * Keep in sync with frontend/src/utils/priceSurfaceThemePacks.js
+ * This server module is the source of truth. The retired frontend mirror was
+ * removed because the browser never imported it.
  */
 
 const { normalizePriceSurfaceMappings } = require('./priceSurfaceRegistry');

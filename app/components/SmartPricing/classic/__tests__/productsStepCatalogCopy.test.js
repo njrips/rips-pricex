@@ -55,7 +55,7 @@ describe('productsStepCatalogCopy', () => {
         withheldCount: 15,
       })
     ).toBe(
-      '299 active products in your store · 282 available to add · 15 in other tests · 2 can’t be tested (gift cards or no price)'
+      '299 active products in your store · 282 available to add · 15 in other tests · 2 can’t be tested (unpublished, sold out, gift cards, or no price)'
     );
   });
 

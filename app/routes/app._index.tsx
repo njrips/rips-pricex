@@ -1,6 +1,7 @@
 import { useEffect, useMemo } from 'react';
 import { TitleBar } from '@shopify/app-bridge-react';
 import { useNavigate, useOutletContext } from 'react-router';
+import { preserveEmbeddedSearch } from '../utils/shopifyEmbeddedSearch';
 import { Banner, Box } from '@shopify/polaris';
 import ClassicExperimentsList from '../components/SmartPricing/classic/ClassicExperimentsList';
 import { useKeyedState } from '../hooks/useKeyedState';
@@ -59,12 +60,12 @@ export default function ExperimentsHome() {
             tone="warning"
             title="Create is locked"
             action={{
-              content: 'Open setup',
-              onAction: () => navigate('/app/setup'),
+              content: 'View plans',
+              onAction: upgrade,
             }}
-            secondaryAction={{ content: 'View plans', onAction: upgrade }}
+            secondaryAction={{ content: 'Open setup', onAction: () => navigate(preserveEmbeddedSearch('/app/setup')) }}
           >
-            <p>Finish setup to start your first test.</p>
+            <p>An active Priceify plan is required to create a test.</p>
           </Banner>
         </Box>
       ) : launchSummary.anyReady === false ? (
@@ -72,15 +73,14 @@ export default function ExperimentsHome() {
           <Banner
             tone="warning"
             title="Finish store setup before launch"
-            action={{ content: 'Open Store setup', onAction: () => navigate('/app/setup') }}
+            action={{ content: 'Open setup', onAction: () => navigate(preserveEmbeddedSearch('/app/setup')) }}
             secondaryAction={{
               content: 'Price locations',
-              onAction: () => navigate('/app/settings?tab=price-surfaces&automap=1'),
+              onAction: () => navigate(preserveEmbeddedSearch('/app/settings?tab=price-surfaces&automap=1')),
             }}
           >
             <p>
-              {launchSummary.detail ||
-                'Offer tests need Checkout pricing functions. Price tests also need Theme connection and price locations.'}
+              Offer tests need Checkout pricing functions. Price tests also need Theme connection and price locations.
             </p>
           </Banner>
         </Box>
@@ -89,15 +89,15 @@ export default function ExperimentsHome() {
           <Banner
             tone="info"
             title="Offer tests can launch"
-            action={{ content: 'Open Store setup', onAction: () => navigate('/app/setup') }}
+            action={{ content: 'Open setup', onAction: () => navigate(preserveEmbeddedSearch('/app/setup')) }}
             secondaryAction={{
               content: 'Price locations',
-              onAction: () => navigate('/app/settings?tab=price-surfaces&automap=1'),
+              onAction: () => navigate(preserveEmbeddedSearch('/app/settings?tab=price-surfaces&automap=1')),
             }}
           >
             <p>
               {launchSummary.detail ||
-                'Price tests still need Checkout pricing functions and price locations. Offer tests apply at checkout and do not wait on those steps.'}
+                'Price tests still need Checkout pricing functions and price locations. Offer tests can launch: they apply at checkout and do not need price locations.'}
             </p>
           </Banner>
         </Box>

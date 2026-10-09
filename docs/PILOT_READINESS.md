@@ -4,7 +4,7 @@ Further research tracks for pilot blockers: [research/05_FURTHER_RESEARCH_ROADMA
 
 ## Health
 
-- `GET /health` → `{ ok: true, service: "ripspricex-api" }`
+- `GET /health` → `{ ok: true, service: "priceify-api" }`
 - `npm run accept` — entitlement lock/unlock, inbox CRUD, uninstall pause policy
 
 ## Logs to watch

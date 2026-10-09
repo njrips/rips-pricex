@@ -7,6 +7,7 @@ const abTestEngine = require('../abTestEngine');
 const { syncSmartPricingInboxForTest } = require('./smartPricingInboxStopSyncService');
 const {
   MIN_VISITORS_FOR_REVENUE_GUARDRAIL,
+  MIN_CONVERSIONS_FOR_REVENUE_GUARDRAIL,
   evaluateRevenueDrop,
 } = require('./smartPricingRevenueGuardrail');
 
@@ -109,7 +110,14 @@ async function enforceRevenueDropGuardrail({ shopDomain, test, analytics } = {})
   const verdict = evaluateRevenueDrop({
     variants,
     thresholdPercent: threshold,
-    minVisitors: Number(config.min_visitors_per_variant) || MIN_VISITORS_FOR_REVENUE_GUARDRAIL,
+    minVisitors: Math.max(
+      MIN_VISITORS_FOR_REVENUE_GUARDRAIL,
+      Number(config.min_visitors_per_variant) || 0
+    ),
+    minConversions: Math.max(
+      MIN_CONVERSIONS_FOR_REVENUE_GUARDRAIL,
+      Number(config.min_conversions_per_variant) || 0
+    ),
   });
 
   if (!verdict.ready || !verdict.breached) {

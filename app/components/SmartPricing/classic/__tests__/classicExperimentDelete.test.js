@@ -139,7 +139,7 @@ describe('classicExperimentDelete', () => {
   });
 
   it('mentions linked tests in the confirm message', () => {
-    expect(buildClassicExperimentDeleteConfirmMessage(experiment)).toContain('2 linked Priceify tests');
+    expect(buildClassicExperimentDeleteConfirmMessage(experiment)).toContain('Also deletes results for 2 products.');
   });
 
   it('deletes inbox plans locally, on server, and linked tests', async () => {

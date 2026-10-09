@@ -1,1 +1,1 @@
-module.exports = { tenantExists: async () => true, getTenantByDomain: async () => null };
+module.exports = { getTenantByDomain: async () => null };

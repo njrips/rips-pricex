@@ -4,6 +4,7 @@ import { Badge, Button, Modal } from '@shopify/polaris';
 import PageShell from '../../shared/PageShell';
 import ClassicPageLoader from '../../shared/ClassicPageLoader';
 import { ROUTES } from '../../../constants';
+import { preserveEmbeddedSearch } from '../../../utils/shopifyEmbeddedSearch';
 import { apiPost } from '../../../services';
 import useClassicShopDomain from '../../../hooks/useClassicShopDomain';
 import { useClassicExperimentDetails } from '../../../hooks/useClassicExperimentDetails';
@@ -44,6 +45,7 @@ import {
   resolveAudienceHistoryActivityTitle,
 } from './classicAudienceEdit';
 import { enrichExperimentsWithListAnalytics } from './classicExperimentListAnalytics';
+import { formatDetailDate } from './classicExperimentDetailsHelpers';
 import { appendActivityToPlans, createActivityEntry } from './classicActivity';
 import {
   formatClassicStatusLabel,
@@ -447,7 +449,7 @@ export default function ClassicExperimentOverview() {
       await sleep(450);
       refresh({ quiet: true });
     } catch (err) {
-      showError(err, 'Could not apply the ready products.');
+      showError(err, 'Could not apply the ready winners.');
     } finally {
       setRolloutApplyingAll(false);
     }
@@ -704,7 +706,7 @@ export default function ClassicExperimentOverview() {
       );
       await replaceExperimentPlansLocal(archived);
       showSuccess('Test archived.');
-      navigate(`${ROUTES.appSmartPricing(shopDomain)}?tab=archived`);
+      navigate(preserveEmbeddedSearch('/app?tab=finished'));
     } catch (err) {
       showError(err, 'Could not archive test.');
     } finally {
@@ -827,13 +829,17 @@ export default function ClassicExperimentOverview() {
 
   const openAudienceMetricsEditor = focus => {
     if (!experimentPlans.length) {
-      showError(null, 'No plans to update.');
+      showError(null, 'No products to update.');
       return;
     }
     // 'guardrail' scrolls the modal to the revenue guardrail and retitles it.
     // Collapsing it to 'audience' dropped the caller on the segment fields with
     // no sign of the setting they clicked Edit on.
-    setEditFocus(focus === 'metrics' || focus === 'guardrail' ? focus : 'audience');
+    setEditFocus(
+      focus === 'metrics' || focus === 'guardrail' || focus === 'traffic'
+        ? focus
+        : 'audience'
+    );
     setEditSeed(audienceUiFromSummaries(audience, metrics, plan?.metadata?.audience_ui));
     setEditOpen(true);
   };
@@ -841,7 +847,7 @@ export default function ClassicExperimentOverview() {
   const handleSaveAudienceMetrics = async audienceState => {
     if (!canEditClassicAudienceMetrics(status) || editSaving) return;
     if (!experimentPlans.length) {
-      showError(null, 'No plans to update.');
+      showError(null, 'No products to update.');
       return;
     }
     const check = validateClassicAudienceUi(audienceState);
@@ -884,7 +890,7 @@ export default function ClassicExperimentOverview() {
       setEditOpen(false);
       showSuccess(
         isRunning
-          ? 'Audience and metrics saved on the plan. Live assignment stays as launched until you pause and relaunch.'
+          ? 'Audience and metrics saved. The live test keeps its launch targeting until you pause and relaunch.'
           : 'Audience and metrics updated.'
       );
     } catch (err) {
@@ -930,8 +936,8 @@ export default function ClassicExperimentOverview() {
               </Button>
             </div>
             <p className={styles.help}>
-              That plan is missing from the Priceify inbox. It may have been deleted, or this
-              browser is out of sync — try refreshing the tests list.
+              This test could not be found. It may have been deleted, or this browser is out of
+              sync — try refreshing the tests list.
             </p>
             <Button onClick={refresh}>Retry load</Button>
           </div>
@@ -973,19 +979,19 @@ export default function ClassicExperimentOverview() {
                 </p>
               ) : null}
               <div className={styles.overviewMeta}>
-                <span>Owner · {plan?.owner_name || plan?.created_by_name || 'You'}</span>
-                <span>Type · {isOfferTest ? 'Offer test' : 'Price test'}</span>
-                {plan?.created_at || test?.started_at || test?.created_at ? (
+                <span>Owner — {plan?.owner_name || plan?.created_by_name || 'You'}</span>
+                <span>Type — {isOfferTest ? 'Offer test' : 'Price test'}</span>
+                {test?.started_at || test?.startedAt || plan?.started_at ? (
                   <span>
-                    Started ·{' '}
-                    {String(test?.started_at || test?.created_at || plan?.created_at).slice(0, 10)}
+                    Started —{' '}
+                    {formatDetailDate(test?.started_at || test?.startedAt || plan?.started_at)}
                   </span>
                 ) : null}
               </div>
               {!isDraft && (isRunning || isPaused) && !canEditSetup ? (
                 <p className={styles.help} style={{ marginTop: 8 }}>
-                  After the minimum visitors per variation is reached, you can pause variations but
-                  not edit test settings.
+                  After the minimum visitors per variation is reached, you can{' '}
+                  {'pause variations but not edit test settings.'}
                 </p>
               ) : null}
             </div>
@@ -1216,9 +1222,7 @@ export default function ClassicExperimentOverview() {
               onEditMetrics={() => openAudienceMetricsEditor('guardrail')}
               onEditAudience={() => openAudienceMetricsEditor('audience')}
               onChangeMetric={() => openAudienceMetricsEditor('metrics')}
-              onAdjustTraffic={() =>
-                navigate(buildClassicWizardResumePath(resumeId, 'variations'))
-              }
+              onAdjustTraffic={() => openAudienceMetricsEditor('traffic')}
               onViewHistory={() => selectTab('History')}
               onViewTestsList={() => navigate(ROUTES.appSmartPricing(shopDomain))}
             />
@@ -1241,7 +1245,7 @@ export default function ClassicExperimentOverview() {
         }
         liveWarning={
           (isRunning || isPaused) && linkedTestIds.length
-            ? 'This updates the saved plan. The live test keeps launch targeting until you relaunch.'
+            ? 'This updates the saved test settings. The live test keeps its launch targeting until you relaunch.'
             : ''
         }
         saving={editSaving}

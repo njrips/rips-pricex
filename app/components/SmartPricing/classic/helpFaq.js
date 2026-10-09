@@ -30,12 +30,12 @@ export const HELP_GLOSSARY_TERMS = [
   {
     term: 'Revenue guardrail',
     definition:
-      'Per-test limit on revenue-per-visitor drop vs control, checked for each product on its own. After about 100 visitors per variation, Priceify stops testing a product if any of its variations falls more than your threshold below that product’s control. The other products keep running.',
+      'Per-test limit on revenue-per-visitor drop vs control, checked for each product on its own. After every variation reaches the test’s minimum visitors (at least 5,000) and 10 conversions, Priceify stops testing a product if any variation falls more than your threshold below that product’s control. The other products keep running.',
   },
   {
     term: 'Results settings',
     definition:
-      'Shop-wide confidence level and minimum visitors per variation (Settings → Results settings).',
+      'Shop-wide confidence level and minimum visitors per variation (App settings → Results settings).',
   },
   {
     term: 'Price locations',
@@ -51,7 +51,7 @@ export const HELP_GLOSSARY_TERMS = [
 export const HELP_FAQ_ITEMS = [
   {
     q: 'Checkout is not ready / Launch is blocked',
-    a: 'Open Store setup and work the checklist in order: complete Theme connection, install Checkout pricing functions (one button covers dynamic cart prices and checkout discounts), then map price locations under Settings → Price locations. Refresh status on Store setup when you change something. Offer tests need checkout discounts; price tests also need Checkout pricing functions and mapped price locations. Store setup reads your live theme, so a step already done shows as enabled rather than asking you to confirm it.',
+    a: 'Open Store setup and work the checklist in order: turn on Theme connection (Open theme settings, enable Priceify, Save, then Check again), click Refresh status under Checkout pricing functions (one button installs dynamic cart prices and checkout discounts), then click Auto-detect prices under Price locations on your site, or map them yourself under App settings → Price locations. Offer tests only need checkout discounts; price tests also need Theme connection, dynamic cart prices, and a mapped product-page price location. Store setup reads your live theme, so a step already done shows as enabled rather than asking you to confirm it.',
   },
   {
     q: 'Shoppers do not see the offer under the product price',
@@ -59,7 +59,7 @@ export const HELP_FAQ_ITEMS = [
   },
   {
     q: 'Preview, QR, or copy link is wrong',
-    a: 'Preview and Open land on the storefront product page (not an app URL). Each click clears the previous preview bucket for that browser, then keeps the new variation in session storage and a session cookie so theme navigation stays on that arm. Price tests keep the anti-flicker guard on the PDP. Offer tests show the sale cutout and the assigned message or offer amount under the product price. If either is missing, confirm Theme connection on Store setup and price locations in Settings, then retry Preview from the test Overview tab.',
+    a: 'Preview and Open land on the storefront product page (not an app URL). Each click clears the previous preview bucket for that browser, then keeps the new variation in session storage and a session cookie so theme navigation stays on that variation. Price tests keep the anti-flicker guard on the PDP. Offer tests show the sale cutout and the assigned message or offer amount under the product price. If either is missing, confirm Theme connection on Store setup and price locations in Settings, then retry Preview from the test Overview tab.',
   },
   {
     q: 'How does sample size and significance work?',
@@ -67,15 +67,15 @@ export const HELP_FAQ_ITEMS = [
   },
   {
     q: 'How does AI price Suggest work?',
-    a: 'On Products, AI suggested mode asks the AI for a range inside your min–max band for every product you selected, then places the test-variation prices across that range and clamps them to shop max price change and a cost-aware min-margin floor. Control stays at the catalog price. Variations are spread across the range rather than bunched together, because prices a point or two apart cannot be told apart at real store traffic. Every cell stays editable before launch. Open the info icon next to AI Price Suggestions for the full calculation.',
+    a: 'On Products & prices, choose AI suggested, set a min–max band, and click Suggest. Suggest prices only the variation whose tab is open: it asks the AI for a range inside that variation’s band for every product you selected, then places the test-variation prices across that range and clamps them to shop max price change and a cost-aware min-margin floor. Control stays at the catalog price. Variations are spread across the range rather than bunched together, because prices a point or two apart cannot be told apart at real store traffic. Every cell stays editable before launch. Open the info icon next to How would you like to set prices? for the full calculation.',
   },
   {
     q: 'What does Suggest send to the AI?',
-    a: 'Per product you selected: its title, product type, current price and currency, margin percent, units sold in the last 30 days, a revenue level (not the amount), product page visits per day, its opportunity score, its variant count, and Priceify’s own read on how hard it can be pushed. Plus how many variations you are testing, the min–max band you typed, the test metric, and your shop price safety limits (max price change and minimum margin). Nothing about a shopper is sent: no customer details, orders, or visitor records — the visit figure is only a daily count. Your shop domain and your Shopify product ids are not sent either, and nothing is stored or reused, so each click asks fresh. The reply is re-checked against your own catalog prices and limits before it becomes a price, so a suggestion cannot exceed your guardrails even if the model ignores them.',
+    a: 'Per product you selected: its title, description, vendor, product type, main image resized to at most 1024 pixels, current price and currency, units sold in the last 30 days, a revenue level (not the amount), product page visits and revenue per visitor, stock on hand, its opportunity score, its variant count, and Priceify’s labels for its price point and traffic. Plus how many variations you are testing, the min–max band you typed, the test metric, and your max price change. Product costs and margins are not sent; your minimum margin is applied by Priceify after the reply. Nothing about a shopper is sent: no customer details, orders, or visitor records — the visit figure is only a daily count. Your shop domain and your Shopify product ids are not sent either, and nothing is stored or reused, so each click asks fresh. The reply is re-checked against your own catalog prices and limits before it becomes a price, so a suggestion cannot exceed your guardrails even if the model ignores them.',
   },
   {
     q: 'The prices filled in but the banner says they are not from AI',
-    a: 'Suggest always fills the table, and says where the numbers came from. An even spread across your band is used instead of the model when the band is set in dollars (one flat cash uplift cannot be expressed as one percentage across products at different prices), when AI is unavailable or switched off, when the reply comes back unusable, and for any product past the first 40 in one request. If only some prices fell back, the banner says how many. Prices from the even spread respect the same guardrails and are just as launchable — you can edit any of them, or click Re-suggest to try again.',
+    a: 'Suggest always fills the table, and says where the numbers came from. An even spread across your band is used instead of the model when the band is set in dollars (one flat cash uplift cannot be expressed as one percentage across products at different prices), when AI is unavailable or switched off, when the reply comes back unusable, and for any product the AI still skips after being asked again or that is unanswered when the roughly 40-second time limit runs out. If only some prices fell back, the banner says how many. Prices from the even spread respect the same guardrails and are just as launchable — you can edit any of them, or click Re-suggest to try again.',
   },
   {
     q: 'I edited audience or metrics on a live test',
@@ -87,15 +87,15 @@ export const HELP_FAQ_ITEMS = [
   },
   {
     q: 'One product finished but the others have not — do I have to end the whole test?',
-    a: 'No. Every product in a test is its own measurement and finishes on its own schedule. On the Overview tab, Product performance by variation lists each product; use Apply winner on a row when it is ready, or Apply ready products when several are ready. Apply on a row writes that product’s price and stops only that product; Apply ready products does every finished one at once and leaves the rest running. Products where control won, or offer tests, finish without a catalog change. You are emailed once per product the first time it reaches a decision, and if automatic writes are on there is a review window — three days by default — before Priceify applies anything itself.',
+    a: 'No. Every product in a test is its own measurement and finishes on its own schedule. On the Overview tab, Product performance by variation lists each product; use Apply winner on a row when it is ready, or Apply all ready winners when several are ready. Apply on a row writes that product’s price and stops only that product; Apply all ready winners does every finished one at once and leaves the rest running. Products where control won, or offer tests, finish without a catalog change. You are emailed once per product the first time it reaches a decision, and if automatic writes are on there is a review window — three days by default — before Priceify applies anything itself.',
   },
   {
     q: 'Create is locked',
-    a: 'Finish setup to start your first test. Subscribe or confirm your Priceify plan under Settings → Plan & usage, then complete Store setup (Theme connection, Checkout pricing functions, and price locations).',
+    a: 'Create is locked only while the shop has no active Priceify plan. Choose a plan with View plans on the banner or under App settings → Plan & usage. Store setup does not lock Create: you can build and save tests while Theme connection, Checkout pricing functions, or price locations are unfinished — only Launch waits for them.',
   },
   {
     q: 'Where is the revenue guardrail?',
-    a: 'On each test — Audience & goals when you create it, and Settings on the test after launch. It is not in Results settings. Choose 3%–50% (default 10%); after about 100 visitors per variation, Priceify pauses if revenue per visitor drops further below control than your threshold. Max price change and margin limits are enforced on Products & prices, not here.',
+    a: 'On each test — Audience & goals when you create it, and Settings on the test after launch. It is not in Results settings. Choose 3%–50% (default 10%). It is checked product by product after every variation reaches the test’s minimum visitors (at least 5,000) and 10 conversions. Priceify then stops testing that product if any variation’s revenue per visitor falls more than your threshold below control. The other products keep running. Max price change and margin limits are enforced on Products & prices, not here.',
   },
   {
     q: 'How do I contact support?',

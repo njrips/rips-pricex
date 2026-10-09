@@ -10,7 +10,8 @@
 const DEFAULT_MAX_REVENUE_DROP_PERCENT = 10;
 const MIN_MAX_REVENUE_DROP_PERCENT = 3;
 const MAX_MAX_REVENUE_DROP_PERCENT = 50;
-const MIN_VISITORS_FOR_REVENUE_GUARDRAIL = 100;
+const MIN_VISITORS_FOR_REVENUE_GUARDRAIL = 5000;
+const MIN_CONVERSIONS_FOR_REVENUE_GUARDRAIL = 10;
 
 function clampMaxRevenueDropPercent(raw, fallback = DEFAULT_MAX_REVENUE_DROP_PERCENT) {
   const num = Number(raw);
@@ -57,12 +58,22 @@ function isRevenueGuardrailEnabled(plan = {}) {
 
 function buildRevenueDropGuardrailConfig(shopGuardrails = {}, plan = {}) {
   const maxDrop = resolveEffectiveMaxRevenueDropPercent(shopGuardrails, plan);
+  const configuredVisitors = Number(
+    plan.goal?.min_sample_size ??
+      plan.launch_preferences?.min_sample_size ??
+      plan.statistical_design?.min_sample_size
+  );
+  const minVisitors = Math.max(
+    MIN_VISITORS_FOR_REVENUE_GUARDRAIL,
+    Number.isFinite(configuredVisitors) ? configuredVisitors : 0
+  );
   return {
     enabled: isRevenueGuardrailEnabled(plan),
     auto_stop: true,
     metric: 'revenue_per_visitor',
     max_revenue_drop_percent: maxDrop,
-    min_visitors_per_variant: MIN_VISITORS_FOR_REVENUE_GUARDRAIL,
+    min_visitors_per_variant: minVisitors,
+    min_conversions_per_variant: MIN_CONVERSIONS_FOR_REVENUE_GUARDRAIL,
     action: 'pause',
   };
 }
@@ -93,6 +104,7 @@ function evaluateRevenueDrop({
   variants = [],
   thresholdPercent = DEFAULT_MAX_REVENUE_DROP_PERCENT,
   minVisitors = MIN_VISITORS_FOR_REVENUE_GUARDRAIL,
+  minConversions = MIN_CONVERSIONS_FOR_REVENUE_GUARDRAIL,
 } = {}) {
   const rows = Array.isArray(variants) ? variants : [];
   const threshold = clampMaxRevenueDropPercent(thresholdPercent);
@@ -104,7 +116,12 @@ function evaluateRevenueDrop({
   const control = rows[controlIndex];
   const controlRpv = variantRpv(control);
   const controlVisitors = Number(control.visitors) || 0;
-  if (!(controlRpv > 0) || controlVisitors < floor) {
+  const conversionFloor = Math.max(
+    1,
+    Number(minConversions) || MIN_CONVERSIONS_FOR_REVENUE_GUARDRAIL
+  );
+  const controlConversions = Number(control.conversions ?? control.orders) || 0;
+  if (!(controlRpv > 0) || controlVisitors < floor || controlConversions < conversionFloor) {
     return {
       ready: false,
       breached: false,
@@ -114,7 +131,9 @@ function evaluateRevenueDrop({
       // against: revenue never goes below zero, so no challenger can be down
       // on it. The guardrail is idle here by arithmetic, not for want of data.
       reason:
-        controlVisitors >= floor ? 'control_has_no_revenue_yet' : 'insufficient_control_sample',
+        controlVisitors >= floor && controlConversions >= conversionFloor
+          ? 'control_has_no_revenue_yet'
+          : 'insufficient_control_sample',
       threshold_percent: threshold,
       control_rpv: Number.isFinite(controlRpv) ? controlRpv : null,
       control_visitors: controlVisitors,
@@ -125,8 +144,9 @@ function evaluateRevenueDrop({
   rows.forEach((row, index) => {
     if (index === controlIndex || isControlVariant(row, index)) return;
     const visitors = Number(row.visitors) || 0;
+    const conversions = Number(row.conversions ?? row.orders) || 0;
     const rpv = variantRpv(row);
-    if (visitors < floor || !Number.isFinite(rpv)) return;
+    if (visitors < floor || conversions < conversionFloor || !Number.isFinite(rpv)) return;
     const drop = ((controlRpv - rpv) / controlRpv) * 100;
     if (!worst || drop > worst.observed_drop_percent) {
       worst = {
@@ -165,6 +185,7 @@ function evaluateRevenueDrop({
 module.exports = {
   DEFAULT_MAX_REVENUE_DROP_PERCENT,
   MIN_VISITORS_FOR_REVENUE_GUARDRAIL,
+  MIN_CONVERSIONS_FOR_REVENUE_GUARDRAIL,
   clampMaxRevenueDropPercent,
   parseRevenueDropThreshold,
   resolveEffectiveMaxRevenueDropPercent,

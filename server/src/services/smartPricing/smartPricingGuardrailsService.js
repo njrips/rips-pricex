@@ -128,26 +128,13 @@ function normalizeConfidenceLevel(raw, fallback = DEFAULT_GUARDRAILS.confidence_
   const n = Number(raw);
   if (!Number.isFinite(n) || n <= 0) return fallback;
   const pct = n > 0 && n < 1 ? Math.round(n * 100) : Math.round(n);
-  return pct === 95 ? 95 : 90;
-}
-
-function normalizeMdePercent(raw, fallback = DEFAULT_GUARDRAILS.mde_percent) {
-  return clampNumber(raw, 5, 20, fallback);
+  return [80, 90, 95].includes(pct) ? pct : fallback;
 }
 
 function normalizeMinSampleSize(raw, fallback = DEFAULT_GUARDRAILS.min_sample_size_per_variation) {
   const n = Number(raw);
   if (!Number.isFinite(n) || n < 1) return fallback;
   return Math.min(1000000, Math.round(n));
-}
-
-function normalizeMinConversions(
-  raw,
-  fallback = DEFAULT_GUARDRAILS.min_conversions_per_variation
-) {
-  // The lower bound is the normal-approximation floor enforced at decision
-  // time, so Settings cannot offer a value the analysis would override anyway.
-  return clampNumber(raw, ABSOLUTE_MIN_CONVERSIONS_PER_VARIATION, 2000, fallback);
 }
 
 function resolveShopStatisticalDefaults(guardrails = {}) {
@@ -244,14 +231,14 @@ function normalizeGuardrails(raw = {}) {
       source.confidence_level ?? source.confidenceLevel,
       DEFAULT_GUARDRAILS.confidence_level
     ),
-    statistical_power: Number(source.statistical_power ?? source.statisticalPower) === 90 ? 90 : 80,
-    mde_percent: normalizeMdePercent(source.mde_percent ?? source.mdePercent),
+    // These are not merchant-facing settings. Keep one documented policy
+    // instead of silently carrying legacy hidden values into new tests.
+    statistical_power: DEFAULT_GUARDRAILS.statistical_power,
+    mde_percent: DEFAULT_GUARDRAILS.mde_percent,
     min_sample_size_per_variation: normalizeMinSampleSize(
       source.min_sample_size_per_variation ?? source.minSampleSizePerVariation
     ),
-    min_conversions_per_variation: normalizeMinConversions(
-      source.min_conversions_per_variation ?? source.minConversionsPerVariation
-    ),
+    min_conversions_per_variation: DEFAULT_GUARDRAILS.min_conversions_per_variation,
     analysis_method: 'sequential',
     updated_at: source.updated_at || null,
   };

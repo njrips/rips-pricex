@@ -8,6 +8,7 @@ const {
   resolveProductBandSlice,
   mergeModelBandWithHeuristics,
   sanitizeModelRationale,
+  inferHeuristicTestDirection,
 } = require('../smartPricingAiSuggestFeatures');
 const { deterministicPriceSuggestions } = require('../smartPricingAiSuggestService');
 
@@ -146,6 +147,18 @@ describe('smartPricingAiSuggestFeatures', () => {
       25
     );
     assert.notDeepEqual(slow, fast);
+  });
+
+  it('treats an unrecorded cost as no information, not as a thin margin', () => {
+    // Most shops never enter a cost; holding all of them near today's price
+    // tested nothing.
+    const busy = { units_sold_30d: 60, daily_visitors: 400, visitors_30d: 12000 };
+    assert.equal(inferHeuristicTestDirection({ ...busy, margin_percent: null }), 'rise_candidate');
+    assert.equal(inferHeuristicTestDirection({ ...busy, margin_percent: 8 }), 'rise_cautious');
+
+    const unknown = resolveProductBandSlice({ ...busy, margin_percent: null }, 0, 20);
+    const thin = resolveProductBandSlice({ ...busy, margin_percent: 8 }, 0, 20);
+    assert.ok(unknown.max - unknown.min > thin.max - thin.min);
   });
 
   it('sanitizes model rationale length', () => {

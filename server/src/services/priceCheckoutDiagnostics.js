@@ -1,6 +1,6 @@
 /**
  * Checkout price test infrastructure diagnostics (operator / merchant QA).
- * Aligns URL derivation with scripts/write-ripx-checkout-config.js
+ * Classic price tests use the cart transform. The old checkout-discount batch config is not shipped.
  */
 
 const fs = require('fs');
@@ -45,7 +45,7 @@ function parseUrlSafe(urlString) {
   }
 }
 
-/** Relative to repo root — documented for operators (see write-ripx-checkout-config.js). */
+/** Retired path. A missing file means this app never shipped that config. */
 const RIPX_EXTENSION_CONFIG_RELATIVE_PATH = 'extensions/ripx-checkout-discount/src/ripxConfig.js';
 
 /**
@@ -233,11 +233,11 @@ function buildExtensionConfigDiagnostics(params) {
           id: 'extension_config_file',
           ok: true,
           severity: 'ok',
-          message: `Checkout extension config file not found (${RIPX_EXTENSION_CONFIG_RELATIVE_PATH}). Cannot verify drift vs .env; run npm run shopify:checkout-discount:sync-config after changing APP_URL or secrets.`,
+          message: `Checkout extension config file not found (${RIPX_EXTENSION_CONFIG_RELATIVE_PATH}). Cannot verify drift vs .env; redeploy extensions/ripspricex-checkout-discount after changing APP_URL or secrets.`,
         },
       ],
       recommendations: [
-        `After changing APP_URL or RIPX_CHECKOUT_PRICE_SECRET, run: npm run shopify:checkout-discount:sync-config (writes ${RIPX_EXTENSION_CONFIG_RELATIVE_PATH}).`,
+        'After changing APP_URL or RIPX_CHECKOUT_PRICE_SECRET, redeploy extensions/ripspricex-checkout-discount with the same values. There is no sync-config script.',
       ],
     };
   }
@@ -288,7 +288,7 @@ function buildExtensionConfigDiagnostics(params) {
   if (secretRequired && !secretMatches) {
     issues.push({
       level: strictExtensionConfig ? 'error' : 'warning',
-      text: `Checkout discount extension config drift: RIPX_CHECKOUT_PRICE_SECRET differs between server .env and ${RIPX_EXTENSION_CONFIG_RELATIVE_PATH}. Price tests now use Cart Transform direct price override, but discount-function paths can return 403 until you run npm run shopify:checkout-discount:sync-config and redeploy the checkout discount extension.`,
+      text: `Checkout discount extension config drift: RIPX_CHECKOUT_PRICE_SECRET differs between server .env and ${RIPX_EXTENSION_CONFIG_RELATIVE_PATH}. Price tests now use Cart Transform direct price override, but discount-function paths can return 403 until you redeploy extensions/ripspricex-checkout-discount.`,
     });
   } else if (!secretRequired && extSecret) {
     issues.push({
@@ -299,7 +299,7 @@ function buildExtensionConfigDiagnostics(params) {
   if (Boolean(envNorm) && !batchMatches) {
     issues.push({
       level: 'warning',
-      text: `Batch URL drift: extension "${extBatch || '(empty)'}" vs server .env "${envNorm}". Run npm run shopify:checkout-discount:sync-config and redeploy the checkout discount extension.`,
+      text: `Batch URL drift: extension "${extBatch || '(empty)'}" vs server .env "${envNorm}". Redeploy extensions/ripspricex-checkout-discount.`,
     });
   } else if (!envNorm && extBatch) {
     issues.push({
@@ -309,7 +309,7 @@ function buildExtensionConfigDiagnostics(params) {
   } else if (!envNorm && !extBatch) {
     issues.push({
       level: 'warning',
-      text: 'Extension batch URL and server .env are both unset — set APP_URL (or RIPX_PRICE_RESOLVE_BATCH_URL), run npm run shopify:checkout-discount:sync-config, then rebuild the function.',
+      text: 'Extension batch URL and server .env are both unset — set APP_URL (or RIPX_PRICE_RESOLVE_BATCH_URL), redeploy extensions/ripspricex-checkout-discount, then rebuild the function.',
     });
   }
   // Match env batch-URL tunnel policy: ephemeral tunnels are fine in development,
@@ -341,7 +341,7 @@ function buildExtensionConfigDiagnostics(params) {
     recommendations: ok
       ? []
       : [
-          'Drift fix: npm run shopify:checkout-discount:sync-config from repo root with the same .env as production, then rebuild/deploy extensions/ripx-checkout-discount.',
+          'Drift fix: redeploy extensions/ripspricex-checkout-discount from the repo root with the same .env as production.',
         ],
   };
 }
@@ -423,7 +423,15 @@ function buildCheckoutPriceDiagnostics(opts = {}) {
   const checklist = [];
 
   const batchConfigured = Boolean(batchUrl);
-  checklist.push({
+  if (classicPriceTestOnly) {
+    checklist.push({
+      id: 'batch_url_configured',
+      ok: true,
+      severity: 'ok',
+      message:
+        'Checkout batch resolver is not used. Classic price tests are applied by the cart transform.',
+    });
+  } else checklist.push({
     id: 'batch_url_configured',
     ok: batchConfigured,
     severity: batchConfigured ? 'ok' : 'error',
@@ -451,7 +459,7 @@ function buildCheckoutPriceDiagnostics(opts = {}) {
   });
 
   const EXPECTED_BATCH_PATH = '/api/track/price-resolve-batch';
-  if (batchConfigured) {
+  if (!classicPriceTestOnly && batchConfigured) {
     let batchPathOk = true;
     let batchPathSeverity = 'ok';
     let batchPathMessage = '';
@@ -523,14 +531,14 @@ function buildCheckoutPriceDiagnostics(opts = {}) {
   const recommendations = [];
   if (!batchConfigured) {
     recommendations.push(
-      'Set APP_URL to your public API origin, then run: npm run shopify:checkout-discount:sync-config'
+      'Set APP_URL to your public API origin, then redeploy extensions/ripspricex-checkout-discount'
     );
   } else if (!usesHttps && isProduction) {
     recommendations.push('Serve RipX API over TLS and set APP_URL to https://...');
   }
   if (!secretRequired && isProduction) {
     recommendations.push(
-      'Set RIPX_CHECKOUT_PRICE_SECRET and redeploy the checkout discount extension with sync-config.'
+      'Set RIPX_CHECKOUT_PRICE_SECRET and redeploy extensions/ripspricex-checkout-discount.'
     );
   }
   if (assignmentSignatureRequired && !assignmentSignatureSecretConfigured) {

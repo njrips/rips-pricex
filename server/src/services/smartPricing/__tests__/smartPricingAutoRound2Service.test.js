@@ -104,6 +104,20 @@ describe('smartPricingAutoRound2Service', () => {
     expect(result.follow_up_plan.statistical_design.confidence_level).toBe(90);
   });
 
+  it('preserves the current 80% confidence setting for the follow-up', async () => {
+    getShopSmartPricingGuardrails.mockResolvedValue({
+      ...SHOP_GUARDRAILS,
+      confidence_level: 80,
+    });
+    getInboxPlanById.mockResolvedValue({
+      ...samplePlan,
+      statistical_design: { confidence_level: 95, baseline_conversion_rate: 0.02 },
+    });
+    const result = await maybeAutoQueueRound2Plan('demo.myshopify.com', 'SP-1');
+    expect(result.follow_up_plan.statistical_design.confidence_level).toBe(80);
+    expect(result.follow_up_plan.goal.significance_level).toBe(0.8);
+  });
+
   it('falls back to the finished round when the shop has no usable level', async () => {
     getInboxPlanById.mockResolvedValue({
       ...samplePlan,

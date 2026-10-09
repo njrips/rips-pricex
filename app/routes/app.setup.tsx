@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { Link, useNavigate, useOutletContext, useSearchParams } from 'react-router';
-import { withCurrentEmbeddedSearch } from '../utils/shopifyEmbeddedSearch';
+import { preserveEmbeddedSearch, withCurrentEmbeddedSearch } from '../utils/shopifyEmbeddedSearch';
 import { Badge, Banner, Button, Icon } from '@shopify/polaris';
 import { InfoIcon } from '@shopify/polaris-icons';
 import type { ApiTarget, AppOutletContext } from '../lib/api.client';
@@ -122,9 +122,9 @@ async function loadReadiness(target: ApiTarget, { refresh = false } = {}) {
         offerReady: false,
         anyReady: false,
         title: 'Not ready to launch tests yet',
-        detail: 'Could not load checkout readiness.',
+        detail: 'Could not check your store setup. Click Refresh status to try again.',
       },
-      hints: ['Could not load checkout readiness'],
+      hints: [] as string[],
       surface: { known: false, ready: false, configured: 0, message: '' },
       embedStatus: 'unknown' as 'enabled' | 'disabled' | 'unknown',
       embedThemeName: null as string | null,
@@ -233,7 +233,6 @@ export default function SetupPage() {
     };
   }, [refreshReadiness]);
 
-  const functionsReady = cart.installed && discount.installed;
   const functionsBusy = cart.busy || discount.busy || readinessBusy;
 
   /**
@@ -259,7 +258,7 @@ export default function SetupPage() {
       : overallReady
         ? launchSummary.title
         : launchSummary.anyReady
-          ? 'Checkout ready — unlock Create under Settings → Plan'
+          ? 'Checkout ready — choose a plan in Plan & usage to create tests'
           : launchSummary.title;
 
   const setupBootstrapping = readinessBusy && launchSummary.anyReady == null;
@@ -273,10 +272,10 @@ export default function SetupPage() {
         overallReady
           ? {
               label: 'New test',
-              onClick: () => navigate('/app/experiments/new'),
+              onClick: () => navigate(preserveEmbeddedSearch('/app/experiments/new')),
             }
           : {
-              label: readinessBusy ? 'Checking…' : 'Re-check readiness',
+              label: readinessBusy ? 'Checking…' : 'Refresh status',
               onClick: () => {
                 void refreshReadiness();
                 void cart.refresh();
@@ -300,7 +299,7 @@ export default function SetupPage() {
           : !ctx.entitled
             ? {
                 label: 'Plan & usage',
-                onClick: () => navigate('/app/settings?tab=plan'),
+                onClick: () => navigate(preserveEmbeddedSearch('/app/settings?tab=plan')),
               }
             : undefined
       }
@@ -308,9 +307,6 @@ export default function SetupPage() {
       {setupBootstrapping ? <ClassicPageLoader label="Loading store setup…" /> : null}
       {!setupBootstrapping ? (
         <>
-      <p className={styles.help} style={{ marginTop: 0, marginBottom: 16 }}>
-        Complete the steps below to connect Priceify to your theme and checkout.
-      </p>
       <div style={{ marginBottom: 20 }}>
         <Banner
           tone={
@@ -332,7 +328,7 @@ export default function SetupPage() {
               'Store setup covers Theme connection, Checkout pricing functions, and price locations on your site.'}
           </p>
           {embedView === 'disabled' ? (
-            <p>Theme connection is off, so price tests cannot paint. Offer tests still work.</p>
+            <p>Theme connection is off, so price tests cannot show test prices. Offer tests still work.</p>
           ) : null}
         </Banner>
       </div>
@@ -341,8 +337,8 @@ export default function SetupPage() {
         <div className={styles.adminRow}>
           <div className={styles.adminRowHead}>
             <StepTitle
-              label="1. Theme connection"
-              tip="Priceify's storefront script loads through this embed, so price tests cannot repaint prices without it. Apps are not allowed to switch on their own embed — open the theme editor, enable Priceify, and Save. Offer tests apply at checkout and do not need it."
+              label="Theme connection"
+              tip="Priceify's storefront script loads through this embed, so price tests cannot show test prices without it. Apps are not allowed to switch on their own embed — open the theme editor, enable Priceify, and Save. Offer tests apply at checkout and do not need it."
             />
             <Badge tone={embedBadgeTone(embedView)}>
               {embedBadgeLabel(embedView, Boolean(embedUrl))}
@@ -397,12 +393,16 @@ export default function SetupPage() {
         <div className={styles.adminRow}>
           <div className={styles.adminRowHead}>
             <StepTitle
-              label="2. Checkout pricing functions"
-              tip="Two Shopify functions, both installed for you. Dynamic cart prices charge the test price at checkout for price tests. Checkout discounts apply money off for offer tests. Check and install adds whichever is missing and leaves the other alone."
+              label="Checkout pricing functions"
+              tip="Two Shopify functions, both installed for you. Dynamic cart prices charge the test price at checkout for price tests. Checkout discounts apply money off for offer tests. Refresh status adds whichever is missing and leaves the other alone."
             />
-            {/* No badge on the heading: the two rows below already carry a
-                verdict each, and a third one summarising them said "Partly
-                installed" next to a row that says exactly which part. */}
+            {/* Only when both rows agree: a summary of "Not enabled" beside a
+                row that says Enabled would contradict it. */}
+            {!cart.checking && !discount.checking && cart.installed === discount.installed ? (
+              <Badge tone={cart.installed ? 'success' : 'warning'}>
+                {cart.installed ? 'Enabled' : 'Not enabled'}
+              </Badge>
+            ) : null}
           </div>
           <div className={styles.adminStatusLines}>
             {/* Each function's detailed status is its own row's hover text, so
@@ -439,29 +439,31 @@ export default function SetupPage() {
           {cart.error || discount.error ? (
             <p className={styles.help}>
               If this followed a permission update, re-open Priceify from Shopify Admin and try
-              Check and install again.
+              Refresh status again.
             </p>
           ) : null}
           <p className={styles.help}>
             These functions let Priceify update prices in the cart and checkout during a test.
           </p>
           <div className={styles.adminRowActions}>
-            <Button
-              variant="primary"
-              disabled={functionsBusy}
-              loading={functionsBusy}
-              onClick={() => void ensureFunctions()}
-            >
-              {functionsReady ? 'Refresh status' : 'Check and install'}
-            </Button>
+            <TooltipWrapper content="Re‑run the checks to confirm your checkout is ready.">
+              <Button
+                variant="primary"
+                disabled={functionsBusy}
+                loading={functionsBusy}
+                onClick={() => void ensureFunctions()}
+              >
+                Refresh status
+              </Button>
+            </TooltipWrapper>
           </div>
         </div>
 
         <div className={styles.adminRow}>
           <div className={styles.adminRowHead}>
             <StepTitle
-              label="3. Price locations on your site"
-              tip="Where the storefront script finds a price to repaint, on the product page and on listings. Bucketed visitors only see test prices on surfaces mapped here. Offer tests apply at checkout and do not need these."
+              label="Price locations on your site"
+              tip="Where Priceify finds the prices to update, on the product page and on listings. Visitors in a test only see test prices in locations mapped here. Offer tests apply at checkout and do not need these."
             />
             <Badge tone={surfaceBadgeTone(surfaceView)}>
               {surfaceBadgeLabel(surfaceView, surface.configured)}
@@ -469,13 +471,15 @@ export default function SetupPage() {
           </div>
           {surface.message ? <p className={styles.adminRowBody}>{surface.message}</p> : null}
           <div className={styles.adminRowActions}>
-            <Button
-              variant="primary"
-              onClick={() => navigate('/app/settings?tab=price-surfaces&automap=1')}
-            >
-              Auto-detect prices
-            </Button>
-            <Button onClick={() => navigate('/app/settings?tab=price-surfaces')}>
+            <TooltipWrapper content="Try to find common price locations in your theme automatically.">
+              <Button
+                variant="primary"
+                onClick={() => navigate(preserveEmbeddedSearch('/app/settings?tab=price-surfaces&automap=1'))}
+              >
+                Auto-detect prices
+              </Button>
+            </TooltipWrapper>
+            <Button onClick={() => navigate(preserveEmbeddedSearch('/app/settings?tab=price-surfaces'))}>
               Edit price locations
             </Button>
           </div>
@@ -494,8 +498,14 @@ export default function SetupPage() {
       ) : null}
 
       <p className={styles.help} style={{ marginTop: 20 }}>
-        <Link to="/app/settings?tab=plan">Plan & usage</Link> ·{' '}
-        <Link to="/app/settings?tab=price-surfaces">Price locations</Link> ·{' '}
+        <Link to={withCurrentEmbeddedSearch(searchParams, '/app/settings', { tab: 'plan' })}>
+          Plan & usage
+        </Link>{' '}
+        ·{' '}
+        <Link to={withCurrentEmbeddedSearch(searchParams, '/app/settings', { tab: 'price-surfaces' })}>
+          Price locations
+        </Link>{' '}
+        ·{' '}
         <Link to={withCurrentEmbeddedSearch(searchParams, '/app/help')}>Get support</Link>
       </p>
         </>

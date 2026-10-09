@@ -2,6 +2,7 @@
  * Shop-wide custom CSS/JS injected on every storefront page via the runtime config.
  */
 
+const crypto = require('crypto');
 const { query, withTransaction } = require('../utils/database');
 const {
   MAX_GLOBAL_CSS_CHARS,
@@ -71,6 +72,35 @@ function globalAssetsForStorefrontRuntime(assets) {
   return out;
 }
 
+function globalAssetsRuntimeSource(assets) {
+  const runtime = globalAssetsForStorefrontRuntime(assets);
+  const jsExecutionKey = runtime.js
+    ? crypto.createHash('sha256').update(runtime.js).digest('hex').slice(0, 16)
+    : '';
+  const beforeRuntime = runtime.css
+    ? `;(function(){try{var css=${JSON.stringify(runtime.css)};var id="ripx-shop-global-css";var el=document.getElementById(id);if(!el){el=document.createElement("style");el.id=id;el.setAttribute("data-ripx","global-css");(document.head||document.documentElement).appendChild(el);}if(el.textContent!==css)el.textContent=css;}catch(error){try{if(console&&console.warn)console.warn("[RipX] Global custom CSS failed:",error);}catch(_eLog){}}})();\n`
+    : '';
+  const afterRuntime = runtime.js
+    ? `;(function(){var key=${JSON.stringify(jsExecutionKey)};var runs=window.__RIPX_GLOBAL_JS_RUNS__||(window.__RIPX_GLOBAL_JS_RUNS__={});if(runs[key])return;runs[key]=true;function warn(error){try{if(console&&console.warn)console.warn("[RipX] Global custom JavaScript failed:",error);}catch(_eLog){}}function run(){try{var result=(function(window,document,Shopify,RipX,location){\n${runtime.js}\n}).call(window,window,document,window.Shopify,window.RipX,window.location);if(result&&typeof result.then==="function"&&typeof result.catch==="function")result.catch(warn);}catch(error){warn(error);}}if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",run,{once:true});else run();})();\n`
+    : '';
+  return { beforeRuntime, afterRuntime };
+}
+
+function assertGlobalAssetPatchWithinLimits(input = {}) {
+  if (
+    input.css !== undefined &&
+    normalizeMerchantCssSnippet(stripUnsafeText(input.css)).length > MAX_GLOBAL_CSS_CHARS
+  ) {
+    throw new Error(`CSS must be ${MAX_GLOBAL_CSS_CHARS.toLocaleString()} characters or fewer.`);
+  }
+  if (
+    input.js !== undefined &&
+    normalizeMerchantJsSnippet(stripUnsafeText(input.js)).length > MAX_GLOBAL_JS_CHARS
+  ) {
+    throw new Error(`JavaScript must be ${MAX_GLOBAL_JS_CHARS.toLocaleString()} characters or fewer.`);
+  }
+}
+
 async function getShopGlobalAssets(shopDomain) {
   const normalized = String(shopDomain || '')
     .trim()
@@ -78,19 +108,15 @@ async function getShopGlobalAssets(shopDomain) {
   if (!normalized) {
     return { ...DEFAULT_GLOBAL_ASSETS };
   }
-  try {
-    const result = await query('SELECT value FROM key_value_store WHERE key = $1 LIMIT 1', [
-      kvKey(normalized),
-    ]);
-    const rawValue = result.rows?.[0]?.value;
-    if (rawValue === null || rawValue === undefined) {
-      return { ...DEFAULT_GLOBAL_ASSETS };
-    }
-    const parsed = typeof rawValue === 'string' ? JSON.parse(rawValue) : rawValue;
-    return normalizeGlobalAssets(parsed);
-  } catch {
+  const result = await query('SELECT value FROM key_value_store WHERE key = $1 LIMIT 1', [
+    kvKey(normalized),
+  ]);
+  const rawValue = result.rows?.[0]?.value;
+  if (rawValue === null || rawValue === undefined) {
     return { ...DEFAULT_GLOBAL_ASSETS };
   }
+  const parsed = typeof rawValue === 'string' ? JSON.parse(rawValue) : rawValue;
+  return normalizeGlobalAssets(parsed);
 }
 
 async function saveShopGlobalAssets(shopDomain, patch = {}) {
@@ -102,6 +128,7 @@ async function saveShopGlobalAssets(shopDomain, patch = {}) {
   }
   const key = kvKey(normalized);
   const input = patch && typeof patch === 'object' ? patch : {};
+  assertGlobalAssetPatchWithinLimits(input);
 
   return withTransaction(async client => {
     await client.query(
@@ -164,6 +191,8 @@ module.exports = {
   DEFAULT_GLOBAL_ASSETS,
   normalizeGlobalAssets,
   globalAssetsForStorefrontRuntime,
+  globalAssetsRuntimeSource,
+  assertGlobalAssetPatchWithinLimits,
   getShopGlobalAssets,
   saveShopGlobalAssets,
   assertValidGlobalJavascriptSnippet,

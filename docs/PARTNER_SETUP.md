@@ -106,4 +106,5 @@ Until Partner pricing is live:
 ```bash
 # .env
 RIPSPRICEX_DEV_ENTITLE_ALL=true
+# Ignored when NODE_ENV=production. .env.example defaults this to false.
 ```

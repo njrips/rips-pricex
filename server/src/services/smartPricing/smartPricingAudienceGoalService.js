@@ -252,7 +252,7 @@ async function buildBatchPreviewLaunch({
   if (offerBatch) {
     if (readiness?.live_api_checked === true && readiness?.discount_function_available !== true) {
       blockers.push(
-        'Offer tests need Checkout pricing functions on Store setup. Use Check and install, then refresh status.'
+        'Offer tests need Checkout pricing functions on Store setup. Click Refresh status there to install them.'
       );
     }
   } else if (readiness?.ready === false) {

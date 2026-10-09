@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Button, TextField } from '@shopify/polaris';
 import LabelWithInfo from '../../Settings/primitives/LabelWithInfo';
+import TooltipWrapper from '../../shared/TooltipWrapper';
 import { ButtonIconPlus, IconControlBaseline, IconScales } from './classicIcons';
 import styles from './SmartPricingClassic.module.css';
 import {
@@ -149,7 +150,7 @@ export default function VariationsStepPanel({
         <LabelWithInfo
           htmlFor="classic-variations-allocation"
           hash="traffic-split"
-          label="Traffic split"
+          label="Traffic allocation"
         >
           Traffic allocation
         </LabelWithInfo>
@@ -160,6 +161,7 @@ export default function VariationsStepPanel({
             type="range"
             min={MIN_ALLOCATION_PERCENT}
             max={100}
+            step={1}
             value={allocation}
             style={{
               '--slider-fill': `${sliderFillPercent(allocation, MIN_ALLOCATION_PERCENT, 100)}%`,
@@ -183,11 +185,9 @@ export default function VariationsStepPanel({
       </div>
 
       <div className={styles.sectionLabel}>Split traffic between variations</div>
-      {!isOffer ? (
-        <p className={styles.help} style={{ marginTop: 0, marginBottom: 12 }}>
-          Split test traffic between your current price (control) and up to 3 price variations.
-        </p>
-      ) : null}
+      <p className={styles.help} style={{ marginTop: 0, marginBottom: 12 }}>
+        Split test traffic between your current price (control) and up to 3 price variations.
+      </p>
 
       <div className={styles.trafficBanner}>
         <span className={styles.trafficBannerLeft}>
@@ -204,7 +204,12 @@ export default function VariationsStepPanel({
               : `/ 100% · ${formatTrafficPercent(Math.abs(remaining))}% ${remaining > 0 ? 'left' : 'over'}`}
           </span>
         </span>
-        <Button onClick={() => onChange(splitEvenly(variations))}>Split evenly</Button>
+        <TooltipWrapper
+          content="Redistribute traffic across all active variations."
+          preferredPosition="above"
+        >
+          <Button onClick={() => onChange(splitEvenly(variations))}>Split evenly</Button>
+        </TooltipWrapper>
       </div>
 
       {gate.disabled ? (
@@ -259,9 +264,12 @@ export default function VariationsStepPanel({
               ) : null}
             </div>
             {isControl ? (
-              <p className={styles.help} style={{ margin: '0 0 8px' }}>
-                Keeps your current catalog price.
-              </p>
+              <>
+                <p className={styles.help} style={{ margin: '0 0 8px' }}>
+                  Keeps your current catalog price.
+                </p>
+                <div className={styles.trafficLabel}>Current price</div>
+              </>
             ) : (
               <TextField
                 label="Variation name"
@@ -303,6 +311,7 @@ export default function VariationsStepPanel({
                   // headroom instead made the default row a 0-to-0 slider: a
                   // control that could not be dragged anywhere at all.
                   max={100}
+                  step={1}
                   value={row.traffic}
                   disabled={stuck}
                   style={{
@@ -334,10 +343,12 @@ export default function VariationsStepPanel({
         <Button icon={ButtonIconPlus} onClick={addVariation}>
           Add variation
         </Button>
-      ) : null}
+      ) : (
+        <p className={styles.help}>Up to 3 price variations plus control.</p>
+      )}
 
       <p className={styles.help}>
-        If you pause a variation, its traffic will be automatically redistributed to the remaining
+        If you pause a variation, its traffic is automatically redistributed to the remaining
         variations.
       </p>
     </div>

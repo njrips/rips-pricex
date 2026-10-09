@@ -61,17 +61,21 @@ export function shouldShowGuardrailStopBanner(rail, guardrailArmed = true) {
 }
 
 export function formatGuardrailStopMessage(rail) {
+  const productTitle = String(rail?.product_title || rail?.productTitle || '').trim();
+  const scope = productTitle
+    ? ` Traffic assignment stopped for “${productTitle}”; other products keep running.`
+    : ' Traffic assignment stopped for the affected product; other products keep running.';
   if (!rail) {
-    return 'A variation passed the revenue guardrail limit vs control. Traffic assignment stopped.';
+    return `A variation passed the revenue guardrail limit vs control.${scope}`;
   }
   const observed = Number(rail.observed_drop_percent);
   const limit = Number(
     rail.threshold_percent ?? rail.max_revenue_drop_percent ?? rail.threshold
   );
   if (Number.isFinite(observed) && Number.isFinite(limit)) {
-    return `Revenue per visitor dropped ${observed.toFixed(1)}% vs control (limit ${limit}%). Traffic assignment stopped.`;
+    return `Revenue per visitor dropped ${observed.toFixed(1)}% vs control (limit ${limit}%).${scope}`;
   }
-  return 'A variation passed the revenue guardrail limit vs control. Traffic assignment stopped.';
+  return `A variation passed the revenue guardrail limit vs control.${scope}`;
 }
 
 /** Subtle monitoring line when guardrail is armed but has not stopped the test. */

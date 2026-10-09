@@ -98,6 +98,13 @@ apiClient.interceptors.response.use(
     if (error.response?.status === 402) {
       error.isPaymentRequired = true;
       error.upgradeUrl = error.response?.data?.upgradeUrl;
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(
+          new CustomEvent('ripspricex:payment-required', {
+            detail: { upgradeUrl: error.upgradeUrl || '' },
+          })
+        );
+      }
     }
     return Promise.reject(error);
   },
@@ -134,11 +141,6 @@ export function apiPost(endpoint, data, config = {}) {
 export function apiPut(endpoint, data, config = {}) {
   const params = withDomainParams(config.params || {});
   return apiClient.put(endpoint, data, { ...config, params });
-}
-
-export function apiPatch(endpoint, data, config = {}) {
-  const params = withDomainParams(config.params || {});
-  return apiClient.patch(endpoint, data, { ...config, params });
 }
 
 export function apiDelete(endpoint, config = {}) {

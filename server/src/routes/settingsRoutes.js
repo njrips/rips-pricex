@@ -257,7 +257,7 @@ router.post(
       return sendError(
         res,
         404,
-        'Checkout pricing functions are not available on this shop yet. Open Store setup and use Check and install, or contact support.'
+        'Checkout pricing functions are not available on this shop yet. Open Store setup and click Refresh status, or contact support.'
       );
     }
 
@@ -370,7 +370,7 @@ router.post(
           return sendError(
             res,
             403,
-            'Missing checkout pricing permissions. Re-open Priceify from Shopify Admin, then click Check and install on Store setup.',
+            'Missing checkout pricing permissions. Re-open Priceify from Shopify Admin, then click Refresh status on Store setup.',
             {
               function: {
                 id: chosenFunction.id,
@@ -427,7 +427,7 @@ router.post(
               return sendError(
                 res,
                 403,
-                'Missing checkout pricing permissions. Re-open Priceify from Shopify Admin, then click Check and install on Store setup.',
+                'Missing checkout pricing permissions. Re-open Priceify from Shopify Admin, then click Refresh status on Store setup.',
                 {
                   function: {
                     id: chosenFunction.id,
@@ -444,7 +444,7 @@ router.post(
           return sendError(
             res,
             403,
-            'Missing checkout pricing permissions. Re-open Priceify from Shopify Admin, then click Check and install on Store setup.',
+            'Missing checkout pricing permissions. Re-open Priceify from Shopify Admin, then click Refresh status on Store setup.',
             {
               function: {
                 id: chosenFunction.id,

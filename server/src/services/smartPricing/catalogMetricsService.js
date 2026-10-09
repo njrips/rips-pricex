@@ -116,6 +116,34 @@ function prioritizeSkuRows(rows = []) {
   });
 }
 
+function isLiveStoreProduct(product) {
+  const status = String(product?.status || '').trim().toUpperCase();
+  if (status && status !== 'ACTIVE') return false;
+  // The catalog fetch always requests this field. Treat an explicit null as
+  // unpublished from Online Store, while allowing older test/cache fixtures
+  // that predate the field.
+  if (
+    Object.prototype.hasOwnProperty.call(product || {}, 'onlineStoreUrl') &&
+    !String(product?.onlineStoreUrl || '').trim()
+  ) {
+    return false;
+  }
+  return true;
+}
+
+function isSellableVariant(variant) {
+  if (variant?.availableForSale === false) return false;
+  const quantity =
+    variant?.inventoryQuantity === null || variant?.inventoryQuantity === undefined
+      ? null
+      : Number(variant.inventoryQuantity);
+  const policy = String(variant?.inventoryPolicy || '').trim().toUpperCase();
+  if (Number.isFinite(quantity) && quantity <= 0 && policy !== 'CONTINUE') {
+    return false;
+  }
+  return true;
+}
+
 /**
  * Whether a product is already under test is deliberately NOT stamped here.
  * This snapshot is cached for twelve hours, and baking the answer in meant the
@@ -136,10 +164,16 @@ function flattenCatalogRows(
   const rows = [];
 
   products.forEach(product => {
-    if (isExcludedProductType(product.productType, product.tags)) {
+    if (
+      !isLiveStoreProduct(product) ||
+      isExcludedProductType(product.productType, product.tags)
+    ) {
       return;
     }
     (product.variants || []).forEach(variant => {
+      if (!isSellableVariant(variant)) {
+        return;
+      }
       const variantId = normalizeVariantGid(variant.id);
       const productId = normalizeProductGid(product.id);
       const currentPrice = parseMoney(variant.price);
@@ -201,6 +235,9 @@ function flattenCatalogRows(
           variant.inventoryQuantity !== null && variant.inventoryQuantity !== undefined
             ? Number(variant.inventoryQuantity)
             : null,
+        inventory_policy: String(variant.inventoryPolicy || '').trim().toUpperCase() || null,
+        product_status: String(product.status || '').trim().toUpperCase() || null,
+        online_store_url: String(product.onlineStoreUrl || '').trim() || null,
         product_type: product.productType || '',
         _default_cogs_percent: defaultCogsPercent,
       });
@@ -401,6 +438,8 @@ module.exports = {
   estimateBaselinePpv,
   flattenCatalogRows,
   calibrateShopConversionRate,
+  isLiveStoreProduct,
+  isSellableVariant,
   prioritizeSkuRows,
   buildProductQueries,
   buildProductSearchClause,

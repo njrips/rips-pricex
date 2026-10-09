@@ -1,8 +1,9 @@
 export const DEFAULT_MAX_REVENUE_DROP_PERCENT = 10;
 export const MIN_REVENUE_DROP_PERCENT = 3;
 export const MAX_REVENUE_DROP_PERCENT = 50;
-/** Guardrail compares RPV vs control only after this many visitors on control and the arm. */
-export const MIN_VISITORS_FOR_REVENUE_GUARDRAIL = 100;
+/** Noise floor shared with the server's runtime guardrail. */
+export const MIN_VISITORS_FOR_REVENUE_GUARDRAIL = 5000;
+export const MIN_CONVERSIONS_FOR_REVENUE_GUARDRAIL = 10;
 
 export function clampMaxRevenueDropPercent(raw, fallback = DEFAULT_MAX_REVENUE_DROP_PERCENT) {
   const num = Number(raw);
@@ -32,7 +33,7 @@ export function createRevenueGuardrailRow(
   return {
     id: 'revenue',
     label: 'Revenue guardrail',
-    hint: 'Auto-pauses if any variation drops past this vs control after ~100 visitors.',
+    hint: 'Stops testing a product if any variation drops past this vs control after at least 5,000 visitors and 10 conversions per variation.',
     rule: 'Must not drop',
     threshold: `-${n}%`,
     on: on !== false,

@@ -142,7 +142,7 @@ export async function duplicateClassicExperimentAsDraft(shopDomain, experiment) 
 
   const saved = await saveWizardDraftEverywhere(shopDomain, snapshot);
   if (saved.skipped) {
-    return { ok: false, message: 'Could not duplicate this draft.' };
+    return { ok: false, message: 'Could not duplicate this test.' };
   }
 
   return { ok: true, experimentId };

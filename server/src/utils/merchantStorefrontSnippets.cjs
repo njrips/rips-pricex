@@ -47,6 +47,13 @@ function compileGlobalJavascriptSnippet(code) {
   if (!normalized) {
     return { ok: true, normalized: '', fn: null };
   }
+  if (normalized.length > MAX_GLOBAL_JS_CHARS) {
+    return {
+      ok: false,
+      normalized,
+      error: `JavaScript must be ${MAX_GLOBAL_JS_CHARS.toLocaleString()} characters or fewer.`,
+    };
+  }
   try {
     // eslint-disable-next-line no-new-func
     const fn = new Function(...GLOBAL_JS_PARAM_NAMES, normalized);
@@ -68,6 +75,46 @@ function validateGlobalJavascriptSnippet(code) {
   return { valid: false, normalized: result.normalized, error: result.error || 'Invalid JavaScript' };
 }
 
+function hasBalancedCssBraces(css) {
+  let depth = 0;
+  let quote = '';
+  let inComment = false;
+  let escaped = false;
+  for (let index = 0; index < css.length; index += 1) {
+    const char = css[index];
+    const next = css[index + 1];
+    if (inComment) {
+      if (char === '*' && next === '/') {
+        inComment = false;
+        index += 1;
+      }
+      continue;
+    }
+    if (quote) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === '\\') {
+        escaped = true;
+      } else if (char === quote) {
+        quote = '';
+      }
+      continue;
+    }
+    if (char === '/' && next === '*') {
+      inComment = true;
+      index += 1;
+    } else if (char === '"' || char === "'") {
+      quote = char;
+    } else if (char === '{') {
+      depth += 1;
+    } else if (char === '}') {
+      depth -= 1;
+      if (depth < 0) return false;
+    }
+  }
+  return depth === 0 && !quote && !inComment;
+}
+
 function validateGlobalCssSnippet(code) {
   const normalized = normalizeMerchantCssSnippet(code);
   if (!normalized) {
@@ -80,13 +127,11 @@ function validateGlobalCssSnippet(code) {
       error: `CSS must be ${MAX_GLOBAL_CSS_CHARS.toLocaleString()} characters or fewer.`,
     };
   }
-  const open = (normalized.match(/{/g) || []).length;
-  const close = (normalized.match(/}/g) || []).length;
-  if (open !== close) {
+  if (!hasBalancedCssBraces(normalized)) {
     return {
       valid: false,
       normalized,
-      error: 'CSS has unmatched { or } braces.',
+      error: 'CSS has an unmatched brace, quote, or comment.',
     };
   }
   return { valid: true, normalized, error: null };
@@ -107,6 +152,7 @@ module.exports = {
   stripUnsafeText,
   normalizeMerchantCssSnippet,
   normalizeMerchantJsSnippet,
+  hasBalancedCssBraces,
   compileGlobalJavascriptSnippet,
   validateGlobalJavascriptSnippet,
   validateGlobalCssSnippet,

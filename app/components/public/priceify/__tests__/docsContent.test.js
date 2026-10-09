@@ -54,8 +54,8 @@ describe('Priceify guides content', () => {
     // Pinned to the group list rather than a hardcoded set of hrefs, so adding
     // a guide group fails here until it also gets a card someone can click.
     assert.deepEqual(
-      DOCS_NAV_CARDS.map((card) => card.href).sort(),
-      DOCS_GROUPS.map((group) => `#${group.id}`).sort()
+      DOCS_NAV_CARDS.map((card) => card.href),
+      DOCS_GROUPS.map((group) => `#${group.id}`)
     );
     for (const id of ADMIN_DOCS_HASHES) {
       assert.ok(DOCS_SECTION_IDS.includes(id), `missing #${id}`);
@@ -95,6 +95,18 @@ describe('Priceify guides content', () => {
     assert.ok(/band is signed/i.test(aiCopy));
     assert.match(aiCopy, /cheaper/i);
     assert.match(aiCopy, /minimum margin/i);
+    const aiInputs = DOCS_SECTIONS.find((section) => section.id === 'ai-price-inputs');
+    const aiInputsCopy = [
+      aiInputs.summary,
+      ...(aiInputs.paragraphs || []),
+      ...(aiInputs.facts || []).map(fact => `${fact.label} ${fact.value}`),
+    ].join(' ');
+    assert.match(aiInputsCopy, /live web search/i);
+    assert.match(aiInputsCopy, /strict JSON Schema/i);
+    assert.match(aiInputsCopy, /1024 pixels/i);
+    assert.match(aiInputsCopy, /selected metric/i);
+    assert.match(aiInputsCopy, /Margin and cost are not sent/i);
+    assert.match(aiInputsCopy, /not private chain-of-thought/i);
     const offers = DOCS_SECTIONS.find((section) => section.id === 'offers');
     assert.ok(/checkout/i.test(offers.paragraphs.join(' ')));
     const sequential = DOCS_SECTIONS.find((section) => section.id === 'sequential');
@@ -125,6 +137,8 @@ describe('Priceify guides content', () => {
       ...DOCS_FAQ.map((item) => `${item.q} ${item.a}`),
     ].join('\n');
     assert.equal(/\bDocs\b/.test(guideCopy), false);
+    assert.equal(/Create →/.test(guideCopy), false);
+    assert.match(guideCopy, /New test →/);
   });
 
   // A guide nobody can skim is a guide nobody reads: the statistics sections

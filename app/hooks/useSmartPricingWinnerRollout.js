@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { applySmartPricingWinner, previewSmartPricingWinner } from '../services/smartPricingApi';
 import { appendActivityToPlans, createActivityEntry } from '../components/SmartPricing/classic/classicActivity';
 import { isOfferExperimentType } from '../components/SmartPricing/classic/offerSelection';
@@ -10,6 +10,7 @@ export function useSmartPricingWinnerRollout(shopDomain) {
   const [previewLoadingPlanId, setPreviewLoadingPlanId] = useState(null);
   const [preview, setPreview] = useState(null);
   const [error, setError] = useState('');
+  const previewRequest = useRef(0);
 
   const loadPreview = useCallback(
     async plan => {
@@ -17,17 +18,22 @@ export function useSmartPricingWinnerRollout(shopDomain) {
       if (!testId) {
         throw new Error('No linked test found for this plan.');
       }
+      const requestId = previewRequest.current + 1;
+      previewRequest.current = requestId;
       setPreviewLoadingPlanId(plan.id);
       setError('');
       try {
         const data = await previewSmartPricingWinner(shopDomain, testId);
+        if (previewRequest.current !== requestId) return data;
         setPreview({ plan, data });
         return data;
       } catch (err) {
-        setError(err.message || 'Could not preview Apply winner.');
+        if (previewRequest.current === requestId) {
+          setError(err.message || 'Could not preview Apply winner.');
+        }
         throw err;
       } finally {
-        setPreviewLoadingPlanId(null);
+        if (previewRequest.current === requestId) setPreviewLoadingPlanId(null);
       }
     },
     [shopDomain]

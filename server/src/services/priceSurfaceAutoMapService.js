@@ -507,7 +507,7 @@ function buildThemeDrift(previousMeta, currentTheme) {
     current_theme_id: currentId,
     current_theme_name: currentName,
     message: detected
-      ? `Theme changed${previousName ? ` from “${previousName}”` : ''}${currentName ? ` to “${currentName}”` : ''}. Re-verify Auto-map selectors.`
+      ? `Theme changed${previousName ? ` from “${previousName}”` : ''}${currentName ? ` to “${currentName}”` : ''}. Run Auto-detect prices again to check your price locations.`
       : null,
   };
 }
@@ -823,7 +823,7 @@ async function autoMapShopPriceSurfaces(shopDomain, options = {}) {
         unlockFailure?.reason === 'invalid_password'
       ) {
         rationale =
-          'Storefront password was required or not accepted. Enter the Online Store password, then retry Auto-map.';
+          'Storefront password was required or not accepted. Enter the Online Store password, then try Auto-detect prices again.';
       } else if (probeReason === 'rate_limited') {
         rationale =
           'Shopify temporarily blocked storefront password attempts. Wait a few minutes and retry.';

@@ -4,6 +4,7 @@ import SettingsInfoLink from '../../../Settings/SettingsInfoLink';
 import { IconChevron, IconShield } from '../classicIcons';
 import {
   formatAudienceFactValue,
+  formatDetailDate,
   listSecondaryMetricsForDisplay,
   secondaryMetricDisplayLabel,
 } from '../classicExperimentDetailsHelpers';
@@ -12,6 +13,7 @@ import { formatRunningTestStatusLabel } from '../classicOverviewLayout';
 import {
   ensureRevenueGuardrailRows,
   MIN_VISITORS_FOR_REVENUE_GUARDRAIL,
+  MIN_CONVERSIONS_FOR_REVENUE_GUARDRAIL,
 } from '../revenueGuardrail';
 import DetailFactCard from './DetailFactCard';
 import styles from '../SmartPricingClassic.module.css';
@@ -29,6 +31,9 @@ function SettingRow({
   infoHash = null,
   infoLabel = null,
   multilineValue = false,
+  action = null,
+  actionLabel = null,
+  onAction = null,
 }) {
   return (
     <div
@@ -39,6 +44,11 @@ function SettingRow({
         {infoHash ? <SettingsInfoLink hash={infoHash} label={infoLabel || label} /> : null}
       </span>
       <span className={styles.settingsRowValue}>{value}</span>
+      {action && onAction ? (
+        <Button variant="plain" accessibilityLabel={actionLabel || action} onClick={onAction}>
+          {action}
+        </Button>
+      ) : null}
       {note ? <p className={`${styles.help} ${styles.settingsRowNote}`}>{note}</p> : null}
     </div>
   );
@@ -91,7 +101,7 @@ export default function ClassicSettingsTab({
     return (
       <div className={styles.statCard}>
         <h3 className={styles.panelTitle}>Settings</h3>
-        <p className={styles.help}>Launch settings will appear after the plan is saved.</p>
+        <p className={styles.help}>Settings will appear after the test is saved.</p>
       </div>
     );
   }
@@ -214,28 +224,21 @@ export default function ClassicSettingsTab({
       ) : null}
 
       <div className={styles.statCard}>
-        <div className={styles.reviewHead}>
-          <h3 className={styles.panelTitle}>Metrics & guardrail</h3>
-          {onChangeMetric ? (
-            <div className={styles.variationPreviewRow}>
-              <Button variant="plain" onClick={onChangeMetric}>
-                Change metric
-              </Button>
-            </div>
-          ) : null}
-        </div>
+        <h3 className={styles.panelTitle}>Metrics & guardrail</h3>
         <div className={styles.settingsRows}>
           <SettingRow
             label="Primary success metric"
             value={metrics?.primaryMetricLabel || '—'}
             note="Choose one metric to optimise for this test."
+            action={onChangeMetric ? 'Change metric' : null}
+            actionLabel="Change primary success metric"
+            onAction={onChangeMetric}
           />
-          {/* New tests launch without secondary metrics; older ones may still carry some. */}
-          {secondaryItems.length ? (
-            <SettingRow
-              label="Secondary metrics"
-              multilineValue
-              value={
+          <SettingRow
+            label="Secondary metrics"
+            multilineValue
+            value={
+              secondaryItems.length ? (
                 <div className={styles.detailChipRow}>
                   {secondaryItems.map((item, index) => (
                     <span
@@ -246,9 +249,11 @@ export default function ClassicSettingsTab({
                     </span>
                   ))}
                 </div>
-              }
-            />
-          ) : null}
+              ) : (
+                'None'
+              )
+            }
+          />
           <SettingRow
             label="Confidence level"
             value={percentOrDash(metrics?.confidenceLevel)}
@@ -295,7 +300,8 @@ export default function ClassicSettingsTab({
                   </span>
                   <span>
                     below that product&rsquo;s control, after each variation has about{' '}
-                    {MIN_VISITORS_FOR_REVENUE_GUARDRAIL} visitors. The other products keep
+                    {MIN_VISITORS_FOR_REVENUE_GUARDRAIL.toLocaleString()} visitors and at least{' '}
+                    {MIN_CONVERSIONS_FOR_REVENUE_GUARDRAIL} conversions. The other products keep
                     running.
                   </span>
                 </div>
@@ -325,7 +331,7 @@ export default function ClassicSettingsTab({
         onToggle={event => setTechnicalOpen(event.currentTarget.open)}
       >
         <summary className={styles.advancedSummary}>
-          Reference and identifiers
+          Reference & identifiers
           <IconChevron size={16} up={technicalOpen} />
         </summary>
         <div className={styles.advancedBody}>
@@ -458,13 +464,9 @@ export default function ClassicSettingsTab({
           ) : null}
 
           <div className={styles.settingsDisclosureGroup}>
-            <div className={styles.sectionLabel}>Identifiers</div>
+            <div className={styles.sectionLabel}>Reference</div>
             <p className={styles.help}>Quote these when contacting support.</p>
             <div className={styles.settingsRows}>
-              <SettingRow
-                label="Plan ID"
-                value={<span className={styles.monoValue}>{settings.planId || '—'}</span>}
-              />
               <SettingRow
                 label="Test ID"
                 value={<span className={styles.monoValue}>{settings.testId || '—'}</span>}
@@ -472,13 +474,13 @@ export default function ClassicSettingsTab({
               {settings.createdAt ? (
                 <SettingRow
                   label="Created date"
-                  value={String(settings.createdAt).slice(0, 10)}
+                  value={formatDetailDate(settings.createdAt)}
                 />
               ) : null}
               {settings.startedAt ? (
                 <SettingRow
                   label="Started date"
-                  value={String(settings.startedAt).slice(0, 10)}
+                  value={formatDetailDate(settings.startedAt)}
                 />
               ) : null}
             </div>

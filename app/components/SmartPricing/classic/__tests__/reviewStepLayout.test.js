@@ -102,7 +102,7 @@ describe('overview summary', () => {
       'Traffic: 100% of eligible visitors · Control 34% · Var A 33% · Var B 33%',
       'Audience: All visitors · All devices · All sources · All countries',
       'Results: Primary: Revenue per visitor · 90% confidence · 5,000 visitors/variation',
-      'Safety: Guardrail ON · Stop a product if Rev/visitor drops >10% vs control, after 100 visitors/variation',
+      'Safety: Guardrail ON · Stop a product if Rev/visitor drops >10% vs control, after 5,000 visitors/variation',
     ]);
   });
 

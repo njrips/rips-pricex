@@ -14,9 +14,10 @@ const { resolveSmartPricingCheckoutReadiness } = require('./smartPricingCheckout
 function statisticalInputsFromGuardrails(guardrails) {
   const g = guardrails && typeof guardrails === 'object' ? guardrails : {};
   const minSample = Number(g.min_sample_size_per_variation);
+  const configuredConfidence = Number(g.confidence_level);
   return {
     mdePercent: Number(g.mde_percent) || 10,
-    confidenceLevel: Number(g.confidence_level) === 95 ? 95 : 90,
+    confidenceLevel: [80, 90, 95].includes(configuredConfidence) ? configuredConfidence : 90,
     power: Number(g.statistical_power) || 80,
     ...(Number.isFinite(minSample) && minSample >= 1
       ? { minSampleSize: Math.round(minSample) }
@@ -90,6 +91,8 @@ async function createBatchFromSelection({
         planId: `SP-${Date.now()}-${index}`,
         imageUrl: opp.image_url,
         handle: opp.handle || opp.product_handle || '',
+        marginPercent: opp.margin_percent,
+        marginSource: opp.margin_source || null,
         checkoutPriceFunctionActive: checkoutActive,
       })
     );

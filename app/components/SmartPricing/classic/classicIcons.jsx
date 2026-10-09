@@ -12,7 +12,7 @@ import {
 /**
  * Classic Smart Pricing icons — paths traced from EchoTest Figma
  * (file 4ZiENSDNrhaAOawOSqGZ6C). Prefer currentColor so theme tokens apply.
- * Source SVG exports: ./assets/figma-icons/
+ * The paths are inlined here; the duplicate exported SVG files were removed.
  */
 
 const strokeProps = {
@@ -46,7 +46,7 @@ export function IconSearch({ size = 14 }) {
   );
 }
 
-/** Traffic banner — Figma Scale (18:6905 / assets/figma-icons/scales.svg). */
+/** Traffic banner — Figma Scale (18:6905). */
 export function IconScales({ size = 16 }) {
   return (
     <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden>

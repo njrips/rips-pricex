@@ -388,7 +388,7 @@ export default function ClassicProductPickerModal({
           <div>
             <h2 className={`${styles.modalTitle} ripx-classic-sans`}>Product picker</h2>
             <p className={styles.subtitle} style={{ marginBottom: 0 }}>
-              Filter on the left, pick products on the right.
+              Filter on the left, pick eligible live-store products on the right.
             </p>
             {storeCatalogStatusText ? (
               <p className={styles.help} style={{ margin: '6px 0 0' }}>

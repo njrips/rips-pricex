@@ -2,7 +2,6 @@ const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
-  ABSOLUTE_MIN_CONVERSIONS_PER_VARIATION,
   normalizeGuardrails,
   resolveShopStatisticalDefaults,
   mergePreviewGuardrails,
@@ -63,16 +62,22 @@ describe('smartPricingGuardrailsService', () => {
     assert.equal(next.max_revenue_drop_percent, DEFAULT_GUARDRAILS.max_revenue_drop_percent);
   });
 
-  it('accepts 0.95 confidence as 95 and keeps a custom min sample', () => {
+  it('accepts 0.95 confidence as 95 and keeps a custom visitor floor', () => {
     const next = normalizeGuardrails({
       confidence_level: 0.95,
       mde_percent: 8,
       min_sample_size_per_variation: 2500,
     });
     assert.equal(next.confidence_level, 95);
-    assert.equal(next.mde_percent, 8);
+    assert.equal(next.mde_percent, 10);
     assert.equal(next.min_sample_size_per_variation, 2500);
     assert.equal(resolveShopStatisticalDefaults(next).significanceLevel, 0.95);
+  });
+
+  it('preserves the 80% confidence option offered in Results settings', () => {
+    const next = normalizeGuardrails({ confidence_level: 80 });
+    assert.equal(next.confidence_level, 80);
+    assert.equal(resolveShopStatisticalDefaults(next).significanceLevel, 0.8);
   });
 
   it('defaults the conversion floor to what the visitor floor implies', () => {
@@ -82,21 +87,15 @@ describe('smartPricingGuardrailsService', () => {
     assert.equal(resolveShopStatisticalDefaults({}).minConversions, 100);
   });
 
-  it('clamps the conversion floor to the range the analysis can honour', () => {
-    // Below the normal-approximation floor the decision engine would override
-    // the setting anyway, so Settings must not store a smaller number.
-    assert.equal(
-      normalizeGuardrails({ min_conversions_per_variation: 2 }).min_conversions_per_variation,
-      ABSOLUTE_MIN_CONVERSIONS_PER_VARIATION
-    );
-    assert.equal(
-      normalizeGuardrails({ min_conversions_per_variation: 99999 }).min_conversions_per_variation,
-      2000
-    );
-    assert.equal(
-      normalizeGuardrails({ minConversionsPerVariation: 250 }).min_conversions_per_variation,
-      250
-    );
+  it('resets hidden statistical inputs to the documented fixed policy', () => {
+    const normalized = normalizeGuardrails({
+      min_conversions_per_variation: 250,
+      statistical_power: 90,
+      mde_percent: 8,
+    });
+    assert.equal(normalized.min_conversions_per_variation, 100);
+    assert.equal(normalized.statistical_power, 80);
+    assert.equal(normalized.mde_percent, 10);
   });
 
   it('keeps automatic price writes off unless the merchant opts in', () => {
@@ -140,7 +139,7 @@ describe('smartPricingGuardrailsService', () => {
     assert.equal(normalizeGuardrails({ notificationEmail: 'a@b.co' }).notification_email, 'a@b.co');
   });
 
-  it('keeps settings the Stat settings page no longer sends', () => {
+  it('keeps visible and operational settings while resetting hidden statistical values', () => {
     // Stat settings posts two fields. saveShopSmartPricingGuardrails spreads
     // that patch over the stored values and normalizes the result, so anything
     // the merchant configured before the page shrank has to survive the round
@@ -175,9 +174,9 @@ describe('smartPricingGuardrailsService', () => {
     assert.equal(saved.max_price_change_percent, 25);
     assert.equal(saved.min_margin_percent, 20);
     assert.equal(saved.default_cogs_percent, 40);
-    assert.equal(saved.min_conversions_per_variation, 250);
-    assert.equal(saved.statistical_power, 90);
-    assert.equal(saved.mde_percent, 8);
+    assert.equal(saved.min_conversions_per_variation, 100);
+    assert.equal(saved.statistical_power, 80);
+    assert.equal(saved.mde_percent, 10);
   });
 
   it('does not invent a frequentist analysis method', () => {

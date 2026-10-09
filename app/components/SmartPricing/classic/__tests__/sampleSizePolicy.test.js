@@ -60,6 +60,17 @@ describe('sampleSizePolicy', () => {
     });
   });
 
+  it('preserves the shop 80% confidence option in planning and stamped fields', () => {
+    expect(shopDesignFromGuardrails({ confidence_level: 80 })).toMatchObject({
+      confidenceLevel: 80,
+      significanceLevel: 0.8,
+    });
+    expect(stampStatisticalFields({}, { confidence_level: 80 })).toMatchObject({
+      confidence_level: 80,
+      significance_level: 0.8,
+    });
+  });
+
   it('reads nested API guardrails payloads', () => {
     expect(shopDesignFromGuardrails({ guardrails: { confidence_level: 95, mde_percent: 15 } })).toEqual({
       confidenceLevel: 95,

@@ -421,9 +421,8 @@ function enrollmentLockKeys({ test, productId, variantId } = {}) {
  * per product closes that window; the lease is in Postgres so it holds across
  * instances, and it expires on its own.
  *
- * If the lease store itself is unreachable the work still runs: the check below
- * is what actually protects the merchant, and a storage hiccup should not stop
- * anyone launching.
+ * If the lease store itself is unreachable the launch is refused. Running
+ * without the lock is how two requests both pass the free-to-start check.
  *
  * Pass the `test` where there is one, so every product it claims is held.
  * Callers that only know a product and variant -- a launch working from a plan,
@@ -450,7 +449,9 @@ async function withPricingEnrollmentLock({ shopDomain, productId, variantId, tes
     for (const key of keys) {
       const name = `price_test_enroll.${shop}.${key}`;
       // eslint-disable-next-line no-await-in-loop -- taken in order on purpose
-      const acquired = await acquireJobLease(name, PRICING_LOCK_SECONDS);
+      const acquired = await acquireJobLease(name, PRICING_LOCK_SECONDS, {
+        failClosed: true,
+      });
       if (!acquired) {
         const err = new Error(
           'This product is already being started by another request. Give it a moment and try again.'

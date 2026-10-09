@@ -22,7 +22,7 @@ const CHECKING = {
 };
 
 const NEEDS_INSTALL =
-  'Use Check and install on Store setup to add checkout discounts for offer tests';
+  'Click Refresh status on Store setup to install checkout discounts for offer tests';
 
 /** What the status payload means for the merchant, as a complete state. */
 function describeStatus(data) {
@@ -42,9 +42,9 @@ function describeStatus(data) {
   }
   return {
     status: scopeMissing
-      ? 'Re-approve read_discounts and write_discounts, then click Check and install on Store setup'
+      ? 'Re-approve read_discounts and write_discounts, then click Refresh status on Store setup'
       : functionAvailable
-        ? 'Checkout discounts found — click Check and install on Store setup'
+        ? 'Checkout discounts found — click Refresh status on Store setup'
         : NEEDS_INSTALL,
     installed: false,
     functionAvailable,
@@ -128,7 +128,7 @@ export default function useCheckoutDiscountStatus(shopDomain, { enabled = true }
     } catch (e) {
       setState(prev => ({
         ...prev,
-        error: e?.response?.data?.error || e?.message || 'Check and install failed',
+        error: e?.response?.data?.error || e?.message || 'Could not refresh status. Try again.',
       }));
       return null;
     } finally {

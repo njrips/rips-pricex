@@ -4,6 +4,7 @@ import {
   isShopifyRedirectResponse,
   isShopifySessionBounce,
   shouldRenderShopifyBoundaryHtml,
+  preserveEmbeddedSearch,
   withCurrentEmbeddedSearch,
   withEmbeddedSearch,
 } from '../shopifyEmbeddedSearch.js';
@@ -21,6 +22,26 @@ describe('withEmbeddedSearch', () => {
 
   it('returns a bare path when there is nothing to keep', () => {
     assert.equal(withEmbeddedSearch({ url: 'https://example.com/help' }, '/app/help'), '/app/help');
+  });
+
+  it('copies the browser embed params onto an internal path', () => {
+    const previous = globalThis.window;
+    globalThis.window = {
+      location: { search: '?shop=demo.myshopify.com&host=abc&embedded=1&tab=stats' },
+    };
+    try {
+      assert.equal(
+        preserveEmbeddedSearch('/app/setup'),
+        '/app/setup?shop=demo.myshopify.com&host=abc&embedded=1',
+      );
+      assert.equal(
+        preserveEmbeddedSearch('/app/settings?tab=plan'),
+        '/app/settings?tab=plan&shop=demo.myshopify.com&host=abc&embedded=1',
+      );
+    } finally {
+      if (previous === undefined) delete globalThis.window;
+      else globalThis.window = previous;
+    }
   });
 
   it('keeps embed params from the current client search', () => {

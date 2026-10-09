@@ -6,16 +6,16 @@ export const ACTIVITY_KIND_META = {
   created: { label: 'Created', group: 'lifecycle' },
   started: { label: 'Launched', group: 'lifecycle' },
   linked: { label: 'Launched', group: 'lifecycle' },
-  queued: { label: 'Lifecycle', group: 'lifecycle' },
+  queued: { label: 'Queued', group: 'lifecycle' },
   paused: { label: 'Paused', group: 'lifecycle' },
   stopped: { label: 'Stopped', group: 'lifecycle' },
   resumed: { label: 'Resumed', group: 'lifecycle' },
-  archived: { label: 'Lifecycle', group: 'lifecycle' },
-  restored: { label: 'Lifecycle', group: 'lifecycle' },
+  archived: { label: 'Archived', group: 'lifecycle' },
+  restored: { label: 'Restored', group: 'lifecycle' },
   updated: { label: 'Settings changed', group: 'lifecycle' },
-  qa: { label: 'Lifecycle', group: 'lifecycle' },
+  qa: { label: 'QA check', group: 'lifecycle' },
   guardrail: { label: 'Guardrail', group: 'guardrail' },
-  winner_ready: { label: 'Winner applied', group: 'lifecycle' },
+  winner_ready: { label: 'Winner ready', group: 'lifecycle' },
   complete: { label: 'Winner applied', group: 'lifecycle' },
 };
 
@@ -121,6 +121,14 @@ function combineLaunchActivityBatch(batch = []) {
 
 export function activityKindMeta(kind) {
   return ACTIVITY_KIND_META[String(kind || '').trim()] || { label: 'Event', group: 'lifecycle' };
+}
+
+/** Guardrail setting changes belong under the Guardrails filter, not Lifecycle. */
+function activityGroup(item = {}) {
+  if (String(item?.kind || '').trim() === 'updated' && /^guardrail\b/i.test(String(item?.title || ''))) {
+    return 'guardrail';
+  }
+  return activityKindMeta(item?.kind).group;
 }
 
 export function activityKindTone(item = {}) {
@@ -260,7 +268,7 @@ export function filterActivityItems(items = [], filter = 'all') {
   const key = String(filter || 'all').trim() || 'all';
   if (key === 'all') return Array.isArray(items) ? items : [];
   return (Array.isArray(items) ? items : []).filter(
-    item => activityKindMeta(item.kind).group === key
+    item => activityGroup(item) === key
   );
 }
 
@@ -271,7 +279,7 @@ export function activityFilterCounts(items = []) {
   });
   (Array.isArray(items) ? items : []).forEach(item => {
     counts.all += 1;
-    const group = activityKindMeta(item.kind).group;
+    const group = activityGroup(item);
     if (counts[group] !== undefined) counts[group] += 1;
   });
   return counts;

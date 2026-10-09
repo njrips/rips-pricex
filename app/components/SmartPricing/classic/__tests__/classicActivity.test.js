@@ -234,4 +234,26 @@ describe('buildActivityTimeline log merge', () => {
     expect(items.find(item => item.id === 'qa_ok')?.title).toBe('Self-QA passed');
     expect(items.find(item => item.id === 'qa_bad')?.title).toBe('Self-QA failed');
   });
+
+  it('does not describe a manually stopped test as keeping the catalog price', () => {
+    const items = buildActivityTimeline({
+      plan: {
+        status: 'completed',
+        updated_at: '2026-08-03T00:00:00.000Z',
+        metadata: {
+          activity_log: [
+            {
+              id: 'stopped_1',
+              kind: 'stopped',
+              title: 'Stopped test',
+              at: '2026-08-03T00:00:00.000Z',
+              detail: 'Traffic assignment stopped.',
+            },
+          ],
+        },
+      },
+    });
+    expect(items.some(item => item.title === 'Stopped test')).toBe(true);
+    expect(items.some(item => item.title === 'Kept catalog price')).toBe(false);
+  });
 });

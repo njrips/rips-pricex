@@ -30,10 +30,51 @@ const {
 } = require('../utils/storefrontAssignmentContext');
 const logger = require('../utils/logger');
 const { createTrackRateLimit } = require('../middleware/trackRateLimit');
+const { verifyAppProxySignature } = require('../utils/appProxySignature');
+const { publicErrorMessage } = require('../utils/publicError');
 
 const router = express.Router();
 const trackRateLimit = createTrackRateLimit();
 router.use((req, res, next) => (req.method === 'POST' ? trackRateLimit(req, res, next) : next()));
+
+router.use((req, res, next) => {
+  if (!String(req.baseUrl || '').endsWith('/proxy')) return next();
+  const secret = String(process.env.SHOPIFY_API_SECRET || '').trim();
+  if (!secret || !verifyAppProxySignature(req.query, secret)) {
+    return res.status(401).json({ error: 'Invalid app proxy signature' });
+  }
+  return next();
+});
+
+const installedShopCache = new Map();
+
+async function requireInstalledShop(req, res) {
+  const shop = resolveShop(req);
+  if (!shop) return null;
+  const cachedUntil = installedShopCache.get(shop) || 0;
+  if (cachedUntil > Date.now()) return shop;
+  try {
+    const result = await query(
+      `SELECT 1
+         FROM shop_sessions
+        WHERE LOWER(TRIM(shop_domain)) = $1
+          AND access_token IS NOT NULL
+          AND BTRIM(access_token) <> ''
+        LIMIT 1`,
+      [shop]
+    );
+    if ((result.rowCount || 0) < 1) {
+      res.status(403).json({ error: 'Shop is not installed' });
+      return null;
+    }
+    installedShopCache.set(shop, Date.now() + 60_000);
+    return shop;
+  } catch (error) {
+    logger.error('installed shop check failed', { shop, message: error.message });
+    res.status(503).json({ error: 'Shop install status unavailable' });
+    return null;
+  }
+}
 
 function loadScriptBody() {
   const p = path.resolve(__dirname, '../../../storefront/storefront-script.js');
@@ -63,24 +104,30 @@ async function serveScript(req, res) {
   let activeTests = [];
   let goalMetricDefinitions = [];
   let shopPriceSurfaceMappings = [];
-  let globalCustomAssets = null;
+  let globalAssetsRuntime = { beforeRuntime: '', afterRuntime: '' };
   try {
     if (shop) {
       const {
         getShopGlobalAssets,
-        globalAssetsForStorefrontRuntime,
+        globalAssetsRuntimeSource,
       } = require('../services/shopGlobalAssetsService');
       const [tests, goals, surfaces, globalAssets] = await Promise.all([
-        getActiveTestsForStorefront(shop),
+        getActiveTestsForStorefront(shop).catch(err => {
+          logger.warn('active tests load failed', { shop, message: err.message });
+          return [];
+        }),
         listGoalMetricDefinitions(shop).catch(() => []),
         getShopPriceSurfaceMappings(shop).catch(() => []),
-        getShopGlobalAssets(shop).catch(() => null),
+        getShopGlobalAssets(shop).catch(err => {
+          logger.warn('global storefront snippets load failed', { shop, message: err.message });
+          return null;
+        }),
       ]);
       activeTests = (tests || []).filter((t) => isStorefrontEmbeddedTestType(t.type));
       goalMetricDefinitions = goals || [];
       shopPriceSurfaceMappings = surfaces || [];
       if (globalAssets) {
-        globalCustomAssets = globalAssetsForStorefrontRuntime(globalAssets);
+        globalAssetsRuntime = globalAssetsRuntimeSource(globalAssets);
       }
     }
   } catch (err) {
@@ -97,7 +144,6 @@ async function serveScript(req, res) {
       { shopMappings: shopPriceSurfaceMappings },
       {
         runtimeSource: 'ripspricex-track',
-        globalCustomAssets,
       }
     );
   } catch (err) {
@@ -126,9 +172,18 @@ async function serveScript(req, res) {
   } catch (err) {
     logger.warn('early anti-flicker bootstrap failed', { message: err.message });
   }
-  const body = `${early}\nwindow.AB_TEST_RUNTIME_CONFIG=${JSON.stringify(config)};\n${loadScriptBody()}`;
+  const body =
+    `${early}\nwindow.AB_TEST_RUNTIME_CONFIG=${JSON.stringify(config)};\n` +
+    `${globalAssetsRuntime.beforeRuntime}${loadScriptBody()}\n${globalAssetsRuntime.afterRuntime}`;
   res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
-  res.setHeader('Cache-Control', getStorefrontScriptCacheControl?.() || 'public, max-age=60');
+  res.setHeader(
+    'Cache-Control',
+    getStorefrontScriptCacheControl?.({
+      hasGlobalCustomAssets: Boolean(
+        globalAssetsRuntime.beforeRuntime || globalAssetsRuntime.afterRuntime
+      ),
+    }) || 'public, max-age=60'
+  );
   res.send(body);
 }
 
@@ -139,13 +194,40 @@ router.get('/storefront-script-health', (_req, res) => {
   res.json({ ok: true, version: SCRIPT_VERSION, service: 'ripspricex' });
 });
 
+router.post('/client-error', (req, res) => {
+  const payload = req.body && typeof req.body === 'object' ? req.body : {};
+  const shop = resolveShop(req).slice(0, 255);
+  const error = String(payload.error || 'ripx_storefront_error').slice(0, 160);
+  let page = '';
+  try {
+    const parsed = new URL(String(payload.url || ''));
+    if (parsed.protocol === 'https:' || parsed.protocol === 'http:') {
+      page = `${parsed.origin}${parsed.pathname}`.slice(0, 500);
+    }
+  } catch {
+    page = '';
+  }
+  const rawMetadata =
+    payload.metadata && typeof payload.metadata === 'object' ? payload.metadata : {};
+  const metadata = {
+    reason: String(rawMetadata.reason || '').slice(0, 160),
+    version: String(rawMetadata.version || '').slice(0, 40),
+    preview: rawMetadata.preview === true,
+    fallbackConfigured: rawMetadata.fallbackConfigured === true,
+    attemptCount: Math.max(0, Math.min(100, Number(rawMetadata.attemptCount) || 0)),
+  };
+  logger.warn('storefront client error', { shop: shop || null, error, page: page || null, metadata });
+  return res.status(202).json({ ok: true });
+});
+
 router.get('/ping', (req, res) => {
   res.json({ ok: true, shop: resolveShop(req) || null });
 });
 
 router.get('/variants', async (req, res) => {
   try {
-    const shop = resolveShop(req);
+    const shop = await requireInstalledShop(req, res);
+    if (!shop && res.headersSent) return undefined;
     const userId = String(req.query.user_id || req.query.userId || crypto.randomUUID());
     let testIds = [];
     if (req.query.test_ids) {
@@ -181,13 +263,14 @@ router.get('/variants', async (req, res) => {
     });
   } catch (err) {
     logger.error('variants failed', { message: err.message });
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: publicErrorMessage(err) });
   }
 });
 
 router.get('/variant', async (req, res) => {
   try {
-    const shop = resolveShop(req);
+    const shop = await requireInstalledShop(req, res);
+    if (!shop && res.headersSent) return undefined;
     const userId = String(req.query.user_id || req.query.userId || crypto.randomUUID());
     const testId = String(req.query.test_id || '').trim();
     if (!shop || !testId) {
@@ -212,7 +295,8 @@ router.get('/variant', async (req, res) => {
       user_id: userId,
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    logger.error('variant failed', { message: err.message });
+    res.status(500).json({ error: publicErrorMessage(err) });
   }
 });
 
@@ -224,6 +308,8 @@ router.get(['/preview', '/preview-storefront-test'], async (req, res) => {
     if (!shop || !testId) {
       return res.status(400).json({ error: 'shop and test_id required' });
     }
+    const installedShop = await requireInstalledShop(req, res);
+    if (!installedShop) return undefined;
     const test = await getTestById(testId, shop);
     if (!test || test.shop_domain !== shop) {
       return res.status(404).json({ error: 'Test not found' });
@@ -273,17 +359,23 @@ router.get(['/preview', '/preview-storefront-test'], async (req, res) => {
       },
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    logger.error('preview failed', { message: err.message });
+    res.status(500).json({ error: publicErrorMessage(err) });
   }
 });
 
 router.get(['/preview-document', '/preview-document/'], async (req, res) => {
   try {
+    if (!resolveShop(req)) {
+      return res.status(400).type('html').send('<!-- missing shop -->');
+    }
+    const installedShop = await requireInstalledShop(req, res);
+    if (!installedShop) return undefined;
     const { servePreviewDocument } = require('./previewDocument');
     return servePreviewDocument(req, res);
   } catch (err) {
     logger.error('preview-document failed', { message: err.message, stack: err.stack });
-    res.status(500).type('html').send(`<!-- preview-document error: ${err.message} -->`);
+    res.status(500).type('html').send(`<!-- preview-document error: ${publicErrorMessage(err)} -->`);
   }
 });
 
@@ -293,7 +385,7 @@ router.get(['/preview-launch', '/preview-launch/'], async (req, res) => {
     return servePreviewLaunch(req, res);
   } catch (err) {
     logger.error('preview-launch failed', { message: err.message, stack: err.stack });
-    res.status(500).type('html').send(`<!-- preview-launch error: ${err.message} -->`);
+    res.status(500).type('html').send(`<!-- preview-launch error: ${publicErrorMessage(err)} -->`);
   }
 });
 
@@ -320,13 +412,18 @@ router.post('/exposure', async (req, res) => {
     if (!shop || !userId || !testIds.length) {
       return res.status(400).json({ error: 'shop, user_id, test_ids required' });
     }
+    const installedShop = await requireInstalledShop(req, res);
+    if (!installedShop) return undefined;
     const result = await query(
       `UPDATE test_assignments
        SET exposed_at = NOW()
        WHERE exposed_at IS NULL
          AND user_id = $1
          AND LOWER(TRIM(shop_domain)) = $2
-         AND test_id = ANY($3::uuid[])`,
+         AND test_id = ANY($3::uuid[])
+         AND test_id IN (
+           SELECT id FROM tests WHERE LOWER(TRIM(shop_domain)) = $2
+         )`,
       [userId, String(shop).toLowerCase().trim(), testIds]
     ).catch(err => {
       // Before migration 010 there is no column to stamp, and nothing reads it.
@@ -335,13 +432,14 @@ router.post('/exposure', async (req, res) => {
     });
     res.json({ ok: true, exposed: result.rowCount || 0 });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: publicErrorMessage(err) });
   }
 });
 
 router.post('/catalog-product-view', async (req, res) => {
   try {
-    const shop = resolveShop(req);
+    const shop = await requireInstalledShop(req, res);
+    if (!shop && res.headersSent) return undefined;
     const productId = String(req.body?.product_id || req.body?.productId || '').trim();
     if (!shop || !productId) {
       return res.status(400).json({ error: 'shop and product_id required' });
@@ -387,13 +485,14 @@ router.post('/catalog-product-view', async (req, res) => {
     });
     res.json({ ok: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: publicErrorMessage(err) });
   }
 });
 
 router.post(['/', '/event', '/events'], async (req, res) => {
   try {
-    const shop = resolveShop(req);
+    const shop = await requireInstalledShop(req, res);
+    if (!shop && res.headersSent) return undefined;
     const body = req.body || {};
     const testId = body.test_id || body.testId;
     const variantId = body.variant_id || body.variantId;
@@ -423,9 +522,25 @@ router.post(['/', '/event', '/events'], async (req, res) => {
     // unnamed so this still runs on a database that has not taken migration 009
     // yet, where naming the index would raise 42P10 and drop the event instead.
     const dedupeConversion = String(eventType) === 'conversion' && orderId !== '';
-    await query(
+    const inserted = await query(
       `INSERT INTO events (test_id, variant_id, user_id, shop_domain, event_type, event_name, event_value, metadata)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
+       SELECT $1::uuid, $2, $3, $4, $5, $6, $7, $8::jsonb
+       WHERE EXISTS (
+         SELECT 1
+           FROM tests t
+          WHERE t.id = $1::uuid
+            AND LOWER(TRIM(t.shop_domain)) = LOWER(TRIM($4))
+            AND EXISTS (
+              SELECT 1
+                FROM jsonb_array_elements(
+                  CASE
+                    WHEN jsonb_typeof(t.variants) = 'array' THEN t.variants
+                    ELSE '[]'::jsonb
+                  END
+                ) variant
+               WHERE variant->>'id' = $2
+            )
+       )
        ${dedupeConversion ? 'ON CONFLICT DO NOTHING' : ''}`,
       [
         testId,
@@ -438,9 +553,13 @@ router.post(['/', '/event', '/events'], async (req, res) => {
         JSON.stringify(metadata),
       ]
     );
+    if ((inserted.rowCount || 0) < 1 && !dedupeConversion) {
+      return res.status(403).json({ error: 'unknown test' });
+    }
     res.json({ ok: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    logger.error('track event failed', { message: err.message });
+    res.status(500).json({ error: publicErrorMessage(err) });
   }
 });
 
@@ -461,6 +580,8 @@ router.get(
           response.status(400).type('html').send('<!-- missing shop or url -->');
           return null;
         }
+        const installedShop = await requireInstalledShop(request, response);
+        if (!installedShop) return null;
         return {
           normalizedShop: shop,
           shopDomain: shop,
@@ -477,7 +598,7 @@ router.get(
       return servePricePreviewBootstrap(req, res);
     } catch (err) {
       logger.error('price preview bootstrap failed', { message: err.message, stack: err.stack });
-      res.status(500).type('html').send(`<!-- preview bootstrap error: ${err.message} -->`);
+      res.status(500).type('html').send(`<!-- preview bootstrap error: ${publicErrorMessage(err)} -->`);
     }
   }
 );

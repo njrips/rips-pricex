@@ -24,7 +24,7 @@ There is **no** email user / Domains switcher. One install = one shop.
 
 | Method | Path | Notes |
 |--------|------|-------|
-| GET | `/health` | `{ ok, service: ripspricex-api }` |
+| GET | `/health` | `{ ok, service: priceify-api }` |
 | POST | `/api/shops/install` | Upsert `shop_sessions` |
 | POST | `/api/shops/uninstall` | Clear entitlement, pause tests |
 | GET | `/api/billing/status` | Entitlement snapshot |

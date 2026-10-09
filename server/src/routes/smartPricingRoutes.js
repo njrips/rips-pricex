@@ -103,6 +103,9 @@ const {
   suggestPrices,
 } = require('../services/smartPricing/smartPricingAiSuggestService');
 const { hasOpenAiKey } = require('../services/smartPricing/smartPricingAiProvider');
+const {
+  fetchProductContextForSuggest,
+} = require('../services/smartPricing/smartPricingProductContextService');
 
 const router = express.Router();
 
@@ -118,11 +121,12 @@ router.use((req, res, next) => {
 });
 
 async function resolveShopifyAccessToken(req) {
-  if (req.shopifyAccessToken) {
-    return req.shopifyAccessToken;
-  }
+  const { resolveShopifyAdminToken } = require('../utils/shopifyAdminToken');
   const session = await getShopSession(req.shopDomain);
-  return session?.access_token || process.env.SHOPIFY_ACCESS_TOKEN || '';
+  return resolveShopifyAdminToken({
+    requestToken: req.shopifyAccessToken,
+    sessionToken: session?.access_token,
+  });
 }
 
 router.get(
@@ -826,6 +830,33 @@ router.post(
 const MAX_SUGGEST_PRODUCTS = 500;
 const MAX_SUGGEST_VARIANTS = 5000;
 const MAX_SUGGEST_ARMS = 10;
+const SUGGEST_COOLDOWN_MS = 5000;
+const suggestRequestState = new Map();
+
+async function withSuggestRequestSlot(shopDomain, work) {
+  const key = String(shopDomain || '').trim().toLowerCase();
+  const now = Date.now();
+  const prior = suggestRequestState.get(key);
+  if (prior?.active || now - Number(prior?.lastFinishedAt || 0) < SUGGEST_COOLDOWN_MS) {
+    const error = new Error('A price suggestion is already running or just finished. Try again shortly.');
+    error.status = 429;
+    throw error;
+  }
+  suggestRequestState.set(key, { active: true, lastFinishedAt: prior?.lastFinishedAt || 0 });
+  try {
+    return await work();
+  } finally {
+    const lastFinishedAt = Date.now();
+    suggestRequestState.set(key, { active: false, lastFinishedAt });
+    const timer = setTimeout(() => {
+      const current = suggestRequestState.get(key);
+      if (!current?.active && current?.lastFinishedAt === lastFinishedAt) {
+        suggestRequestState.delete(key);
+      }
+    }, SUGGEST_COOLDOWN_MS * 2);
+    timer.unref?.();
+  }
+}
 
 function suggestPriceRequestLimits(variants, arms) {
   const errors = [];
@@ -871,26 +902,39 @@ router.post(
     const guardrails = await getShopSmartPricingGuardrails(req.shopDomain).catch(() => ({
       ...DEFAULT_GUARDRAILS,
     }));
-    const result = await suggestPrices({
-      variants,
-      arms,
-      // Shop guardrails are price safety limits, so they must win over anything
-      // the client sends; body values only fill keys the shop does not define.
-      guardrails: { ...(body.guardrails || {}), ...guardrails },
-      minPct: body.min_pct ?? body.minPct ?? 10,
-      maxPct: body.max_pct ?? body.maxPct ?? 20,
-      unit: body.unit === 'amount' ? 'amount' : 'percent',
-      minAmount: body.min_amount ?? body.minAmount ?? null,
-      maxAmount: body.max_amount ?? body.maxAmount ?? null,
-      objective: body.objective || guardrails.objective || 'revenue_per_visitor',
-      // The client has always sent use_ai; honouring it gives an operator a way
-      // to ask for the deterministic spread without unsetting the API key.
-      useAi: body.use_ai !== false && body.useAi !== false,
-      regenerate: body.regenerate === true || body.regenerate === 1,
-      attempt: Number(body.attempt) || 0,
-      // Priced across every arm in `arms`, returned for these only.
-      targetArmIds: Array.isArray(body.target_arm_ids) ? body.target_arm_ids : null,
-    });
+    let result;
+    try {
+      result = await withSuggestRequestSlot(req.shopDomain, () =>
+        suggestPrices({
+          variants,
+          arms,
+          // Shop guardrails are price safety limits, so they must win over anything
+          // the client sends; body values only fill keys the shop does not define.
+          guardrails: { ...(body.guardrails || {}), ...guardrails },
+          minPct: body.min_pct ?? body.minPct ?? 10,
+          maxPct: body.max_pct ?? body.maxPct ?? 20,
+          unit: body.unit === 'amount' ? 'amount' : 'percent',
+          minAmount: body.min_amount ?? body.minAmount ?? null,
+          maxAmount: body.max_amount ?? body.maxAmount ?? null,
+          objective: body.objective || guardrails.objective || 'revenue_per_visitor',
+          useAi: body.use_ai !== false && body.useAi !== false,
+          regenerate: body.regenerate === true || body.regenerate === 1,
+          attempt: Number(body.attempt) || 0,
+          targetArmIds: Array.isArray(body.target_arm_ids) ? body.target_arm_ids : null,
+          loadProductContext: async productIds =>
+            fetchProductContextForSuggest({
+              shopDomain: req.shopDomain,
+              accessToken: await resolveShopifyAccessToken(req),
+              productIds,
+            }),
+        })
+      );
+    } catch (error) {
+      if (error?.status === 429) {
+        return sendError(res, 429, error.message);
+      }
+      throw error;
+    }
     return sendSuccess(res, HTTP_STATUS.OK, {
       ...result,
       ai_available: hasOpenAiKey(),
@@ -1405,10 +1449,6 @@ function isFreeSmartPricingRequest(method, path) {
     return route.startsWith('/wizard-drafts/') || route.startsWith('/inbox/plans/');
   }
   if (verb === 'POST') {
-    // Wizard pricing is read-only on the catalog until launch; blocking it behind
-    // a plan left the Products table empty even though the deterministic spread
-    // is cheap and RipX never gated it.
-    if (route === '/plans/suggest-prices') return true;
     return /^\/tests\/[^/]+\/(stop-product|finish-product|release-product)$/.test(route);
   }
   return false;
@@ -1417,4 +1457,5 @@ function isFreeSmartPricingRequest(method, path) {
 module.exports = router;
 module.exports.isFreeSmartPricingRequest = isFreeSmartPricingRequest;
 module.exports.suggestPriceRequestLimits = suggestPriceRequestLimits;
+module.exports.withSuggestRequestSlot = withSuggestRequestSlot;
 module.exports.wizardDraftRefusalBody = wizardDraftRefusalBody;

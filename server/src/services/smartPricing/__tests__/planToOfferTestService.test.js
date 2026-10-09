@@ -111,7 +111,7 @@ describe('planToOfferTestService', () => {
     });
     expect(payload.goal.analysis_method).toBe('sequential');
     expect(payload.goal.significance_level).toBe(0.95);
-    expect(payload.goal.mde_percent).toBe(8);
+    expect(payload.goal.mde_percent).toBe(10);
     expect(payload.goal.min_sample_size).toBe(2200);
   });
 

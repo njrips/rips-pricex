@@ -116,8 +116,9 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 /**
  * How long a ready product sits before the app writes its price unattended.
  *
- * The window is measured from when the product first became ready for the
- * merchant, which is also when they were emailed about it. Without it, the
+ * The window is measured from when the merchant was successfully notified.
+ * Readiness can be recorded before an email succeeds, so using ready_since
+ * would let the clock expire without the promised notice. Without it, the
  * first a merchant would know of an automatic price change is seeing it already
  * done, which defeats the point of telling them at all.
  */
@@ -125,12 +126,10 @@ function resolveReviewWindow({ guardrails, readiness, now }) {
   const delayDays = Number(parseObject(guardrails).auto_apply_delay_days);
   const days = Number.isFinite(delayDays) && delayDays > 0 ? delayDays : 0;
   if (days <= 0) return { due: true, apply_at: null, delay_days: 0 };
-  const readySince = parseObject(readiness).ready_since;
-  const startedAt = readySince ? Date.parse(readySince) : NaN;
+  const notifiedAt = parseObject(readiness).notified_at;
+  const startedAt = notifiedAt ? Date.parse(notifiedAt) : NaN;
   if (!Number.isFinite(startedAt)) {
-    // Not yet recorded as ready. This is the first look at it, so the window has
-    // not started and certainly has not elapsed.
-    return { due: false, apply_at: null, delay_days: days };
+    return { due: false, apply_at: null, delay_days: days, awaiting_notification: true };
   }
   const applyAt = startedAt + days * DAY_MS;
   return {
@@ -221,7 +220,9 @@ function resolveAutoWinnerDecision({ test, analytics, plan, guardrails, readines
     if (!window.due) {
       return {
         action: 'continue',
-        reason: 'waiting_for_review_window',
+        reason: window.awaiting_notification
+          ? 'waiting_for_notification'
+          : 'waiting_for_review_window',
         variantIndex,
         auto_apply_at: window.apply_at,
         delay_days: window.delay_days,
@@ -285,6 +286,8 @@ function loadDeps(overrides = {}) {
     listInboxPlans,
     listRunningSmartPricingTests: shop => listRunningSmartPricingTests(shop),
     getTestAnalytics: (...args) => analyticsService.getTestAnalytics(...args),
+    enforceRevenueDropGuardrail: (...args) =>
+      require('./smartPricingGuardrailEvaluatorService').enforceRevenueDropGuardrail(...args),
     stopTest: (...args) => abTestEngine.stopTest(...args),
     applyPersonalization: (...args) =>
       require('../personalizationService').applyPersonalization(...args),
@@ -404,6 +407,40 @@ async function evaluateSmartPricingAutoWinner(input = {}, depOverrides = {}) {
       input.readiness !== undefined
         ? input.readiness
         : (await deps.getShopRolloutReadiness(shopDomain).catch(() => ({})))?.[testId] || null;
+
+    // The readiness sweep and unattended apply job run on different schedules.
+    // Recheck under the same rollout lease used for the catalog write so a
+    // newly breached product cannot be published in the gap between sweeps.
+    let revenueGuardrail;
+    try {
+      revenueGuardrail = await deps.enforceRevenueDropGuardrail({
+        shopDomain,
+        test,
+        analytics,
+      });
+    } catch (error) {
+      deps.logger.warn('Smart Pricing auto-winner revenue guardrail check failed', {
+        shopDomain,
+        testId,
+        error: error?.message,
+      });
+      return {
+        skipped: true,
+        enforced: false,
+        test_id: testId,
+        reason: 'guardrail_check_failed',
+      };
+    }
+    if (revenueGuardrail?.breached === true || revenueGuardrail?.enforced === true) {
+      return {
+        skipped: true,
+        enforced: Boolean(revenueGuardrail.enforced),
+        test_id: testId,
+        reason: 'guardrail_breached',
+        guardrail: revenueGuardrail,
+      };
+    }
+
     const decision = resolveAutoWinnerDecision({
       test,
       analytics,

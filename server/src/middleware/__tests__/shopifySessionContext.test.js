@@ -198,15 +198,16 @@ describe('requireShopifySession', () => {
     assert.equal(res.statusCode, 401);
   });
 
-  it('carries an access token through for install sync flows', () => {
+  it('ignores a browser-supplied Admin API access token', () => {
     const req = makeReq({
       token: makeToken(),
       headers: { 'X-Shopify-Access-Token': 'shpat_example' },
+      body: { access_token: 'shpat_body' },
     });
     const { nextCalled } = run(req);
 
     assert.equal(nextCalled, true);
-    assert.equal(req.shopifyAccessToken, 'shpat_example');
+    assert.equal(req.shopifyAccessToken, undefined);
   });
 });
 

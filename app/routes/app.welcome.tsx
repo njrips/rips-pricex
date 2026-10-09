@@ -1,10 +1,11 @@
-import { useMemo } from 'react';
-import { Link, useNavigate, useOutletContext, useSearchParams } from 'react-router';
+import { useEffect, useMemo, useRef } from 'react';
+import { Link, useNavigate, useOutletContext, useRevalidator, useSearchParams } from 'react-router';
 import { Banner } from '@shopify/polaris';
 import type { AppOutletContext } from '../lib/api.client';
 import { useUpgradeRedirect } from '../lib/useUpgradeRedirect';
 import ClassicAdminShell from '../components/SmartPricing/classic/ClassicAdminShell';
 import styles from '../components/SmartPricing/classic/SmartPricingClassic.module.css';
+import { withCurrentEmbeddedSearch } from '../utils/shopifyEmbeddedSearch';
 
 /**
  * Partner Dashboard "Welcome URL" after Shopify App Pricing approval.
@@ -21,6 +22,16 @@ export default function PlanWelcomePage() {
     const raw = params.get('plan_handle') || params.get('planHandle');
     return raw ? String(raw).trim() : '';
   }, [params]);
+  const revalidator = useRevalidator();
+  const refreshedPlan = useRef('');
+  useEffect(() => {
+    if (!planFromQuery || refreshedPlan.current === planFromQuery) return undefined;
+    refreshedPlan.current = planFromQuery;
+    revalidator.revalidate();
+    return undefined;
+  }, [planFromQuery, revalidator]);
+  const embeddedPath = (path: string, extra: Record<string, string> = {}) =>
+    withCurrentEmbeddedSearch(params, path, extra);
 
   const displayPlan = planFromQuery || ctx.planHandle || 'your plan';
   const entitled = Boolean(ctx.entitled);
@@ -39,18 +50,18 @@ export default function PlanWelcomePage() {
         entitled
           ? {
               label: 'Open Store setup',
-              onClick: () => navigate('/app/setup'),
+              onClick: () => navigate(embeddedPath('/app/setup')),
             }
           : {
               label: 'Plan & usage',
-              onClick: () => navigate('/app/settings?tab=plan'),
+              onClick: () => navigate(embeddedPath('/app/settings', { tab: 'plan' })),
             }
       }
       footerSecondary={
         entitled
           ? {
               label: 'New test',
-              onClick: () => navigate('/app/experiments/new'),
+              onClick: () => navigate(embeddedPath('/app/experiments/new')),
             }
           : {
               label: 'Open Shopify plan selection',
@@ -74,12 +85,12 @@ export default function PlanWelcomePage() {
         <div className={styles.adminRow}>
           <p className={styles.adminRowTitle}>Next steps</p>
           <p className={styles.adminRowBody}>
-            1. Confirm readiness on <Link to="/app/setup">Store setup</Link> (Theme connection,
+            1. Confirm readiness on <Link to={embeddedPath('/app/setup')}>Store setup</Link> (Theme connection,
             Checkout pricing functions, price locations).
           </p>
           <p className={styles.adminRowBody}>
             2. Review or change the subscription anytime under{' '}
-            <Link to="/app/settings?tab=plan">Settings → Plan</Link>.
+            <Link to={embeddedPath('/app/settings', { tab: 'plan' })}>App settings → Plan &amp; usage</Link>.
           </p>
           <p className={styles.adminRowBody}>
             3. Create your first test from New test (or the title bar).

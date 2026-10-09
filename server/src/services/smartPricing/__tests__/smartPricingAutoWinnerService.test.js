@@ -190,7 +190,10 @@ describe('resolveAutoWinnerDecision', () => {
 
     const tooEarly = resolveAutoWinnerDecision({
       ...winning,
-      readiness: { ready_since: '2026-01-10T00:00:00.000Z' },
+      readiness: {
+        ready_since: '2026-01-09T00:00:00.000Z',
+        notified_at: '2026-01-10T00:00:00.000Z',
+      },
       now: new Date('2026-01-12T00:00:00Z'),
     });
     assert.equal(tooEarly.action, 'continue');
@@ -199,15 +202,16 @@ describe('resolveAutoWinnerDecision', () => {
 
     const due = resolveAutoWinnerDecision({
       ...winning,
-      readiness: { ready_since: '2026-01-10T00:00:00.000Z' },
+      readiness: {
+        ready_since: '2026-01-09T00:00:00.000Z',
+        notified_at: '2026-01-10T00:00:00.000Z',
+      },
       now: new Date('2026-01-13T00:00:01Z'),
     });
     assert.equal(due.action, 'apply_variation');
   });
 
-  it('does not start the window from the sweep that first sees the win', () => {
-    // With no recorded ready_since this is the first look at the product, so
-    // the window has not started rather than already elapsed.
+  it('does not start the window until the merchant was successfully notified', () => {
     const decision = resolveAutoWinnerDecision({
       test: priceTest(),
       plan: { id: 'SP-1' },
@@ -217,9 +221,9 @@ describe('resolveAutoWinnerDecision', () => {
         winnerVariantId: 'v-up',
       }),
       guardrails: { auto_apply_winner: true, auto_apply_delay_days: 3 },
-      readiness: null,
+      readiness: { ready_since: '2026-01-01T00:00:00.000Z', notified_at: null },
     });
-    assert.equal(decision.reason, 'waiting_for_review_window');
+    assert.equal(decision.reason, 'waiting_for_notification');
     assert.equal(decision.auto_apply_at, null);
   });
 
@@ -318,6 +322,11 @@ describe('evaluateSmartPricingAutoWinner', () => {
       findInboxPlanByTestId: async () => ({ id: 'SP-1', experiment_type: 'price_test' }),
       listInboxPlans: async () => ({ plans: [] }),
       getTestAnalytics: async () => sequentialAnalytics(),
+      enforceRevenueDropGuardrail: async () => ({
+        skipped: false,
+        enforced: false,
+        breached: false,
+      }),
       stopTest: async () => {
         calls.stop += 1;
         return priceTest({ status: 'stopped' });
@@ -394,6 +403,58 @@ describe('evaluateSmartPricingAutoWinner', () => {
     assert.equal(injected.calls.publish, 1);
     assert.equal(injected.calls.personalize, 1);
     assert.equal(injected.calls.sync[0].meta.reason, 'auto_winner');
+  });
+
+  it('rechecks the revenue guardrail before an unattended catalog write', async () => {
+    const injected = deps({
+      enforceRevenueDropGuardrail: async () => ({
+        skipped: false,
+        enforced: true,
+        breached: true,
+        observed_drop_percent: 18,
+      }),
+    });
+    const result = await evaluateSmartPricingAutoWinner(
+      {
+        shopDomain: 'demo.myshopify.com',
+        test: priceTest(),
+        plan: { id: 'SP-1' },
+        analytics: sequentialAnalytics({
+          significant: true,
+          winner: 'variantB',
+          winnerVariantId: 'v-up',
+        }),
+      },
+      injected
+    );
+
+    assert.equal(result.reason, 'guardrail_breached');
+    assert.equal(injected.calls.stop, 0);
+    assert.equal(injected.calls.publish, 0);
+  });
+
+  it('fails closed when the last revenue guardrail check cannot run', async () => {
+    const injected = deps({
+      enforceRevenueDropGuardrail: async () => {
+        throw new Error('analytics unavailable');
+      },
+    });
+    const result = await evaluateSmartPricingAutoWinner(
+      {
+        shopDomain: 'demo.myshopify.com',
+        test: priceTest(),
+        plan: { id: 'SP-1' },
+        analytics: sequentialAnalytics({
+          significant: true,
+          winner: 'variantB',
+          winnerVariantId: 'v-up',
+        }),
+      },
+      injected
+    );
+
+    assert.equal(result.reason, 'guardrail_check_failed');
+    assert.equal(injected.calls.publish, 0);
   });
 
   it('stops a control win without publishing', async () => {
