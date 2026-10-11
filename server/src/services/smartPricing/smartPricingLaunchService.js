@@ -18,12 +18,28 @@ const {
 const { ensureOfferCheckoutDiscount } = require('./offerCheckoutDiscountService');
 const { getShopSession } = require('../../models/shopSession');
 const { linkInboxPlanToTest } = require('../../models/smartPricingInboxStore');
+const { findDeletions, planExperimentId } = require('../../models/smartPricingDeletionStore');
 
 async function launchSmartPricingPlanAsTest(
   plan,
   shopDomain,
   { status = 'draft', autoStart = false } = {}
 ) {
+  // A wizard or list left open in another tab can still hold the plans of an
+  // experiment deleted here, and launching one starts a test nobody can see.
+  const experimentId = planExperimentId(plan);
+  if (experimentId) {
+    const deleted = await findDeletions(shopDomain, { experimentIds: [experimentId] }).catch(
+      () => null
+    );
+    if (deleted?.experiments?.has(experimentId)) {
+      const err = new Error('This test was deleted. Refresh the page to see your current tests.');
+      err.isValidation = true;
+      err.errors = [err.message];
+      throw err;
+    }
+  }
+
   const guardrails = await getShopSmartPricingGuardrails(shopDomain).catch(() => ({}));
   const offerPlan = isOfferPlan(plan);
   let validatedPlan = plan;

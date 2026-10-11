@@ -96,6 +96,8 @@ class TestAssignmentModel {
       ]);
       return result.rows[0];
     } catch (err) {
+      // The test was purged while a visitor was being assigned to it.
+      if (err?.code === '23503') return null;
       if (err.message?.includes('device') || err.message?.includes('country')) {
         const result = await query(sqlWithoutSegment, [
           test_id,

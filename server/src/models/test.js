@@ -536,13 +536,26 @@ class TestModel {
       // long the test ran reads a null `stopped_at` as "still running", and a
       // paused test is not. Matches how the billing sweep pauses a test.
       updates.push('stopped_at = COALESCE(stopped_at, NOW())');
+    } else if (status === 'archived') {
+      // Starts the purge grace period; a second delete must not restart it.
+      updates.push('deleted_at = COALESCE(deleted_at, NOW())');
+      // What Restore puts back. A repeat delete keeps the first answer.
+      updates.push(
+        "metadata = CASE WHEN status = 'archived' THEN metadata " +
+          "ELSE COALESCE(metadata, '{}'::jsonb) || jsonb_build_object('status_before_delete', status) END"
+      );
     }
 
+    // Archived is how a test is deleted, so nothing may move it out again. A
+    // Resume or Pause from a tab opened before the delete, or the auto-winner
+    // finishing a pass it began beforehand, used to put a deleted test back on
+    // the storefront and its plan back on the list.
     const sql = `
       UPDATE tests
       SET ${updates.join(', ')}
       WHERE id = $2
         AND LOWER(TRIM(shop_domain)) = LOWER(TRIM($3))
+        AND (status <> 'archived' OR $1 = 'archived')
       RETURNING *
     `;
 
@@ -676,11 +689,16 @@ class TestModel {
 
     fields.push('updated_at = NOW()');
 
+    // Same rule as updateTestStatus: a deleted test stays deleted.
+    const leavesArchive =
+      Object.prototype.hasOwnProperty.call(updates, 'status') && updates.status !== 'archived';
     const sql = `
       UPDATE tests
       SET ${fields.join(', ')}
       WHERE id = $${paramIndex}
-        AND LOWER(TRIM(shop_domain)) = LOWER(TRIM($${paramIndex + 1}))
+        AND LOWER(TRIM(shop_domain)) = LOWER(TRIM($${paramIndex + 1}))${
+          leavesArchive ? "\n        AND status <> 'archived'" : ''
+        }
       RETURNING *
     `;
 

@@ -22,6 +22,7 @@ const SHOP_TABLES = [
   'analytics_daily',
   'smart_pricing_product_events',
   'smart_pricing_inbox_plans',
+  'smart_pricing_deletions',
   'catalog_product_view_daily',
   'catalog_product_view_sessions',
   'catalog_collection_view_daily',

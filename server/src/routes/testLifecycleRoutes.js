@@ -15,7 +15,16 @@ const {
   rearmRevenueGuardrailForResume,
 } = require('../services/smartPricing/smartPricingProductLifecycleService');
 
+const {
+  applyPlanSettingsToPausedTests,
+} = require('../services/smartPricing/smartPricingPausedSettingsService');
+const logger = require('../utils/logger');
+
+const { recordDeletions } = require('../models/smartPricingDeletionStore');
+
 const router = express.Router();
+
+const isArchived = test => String(test?.status || '') === 'archived';
 
 router.get(
   '/:id',
@@ -36,11 +45,15 @@ router.post(
     if (!test || test.shop_domain !== req.shopDomain) {
       return res.status(404).json({ error: 'Test not found' });
     }
+    if (isArchived(test)) {
+      return res.status(409).json({ error: 'This test was deleted.', code: 'TEST_DELETED' });
+    }
     // This is the route the Resume button calls, once per product. A test that
     // sat paused may have had its product taken by another test in the
     // meantime, and starting anyway would put two prices on one variant. The
     // check and the start are held together, because the list resumes several
     // tests at once and two of them can land on one product at the same moment.
+    let started = null;
     try {
       // `target_id` alone was not enough to name the thing being claimed: a
       // test that carries its products in `target_ids` or in the per-product
@@ -65,7 +78,20 @@ router.post(
           // too, so it would also never decide. The per-product resume has
           // always re-armed; this path is the same override and must match.
           await rearmRevenueGuardrailForResume(req.params.id, req.shopDomain, test);
-          await updateTestStatus(req.params.id, req.shopDomain, 'running');
+          // Settings edited since the pause -- including ones saved while it
+          // was still running -- are what the merchant now sees on the details
+          // page, so they are what it resumes with. After the re-arm, which
+          // writes the guardrail from the copy read above.
+          if (String(test.status || '').toLowerCase() === 'paused') {
+            await applyPlanSettingsToPausedTests(req.shopDomain, [req.params.id]).catch(err => {
+              logger.warn('resume could not apply edited settings', {
+                shop: req.shopDomain,
+                testId: req.params.id,
+                error: err?.message,
+              });
+            });
+          }
+          started = await updateTestStatus(req.params.id, req.shopDomain, 'running');
         }
       );
     } catch (err) {
@@ -77,6 +103,11 @@ router.post(
         code: err.code,
         conflict: err.conflict,
       });
+    }
+    // Deleted after the check above: the status update refuses to move a
+    // deleted test, so nothing started, and saying so beats a 200.
+    if (!started) {
+      return res.status(409).json({ error: 'This test was deleted.', code: 'TEST_DELETED' });
     }
     await syncSmartPricingInboxForTest(req.shopDomain, req.params.id, {
       reason: 'manual_start',
@@ -108,6 +139,11 @@ router.post(
     if (!test || test.shop_domain !== req.shopDomain) {
       return res.status(404).json({ error: 'Test not found' });
     }
+    // Already off the storefront for good. Answering as a no-op keeps a batch
+    // pause from failing over one product that was deleted in another tab.
+    if (isArchived(test)) {
+      return res.json({ test });
+    }
     await updateTestStatus(req.params.id, req.shopDomain, 'paused');
     await syncSmartPricingInboxForTest(req.shopDomain, req.params.id, {
       reason: 'merchant_pause',
@@ -136,6 +172,9 @@ router.post(
     const test = await getTestById(req.params.id, req.shopDomain);
     if (!test || test.shop_domain !== req.shopDomain) {
       return res.status(404).json({ error: 'Test not found' });
+    }
+    if (isArchived(test)) {
+      return res.json({ test });
     }
     await updateTestStatus(req.params.id, req.shopDomain, 'stopped');
     // The inbox plan has to hear that this is finished rather than paused, or
@@ -166,7 +205,15 @@ router.delete(
     if (!test || test.shop_domain !== req.shopDomain) {
       return res.status(404).json({ error: 'Test not found' });
     }
+    // Deleted results are purged for good, so a test still pricing shoppers or
+    // holding its product is stopped first.
+    if (['running', 'paused', 'scheduled'].includes(String(test.status || ''))) {
+      return res
+        .status(409)
+        .json({ error: 'Stop this test before deleting it.', code: 'TEST_LIVE' });
+    }
     await updateTestStatus(req.params.id, req.shopDomain, 'archived');
+    await recordDeletions(req.shopDomain, { testIds: [String(test.id)] }).catch(() => 0);
     res.json({ ok: true });
   })
 );

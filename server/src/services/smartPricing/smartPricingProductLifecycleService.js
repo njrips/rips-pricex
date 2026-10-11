@@ -603,21 +603,28 @@ function inferFollowUpBasePrice(plan = {}, { catalogPrice = null } = {}) {
   const learningRound = Array.isArray(plan.learning_path)
     ? plan.learning_path.find(row => Number(row.round) === Number(plan.learning_round || 1) + 1)
     : null;
+  const positive = value => {
+    const price = toFinitePrice(value);
+    return price !== null && price > 0 ? price : null;
+  };
   const previewPrices = learningRound?.candidate_arms_preview;
   if (Array.isArray(previewPrices) && previewPrices.length > 0) {
-    const mid = previewPrices[Math.floor(previewPrices.length / 2)];
-    if (Number.isFinite(Number(mid))) {
-      return Number(mid);
+    const mid = positive(previewPrices[Math.floor(previewPrices.length / 2)]);
+    if (mid !== null) {
+      return mid;
     }
   }
-  const arms = Array.isArray(plan.price_arms) ? plan.price_arms : [];
-  const nonControl = arms.filter(arm => arm.role !== 'control');
-  const pool = nonControl.length ? nonControl : arms;
-  if (!pool.length) {
-    return Number(plan.current_price) || 0;
+  // Offer tests and plans rebuilt from old tests have arms with no price;
+  // counting those as $0 is how a follow-up came to be priced from nothing.
+  const priced = (Array.isArray(plan.price_arms) ? plan.price_arms : []).filter(
+    arm => positive(arm?.price) !== null
+  );
+  const nonControl = priced.filter(arm => arm.role !== 'control');
+  const pool = nonControl.length ? nonControl : priced;
+  if (pool.length) {
+    return Math.max(...pool.map(arm => positive(arm.price)));
   }
-  return pool.reduce((best, arm) => (Number(arm.price) > Number(best.price) ? arm : best), pool[0])
-    .price;
+  return positive(plan.current_price);
 }
 
 function resolveLearningRound(plan = {}) {
@@ -695,6 +702,13 @@ async function buildFollowUpPlan({
   }
 
   const basePrice = inferFollowUpBasePrice(plan, { catalogPrice });
+  if (basePrice === null) {
+    const err = new Error(
+      "This product's current price could not be found, so the next round has nothing to test around. Check the product in Shopify, then try again."
+    );
+    err.code = 'NO_BASE_PRICE';
+    throw err;
+  }
   const statsInput = plan.statistical_design || {};
   const shopMde = Number(guardrails.mde_percent);
   const shopConf = Number(guardrails.confidence_level);
@@ -911,6 +925,9 @@ async function maybeAutoQueueFollowUpPlan(shopDomain, planId) {
     if (err.code === 'MAX_LEARNING_ROUNDS') {
       return { queued: false, reason: 'max_rounds', message: err.message };
     }
+    if (err.code === 'NO_BASE_PRICE') {
+      return { queued: false, reason: 'no_base_price', message: err.message };
+    }
     throw err;
   }
 }
@@ -957,7 +974,48 @@ async function resolvePlanLineage(shopDomain, planId) {
 /**
  * Full per-product report payload for the drill-down UI.
  */
-async function buildSmartPricingProductReport(shopDomain, planId) {
+/**
+ * The price the product sold at before this test. A zero counts as unknown:
+ * nothing is tested from a $0 base, and a follow-up built from a plan with no
+ * price used to store exactly that.
+ *
+ * Shopify's live price comes last. It is only the pre-test price until a
+ * winner is applied, so it is shown but never written back to the plan.
+ */
+async function resolveCatalogPrice(shopDomain, plan, analytics, accessToken) {
+  const positive = value => {
+    const price = toFinitePrice(value);
+    return price !== null && price > 0 ? price : null;
+  };
+  const fromPlan = positive(plan?.current_price);
+  if (fromPlan !== null) return { price: fromPlan, source: 'plan' };
+
+  const arms = [
+    ...(Array.isArray(plan?.price_arms) ? plan.price_arms : []),
+    ...(Array.isArray(analytics?.arms) ? analytics.arms : []),
+  ];
+  for (const arm of arms) {
+    if (arm?.role !== 'control') continue;
+    const price = positive(arm.price);
+    if (price !== null) return { price, source: 'control_arm' };
+  }
+
+  if (accessToken && plan?.product_id) {
+    const product = await getShopifyService()
+      .getProductWithVariants(shopDomain, accessToken, plan.product_id, 250)
+      .catch(() => null);
+    const variants = product?.variants || [];
+    // Same rule as a re-run: a variant plan never borrows another variant's price.
+    const match = plan.variant_id
+      ? variants.find(v => String(v.id) === String(plan.variant_id))
+      : variants[0];
+    const price = positive(match?.price);
+    if (price !== null) return { price, source: 'shopify' };
+  }
+  return { price: null, source: null };
+}
+
+async function buildSmartPricingProductReport(shopDomain, planId, { accessToken = null } = {}) {
   const plan = await getInboxPlanById(shopDomain, planId);
   if (!plan) {
     throw new Error('Plan not found');
@@ -1010,9 +1068,12 @@ async function buildSmartPricingProductReport(shopDomain, planId) {
     .sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
 
   const currentAnalytics = await analyticsFor(currentTestId);
+  const catalog = await resolveCatalogPrice(shopDomain, plan, currentAnalytics, accessToken);
 
   return {
     plan,
+    catalog_price: catalog.price,
+    catalog_price_source: catalog.source,
     product_decision: currentAnalytics?.product_decision || null,
     analytics: currentAnalytics,
     lineage: rounds,
@@ -1036,6 +1097,7 @@ module.exports = {
   resolvePlanLineage,
   buildSmartPricingProductReport,
   inferFollowUpBasePrice,
+  resolveCatalogPrice,
   resolveLearningRound,
   resolveMaxLearningRounds,
   RERUN_ELIGIBLE_STATUSES,

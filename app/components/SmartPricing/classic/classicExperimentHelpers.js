@@ -107,13 +107,28 @@ export function getPlanExperimentTitle(plan) {
   return raw || 'Untitled test';
 }
 
+/**
+ * Shopify names the only variant of a product with no options "Default
+ * Title". Older launches appended it to the product name; it says nothing.
+ */
+export function isDefaultVariantTitle(title) {
+  return /^default\s*title$/i.test(String(title || '').trim());
+}
+
+export function stripDefaultVariantTitle(title) {
+  return String(title || '')
+    .trim()
+    .replace(/\s+[—–-]\s+default\s*title$/i, '')
+    .trim();
+}
+
 export function getPlanProductTitle(plan) {
   return (
-    String(plan?.product_title || plan?.metadata?.product_title || '').trim() ||
+    stripDefaultVariantTitle(plan?.product_title || plan?.metadata?.product_title) ||
     (() => {
       const raw = String(plan?.title || '').trim();
       const sep = raw.indexOf(' · ');
-      return sep > 0 ? raw.slice(sep + 3).trim() : raw;
+      return stripDefaultVariantTitle(sep > 0 ? raw.slice(sep + 3) : raw);
     })() ||
     'Product'
   );

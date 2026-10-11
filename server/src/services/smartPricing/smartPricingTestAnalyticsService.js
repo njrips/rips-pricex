@@ -6,6 +6,7 @@ const { getTestById } = require('../../models/test');
 const analyticsService = require('../analytics');
 const { findInboxPlanByTestId } = require('../../models/smartPricingInboxStore');
 const { isSmartPricingTest } = require('./smartPricingTestIdentity');
+const { variantFixedPrice, synthesizeArmsFromTestVariants } = require('./testVariantArms');
 
 /**
  * A measured number, or null when there is nothing to measure.
@@ -18,35 +19,6 @@ function finiteOrNull(value) {
   if (value === null || value === undefined || value === '') return null;
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
-}
-
-function variantFixedPrice(variant = {}) {
-  const cfg = variant.config && typeof variant.config === 'object' ? variant.config : {};
-  if (cfg.price !== undefined && cfg.price !== null && String(cfg.price).trim() !== '') {
-    return Number(cfg.price);
-  }
-  const byProduct = cfg.byProduct;
-  if (byProduct && typeof byProduct === 'object') {
-    for (const productCfg of Object.values(byProduct)) {
-      const byVariant =
-        productCfg?.byVariant && typeof productCfg.byVariant === 'object'
-          ? productCfg.byVariant
-          : null;
-      if (!byVariant) {
-        continue;
-      }
-      for (const variantCfg of Object.values(byVariant)) {
-        if (
-          variantCfg?.price !== undefined &&
-          variantCfg?.price !== null &&
-          String(variantCfg.price).trim() !== ''
-        ) {
-          return Number(variantCfg.price);
-        }
-      }
-    }
-  }
-  return null;
 }
 
 function isOfferAnalyticsContext(arm, test) {
@@ -138,6 +110,30 @@ function matchVariantToArm(arm, testVariants = [], analyticsVariants = [], optio
   return { testVariant, analyticsVariant };
 }
 
+const OFFER_DISCOUNT_TYPES = new Set(['percent', 'fixed', 'free_shipping']);
+
+/**
+ * The discount an offer arm gives, from the plan arm or else the test variant
+ * it launched as. Offer arms carry no price of their own: the shopper pays the
+ * catalog price less this, so without it the arm's price cannot be shown.
+ */
+function armOffer(arm, testVariant) {
+  const sources = [arm?.offer, testVariant?.config];
+  for (const source of sources) {
+    if (!source || typeof source !== 'object') continue;
+    const type = String(source.discount_type || '').trim().toLowerCase();
+    if (!OFFER_DISCOUNT_TYPES.has(type)) continue;
+    const value = finiteOrNull(source.discount_value);
+    if (type !== 'free_shipping' && !(value > 0)) continue;
+    return {
+      discount_type: type,
+      discount_value: value,
+      offer_message: String(source.offer_message || '').trim() || null,
+    };
+  }
+  return null;
+}
+
 function buildArmAnalyticsRow(arm, projection, matches, baselinePpv) {
   const live = matches.analyticsVariant || {};
   const visitors = Number(live.visitors) || 0;
@@ -157,21 +153,30 @@ function buildArmAnalyticsRow(arm, projection, matches, baselinePpv) {
     liveRpv > (baseline || 0) &&
     livePpv < (baseline || liveRpv);
   const conversions = Number(live.conversions) || 0;
+  const orders = Math.max(Number(live.orders) || 0, conversions);
   const matched = matches.analyticsVariant !== null && matches.analyticsVariant !== undefined;
 
   return {
     arm_id: arm.id,
     role: arm.role,
     label: arm.label || null,
-    price: arm.price,
+    price:
+      finiteOrNull(arm.price) ??
+      (matches.testVariant ? finiteOrNull(variantFixedPrice(matches.testVariant)) : null),
+    offer: armOffer(arm, matches.testVariant),
     variant_id: live.id || matches.testVariant?.id || null,
     variant_name: live.name || matches.testVariant?.name || null,
     allocation_percent: finiteOrNull(arm.allocation_percent ?? matches.testVariant?.allocation),
     visitors,
     conversions,
+    orders,
     revenue: matched ? finiteOrNull(live.revenue) : null,
     // An average needs at least one order to average over.
-    avg_order_value: matched && conversions > 0 ? finiteOrNull(live.avgOrderValue) : null,
+    avg_order_value: matched && orders > 0 ? finiteOrNull(live.avgOrderValue) : null,
+    // What the tested product itself added to an average order, over the
+    // orders that recorded it; the rest of the subtotal is other cart items.
+    product_revenue_per_order: matched ? finiteOrNull(live.avgTestedRevenue) : null,
+    product_revenue_orders: matched ? Number(live.testedOrders) || 0 : 0,
     // Null, not 0, when this arm could not be matched to live analytics: the
     // arm has reported nothing, and a confident "0.00%" reads as a variation
     // that nobody bought rather than one nobody has seen yet.
@@ -309,25 +314,6 @@ function buildSignificanceSummary(analytics) {
       finiteOrNull(sig.collectionDays) === null ? null : Math.round(Number(sig.collectionDays)),
     outcomeMaturityDays: finiteOrNull(sig.outcomeMaturityDays),
   };
-}
-
-function synthesizeArmsFromTestVariants(testVariants = []) {
-  return (Array.isArray(testVariants) ? testVariants : []).map((variant, index) => {
-    const price = variantFixedPrice(variant);
-    const name = String(variant?.name || `Variant ${index + 1}`).trim();
-    const role =
-      index === 0 || /^control\b/i.test(name) || /\bcontrol\b/i.test(name)
-        ? 'control'
-        : 'challenger';
-    return {
-      id: variant?.id || `variant_${index}`,
-      role,
-      label:
-        name || (role === 'control' ? 'Control' : `Variation ${String.fromCharCode(65 + index)}`),
-      price: Number.isFinite(price) ? price : null,
-      allocation_percent: Number(variant?.allocation) || null,
-    };
-  });
 }
 
 async function buildSmartPricingTestAnalytics(shopDomain, testId) {
@@ -516,6 +502,11 @@ async function buildSmartPricingTestAnalytics(shopDomain, testId) {
     summary: {
       visitors: totalVisitors,
       conversions: totalConversions,
+      orders: Math.max(
+        Number(analyticsSummary.totalOrders) ||
+          armRows.reduce((sum, row) => sum + (Number(row.orders) || 0), 0),
+        totalConversions
+      ),
       overall_conversion_rate: overallConversionRate,
       revenue: finiteOrNull(analyticsSummary.totalRevenue),
       live_weighted_ppv: weightedLivePpv,

@@ -36,6 +36,9 @@ const INBOX_SYNC_LEASE_SECONDS = 240;
  */
 const RETENTION_LEASE_SECONDS = 600;
 
+/** Longer than the purge's own time budget, so a pass never outlives its lease. */
+const TEST_PURGE_LEASE_SECONDS = 600;
+
 /**
  * Schedules an async pass that never overlaps itself.
  *
@@ -133,6 +136,13 @@ async function sweepRetention() {
   await withJobLease('data_retention', RETENTION_LEASE_SECONDS, () => sweepExpiredData());
 }
 
+/** Permanently removes tests deleted longer ago than the grace period. */
+async function purgeDeletedTestsPass() {
+  const { withJobLease } = require('../utils/jobLease');
+  const { purgeDeletedTests } = require('../services/testPurgeService');
+  await withJobLease('test_purge', TEST_PURGE_LEASE_SECONDS, () => purgeDeletedTests());
+}
+
 const INBOX_SYNC_BATCH = 50;
 const inboxSyncCursors = new Map();
 
@@ -205,6 +215,10 @@ function startBackgroundJobs() {
   everyInterval('cancel-policy', cancelMs, pauseStaleRunningOnCancelPolicy);
   everyInterval('auto-winner', autoWinnerMs, evaluateAllAutoWinners);
   everyInterval('data-retention', retentionMs, sweepRetention);
+  // Each pass is capped at a few minutes, so a large backlog clears over a
+  // run of passes instead of in one long one.
+  const purgeMs = Number(process.env.RIPSPRICEX_TEST_PURGE_MS || 10 * 60 * 1000);
+  everyInterval('test-purge', purgeMs, purgeDeletedTestsPass);
 
   // First pass shortly after boot, so a restart does not wait a whole interval.
   // It goes through the same guard as the timers: readiness runs before the
@@ -223,6 +237,7 @@ function startBackgroundJobs() {
     autoWinnerMs,
     readinessMs,
     retentionMs,
+    purgeMs,
   });
 }
 
@@ -233,5 +248,6 @@ module.exports = {
   evaluateAllAutoWinners,
   sweepAllRolloutReadiness,
   sweepRetention,
+  purgeDeletedTestsPass,
   nextInboxSyncWindow,
 };

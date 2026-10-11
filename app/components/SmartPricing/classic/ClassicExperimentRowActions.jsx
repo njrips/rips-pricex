@@ -14,13 +14,13 @@ import { enrichInboxPlansForLaunch, rollupExperimentStatus } from './classicExpe
 import { appendActivityToPlans, createActivityEntry } from './classicActivity';
 import { planResume, resumeConflictListMessage } from './resumeConflicts';
 import {
+  buildClassicExperimentEditTarget,
   buildClassicWizardResumePath,
   CLASSIC_STOPPED_PLAN_STATUS,
   classicBatchOutcomeMessage,
   collectExperimentTestIds,
   isSettledClassicPlan,
   splitSettledByIds,
-  getClassicExperimentResumeId,
   resolveClassicExperimentMenuActions,
 } from './classicExperimentListActions';
 import {
@@ -31,7 +31,6 @@ import {
   stopPausedTestsBeforeArchive,
   withUnlistedExperimentTests,
 } from './classicExperimentTestScope';
-import { classicCreateStepId } from './classicCreateSteps';
 import { duplicateClassicExperimentAsDraft } from './classicExperimentDuplicate';
 import styles from './SmartPricingClassic.module.css';
 
@@ -459,16 +458,7 @@ export default function ClassicExperimentRowActions({
         break;
       case 'edit':
         setOpen(false);
-        // The step matters for an unfinished draft: the wizard opens at step 1
-        // without it, so continuing a draft left on Audience walked the
-        // merchant back through everything they had already answered. Clicking
-        // the row title has always passed it.
-        navigate(
-          buildClassicWizardResumePath(
-            getClassicExperimentResumeId(experiment),
-            classicCreateStepId(experiment?.wizardDraft?.step) || undefined
-          )
-        );
+        navigate(buildClassicExperimentEditTarget(experiment));
         break;
       case 'duplicate':
         setOpen(false);

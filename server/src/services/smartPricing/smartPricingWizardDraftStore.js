@@ -14,6 +14,7 @@
  */
 
 const { query } = require('../../utils/database');
+const { findDeletions } = require('../../models/smartPricingDeletionStore');
 
 /**
  * How many unfinished experiments a shop keeps, matching the browser's own
@@ -177,6 +178,14 @@ async function saveShopWizardDraft(shopDomain, snapshot) {
 
   if (Buffer.byteLength(JSON.stringify(draft), 'utf8') > MAX_DRAFT_BYTES) {
     return { drafts: await getShopWizardDrafts(shop), saved: null, reason: 'draft_too_large' };
+  }
+
+  // The wizard autosaves each step without waiting for the last save, and a
+  // second tab keeps its own copy. Either one landing after a delete used to
+  // put the deleted experiment straight back under Drafts.
+  const deleted = await findDeletions(shop, { experimentIds: [draftIdOf(draft)] });
+  if (deleted.experiments.has(draftIdOf(draft))) {
+    return { drafts: await getShopWizardDrafts(shop), saved: null, reason: 'experiment_deleted' };
   }
 
   let stored = draft;

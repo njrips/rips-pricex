@@ -334,6 +334,52 @@ export async function getSmartPricingExperimentTests(domain, experimentId) {
   return Array.isArray(data?.tests) ? data.tests : [];
 }
 
+/**
+ * Deletes an experiment in one server transaction: archives its tests, removes
+ * its plans and its draft, and records the deletion so no stale copy restores
+ * it. Safe to repeat.
+ */
+export async function deleteSmartPricingExperimentCompletely(
+  domain,
+  { experimentId = '', planIds = [], testIds = [] } = {}
+) {
+  const res = await apiPost(
+    '/smart-pricing/experiments/delete',
+    { experiment_id: experimentId || '', plan_ids: planIds, test_ids: testIds },
+    domain ? { params: { domain } } : {}
+  );
+  return unwrapData(res);
+}
+
+/** Experiments deleted within the grace period, which can still be restored. */
+export async function getRestorableSmartPricingExperiments(domain) {
+  const res = await apiGet('/smart-pricing/experiments/deleted', domain ? { domain } : {});
+  return unwrapData(res);
+}
+
+/** Undo a delete within the grace period; the experiment comes back archived. */
+export async function restoreSmartPricingExperiment(
+  domain,
+  { experimentId = '', testIds = [] } = {}
+) {
+  const res = await apiPost(
+    '/smart-pricing/experiments/restore',
+    { experiment_id: experimentId || '', test_ids: testIds },
+    domain ? { params: { domain } } : {}
+  );
+  return unwrapData(res);
+}
+
+/** Push settings saved on a paused experiment's plans onto its tests, so Resume uses them. */
+export async function applyPausedSmartPricingSettings(domain, testIds = []) {
+  const res = await apiPost(
+    '/smart-pricing/experiments/apply-paused-settings',
+    { test_ids: testIds },
+    domain ? { params: { domain } } : {}
+  );
+  return unwrapData(res);
+}
+
 /** Archives every test launched from the experiment and removes its inbox plans. */
 export async function deleteSmartPricingExperiment(domain, experimentId) {
   const res = await apiDelete(

@@ -52,6 +52,24 @@ describe('smartPricingWizardDraftStore', () => {
     query.mockReset();
   });
 
+  it('refuses to save a draft for an experiment that was deleted', async () => {
+    // An autosave already in flight when the merchant pressed Delete, or a
+    // second tab still open on the wizard, used to put the draft straight back.
+    const rows = useFakeStore();
+    const fake = query.getMockImplementation();
+    query.mockImplementation(async (sql, params) =>
+      /smart_pricing_deletions/.test(sql)
+        ? { rows: [{ entity_type: 'experiment', entity_id: 'exp_gone' }] }
+        : fake(sql, params)
+    );
+
+    const result = await saveShopWizardDraft(SHOP, { experiment_id: 'exp_gone', name: 'Old' });
+
+    expect(result.saved).toBeNull();
+    expect(result.reason).toBe('experiment_deleted');
+    expect(rows.size).toBe(0);
+  });
+
   it('stores a draft and reads it back', async () => {
     useFakeStore();
     await saveShopWizardDraft(SHOP, { experiment_id: 'exp_1', name: 'Spring pricing' });

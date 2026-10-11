@@ -13,6 +13,7 @@ import {
 } from '../classicExperimentDetailsHelpers';
 import { IconTrophy } from '../classicIcons';
 import ClassicApplyAllReadyConfirmModal from './ClassicApplyAllReadyConfirmModal';
+import { ProductResultsTitle, ViewProductResultsButton } from './ClassicProductResultsLink';
 import styles from '../SmartPricingClassic.module.css';
 
 const LOADING_BADGE = { tone: null, label: 'Loading' };
@@ -105,7 +106,7 @@ function ProductDetailModal({ row, onClose, onApply, onFinish, busy }) {
     <Modal
       open
       onClose={onClose}
-      title={row.title}
+      title={row.productTitle || row.title}
       primaryAction={
         decision?.can_apply
           ? { content: 'Apply this price', onAction: () => onApply(row), loading: busy }
@@ -338,13 +339,10 @@ export default function ClassicRolloutReadinessPanel({
               return (
                 <tr key={row.key}>
                   <td>
-                    <button
-                      type="button"
-                      className={styles.rolloutProductLink}
-                      onClick={() => openDetails(row)}
-                    >
-                      {row.productTitle}
-                    </button>
+                    <ProductResultsTitle
+                      title={row.productTitle}
+                      onOpen={() => openDetails(row)}
+                    />
                     {row.variantTitle ? (
                       <div className={styles.productSub}>{row.variantTitle}</div>
                     ) : null}
@@ -367,6 +365,12 @@ export default function ClassicRolloutReadinessPanel({
                   </td>
                   <td>{row.loading ? null : <ProgressCell decision={row.decision} />}</td>
                   <td>
+                    <div className={styles.productActionsCell}>
+                    <ViewProductResultsButton
+                      title={row.productTitle}
+                      onOpen={() => openDetails(row)}
+                      disabled={row.loading}
+                    />
                     {row.decision?.can_apply ? (
                       <Button
                         size="slim"
@@ -386,16 +390,8 @@ export default function ClassicRolloutReadinessPanel({
                       >
                         Finish
                       </Button>
-                    ) : (
-                      <Button
-                        size="slim"
-                        variant="plain"
-                        disabled={row.loading}
-                        onClick={() => openDetails(row)}
-                      >
-                        Details
-                      </Button>
-                    )}
+                    ) : null}
+                    </div>
                   </td>
                 </tr>
               );

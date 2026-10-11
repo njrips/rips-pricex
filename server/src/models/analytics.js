@@ -190,8 +190,14 @@ class AnalyticsModel {
       RETURNING *
     `;
 
-    const result = await query(sql, values);
-    return result.rows[0] || null;
+    try {
+      const result = await query(sql, values);
+      return result.rows[0] || null;
+    } catch (err) {
+      // The test was purged while this event was on its way in.
+      if (err?.code === '23503') return null;
+      throw err;
+    }
   }
 
   /**
@@ -290,7 +296,12 @@ class AnalyticsModel {
       SELECT 
         e.variant_id,
         COUNT(DISTINCT e.user_id) as conversions,
-        COALESCE(SUM(e.event_value), 0) as revenue
+        COUNT(DISTINCT COALESCE(e.metadata->>'order_id', e.id::text)) as orders,
+        COALESCE(SUM(e.event_value), 0) as revenue,
+        SUM(CASE WHEN e.metadata->>'tested_revenue' ~ '^-?[0-9]+(\\.[0-9]+)?$'
+                 THEN (e.metadata->>'tested_revenue')::numeric END) as tested_revenue,
+        COUNT(DISTINCT CASE WHEN e.metadata->>'tested_revenue' ~ '^-?[0-9]+(\\.[0-9]+)?$'
+                            THEN COALESCE(e.metadata->>'order_id', e.id::text) END) as tested_orders
       FROM events e
       ${convJoin}
       WHERE e.test_id = $1 
@@ -313,14 +324,27 @@ class AnalyticsModel {
           variant_name: row.variant_name,
           visitors: parseInt(row.visitors, 10) || 0,
           conversions: 0,
+          orders: 0,
           revenue: 0,
         };
       });
 
+      // conversions counts buyers, which is what a conversion rate divides;
+      // orders counts orders, which is what an average order value divides.
+      // A shopper who comes back and buys again is one of the first and two of
+      // the second.
       conversionsResult.rows.forEach(row => {
         if (variantMap[row.variant_id]) {
           variantMap[row.variant_id].conversions = parseInt(row.conversions, 10) || 0;
+          variantMap[row.variant_id].orders = parseInt(row.orders, 10) || 0;
           variantMap[row.variant_id].revenue = parseFloat(row.revenue) || 0;
+          // The tested product's own lines, which the order webhook records
+          // beside the order subtotal. Browser-reported orders lack it.
+          variantMap[row.variant_id].tested_orders = parseInt(row.tested_orders, 10) || 0;
+          variantMap[row.variant_id].tested_revenue =
+            row.tested_revenue === null || row.tested_revenue === undefined
+              ? null
+              : parseFloat(row.tested_revenue);
         }
       });
 

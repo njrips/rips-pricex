@@ -102,7 +102,18 @@ export async function loadWizardDrafts(shopDomain) {
   try {
     const data = await getSmartPricingWizardDrafts(shopDomain);
     const server = Array.isArray(data?.drafts) ? data.drafts : [];
-    return { drafts: mergeWizardDrafts(local, server), reachedServer: true };
+    // Deleted on another device, or in a tab whose autosave was still running.
+    // Without this the browser copy would bring the experiment back as a draft.
+    const deleted = new Set(
+      (Array.isArray(data?.deleted_experiment_ids) ? data.deleted_experiment_ids : []).map(String)
+    );
+    const kept = local.filter(draft => {
+      const id = draftIdOf(draft);
+      if (!deleted.has(id)) return true;
+      clearClassicWizardDraft(shopDomain, id);
+      return false;
+    });
+    return { drafts: mergeWizardDrafts(kept, server), reachedServer: true };
   } catch {
     return { drafts: mergeWizardDrafts(local, []), reachedServer: false };
   }

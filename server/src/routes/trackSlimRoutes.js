@@ -558,6 +558,11 @@ router.post(['/', '/event', '/events'], async (req, res) => {
     }
     res.json({ ok: true });
   } catch (err) {
+    // The test was purged between the check above and the insert: a page
+    // opened before the delete is still posting. Same answer as any unknown test.
+    if (err?.code === '23503') {
+      return res.status(403).json({ error: 'unknown test' });
+    }
     logger.error('track event failed', { message: err.message });
     res.status(500).json({ error: publicErrorMessage(err) });
   }

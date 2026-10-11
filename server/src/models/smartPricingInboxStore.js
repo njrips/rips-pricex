@@ -3,6 +3,18 @@
  */
 
 const { query, getClient } = require('../utils/database');
+const logger = require('../utils/logger');
+const {
+  planArmsFromTestVariants,
+  controlPriceOfArms,
+  stripLaunchLabelPrefix,
+} = require('../services/smartPricing/testVariantArms');
+const {
+  findDeletions,
+  planExperimentId,
+  recordDeletions,
+  TEST_PURGE_GRACE_DAYS,
+} = require('./smartPricingDeletionStore');
 
 // A classic experiment writes one plan per product and launches up to 500
 // products, so this has to hold many experiments at once. Over it, a save is
@@ -277,8 +289,33 @@ async function saveInboxPlans(
   }
 
   const client = await getClient();
+  let refusedPlanIds = [];
   try {
     await client.query('BEGIN');
+
+    // A copy taken before a delete -- another tab, another device, a save
+    // already in flight -- still lists the deleted experiment's plans, and an
+    // upsert would put every one of them back.
+    const deleted = await findDeletions(
+      domain,
+      {
+        experimentIds: normalized.map(planExperimentId).filter(Boolean),
+        testIds: normalized.map(plan => extractPlanFields(plan).testId).filter(Boolean),
+      },
+      { client }
+    );
+    const isDeleted = plan => {
+      const experimentId = planExperimentId(plan);
+      const { testId } = extractPlanFields(plan);
+      return (
+        (experimentId && deleted.experiments.has(experimentId)) ||
+        (testId && deleted.tests.has(String(testId)))
+      );
+    };
+    refusedPlanIds = normalized.filter(isDeleted).map(plan => plan.id);
+    const accepted = refusedPlanIds.length
+      ? normalized.filter(plan => !isDeleted(plan))
+      : normalized;
 
     // The array is the caller's view of the inbox, and that view can be stale:
     // a browser whose local copy stopped updating, or one that never loaded
@@ -303,7 +340,7 @@ async function saveInboxPlans(
       );
     }
 
-    for (const plan of normalized) {
+    for (const plan of accepted) {
       const { status, testId, archived, archivedAt } = extractPlanFields(plan);
       try {
         await client.query(
@@ -355,17 +392,39 @@ async function saveInboxPlans(
     client.release();
   }
 
-  return listInboxPlans(domain);
+  const snapshot = await listInboxPlans(domain);
+  // Named so the browser can drop them from its own copy instead of sending
+  // them again on every save.
+  return refusedPlanIds.length ? { ...snapshot, refused_plan_ids: refusedPlanIds } : snapshot;
 }
 
-async function upsertInboxPlan(shopDomain, plan) {
-  // Insert-if-absent only. Preview must not overwrite launch-persisted status/test_id.
+/**
+ * Insert-if-absent only. Preview must not overwrite launch-persisted status/test_id.
+ *
+ * `allowDeleted` is for the orphan restore alone: a test still pricing
+ * shoppers has to be reachable even if its experiment was deleted, because the
+ * plan is the only place it can be stopped.
+ */
+async function upsertInboxPlan(shopDomain, plan, { allowDeleted = false } = {}) {
   const domain = normalizeShopDomain(shopDomain);
   const normalized = normalizePlanJson(plan);
   if (!domain || !normalized) {
     return null;
   }
   const { status, testId, archived, archivedAt } = extractPlanFields(normalized);
+  if (!allowDeleted) {
+    const experimentId = planExperimentId(normalized);
+    const deleted = await findDeletions(domain, {
+      experimentIds: experimentId ? [experimentId] : [],
+      testIds: testId ? [testId] : [],
+    });
+    if (
+      (experimentId && deleted.experiments.has(experimentId)) ||
+      (testId && deleted.tests.has(String(testId)))
+    ) {
+      return null;
+    }
+  }
   try {
     await query(
       `INSERT INTO smart_pricing_inbox_plans
@@ -746,6 +805,19 @@ function firstVariantIdOfTest(variants) {
   return null;
 }
 
+/**
+ * Launch named a single-variant product's test "Snowboard - Default Title",
+ * Shopify's placeholder for a product with no options, so that half is
+ * dropped. Any other dash is left alone: "Snowboard - Limited Edition" may be
+ * the product's real name.
+ */
+function stripDefaultVariantTitle(raw) {
+  return String(raw || '')
+    .trim()
+    .replace(/\s+[—–-]\s+default\s*title$/i, '')
+    .trim();
+}
+
 /** The inbox plan a live Smart Pricing test was launched from, rebuilt from the test. */
 function planFromOrphanedTest(test) {
   const metadata = test.metadata && typeof test.metadata === 'object' ? test.metadata : {};
@@ -758,19 +830,24 @@ function planFromOrphanedTest(test) {
   const experimentType =
     metadata.experiment_type || (String(test.type || '') === 'offer' ? 'offer_test' : 'price_test');
   const iso = value => (value ? new Date(value).toISOString() : null);
+  // Older launches kept neither the arms nor the starting price on the test,
+  // only in the plan that went missing. The variants still carry every price.
+  const arms = Array.isArray(metadata.price_arms) && metadata.price_arms.length
+    ? metadata.price_arms
+    : planArmsFromTestVariants(test.variants);
   return {
     id: String(metadata.smart_pricing_plan_id || '').trim() || `SP-restored-${test.id}`,
     title: title || 'Untitled test',
-    product_title: sep > 0 ? title.slice(sep + 3).trim() : title,
+    product_title: stripDefaultVariantTitle(sep > 0 ? title.slice(sep + 3).trim() : title),
     status: String(test.status || '') === 'paused' ? 'paused' : 'running',
     test_id: String(test.id),
     test_type: test.type || null,
     experiment_type: experimentType,
     product_id: test.target_id || null,
     variant_id: firstVariantIdOfTest(test.variants),
-    current_price: metadata.current_price ?? null,
+    current_price: metadata.current_price ?? controlPriceOfArms(arms),
     currency: metadata.currency || null,
-    price_arms: Array.isArray(metadata.price_arms) ? metadata.price_arms : [],
+    price_arms: arms,
     statistical_design: metadata.statistical_design || null,
     goal: test.goal || null,
     launched_at: iso(test.started_at),
@@ -816,10 +893,105 @@ async function restoreOrphanedLivePlans(shopDomain) {
   const plans = (result.rows || []).map(planFromOrphanedTest);
   let restored = 0;
   for (const plan of plans) {
-    const row = await upsertInboxPlan(domain, plan);
+    const row = await upsertInboxPlan(domain, plan, { allowDeleted: true });
     if (row) restored += 1;
   }
+  if (restored > 0) {
+    // A restore means some path left a live test without its plan. Without a
+    // trace, the merchant's "it came back" was all there was to go on.
+    logger.warn('restored inbox plans for live tests that had none', {
+      shop: domain,
+      restored,
+      test_ids: plans.map(plan => plan.test_id).slice(0, 50),
+    });
+  }
   return { restored, test_ids: plans.map(plan => plan.test_id) };
+}
+
+const EMPTY_ARMS_SQL = `COALESCE(jsonb_array_length(CASE WHEN jsonb_typeof(plan_json->'price_arms') = 'array'
+                                  THEN plan_json->'price_arms' END), 0) = 0`;
+
+/**
+ * Fills in what earlier restores left out: they read prices from test
+ * metadata that never had them, so the plans came back with no arms, no
+ * starting price, offer arms without their offer, and a "Default Title" tail
+ * on the product name. Only what is missing is filled, each part re-checked
+ * against what was read, so anything the merchant has since edited stays.
+ */
+async function repairRestoredPlanPrices(shopDomain) {
+  const domain = normalizeShopDomain(shopDomain);
+  if (!domain) return { repaired: 0 };
+  const result = await query(
+    `SELECT p.plan_id, p.plan_json, t.name, t.variants, t.metadata
+       FROM smart_pricing_inbox_plans p
+       JOIN tests t ON t.id::text = p.test_id::text
+                   AND LOWER(TRIM(t.shop_domain)) = p.shop_domain
+      WHERE p.shop_domain = $1
+        AND (p.plan_json->>'restored_from_test') = 'true'
+        AND (${EMPTY_ARMS_SQL.replace(/plan_json/g, 'p.plan_json')}
+             OR p.plan_json->>'current_price' IS NULL
+             OR p.plan_json->>'product_title' ~* '\\s[—–-]\\s+default\\s*title$'
+             OR (t.type = 'offer' AND NOT EXISTS (
+                   SELECT 1 FROM jsonb_array_elements(
+                     CASE WHEN jsonb_typeof(p.plan_json->'price_arms') = 'array'
+                          THEN p.plan_json->'price_arms' ELSE '[]'::jsonb END) arm
+                    WHERE arm ? 'offer')))
+      LIMIT $2`,
+    [domain, MAX_PLANS_PER_SHOP]
+  );
+  let repaired = 0;
+  for (const row of result.rows || []) {
+    const plan = row.plan_json && typeof row.plan_json === 'object' ? row.plan_json : {};
+    const rebuilt = planFromOrphanedTest({ name: row.name, variants: row.variants, metadata: row.metadata });
+    const nextArms = repairedArms(plan.price_arms, rebuilt.price_arms);
+    const currentPrice = controlPriceOfArms(nextArms || plan.price_arms);
+    const productTitle = stripDefaultVariantTitle(plan.product_title);
+    const fillsPrice = plan.current_price == null && currentPrice != null;
+    const fillsTitle = productTitle !== '' && productTitle !== String(plan.product_title ?? '');
+    if (!nextArms && !fillsPrice && !fillsTitle) continue;
+    const update = await query(
+      `UPDATE smart_pricing_inbox_plans
+          SET plan_json = plan_json
+            || CASE WHEN $3::jsonb IS NOT NULL
+                     AND plan_json->'price_arms' IS NOT DISTINCT FROM $7::jsonb
+                    THEN jsonb_build_object('price_arms', $3::jsonb) ELSE '{}'::jsonb END
+            || CASE WHEN plan_json->>'current_price' IS NULL AND $4::numeric IS NOT NULL
+                    THEN jsonb_build_object('current_price', $4::numeric) ELSE '{}'::jsonb END
+            || CASE WHEN plan_json->>'product_title' = $5 AND $6 <> '' AND $6 <> $5
+                    THEN jsonb_build_object('product_title', $6::text) ELSE '{}'::jsonb END
+        WHERE shop_domain = $1 AND plan_id = $2
+        RETURNING plan_id`,
+      [
+        domain,
+        row.plan_id,
+        nextArms ? JSON.stringify(nextArms) : null,
+        currentPrice,
+        String(plan.product_title ?? ''),
+        productTitle,
+        plan.price_arms === undefined ? null : JSON.stringify(plan.price_arms),
+      ]
+    );
+    if (update.rows?.length) repaired += 1;
+  }
+  return { repaired };
+}
+
+/**
+ * The arms a restored plan should have, or null when its own are fine. Empty
+ * arms take the rebuilt ones; offer arms that lost their offer get it back
+ * from the variant they ran as, matched by position as launch wrote them.
+ */
+function repairedArms(planArms, rebuiltArms) {
+  const current = Array.isArray(planArms) ? planArms : [];
+  const rebuilt = Array.isArray(rebuiltArms) ? rebuiltArms : [];
+  if (!current.length) return rebuilt.length ? rebuilt : null;
+  if (current.some(arm => arm?.offer) || current.length !== rebuilt.length) return null;
+  if (!rebuilt.some(arm => arm.offer)) return null;
+  return current.map((arm, index) =>
+    rebuilt[index].offer
+      ? { ...arm, offer: rebuilt[index].offer, label: stripLaunchLabelPrefix(arm?.label) }
+      : arm
+  );
 }
 
 /**
@@ -848,51 +1020,350 @@ async function listExperimentTests(shopDomain, experimentId) {
   }));
 }
 
+function cleanIdList(ids) {
+  return [
+    ...new Set(
+      (Array.isArray(ids) ? ids : [])
+        .map(id => (id === null || id === undefined ? '' : String(id).trim()))
+        .filter(Boolean)
+    ),
+  ].slice(0, MAX_PLANS_PER_SHOP);
+}
+
 /**
- * Deletes an experiment by its id: archives every test launched from it and
- * removes every inbox plan under it.
+ * Deletes an experiment: archives every test launched from it, removes every
+ * inbox plan under it, and remembers both, all in one transaction.
  *
- * Deleting used to archive only the tests the browser had plans for. Any test
- * whose plan the browser lacked -- dropped by the old 200-plan cap, or missing
- * from a stale local copy -- was left running, and came back on the list as
- * soon as its plan was restored. Asking the database for the experiment's tests
- * reaches all of them.
+ * The browser used to do this as a run of separate requests, plans first and
+ * tests after. A request lost in between -- a deploy restarting the server is
+ * enough -- left the tests running with no plan, and the next list load
+ * restored them, so the experiment came back. Done here it either all happens
+ * or none of it does, and repeating it is harmless.
+ *
+ * `planIds` and `testIds` are what the browser can see. They reach tests that
+ * predate experiment ids on tests, and plans that never had one.
  */
-async function deleteExperimentEverywhere(shopDomain, experimentId) {
+const LIVE_TEST_STATUSES = new Set(['running', 'paused', 'scheduled']);
+const ENDED_TEST_STATUSES = new Set(['stopped', 'completed']);
+
+/**
+ * Why these tests may not be deleted yet, or null when they may.
+ *
+ * A live test is still pricing shoppers or holding its product, so it is
+ * stopped first. An ended one whose plan is still on the list is archived
+ * first. A draft never ran and has nothing to lose.
+ */
+function deleteRefusal(rows) {
+  const live = rows.filter(row => LIVE_TEST_STATUSES.has(String(row.status)));
+  if (live.length) {
+    return {
+      code: 'EXPERIMENT_LIVE',
+      message: 'Stop this test and archive it before deleting it.',
+      testIds: live.map(row => row.id),
+    };
+  }
+  const unarchived = rows.filter(
+    row => ENDED_TEST_STATUSES.has(String(row.status)) && row.plan_not_archived
+  );
+  if (unarchived.length) {
+    return {
+      code: 'EXPERIMENT_NOT_ARCHIVED',
+      message: 'Archive this test before deleting it. Archived tests can still be restored.',
+      testIds: unarchived.map(row => row.id),
+    };
+  }
+  return null;
+}
+
+async function deleteExperimentEverywhere(
+  shopDomain,
+  experimentId,
+  { planIds = [], testIds = [] } = {}
+) {
   const domain = normalizeShopDomain(shopDomain);
   const id = String(experimentId || '').trim();
-  if (!domain || !id) {
-    return { archived_test_ids: [], deleted_plan_ids: [] };
+  const plans = cleanIdList(planIds);
+  const tests = cleanIdList(testIds);
+  const empty = { archived_test_ids: [], deleted_plan_ids: [], test_ids: [] };
+  if (!domain || (!id && !plans.length && !tests.length)) {
+    return empty;
   }
   const client = await getClient();
   try {
     await client.query('BEGIN');
+    const linked = await client.query(
+      `SELECT test_id::text AS test_id
+         FROM smart_pricing_inbox_plans
+        WHERE shop_domain = $1
+          AND test_id IS NOT NULL
+          AND (plan_id = ANY($2::text[])
+               OR ($3::text <> '' AND (plan_json->'metadata'->>'experiment_id' = $3::text
+                                       OR plan_json->>'experiment_id' = $3::text
+                                       OR plan_json->>'batch_id' = $3::text)))`,
+      [domain, plans, id]
+    );
+    const candidateTestIds = cleanIdList([
+      ...tests,
+      ...(linked.rows || []).map(row => row.test_id),
+    ]);
+
+    // Delete erases results for good, so it is the step after Archive. Locked
+    // so a Resume landing mid-delete waits rather than restarting a test that
+    // is about to be removed.
+    const current = await client.query(
+      `SELECT t.id::text AS id,
+              t.status,
+              EXISTS (
+                SELECT 1 FROM smart_pricing_inbox_plans p
+                 WHERE p.shop_domain = $1
+                   AND p.test_id = t.id
+                   AND COALESCE(p.archived, false) = false
+                   AND COALESCE((p.plan_json->>'archived')::boolean, false) = false
+              ) AS plan_not_archived
+         FROM tests t
+        WHERE LOWER(TRIM(t.shop_domain)) = $1
+          AND t.status <> 'archived'
+          AND (($2::text <> '' AND t.metadata->>'experiment_id' = $2::text)
+               OR t.id::text = ANY($3::text[]))
+        FOR UPDATE OF t`,
+      [domain, id, candidateTestIds]
+    );
+    const refusal = deleteRefusal(current.rows || []);
+    if (refusal) {
+      const err = new Error(refusal.message);
+      err.code = refusal.code;
+      err.testIds = refusal.testIds;
+      throw err;
+    }
+
     const archived = await client.query(
       `UPDATE tests
-          SET status = 'archived', updated_at = NOW()
+          SET status = 'archived',
+              updated_at = NOW(),
+              deleted_at = COALESCE(deleted_at, NOW()),
+              metadata = COALESCE(metadata, '{}'::jsonb)
+                || jsonb_build_object('status_before_delete', status)
         WHERE LOWER(TRIM(shop_domain)) = $1
-          AND metadata->>'experiment_id' = $2
           AND status <> 'archived'
+          AND (($2::text <> '' AND metadata->>'experiment_id' = $2::text)
+               OR id::text = ANY($3::text[]))
       RETURNING id`,
-      [domain, id]
+      [domain, id, candidateTestIds]
     );
     const archivedIds = (archived.rows || []).map(row => String(row.id));
+    const allTestIds = cleanIdList([...candidateTestIds, ...archivedIds]);
     const deleted = await client.query(
       `DELETE FROM smart_pricing_inbox_plans
         WHERE shop_domain = $1
-          AND (plan_json->'metadata'->>'experiment_id' = $2
-               OR plan_json->>'experiment_id' = $2
-               OR test_id::text = ANY($3::text[]))
-      RETURNING plan_id`,
-      [domain, id, archivedIds]
+          AND (plan_id = ANY($2::text[])
+               OR test_id::text = ANY($3::text[])
+               OR ($4::text <> '' AND (plan_json->'metadata'->>'experiment_id' = $4::text
+                                       OR plan_json->>'experiment_id' = $4::text
+                                       OR plan_json->>'batch_id' = $4::text)))
+      RETURNING plan_id, test_id::text AS test_id, plan_json`,
+      [domain, plans, allTestIds, id]
     );
+    await recordDeletions(
+      domain,
+      { experimentIds: id ? [id] : [], testIds: allTestIds },
+      { client }
+    );
+    // Restore within the grace period puts back the plan exactly as it was --
+    // price arms and all -- rather than one rebuilt from the test row. The
+    // purge drops this copy along with the test.
+    const keptPlans = (deleted.rows || []).filter(row => row.test_id && row.plan_json);
+    if (keptPlans.length) {
+      await client.query(
+        `UPDATE smart_pricing_deletions d
+            SET details = COALESCE(d.details, '{}'::jsonb) || jsonb_build_object('plan', u.plan)
+           FROM unnest($2::text[], $3::jsonb[]) AS u(test_id, plan)
+          WHERE d.shop_domain = $1
+            AND d.entity_type = 'test'
+            AND d.entity_id = u.test_id`,
+        [
+          domain,
+          keptPlans.map(row => row.test_id),
+          keptPlans.map(row => JSON.stringify(row.plan_json)),
+        ]
+      );
+    }
     await client.query('COMMIT');
     return {
       archived_test_ids: archivedIds,
       deleted_plan_ids: (deleted.rows || []).map(row => row.plan_id),
+      test_ids: allTestIds,
     };
   } catch (err) {
-    await client.query('ROLLBACK');
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+function experimentTitleOfTest(test) {
+  const stored = String(test.experiment_title || '').trim();
+  if (stored) return stored;
+  const raw = String(test.name || '').trim();
+  const title = raw.startsWith(SMART_PRICING_TEST_NAME_PREFIX)
+    ? raw.slice(SMART_PRICING_TEST_NAME_PREFIX.length).trim()
+    : raw;
+  const sep = title.indexOf(' · ');
+  return (sep > 0 ? title.slice(0, sep) : title).trim() || 'Untitled test';
+}
+
+/**
+ * Experiments deleted within the grace period, which Restore can still bring
+ * back. Tests launched before experiments had ids are listed one per row.
+ */
+async function listRestorableExperiments(shopDomain, { graceDays = TEST_PURGE_GRACE_DAYS } = {}) {
+  const domain = normalizeShopDomain(shopDomain);
+  if (!domain) return [];
+  const result = await query(
+    `SELECT id::text AS id,
+            name,
+            deleted_at,
+            metadata->>'experiment_id' AS experiment_id,
+            metadata->>'experiment_title' AS experiment_title
+       FROM tests
+      WHERE LOWER(TRIM(shop_domain)) = $1
+        AND status = 'archived'
+        AND deleted_at IS NOT NULL
+        AND deleted_at > NOW() - make_interval(days => $2::int)
+      ORDER BY deleted_at DESC
+      LIMIT $3`,
+    [domain, graceDays, MAX_PLANS_PER_SHOP]
+  );
+  const groups = new Map();
+  for (const row of result.rows || []) {
+    const experimentId = String(row.experiment_id || '').trim();
+    const key = experimentId || `test:${row.id}`;
+    const deletedAt = new Date(row.deleted_at);
+    const group = groups.get(key) || {
+      key,
+      experiment_id: experimentId || null,
+      title: experimentTitleOfTest(row),
+      test_ids: [],
+      deleted_at: deletedAt,
+      earliest: deletedAt,
+    };
+    group.test_ids.push(row.id);
+    if (deletedAt > group.deleted_at) group.deleted_at = deletedAt;
+    if (deletedAt < group.earliest) group.earliest = deletedAt;
+    groups.set(key, group);
+  }
+  const dayMs = 24 * 60 * 60 * 1000;
+  return Array.from(groups.values()).map(({ earliest, ...group }) => ({
+    ...group,
+    product_count: group.test_ids.length,
+    deleted_at: group.deleted_at.toISOString(),
+    // The first of its tests to reach the end of its grace period goes first.
+    purge_after: new Date(earliest.getTime() + graceDays * dayMs).toISOString(),
+  }));
+}
+
+/**
+ * Undoes a delete within the grace period.
+ *
+ * The tests go back to the status they had (ended or draft -- nothing live can
+ * be deleted), their plans come back archived, which is where Delete was
+ * offered from, and the deletion record goes so saves of them are accepted
+ * again. Plans are restored from the copy kept at delete time and, failing
+ * that, rebuilt from the test.
+ */
+async function restoreDeletedExperiment(
+  shopDomain,
+  experimentId,
+  { testIds = [], graceDays = TEST_PURGE_GRACE_DAYS } = {}
+) {
+  const domain = normalizeShopDomain(shopDomain);
+  const id = String(experimentId || '').trim();
+  const tests = cleanIdList(testIds);
+  if (!domain || (!id && !tests.length)) {
+    const err = new Error('Nothing to restore.');
+    err.code = 'NOTHING_TO_RESTORE';
+    throw err;
+  }
+  const client = await getClient();
+  try {
+    await client.query('BEGIN');
+    // Locked, and limited to the grace period, so a purge pass starting now
+    // either sees the restored status or has already taken the test.
+    const restored = await client.query(
+      `UPDATE tests
+          SET status = CASE
+                WHEN metadata->>'status_before_delete' IN ('stopped', 'completed', 'draft')
+                  THEN metadata->>'status_before_delete'
+                ELSE 'stopped'
+              END,
+              deleted_at = NULL,
+              updated_at = NOW(),
+              metadata = COALESCE(metadata, '{}'::jsonb) - 'status_before_delete'
+        WHERE LOWER(TRIM(shop_domain)) = $1
+          AND status = 'archived'
+          AND deleted_at IS NOT NULL
+          AND deleted_at > NOW() - make_interval(days => $4::int)
+          AND (($2::text <> '' AND metadata->>'experiment_id' = $2::text)
+               OR id::text = ANY($3::text[]))
+      RETURNING id::text AS id, name, type, status, target_id, variants, goal, metadata,
+                started_at, created_at, updated_at`,
+      [domain, id, tests, graceDays]
+    );
+    const rows = restored.rows || [];
+    if (!rows.length) {
+      const err = new Error('This test can no longer be restored.');
+      err.code = 'NOTHING_TO_RESTORE';
+      throw err;
+    }
+    const restoredIds = rows.map(row => row.id);
+
+    const kept = await client.query(
+      `SELECT entity_id, details->'plan' AS plan
+         FROM smart_pricing_deletions
+        WHERE shop_domain = $1 AND entity_type = 'test' AND entity_id = ANY($2::text[])`,
+      [domain, restoredIds]
+    );
+    const keptPlanByTest = new Map(
+      (kept.rows || []).filter(row => row.plan).map(row => [String(row.entity_id), row.plan])
+    );
+
+    await client.query(
+      `DELETE FROM smart_pricing_deletions
+        WHERE shop_domain = $1
+          AND ((entity_type = 'test' AND entity_id = ANY($2::text[]))
+            OR ($3::text <> '' AND entity_type = 'experiment' AND entity_id = $3::text))`,
+      [domain, restoredIds, id]
+    );
+
+    const archivedAt = new Date().toISOString();
+    const restoredPlanIds = [];
+    for (const test of rows) {
+      const kept = keptPlanByTest.get(test.id);
+      const base = kept && typeof kept === 'object' ? kept : planFromOrphanedTest(test);
+      const plan = normalizePlanJson({
+        ...base,
+        status: kept ? base.status : 'completed',
+        test_id: test.id,
+        archived: true,
+        archived_at: base.archived_at || archivedAt,
+      });
+      if (!plan) continue;
+      const fields = extractPlanFields(plan);
+      const inserted = await client.query(
+        `INSERT INTO smart_pricing_inbox_plans
+           (shop_domain, plan_id, plan_json, status, test_id, archived, archived_at, updated_at)
+         VALUES ($1, $2, $3::jsonb, $4, $5, true, $6, NOW())
+         ON CONFLICT (shop_domain, plan_id) DO NOTHING
+         RETURNING plan_id`,
+        [domain, plan.id, JSON.stringify(plan), fields.status, test.id, fields.archivedAt || archivedAt]
+      );
+      if (inserted.rowCount) restoredPlanIds.push(plan.id);
+    }
+
+    await client.query('COMMIT');
+    return { restored_test_ids: restoredIds, restored_plan_ids: restoredPlanIds };
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
     throw err;
   } finally {
     client.release();
@@ -900,8 +1371,12 @@ async function deleteExperimentEverywhere(shopDomain, experimentId) {
 }
 
 module.exports = {
+  listRestorableExperiments,
+  restoreDeletedExperiment,
   listInboxPlans,
   restoreOrphanedLivePlans,
+  repairRestoredPlanPrices,
+  stripDefaultVariantTitle,
   deleteExperimentEverywhere,
   listExperimentTests,
   planFromOrphanedTest,

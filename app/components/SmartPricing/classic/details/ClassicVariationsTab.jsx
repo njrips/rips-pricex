@@ -28,6 +28,7 @@ import {
 } from '../classicExperimentDetailsHelpers';
 import { createPreviewSessionId } from '../../../../utils/previewUrl';
 import { formatTrafficPercent } from '../variationsStepHelpers';
+import { ProductResultsTitle, ViewProductResultsButton } from './ClassicProductResultsLink';
 import {
   buildTrafficSplitSummary,
   resolveArmPerformanceBadge,
@@ -924,7 +925,7 @@ function VariationsProductsTable({
                 </th>
               ))}
               <th scope="col" className={styles.variationsActionsCol}>
-                Preview
+                {onOpenProduct ? 'Actions' : 'Preview'}
               </th>
             </tr>
           </thead>
@@ -979,25 +980,14 @@ function VariationsProductsTable({
                             <span className={styles.tableThumb} aria-hidden />
                           )}
                           <div className={styles.productMeta}>
-                            {onOpenProduct && group.planId ? (
-                              <button
-                                type="button"
-                                style={{
-                                  background: 'none',
-                                  border: 0,
-                                  padding: 0,
-                                  color: 'inherit',
-                                  textAlign: 'left',
-                                  cursor: 'pointer',
-                                  font: 'inherit',
-                                }}
-                                onClick={() => onOpenProduct(group.planId)}
-                              >
-                                <div className={styles.productName}>{group.title}</div>
-                              </button>
-                            ) : (
-                              <div className={styles.productName}>{group.title}</div>
-                            )}
+                            <ProductResultsTitle
+                              title={group.title}
+                              onOpen={
+                                onOpenProduct && group.planId
+                                  ? () => onOpenProduct(group.planId)
+                                  : null
+                              }
+                            />
                             <div className={styles.productSub}>
                               {group.handle ? `/${group.handle}` : 'Catalog'}
                               {multi ? (
@@ -1023,6 +1013,15 @@ function VariationsProductsTable({
                         </td>
                       ))}
                       <td className={styles.variationsActionsCol}>
+                        <div className={styles.productActionsCell}>
+                        <ViewProductResultsButton
+                          title={group.title}
+                          onOpen={
+                            onOpenProduct && group.planId
+                              ? () => onOpenProduct(group.planId)
+                              : null
+                          }
+                        />
                         <SkuPreviewButton
                           arm={previewArm}
                           product={
@@ -1057,6 +1056,7 @@ function VariationsProductsTable({
                             )
                           }
                         />
+                        </div>
                       </td>
                     </tr>
                     {multi && isOpen

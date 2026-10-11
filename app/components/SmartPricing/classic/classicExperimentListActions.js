@@ -1,5 +1,6 @@
 import { preserveEmbeddedSearch } from '../../../utils/shopifyEmbeddedSearch';
 import { canEditClassicTestSetup } from './classicAudienceEdit';
+import { classicCreateStepId } from './classicCreateSteps';
 import { getPlanExperimentId, getPlanExperimentTitle, rollupExperimentStatus } from './classicExperimentHelpers';
 import {
   isActionableOfferConfig,
@@ -220,7 +221,9 @@ export function resolveClassicExperimentMenuActions(experiment, { checkoutReady 
   if (archived) {
     actions.push({ id: 'restore', label: 'Restore' });
     actions.push({ id: 'delete', label: 'Delete', destructive: true });
-  } else if (canDeleteClassicExperimentNow({ status, hasLinkedTests: testIds.length > 0 })) {
+  } else if (
+    canDeleteClassicExperimentNow({ status, archived, hasLinkedTests: testIds.length > 0 })
+  ) {
     actions.push({
       id: 'delete',
       label: isDraft && !testIds.length ? 'Delete draft' : 'Delete',
@@ -239,10 +242,8 @@ export function resolveClassicExperimentMenuActions(experiment, { checkoutReady 
  * tests silently on the way out -- so one click on a destructive menu item
  * both ended a running price test and threw the results away.
  *
- * Pausing first is the same two steps with the stop made explicit, and a
- * paused experiment offers Archive as well, which is usually what someone
- * reaching for Delete actually wanted. A draft has nothing live to stop, so it
- * keeps Delete straight away.
+ * Now the path is Stop, then Archive, then Delete. A draft has nothing live to
+ * stop and no results, so it keeps Delete straight away.
  *
  * Shared with the experiment detail page, which has its own menu. The two
  * drifted apart once already.
@@ -264,17 +265,19 @@ export function canDeleteClassicExperimentNow({
   archived = false,
   hasLinkedTests = true,
 } = {}) {
-  // Withholding Delete only makes sense when there is something to stop first.
+  // Deleting erases results for good, so an experiment that collected any is
+  // archived first: Archive is reversible and keeps everything, and Delete is
+  // then the deliberate second step. The server enforces the same rule.
+  //
   // An experiment marked running with no linked test cannot be paused, stopped
   // or archived, so refusing Delete as well left the merchant a row with no
-  // action on it at all.
+  // action on it at all. A draft never ran and has no results to lose.
   if (!hasLinkedTests) return true;
   if (archived) return true;
-  return (
-    String(status || '')
-      .trim()
-      .toLowerCase() !== 'running'
-  );
+  const key = String(status || '')
+    .trim()
+    .toLowerCase();
+  return key === 'draft' || key === 'queued';
 }
 
 export function getClassicExperimentResumeId(experiment) {
@@ -300,6 +303,47 @@ export function resolveClassicDetailsTab(raw) {
     .toLowerCase();
   if (CLASSIC_DETAILS_TAB_ALIASES[key]) return CLASSIC_DETAILS_TAB_ALIASES[key];
   return CLASSIC_DETAILS_TABS.find(id => id.toLowerCase() === key) || 'Overview';
+}
+
+/** Sections of the details-page settings editor a link can open it on. */
+export const CLASSIC_EDIT_FOCUSES = ['audience', 'metrics', 'guardrail', 'traffic'];
+
+export function resolveClassicEditFocus(raw) {
+  const key = String(raw || '')
+    .trim()
+    .toLowerCase();
+  return CLASSIC_EDIT_FOCUSES.includes(key) ? key : '';
+}
+
+/**
+ * Edit a launched experiment. Its products, prices and arms are fixed once it
+ * has shoppers, so editing is the settings editor on its details page -- not
+ * the create wizard, which can only build a new experiment.
+ */
+export function buildClassicExperimentEditPath(planId, focus = 'audience') {
+  const params = new URLSearchParams({ tab: 'settings', edit: resolveClassicEditFocus(focus) || 'audience' });
+  return preserveEmbeddedSearch(`/app/experiments/${encodeURIComponent(String(planId || '').trim())}?${params}`);
+}
+
+/**
+ * Where Edit takes an experiment: drafts continue in the create wizard,
+ * launched experiments open their settings editor.
+ *
+ * A draft carries its step: the wizard opens at step 1 without it, walking the
+ * merchant back through everything they had already answered.
+ */
+export function buildClassicExperimentEditTarget(experiment) {
+  const plans = Array.isArray(experiment?.plans) ? experiment.plans : [];
+  const status = String(rollupExperimentStatus(plans) || experiment?.status || '')
+    .trim()
+    .toLowerCase();
+  const launched = status !== 'draft' && status !== 'queued' && collectExperimentTestIds(plans).length > 0;
+  const planId = experiment?.representative?.id || plans[0]?.id || '';
+  if (launched && planId) return buildClassicExperimentEditPath(planId);
+  return buildClassicWizardResumePath(
+    getClassicExperimentResumeId(experiment),
+    classicCreateStepId(experiment?.wizardDraft?.step) || undefined
+  );
 }
 
 /** Resume the create wizard. `step` is a CLASSIC_CREATE_STEPS id (e.g. audience). */

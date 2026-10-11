@@ -21,6 +21,7 @@ import { selectUnlistedWizardDrafts, wizardDraftStepLabel } from './classicWizar
 import { loadWizardDrafts } from './classicWizardDraftSync';
 import { formatOfferRule, isOfferExperimentType } from './offerSelection';
 import ClassicExperimentRowActions from './ClassicExperimentRowActions';
+import ClassicRecentlyDeleted from './ClassicRecentlyDeleted';
 import {
   buildClassicWizardResumePath,
   filterClassicExperimentsByTab,
@@ -167,6 +168,8 @@ export default function ClassicExperimentsList() {
   const [message, setMessage] = useState('');
   const [messageType, setMessageType] = useState('error');
   const [expandedIds, setExpandedIds] = useState(() => new Set());
+  // Bumped on every load, so Recently deleted picks up a delete just made.
+  const [loadCount, setLoadCount] = useState(0);
   const {
     checkoutReady,
     offerCheckoutReady,
@@ -189,6 +192,7 @@ export default function ClassicExperimentsList() {
       if (result.message) setMessage(result.message);
       setLoading(false);
       setGridBusy('');
+      setLoadCount(count => count + 1);
     },
     [setLoading]
   );
@@ -708,6 +712,13 @@ export default function ClassicExperimentsList() {
             </tbody>
           </table>
         </div>
+
+        <ClassicRecentlyDeleted
+          shopDomain={shopDomain}
+          refreshKey={loadCount}
+          onRestored={() => reload({ quiet: true })}
+          onMessage={handleListMessage}
+        />
 
         <div className={styles.listFooterLinks}>
           <Button variant="plain" onClick={() => navigate(ROUTES.appSettings(shopDomain))}>

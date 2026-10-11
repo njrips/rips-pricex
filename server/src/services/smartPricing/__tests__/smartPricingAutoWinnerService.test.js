@@ -305,9 +305,13 @@ describe('resolveAutoWinnerDecision', () => {
 
 describe('evaluateSmartPricingAutoWinner', () => {
   function deps(overrides = {}) {
-    const calls = { stop: 0, publish: 0, personalize: 0, sync: [] };
+    const calls = { stop: 0, publish: 0, personalize: 0, sync: [], baselines: [] };
     return {
       calls,
+      getShopRolloutReadiness: async () => ({}),
+      recordWinnerApplied: async (input) => {
+        calls.baselines.push(input);
+      },
       // The apply lock needs a database and now fails closed for price writes,
       // so grant it by default. Individual tests override it to false to cover
       // the contended path; the lease itself is tested in utils/jobLease.
@@ -674,6 +678,12 @@ describe('evaluateShopAutoWinners', () => {
         plans: [{ id: 'SP-1', test_id: 'test-inbox', status: 'running' }],
       }),
       listRunningSmartPricingTests: async () => ['test-inbox', 'test-db'],
+      getShopSmartPricingGuardrails: async () => ({}),
+      getShopRolloutReadiness: async () => ({}),
+      acquireJobLease: async () => true,
+      releaseJobLease: async () => undefined,
+      startJobLeaseHeartbeat: () => () => undefined,
+      enforceRevenueDropGuardrail: async () => ({ skipped: true }),
       getTestById: async id =>
         priceTest({
           id,

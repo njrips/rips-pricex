@@ -49,6 +49,7 @@ import { formatDetailDate } from './classicExperimentDetailsHelpers';
 import { appendActivityToPlans, createActivityEntry } from './classicActivity';
 import {
   formatClassicStatusLabel,
+  getPlanProductTitle,
   normalizePlanStatus,
   readClassicWizardDraft,
   rollupExperimentStatus,
@@ -62,9 +63,10 @@ import {
   stopPausedTestsBeforeArchive,
   withUnlistedExperimentTests,
 } from './classicExperimentTestScope';
-import { buildClassicWizardResumePath, canDeleteClassicExperimentNow, classicBatchOutcomeMessage, CLASSIC_STOPPED_PLAN_STATUS, getClassicExperimentResumeId, isClassicExperimentEnded, isSettledClassicPlan, resolveClassicDetailsTab, splitSettledByIds } from './classicExperimentListActions';
+import { buildClassicWizardResumePath, canDeleteClassicExperimentNow, classicBatchOutcomeMessage, CLASSIC_STOPPED_PLAN_STATUS, getClassicExperimentResumeId, isClassicExperimentEnded, isSettledClassicPlan, resolveClassicDetailsTab, resolveClassicEditFocus, splitSettledByIds } from './classicExperimentListActions';
 import { isOfferExperimentType } from './offerSelection';
 import {
+  applyPausedSmartPricingSettings,
   applyReadySmartPricingProducts,
   applySmartPricingWinner,
   finishSmartPricingProduct,
@@ -245,7 +247,7 @@ export default function ClassicExperimentOverview() {
     () =>
       (Array.isArray(experimentPlans) ? experimentPlans : [])
         .filter(row => row?.id)
-        .map(row => ({ planId: String(row.id), title: row.title || '' })),
+        .map(row => ({ planId: String(row.id), title: getPlanProductTitle(row) })),
     [experimentPlans]
   );
 
@@ -844,6 +846,29 @@ export default function ClassicExperimentOverview() {
     setEditOpen(true);
   };
 
+  // `?edit=` is how Edit test on the list reaches this editor. Consumed once
+  // the experiment has loaded, then dropped so a refresh or Back does not
+  // reopen it.
+  const editParam = resolveClassicEditFocus(searchParams.get('edit'));
+  const [editLinkHandled, setEditLinkHandled] = useState(false);
+  if (editParam && !editLinkHandled && !loading && plan && experimentPlans.length) {
+    setEditLinkHandled(true);
+    if (canEditSetup) {
+      openAudienceMetricsEditor(editParam);
+    } else if (isRunning || isPaused) {
+      showError(
+        null,
+        'Every variation has reached its minimum visitors, so this test’s settings are locked. You can still pause, resume or stop it.'
+      );
+    }
+  }
+  useEffect(() => {
+    if (!editLinkHandled || !searchParams.has('edit')) return;
+    const params = new URLSearchParams(searchParams);
+    params.delete('edit');
+    setSearchParams(params, { replace: true });
+  }, [editLinkHandled, searchParams, setSearchParams]);
+
   const handleSaveAudienceMetrics = async audienceState => {
     if (!canEditClassicAudienceMetrics(status) || editSaving) return;
     if (!experimentPlans.length) {
@@ -887,10 +912,28 @@ export default function ClassicExperimentOverview() {
       if (draft) {
         writeClassicWizardDraft(shopDomain, { ...draft, audience: audienceState });
       }
+      if (isPaused && actionableTestIds.length) {
+        // Resume applies these too; doing it now means the paused test already
+        // matches what this page shows, and a resume from another tab or the
+        // list cannot start it on the old settings.
+        const result = await applyPausedSmartPricingSettings(shopDomain, actionableTestIds).catch(
+          () => null
+        );
+        const skipped = Array.isArray(result?.skipped) ? result.skipped : [];
+        setEditOpen(false);
+        if (skipped.some(row => row.reason === 'running')) {
+          showSuccess(
+            'Settings saved. This test was resumed elsewhere, so they take effect the next time it is paused and resumed.'
+          );
+        } else {
+          showSuccess('Settings saved. The test uses them when you resume it.');
+        }
+        return;
+      }
       setEditOpen(false);
       showSuccess(
         isRunning
-          ? 'Audience and metrics saved. The live test keeps its launch targeting until you pause and relaunch.'
+          ? 'Settings saved. They take effect the next time you pause and resume this test.'
           : 'Audience and metrics updated.'
       );
     } catch (err) {
@@ -1007,7 +1050,7 @@ export default function ClassicExperimentOverview() {
               <>
                 {canEditSetup && (isRunning || isPaused) ? (
                   <Button
-                    onClick={() => navigate(buildClassicWizardResumePath(resumeId))}
+                    onClick={() => openAudienceMetricsEditor('audience')}
                     disabled={Boolean(busyAction)}
                   >
                     Edit test
@@ -1244,8 +1287,8 @@ export default function ClassicExperimentOverview() {
             : 'Audience and metrics are locked after this test ends. Start a new test to try different targeting or a different goal.'
         }
         liveWarning={
-          (isRunning || isPaused) && linkedTestIds.length
-            ? 'This updates the saved test settings. The live test keeps its launch targeting until you relaunch.'
+          isRunning && linkedTestIds.length
+            ? 'This test is running, so it keeps its current settings for now. Changes saved here take effect the next time you pause and resume it.'
             : ''
         }
         saving={editSaving}

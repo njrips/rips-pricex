@@ -186,7 +186,7 @@ async function recordOrderConversions(shopDomain, order) {
       if (err?.code !== '42703') throw err;
     });
 
-    await withTransaction(async client => {
+    const written = await withTransaction(async client => {
       // Only the browser's report is replaced. A row this webhook already wrote
       // may since carry a cancellation or refund, and Shopify can redeliver the
       // original order after either; the insert below then leaves it alone.
@@ -219,8 +219,14 @@ async function recordOrderConversions(shopDomain, order) {
           orderId,
         ]
       );
-      recorded += inserted.rowCount || 0;
+      return inserted.rowCount || 0;
+    }).catch(err => {
+      // The test was purged after its assignment was read above.
+      if (err?.code !== '23503') throw err;
+      skipped.push({ testId: line.testId, reason: 'test_deleted' });
+      return 0;
     });
+    recorded += written;
   }
 
   if (skipped.length) {

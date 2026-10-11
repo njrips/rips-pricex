@@ -8,6 +8,9 @@ import {
   daysBetween,
   describeDecisionProgress,
   formatDaysRunning,
+  productCatalogPrice,
+  productHeading,
+  productVariantLine,
   resolveAdminProductHref,
   resolveArmMetric,
   resolveNeighbourProducts,
@@ -21,6 +24,96 @@ const arms = [
   { arm_id: 'a', role: 'challenger', label: 'Variation A', price: 44, visitors: 100, conversions: 4, conversion_rate: 4, revenue_per_visitor: 1.76, avg_order_value: 44, revenue: 176 },
   { arm_id: 'b', role: 'challenger', label: 'Variation B', price: 36, visitors: 50, conversions: 1, conversion_rate: 2, revenue_per_visitor: 0.72, avg_order_value: 36, revenue: 36 },
 ];
+
+describe('buildProductArmRows orders and profit', () => {
+  it('counts orders apart from buyers, falling back to buyers on an older server', () => {
+    const { rows } = buildProductArmRows([
+      { arm_id: 'c', role: 'control', conversions: 4, orders: 5, visitors: 10 },
+      { arm_id: 'a', role: 'challenger', conversions: 3, visitors: 10 },
+    ]);
+    expect(rows.map(r => [r.conversions, r.orders])).toEqual([[4, 5], [3, 3]]);
+  });
+
+  it('shows profit only when cost of goods makes it differ from revenue, or it is the goal', () => {
+    expect(buildProductArmRows(arms).showProfit).toBe(false);
+    const withCogs = arms.map(arm => ({ ...arm, profit_per_visitor: arm.revenue_per_visitor * 0.45 }));
+    expect(buildProductArmRows(withCogs).showProfit).toBe(true);
+    const same = arms.map(arm => ({ ...arm, profit_per_visitor: arm.revenue_per_visitor }));
+    expect(buildProductArmRows(same).showProfit).toBe(false);
+    expect(buildProductArmRows(same, { primaryMetric: 'profit_per_visitor' }).showProfit).toBe(true);
+  });
+});
+
+describe('buildProductArmRows traffic and average order', () => {
+  const split = [
+    { arm_id: 'c', role: 'control', allocation_percent: 34, visitors: 3034, orders: 66, avg_order_value: 100, product_revenue_per_order: 60 },
+    { arm_id: 'a', role: 'challenger', allocation_percent: 33, visitors: 2963, orders: 8, avg_order_value: 110, product_revenue_per_order: 130 },
+    { arm_id: 'b', role: 'challenger', allocation_percent: 33, visitors: 3003, orders: 0, avg_order_value: null },
+  ];
+
+  it('keeps one decimal of share and flags no one while the split passes its check', () => {
+    const { rows } = buildProductArmRows(split);
+    expect(rows.map(r => r.trafficShare)).toEqual([33.7, 32.9, 33.4]);
+    expect(rows.some(r => r.trafficOffPlan)).toBe(false);
+  });
+
+  it('flags only the variations visibly off plan once the sample ratio check fails', () => {
+    const skewed = split.map((arm, i) => ({ ...arm, visitors: [4000, 2500, 3300][i] }));
+    const { rows } = buildProductArmRows(skewed, { srmDetected: true });
+    expect(rows.map(r => r.trafficOffPlan)).toEqual([true, true, false]);
+  });
+
+  it('compares average order with control, caps the product share at the order, and notes few orders', () => {
+    const { rows } = buildProductArmRows(split);
+    expect(rows.map(r => r.avgOrderDeltaPercent)).toEqual([null, 10, null]);
+    expect(rows.map(r => r.productPerOrder)).toEqual([60, 110, null]);
+    expect(rows.map(r => r.fewOrders)).toEqual([false, true, false]);
+  });
+});
+
+describe('summarizeProductAnalytics orders', () => {
+  it('averages revenue over orders, not buyers', () => {
+    const stats = summarizeProductAnalytics({ summary: { visitors: 100, conversions: 4, orders: 5, revenue: 500 } });
+    expect(stats.orders).toBe(5);
+    expect(stats.avgOrderValue).toBe(100);
+  });
+});
+
+describe('buildProductArmRows prices for offer tests', () => {
+  const offerArms = [
+    { arm_id: 'c', role: 'control', label: 'Control', price: null, offer: null },
+    { arm_id: 'a', role: 'challenger', label: '15% off Variation A', price: null, offer: { discount_type: 'percent', discount_value: 15 } },
+    { arm_id: 'b', role: 'challenger', label: 'Variation B', price: null, offer: { discount_type: 'fixed', discount_value: 5 } },
+    { arm_id: 's', role: 'challenger', label: 'Variation C', price: null, offer: { discount_type: 'free_shipping', discount_value: null } },
+  ];
+
+  it('prices each arm from the catalog price less its offer', () => {
+    const { rows } = buildProductArmRows(offerArms, { catalogPrice: 40 });
+    expect(rows.map(r => r.price)).toEqual([40, 34, 35, 40]);
+    expect(rows.map(r => r.offerText)).toEqual([null, '15% off', '$5.00 off', 'Free shipping']);
+    expect(rows[1].label).toBe('Variation A');
+    expect(rows.map(r => r.priceDeltaPercent)).toEqual([null, -15, -12.5, 0]);
+    expect(rows.every(r => r.priceFromCatalog)).toBe(true);
+  });
+
+  it('takes the offer off the catalog price a wizard-built offer arm stores', () => {
+    const { rows } = buildProductArmRows([
+      { arm_id: 'c', role: 'control', label: 'Control', price: 49 },
+      { arm_id: 'a', role: 'challenger', label: 'Variation A', price: 49, offer: { discount_type: 'percent', discount_value: 10 } },
+    ]);
+    expect(rows.map(r => r.price)).toEqual([49, 44.1]);
+    expect(rows[1].priceDeltaPercent).toBe(-10);
+    expect(rows[1].priceFromCatalog).toBe(true);
+    expect(rows[0].priceFromCatalog).toBe(false);
+  });
+
+  it('leaves prices empty without a catalog price, and never overrides an arm that has one', () => {
+    expect(buildProductArmRows(offerArms).rows.map(r => r.price)).toEqual([null, null, null, null]);
+    const priced = buildProductArmRows(arms, { catalogPrice: 99 }).rows;
+    expect(priced.map(r => r.price)).toEqual([40, 44, 36]);
+    expect(priced.some(r => r.priceFromCatalog)).toBe(false);
+  });
+});
 
 describe('buildProductArmRows', () => {
   it('compares each variation with control on price and on the goal', () => {
@@ -219,5 +312,64 @@ describe('resolveNeighbourProducts', () => {
   it('offers no paging for a product outside the list, or a list of one', () => {
     expect(resolveNeighbourProducts(list, 'older-round').position).toBeNull();
     expect(resolveNeighbourProducts([{ planId: 'p1' }], 'p1').position).toBeNull();
+  });
+});
+
+/**
+ * The test's name is the page title right above the product view, so the
+ * heading repeating it as "Spring sale · Merino Beanie" only pushed the product
+ * name off to the right.
+ */
+describe('productHeading', () => {
+  it('drops the test name a plan title starts with', () => {
+    expect(productHeading({ title: 'Spring sale · Merino Beanie' })).toBe('Merino Beanie');
+  });
+
+  it('prefers the product title the plan stores', () => {
+    expect(
+      productHeading({ title: 'Spring sale · Old name', product_title: 'Merino Beanie' })
+    ).toBe('Merino Beanie');
+  });
+
+  it('leaves the variant to its own line', () => {
+    expect(productHeading({ title: 'Spring sale · Merino Beanie — Grey' }, null, 'Grey')).toBe(
+      'Merino Beanie'
+    );
+    expect(productHeading({ title: 'Spring sale · Merino Beanie — Grey' })).toBe(
+      'Merino Beanie — Grey'
+    );
+  });
+
+  it('falls back to the list row while the plan loads', () => {
+    expect(productHeading(null, { productTitle: 'Merino Beanie' })).toBe('Merino Beanie');
+    expect(productHeading(null, { title: 'Spring sale · Merino Beanie' })).toBe('Merino Beanie');
+    expect(productHeading(null, null)).toBe('Product');
+  });
+
+  it("drops Shopify's Default Title placeholder, and no other dash", () => {
+    expect(
+      productHeading({ title: 'Smart Price Test 1 · The Collection Snowboard: Hydrogen - Default Title' })
+    ).toBe('The Collection Snowboard: Hydrogen');
+    expect(productHeading({ product_title: 'Board — Default Title' })).toBe('Board');
+    expect(productHeading({ product_title: 'DZR Minna - 43' })).toBe('DZR Minna - 43');
+    expect(productHeading(null, { productTitle: 'Board - Default Title' })).toBe('Board');
+  });
+});
+
+describe('productVariantLine', () => {
+  it('shows a real variant and hides the Default Title placeholder', () => {
+    expect(productVariantLine({ variant_title: 'Grey' })).toBe('Grey');
+    expect(productVariantLine({ variant_title: 'Default Title' })).toBe('');
+    expect(productVariantLine(null, { variantTitle: 'default title' })).toBe('');
+    expect(productVariantLine(null, { variantTitle: 'Large' })).toBe('Large');
+  });
+});
+
+describe('productCatalogPrice', () => {
+  it("takes the report's resolved price, then the plan's, and never a zero", () => {
+    expect(productCatalogPrice({ catalog_price: 600 }, { current_price: null })).toBe(600);
+    expect(productCatalogPrice({}, { current_price: 40 })).toBe(40);
+    expect(productCatalogPrice({ catalog_price: null }, { current_price: 0 })).toBeNull();
+    expect(productCatalogPrice(null, null)).toBeNull();
   });
 });

@@ -12,9 +12,12 @@ const {
   patchInboxPlansFromSync,
   linkInboxPlanToTest,
   restoreOrphanedLivePlans,
+  repairRestoredPlanPrices,
   deleteExperimentEverywhere,
   listExperimentTests,
   planFromOrphanedTest,
+  listRestorableExperiments,
+  restoreDeletedExperiment,
   MAX_PLANS_PER_SHOP,
 } = require('../../../models/smartPricingInboxStore');
 
@@ -323,6 +326,7 @@ describe('smartPricingInboxStore', () => {
   it('deletes an experiment by archiving all its tests and removing its plans', async () => {
     const client = {
       query: jest.fn(async sql => {
+        if (String(sql).includes('SELECT test_id::text')) return { rows: [{ test_id: 't3' }] };
         if (String(sql).startsWith('UPDATE tests')) return { rows: [{ id: 't1' }, { id: 't2' }] };
         if (String(sql).includes('DELETE FROM smart_pricing_inbox_plans')) {
           return { rows: [{ plan_id: 'SP-1' }] };
@@ -333,15 +337,256 @@ describe('smartPricingInboxStore', () => {
     };
     getClient.mockResolvedValueOnce(client);
 
-    const result = await deleteExperimentEverywhere('Demo.myshopify.com', 'exp-1');
+    const result = await deleteExperimentEverywhere('Demo.myshopify.com', 'exp-1', {
+      planIds: ['SP-1'],
+      testIds: ['t1'],
+    });
 
     const update = findCall(client, 'UPDATE tests');
     expect(update[0]).toContain("metadata->>'experiment_id' = $2");
-    expect(update[1]).toEqual(['demo.myshopify.com', 'exp-1']);
+    expect(update[0]).toContain("status <> 'archived'");
+    expect(update[1]).toEqual(['demo.myshopify.com', 'exp-1', ['t1', 't3']]);
     const remove = findCall(client, 'DELETE FROM smart_pricing_inbox_plans');
-    expect(remove[1]).toEqual(['demo.myshopify.com', 'exp-1', ['t1', 't2']]);
-    expect(client.query).toHaveBeenCalledWith('COMMIT');
-    expect(result).toEqual({ archived_test_ids: ['t1', 't2'], deleted_plan_ids: ['SP-1'] });
+    expect(remove[1]).toEqual(['demo.myshopify.com', ['SP-1'], ['t1', 't3', 't2'], 'exp-1']);
+    const record = findCall(client, 'INSERT INTO smart_pricing_deletions');
+    expect(record[1][0]).toBe('demo.myshopify.com');
+    expect(record[1][1]).toEqual(['experiment', 'test', 'test', 'test']);
+    expect(record[1][2]).toEqual(['exp-1', 't1', 't3', 't2']);
+
+    const calls = client.query.mock.calls.map(call => String(call[0]));
+    const recordAt = calls.findIndex(sql => sql.includes('INSERT INTO smart_pricing_deletions'));
+    expect(recordAt).toBeGreaterThan(calls.indexOf('BEGIN'));
+    expect(recordAt).toBeLessThan(calls.indexOf('COMMIT'));
+    expect(result).toEqual({
+      archived_test_ids: ['t1', 't2'],
+      deleted_plan_ids: ['SP-1'],
+      test_ids: ['t1', 't3', 't2'],
+    });
+  });
+
+  describe('only deletes what was archived first', () => {
+    function clientWith(rows) {
+      return {
+        query: jest.fn(async sql =>
+          String(sql).includes('plan_not_archived') ? { rows } : { rows: [] }
+        ),
+        release: jest.fn(),
+      };
+    }
+
+    it('refuses a test that is still live, and changes nothing', async () => {
+      const client = clientWith([{ id: 't1', status: 'paused', plan_not_archived: true }]);
+      getClient.mockResolvedValueOnce(client);
+
+      await expect(deleteExperimentEverywhere('demo.myshopify.com', 'exp-1')).rejects.toMatchObject(
+        { code: 'EXPERIMENT_LIVE', testIds: ['t1'] }
+      );
+      expect(findCall(client, 'UPDATE tests')).toBeUndefined();
+      expect(client.query).toHaveBeenCalledWith('ROLLBACK');
+    });
+
+    it('refuses an ended test whose plan was not archived', async () => {
+      const client = clientWith([{ id: 't1', status: 'completed', plan_not_archived: true }]);
+      getClient.mockResolvedValueOnce(client);
+
+      await expect(deleteExperimentEverywhere('demo.myshopify.com', 'exp-1')).rejects.toMatchObject(
+        { code: 'EXPERIMENT_NOT_ARCHIVED' }
+      );
+      expect(findCall(client, 'UPDATE tests')).toBeUndefined();
+    });
+
+    it('deletes ended tests once archived, and drafts that never ran', async () => {
+      const client = clientWith([
+        { id: 't1', status: 'stopped', plan_not_archived: false },
+        { id: 't2', status: 'draft', plan_not_archived: true },
+      ]);
+      getClient.mockResolvedValueOnce(client);
+
+      await deleteExperimentEverywhere('demo.myshopify.com', 'exp-1');
+
+      const update = findCall(client, 'UPDATE tests');
+      expect(update[0]).toContain('deleted_at = COALESCE(deleted_at, NOW())');
+      expect(client.query).toHaveBeenCalledWith('COMMIT');
+    });
+
+    it('locks the tests it checks, so a Resume cannot slip in mid-delete', async () => {
+      const client = clientWith([]);
+      getClient.mockResolvedValueOnce(client);
+
+      await deleteExperimentEverywhere('demo.myshopify.com', 'exp-1');
+
+      expect(findCall(client, 'plan_not_archived')[0]).toContain('FOR UPDATE OF t');
+    });
+  });
+
+  it('keeps each deleted plan and the status it had, so Restore can put both back', async () => {
+    const client = {
+      query: jest.fn(async sql => {
+        if (String(sql).includes('DELETE FROM smart_pricing_inbox_plans')) {
+          return {
+            rows: [{ plan_id: 'SP-1', test_id: 't1', plan_json: { id: 'SP-1', price_arms: [1] } }],
+          };
+        }
+        return { rows: [] };
+      }),
+      release: jest.fn(),
+    };
+    getClient.mockResolvedValueOnce(client);
+
+    await deleteExperimentEverywhere('demo.myshopify.com', 'exp-1', { testIds: ['t1'] });
+
+    expect(findCall(client, 'UPDATE tests')[0]).toContain("'status_before_delete', status");
+    const keep = findCall(client, "jsonb_build_object('plan', u.plan)");
+    expect(keep[1][1]).toEqual(['t1']);
+    expect(JSON.parse(keep[1][2][0]).price_arms).toEqual([1]);
+  });
+
+  describe('restoring a deleted experiment', () => {
+    it('groups restorable tests by experiment, one row per test without one', async () => {
+      query.mockResolvedValueOnce({
+        rows: [
+          {
+            id: 't1',
+            name: 'Smart Pricing · Spring · Hoodie',
+            deleted_at: '2026-10-08T00:00:00.000Z',
+            experiment_id: 'exp-1',
+          },
+          {
+            id: 't2',
+            name: 'Smart Pricing · Spring · Cap',
+            deleted_at: '2026-10-07T00:00:00.000Z',
+            experiment_id: 'exp-1',
+          },
+          { id: 't3', name: 'Old one', deleted_at: '2026-10-06T00:00:00.000Z', experiment_id: null },
+        ],
+      });
+
+      const list = await listRestorableExperiments('Demo.myshopify.com');
+
+      expect(query.mock.calls[0][0]).toContain('deleted_at > NOW() - make_interval');
+      expect(list).toHaveLength(2);
+      expect(list[0]).toMatchObject({
+        experiment_id: 'exp-1',
+        title: 'Spring',
+        test_ids: ['t1', 't2'],
+        product_count: 2,
+        deleted_at: '2026-10-08T00:00:00.000Z',
+        // The earlier of the two deletes is the one purged first.
+        purge_after: '2026-10-14T00:00:00.000Z',
+      });
+      expect(list[1]).toMatchObject({ key: 'test:t3', experiment_id: null, test_ids: ['t3'] });
+    });
+
+    function restoringClient({ restored = [], kept = [] } = {}) {
+      return {
+        query: jest.fn(async sql => {
+          const text = String(sql);
+          if (text.startsWith('UPDATE tests')) return { rows: restored };
+          if (text.includes("details->'plan'")) return { rows: kept };
+          if (text.includes('INSERT INTO smart_pricing_inbox_plans')) return { rowCount: 1 };
+          return { rows: [], rowCount: 0 };
+        }),
+        release: jest.fn(),
+      };
+    }
+
+    it('puts the tests back as they were, and their plans back archived', async () => {
+      const client = restoringClient({
+        restored: [{ id: 't1', name: 'Smart Pricing · Spring · Hoodie', status: 'completed', metadata: {} }],
+        kept: [{ entity_id: 't1', plan: { id: 'SP-1', status: 'completed', price_arms: [{ price: 10 }] } }],
+      });
+      getClient.mockResolvedValueOnce(client);
+
+      const result = await restoreDeletedExperiment('demo.myshopify.com', 'exp-1');
+
+      const update = findCall(client, 'UPDATE tests');
+      expect(update[0]).toContain("metadata->>'status_before_delete'");
+      expect(update[0]).toContain('deleted_at = NULL');
+      expect(update[0]).toContain('deleted_at > NOW() - make_interval');
+      const tombstones = findCall(client, 'DELETE FROM smart_pricing_deletions');
+      expect(tombstones[1]).toEqual(['demo.myshopify.com', ['t1'], 'exp-1']);
+      const insert = findCall(client, 'INSERT INTO smart_pricing_inbox_plans');
+      const plan = JSON.parse(insert[1][2]);
+      expect(plan).toMatchObject({ id: 'SP-1', archived: true, test_id: 't1' });
+      expect(plan.price_arms).toEqual([{ price: 10 }]);
+      expect(insert[0]).toContain('ON CONFLICT (shop_domain, plan_id) DO NOTHING');
+      expect(client.query).toHaveBeenCalledWith('COMMIT');
+      expect(result).toEqual({ restored_test_ids: ['t1'], restored_plan_ids: ['SP-1'] });
+    });
+
+    it('rebuilds a plan from the test when no copy was kept', async () => {
+      const client = restoringClient({
+        restored: [{ id: 't9', name: 'Smart Pricing · Old · Mug', status: 'stopped', metadata: {} }],
+      });
+      getClient.mockResolvedValueOnce(client);
+
+      await restoreDeletedExperiment('demo.myshopify.com', '', { testIds: ['t9'] });
+
+      const plan = JSON.parse(findCall(client, 'INSERT INTO smart_pricing_inbox_plans')[1][2]);
+      expect(plan).toMatchObject({ id: 'SP-restored-t9', status: 'completed', archived: true });
+    });
+
+    it('says so when the grace period is over, and changes nothing', async () => {
+      const client = restoringClient();
+      getClient.mockResolvedValueOnce(client);
+
+      await expect(restoreDeletedExperiment('demo.myshopify.com', 'exp-1')).rejects.toMatchObject({
+        code: 'NOTHING_TO_RESTORE',
+      });
+      expect(client.query).toHaveBeenCalledWith('ROLLBACK');
+      expect(findCall(client, 'DELETE FROM smart_pricing_deletions')).toBeUndefined();
+    });
+  });
+
+  it('rolls the whole delete back when any step fails', async () => {
+    const client = {
+      query: jest.fn(async sql => {
+        if (String(sql).includes('DELETE FROM smart_pricing_inbox_plans')) {
+          throw new Error('connection lost');
+        }
+        return { rows: [] };
+      }),
+      release: jest.fn(),
+    };
+    getClient.mockResolvedValueOnce(client);
+
+    await expect(deleteExperimentEverywhere('demo.myshopify.com', 'exp-1')).rejects.toThrow(
+      'connection lost'
+    );
+    expect(client.query).toHaveBeenCalledWith('ROLLBACK');
+    expect(client.query).not.toHaveBeenCalledWith('COMMIT');
+    expect(client.release).toHaveBeenCalled();
+  });
+
+  it('does not save plans whose experiment or test was deleted', async () => {
+    const client = {
+      query: jest.fn(async sql => {
+        if (String(sql).includes('FROM smart_pricing_deletions')) {
+          return {
+            rows: [
+              { entity_type: 'experiment', entity_id: 'exp-gone' },
+              { entity_type: 'test', entity_id: 't-gone' },
+            ],
+          };
+        }
+        return { rows: [] };
+      }),
+      release: jest.fn(),
+    };
+    getClient.mockResolvedValueOnce(client);
+    query.mockResolvedValue({ rows: [] });
+
+    const result = await saveInboxPlans('demo.myshopify.com', [
+      { id: 'SP-1', metadata: { experiment_id: 'exp-gone' } },
+      { id: 'SP-2', test_id: 't-gone' },
+      { id: 'SP-3', metadata: { experiment_id: 'exp-live' } },
+    ]);
+
+    const upserts = client.query.mock.calls.filter(call =>
+      String(call[0]).includes('INSERT INTO smart_pricing_inbox_plans')
+    );
+    expect(upserts.map(call => call[1][1])).toEqual(['SP-3']);
+    expect(result.refused_plan_ids).toEqual(['SP-1', 'SP-2']);
   });
 
   it("lists an experiment's tests that are not deleted", async () => {
@@ -433,6 +678,149 @@ describe('smartPricingInboxStore', () => {
       const insert = query.mock.calls.find(call => String(call[0]).includes('INSERT INTO'));
       expect(insert[0]).toContain('ON CONFLICT (shop_domain, plan_id) DO NOTHING');
       expect(insert[1][1]).toBe('SP-249');
+    });
+
+    const classicOrphan = {
+      ...orphan,
+      name: 'Smart Pricing · Smart Price Test 1 · The Collection Snowboard: Hydrogen - Default Title',
+      variants: [
+        { id: 'v0', name: '$600.00 Control', allocation: 34, config: { byProduct: { p: { byVariant: { v: { price: 600 } } } } } },
+        { id: 'v1', name: '$696.00 Variation A', allocation: 33, config: { byProduct: { p: { byVariant: { v: { price: 696 } } } } } },
+        { id: 'v2', name: '$660.00 Variation B', allocation: 33, config: { price: 660 } },
+      ],
+      metadata: { experiment_id: 'exp-1', smart_pricing_plan_id: 'SP-300' },
+    };
+
+    it('reads the arms and starting price from the variants when the test metadata has neither', () => {
+      const plan = planFromOrphanedTest(classicOrphan);
+      expect(plan.current_price).toBe(600);
+      expect(plan.price_arms).toEqual([
+        { id: 'v0', role: 'control', label: 'Control', price: 600, allocation_percent: 34 },
+        { id: 'v1', role: 'challenger', label: 'Variation A', price: 696, allocation_percent: 33 },
+        { id: 'v2', role: 'challenger', label: 'Variation B', price: 660, allocation_percent: 33 },
+      ]);
+    });
+
+    it('rebuilds offer arms with their offer and the label the wizard gave them', () => {
+      const plan = planFromOrphanedTest({
+        ...orphan,
+        type: 'offer',
+        variants: [
+          { name: 'Control', config: {} },
+          { name: '15% off Variation A', config: { discount_type: 'percent', discount_value: 15 } },
+          { name: '$5.00 off Variation B', config: { discount_type: 'fixed', discount_value: 5 } },
+        ],
+        metadata: { experiment_id: 'exp-2' },
+      });
+      expect(plan.price_arms.map(arm => [arm.label, arm.offer?.discount_type ?? null])).toEqual([
+        ['Control', null],
+        ['Variation A', 'percent'],
+        ['Variation B', 'fixed'],
+      ]);
+      expect(plan.current_price).toBeNull();
+    });
+
+    it("drops Shopify's Default Title placeholder but keeps any other dash in the name", () => {
+      expect(planFromOrphanedTest(classicOrphan).product_title).toBe('The Collection Snowboard: Hydrogen');
+      expect(planFromOrphanedTest(orphan).product_title).toBe('DZR Minna - 43');
+    });
+  });
+
+  describe('repairRestoredPlanPrices', () => {
+    const variants = [
+      { id: 'v0', name: '$600.00 Control', config: { price: 600 } },
+      { id: 'v1', name: '$696.00 Variation A', config: { price: 696 } },
+    ];
+
+    it('fills only the empty fields, re-checking each in the UPDATE', async () => {
+      query.mockResolvedValueOnce({
+        rows: [
+          {
+            plan_id: 'SP-1',
+            plan_json: { restored_from_test: true, product_title: 'Board - Default Title', price_arms: [], current_price: null },
+            name: 'Smart Pricing · T · Board - Default Title',
+            variants,
+            metadata: {},
+          },
+        ],
+      });
+      query.mockResolvedValueOnce({ rows: [{ plan_id: 'SP-1' }] });
+
+      const result = await repairRestoredPlanPrices('Demo.myshopify.com');
+
+      expect(result).toEqual({ repaired: 1 });
+      const [sql, params] = query.mock.calls[1];
+      expect(sql).toContain("plan_json->>'current_price' IS NULL");
+      expect(sql).toContain("plan_json->>'product_title' = $5");
+      expect(sql).not.toContain('updated_at');
+      expect(params[0]).toBe('demo.myshopify.com');
+      expect(JSON.parse(params[2]).map(arm => arm.price)).toEqual([600, 696]);
+      expect(params[3]).toBe(600);
+      expect(params.slice(4, 6)).toEqual(['Board - Default Title', 'Board']);
+      expect(sql).toContain("plan_json->'price_arms' IS NOT DISTINCT FROM $7::jsonb");
+      expect(JSON.parse(params[6])).toEqual([]);
+    });
+
+    it('gives offer arms back the offer they ran with, keeping everything else', async () => {
+      const offerVariants = [
+        { name: 'Control', config: {}, allocation: 50 },
+        { name: '15% off Variation A', config: { discount_type: 'percent', discount_value: 15, offer_message: 'Hi' }, allocation: 50 },
+      ];
+      const armsRead = [
+        { id: 'variant_0', role: 'control', label: 'Control', price: null, allocation_percent: 50 },
+        { id: 'variant_1', role: 'challenger', label: '15% off Variation A', price: null, allocation_percent: 50 },
+      ];
+      query.mockResolvedValueOnce({
+        rows: [
+          {
+            plan_id: 'SP-4',
+            plan_json: { restored_from_test: true, product_title: 'Hat', price_arms: armsRead, current_price: null },
+            name: 'Smart Pricing · T · Hat',
+            variants: offerVariants,
+            metadata: {},
+          },
+        ],
+      });
+      query.mockResolvedValueOnce({ rows: [{ plan_id: 'SP-4' }] });
+
+      await repairRestoredPlanPrices('demo.myshopify.com');
+
+      expect(query.mock.calls[0][0]).toContain("t.type = 'offer'");
+      const params = query.mock.calls[1][1];
+      expect(JSON.parse(params[2])).toEqual([
+        armsRead[0],
+        { ...armsRead[1], label: 'Variation A', offer: { discount_type: 'percent', discount_value: 15, offer_message: 'Hi' } },
+      ]);
+      expect(JSON.parse(params[6])).toEqual(armsRead);
+      expect(params[3]).toBeNull();
+    });
+
+    it('prices from the arms a plan already has, and writes nothing when there is nothing to fill', async () => {
+      query.mockResolvedValueOnce({
+        rows: [
+          {
+            plan_id: 'SP-2',
+            plan_json: { restored_from_test: true, product_title: 'Board', price_arms: [{ role: 'control', price: 40 }], current_price: 40 },
+            name: 'Smart Pricing · T · Board',
+            variants,
+            metadata: {},
+          },
+          {
+            plan_id: 'SP-3',
+            plan_json: { restored_from_test: true, product_title: 'Hat', price_arms: [{ role: 'control', price: 25 }], current_price: null },
+            name: 'Smart Pricing · T · Hat',
+            variants: [],
+            metadata: {},
+          },
+        ],
+      });
+      query.mockResolvedValueOnce({ rows: [{ plan_id: 'SP-3' }] });
+
+      await repairRestoredPlanPrices('demo.myshopify.com');
+
+      expect(query).toHaveBeenCalledTimes(2);
+      expect(query.mock.calls[1][1][1]).toBe('SP-3');
+      expect(query.mock.calls[1][1][3]).toBe(25);
     });
   });
 });

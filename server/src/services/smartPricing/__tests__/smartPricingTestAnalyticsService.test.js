@@ -415,6 +415,69 @@ describe('smartPricingTestAnalyticsService', () => {
     expect(result.arms[0].visitors).toBe(80);
     expect(result.arms[1].variant_id).toBe('v-a');
     expect(result.arms[1].visitors).toBe(90);
+    expect(result.arms[0].offer).toBeNull();
+    expect(result.arms[1].offer).toEqual({
+      discount_type: 'percent',
+      discount_value: 10,
+      offer_message: null,
+    });
+  });
+
+  it('passes orders through apart from buyers, and totals them', async () => {
+    getTestById.mockResolvedValue({
+      id: 'test-orders',
+      type: 'price',
+      status: 'running',
+      metadata: { smart_pricing_source: 'smart_pricing' },
+      variants: [
+        { id: 'v0', name: 'Control', config: { price: 40 } },
+        { id: 'v1', name: 'Variation A', config: { price: 44 } },
+      ],
+    });
+    findInboxPlanByTestId.mockResolvedValue({
+      id: 'SP-orders',
+      price_arms: [
+        { id: 'v0', role: 'control', label: 'Control', price: 40 },
+        { id: 'v1', role: 'challenger', label: 'Variation A', price: 44 },
+      ],
+    });
+    analyticsService.getTestAnalytics.mockResolvedValue({
+      variants: [
+        { id: 'v0', name: 'Control', visitors: 100, conversions: 4, orders: 5, revenue: 200, avgOrderValue: 40 },
+        { id: 'v1', name: 'Variation A', visitors: 100, conversions: 3, revenue: 132, avgOrderValue: 44 },
+      ],
+      summary: { totalVisitors: 200, totalConversions: 7, totalOrders: 8, totalRevenue: 332 },
+    });
+
+    const result = await buildSmartPricingTestAnalytics('demo.myshopify.com', 'test-orders');
+    expect(result.arms.map(arm => [arm.conversions, arm.orders])).toEqual([[4, 5], [3, 3]]);
+    expect(result.summary.orders).toBe(8);
+    expect(result.summary.conversions).toBe(7);
+  });
+
+  it("reads an offer arm's discount from its variation when the plan arm has none", async () => {
+    getTestById.mockResolvedValue({
+      id: 'test-offer-2',
+      type: 'offer',
+      status: 'running',
+      metadata: { smart_pricing_source: 'smart_pricing' },
+      variants: [
+        { id: 'v0', name: 'Control', config: {} },
+        { id: 'v1', name: '$5.00 off Variation A', config: { discount_type: 'fixed', discount_value: 5 } },
+      ],
+    });
+    findInboxPlanByTestId.mockResolvedValue({
+      id: 'SP-offer-2',
+      price_arms: [
+        { id: 'v0', role: 'control', label: 'Control', price: null },
+        { id: 'v1', role: 'challenger', label: '$5.00 off Variation A', price: null },
+      ],
+    });
+    analyticsService.getTestAnalytics.mockResolvedValue({ variants: [], summary: {} });
+
+    const result = await buildSmartPricingTestAnalytics('demo.myshopify.com', 'test-offer-2');
+    expect(result.arms[1].offer).toMatchObject({ discount_type: 'fixed', discount_value: 5 });
+    expect(result.arms[1].price).toBeNull();
   });
 });
 

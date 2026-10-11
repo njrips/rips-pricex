@@ -11,7 +11,10 @@ import {
   filterClassicExperimentsByTab,
   listTabAfterClassicAction,
   buildClassicWizardResumePath,
+  buildClassicExperimentEditPath,
+  buildClassicExperimentEditTarget,
   resolveClassicDetailsTab,
+  resolveClassicEditFocus,
 } from '../classicExperimentListActions';
 import { classicCreateStepIndex } from '../classicCreateSteps';
 
@@ -270,7 +273,8 @@ describe('classicExperimentListActions', () => {
     expect(actions.some(a => a.id === 'pause')).toBe(false);
     expect(actions.some(a => a.id === 'resume')).toBe(true);
     expect(actions.some(a => a.id === 'archive')).toBe(true);
-    expect(actions.some(a => a.id === 'delete')).toBe(true);
+    // Its results are purged once deleted, so Archive comes first.
+    expect(actions.some(a => a.id === 'delete')).toBe(false);
   });
 
   it('shows archive after an experiment has ended', () => {
@@ -328,13 +332,16 @@ describe('classicExperimentListActions', () => {
       expect(actions.some(a => a.id === 'pause')).toBe(true);
     });
 
-    it('is offered with archive once it is paused, and once it is stopped', () => {
-      ['paused', 'stopped'].forEach(status => {
+    it('is not offered once paused or stopped either, until it is archived', () => {
+      // Deleting purges results for good, so the reversible Archive comes
+      // first and Delete is the deliberate second step.
+      ['paused', 'stopped', 'completed'].forEach(status => {
         const actions = resolveClassicExperimentMenuActions(
           { ...running, status, plans: [{ ...running.plans[0], status }] },
           { checkoutReady: true }
         );
-        expect(actions.map(a => a.id)).toEqual(expect.arrayContaining(['archive', 'delete']));
+        expect(actions.some(a => a.id === 'archive')).toBe(true);
+        expect(actions.some(a => a.id === 'delete')).toBe(false);
       });
     });
 
@@ -380,7 +387,7 @@ describe('classicExperimentListActions', () => {
       };
       const actions = resolveClassicExperimentMenuActions(paused, { checkoutReady: true });
       expect(actions.map(a => a.id)).toEqual(
-        expect.arrayContaining(['resume', 'stop', 'archive', 'delete'])
+        expect.arrayContaining(['resume', 'stop', 'archive'])
       );
     });
 
@@ -434,14 +441,14 @@ describe('classicExperimentListActions', () => {
       expect(ids.filter(id => id !== 'view').length).toBeGreaterThan(0);
     });
 
-    it('leaves a stopped experiment with archive and delete, and no stop', () => {
+    it('leaves a stopped experiment with archive, and no stop', () => {
       const stopped = {
         ...running,
         status: 'completed',
         plans: [{ ...running.plans[0], status: 'completed' }],
       };
       const actions = resolveClassicExperimentMenuActions(stopped, { checkoutReady: true });
-      expect(actions.map(a => a.id)).toEqual(expect.arrayContaining(['archive', 'delete']));
+      expect(actions.some(a => a.id === 'archive')).toBe(true);
       expect(actions.some(a => a.id === 'stop')).toBe(false);
       expect(actions.some(a => a.id === 'resume')).toBe(false);
     });
@@ -463,7 +470,7 @@ describe('classicExperimentListActions', () => {
         plans: [{ ...running.plans[0], status: CLASSIC_STOPPED_PLAN_STATUS }],
       };
       const actions = resolveClassicExperimentMenuActions(stopped, { checkoutReady: true });
-      expect(actions.map(a => a.id)).toEqual(expect.arrayContaining(['archive', 'delete']));
+      expect(actions.some(a => a.id === 'archive')).toBe(true);
       expect(actions.some(a => a.id === 'resume')).toBe(false);
     });
 
@@ -471,12 +478,16 @@ describe('classicExperimentListActions', () => {
       // The list and the detail page each build their own menu, and they
       // drifted apart once already.
       expect(canDeleteClassicExperimentNow({ status: 'running' })).toBe(false);
-      expect(canDeleteClassicExperimentNow({ status: 'paused' })).toBe(true);
-      expect(canDeleteClassicExperimentNow({ status: 'stopped' })).toBe(true);
+      expect(canDeleteClassicExperimentNow({ status: 'paused' })).toBe(false);
+      expect(canDeleteClassicExperimentNow({ status: 'stopped' })).toBe(false);
+      expect(canDeleteClassicExperimentNow({ status: 'completed' })).toBe(false);
       expect(canDeleteClassicExperimentNow({ status: 'draft' })).toBe(true);
-      expect(canDeleteClassicExperimentNow({ status: 'completed' })).toBe(true);
-      expect(canDeleteClassicExperimentNow({ status: 'running', archived: true })).toBe(true);
-      expect(canDeleteClassicExperimentNow()).toBe(true);
+      expect(canDeleteClassicExperimentNow({ status: 'queued' })).toBe(true);
+      expect(canDeleteClassicExperimentNow({ status: 'completed', archived: true })).toBe(true);
+      expect(canDeleteClassicExperimentNow({ status: 'running', hasLinkedTests: false })).toBe(
+        true
+      );
+      expect(canDeleteClassicExperimentNow()).toBe(false);
     });
   });
 
@@ -559,5 +570,51 @@ describe('classicExperimentListActions', () => {
     expect(resolveClassicDetailsTab('performance')).toBe('Overview');
     expect(resolveClassicDetailsTab('')).toBe('Overview');
     expect(resolveClassicDetailsTab('nope')).toBe('Overview');
+  });
+});
+
+/**
+ * Edit on a paused test opened the create wizard, which can only build a new
+ * experiment -- and, with nothing for that id in this browser, opened blank.
+ */
+describe('where Edit test goes', () => {
+  const launched = status => ({
+    id: 'exp-1',
+    representative: { id: 'SP-1', experiment_id: 'exp-1', test_id: 't-1', status },
+    plans: [{ id: 'SP-1', experiment_id: 'exp-1', test_id: 't-1', status }],
+  });
+
+  it('opens the settings editor of a paused or running experiment', () => {
+    expect(buildClassicExperimentEditTarget(launched('paused'))).toBe(
+      '/app/experiments/SP-1?tab=settings&edit=audience'
+    );
+    expect(buildClassicExperimentEditTarget(launched('running'))).toBe(
+      '/app/experiments/SP-1?tab=settings&edit=audience'
+    );
+  });
+
+  it('continues a draft in the wizard at the step it was left on', () => {
+    expect(
+      buildClassicExperimentEditTarget({
+        id: 'exp-2',
+        plans: [],
+        wizardDraft: { step: classicCreateStepIndex('audience') },
+      })
+    ).toBe('/app/experiments/new?resume=exp-2&step=audience');
+    expect(
+      buildClassicExperimentEditTarget({
+        id: 'exp-3',
+        representative: { id: 'SP-3', experiment_id: 'exp-3', status: 'draft' },
+        plans: [{ id: 'SP-3', experiment_id: 'exp-3', status: 'draft' }],
+      })
+    ).toBe('/app/experiments/new?resume=exp-3');
+  });
+
+  it('only accepts editor sections that exist', () => {
+    expect(resolveClassicEditFocus('Traffic')).toBe('traffic');
+    expect(resolveClassicEditFocus('variations')).toBe('');
+    expect(buildClassicExperimentEditPath('SP-1', 'nope')).toBe(
+      '/app/experiments/SP-1?tab=settings&edit=audience'
+    );
   });
 });

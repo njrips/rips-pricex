@@ -20,6 +20,7 @@ import {
   suggestSmartPricingGoals,
   suggestSmartPricingPrices,
   batchPreviewSmartPricingLaunch,
+  getSmartPricingExperimentTests,
 } from '../../../services/smartPricingApi';
 import {
   alreadyLaunchedPlanIds,
@@ -131,6 +132,7 @@ import {
 } from '../targeting/smartPricingAudienceHelpers';
 import ClassicWizardShell from './ClassicWizardShell';
 import { CLASSIC_CREATE_STEPS, classicCreateStepIndex } from './classicCreateSteps';
+import { buildClassicExperimentEditPath } from './classicExperimentListActions';
 import {
   buildWizardResumeSearch,
   shouldAutosaveWizardSnapshot,
@@ -210,6 +212,15 @@ import styles from './SmartPricingClassic.module.css';
  * them there is no telling whether price selectors matter to this run at all.
  */
 const FIRST_STEP_AFTER_TYPE_CHOSEN = 1;
+
+/** Test statuses that mean the experiment is past the wizard. */
+const LAUNCHED_TEST_STATUSES = new Set(['running', 'paused', 'scheduled', 'stopped', 'completed']);
+
+/** A plan whose test exists and has left draft: its experiment has launched. */
+function isLaunchedPlan(plan) {
+  const status = String(plan?.status || '').trim().toLowerCase();
+  return Boolean(String(plan?.test_id || '').trim()) && status !== 'draft' && status !== 'queued';
+}
 
 function createExperimentId() {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -358,6 +369,13 @@ export default function ClassicCreateWizard({ onTitleChange }) {
   // Restored from plans already in the inbox rather than from a draft, so
   // there is no draft for the server to be holding a newer copy of.
   const [resumedFromInbox, setResumedFromInbox] = useState(false);
+  // Set when ?resume= names an experiment that has already launched. Edit for
+  // one of those is its details page; this wizard can only create.
+  const [launchedResumeId, setLaunchedResumeId] = useState('');
+  useEffect(() => {
+    if (!launchedResumeId) return;
+    navigate(buildClassicExperimentEditPath(launchedResumeId), { replace: true });
+  }, [launchedResumeId, navigate]);
 
   const [name, setName] = useState('');
   // Whether the name has been settled rather than still being typed. Latched in
@@ -853,7 +871,12 @@ export default function ClassicCreateWizard({ onTitleChange }) {
   if (hydrated && !draftHydrated) {
     setDraftHydrated(true);
     if (resumeId) {
-      if (resumedLocalDraft) {
+      const launchedHere = (readInboxPlans(shopDomain) || []).some(
+        plan => getPlanExperimentId(plan) === resumeId && isLaunchedPlan(plan)
+      );
+      if (launchedHere) {
+        setLaunchedResumeId(resumeId);
+      } else if (resumedLocalDraft) {
         applyWizardSnapshot(resumedLocalDraft);
       } else {
         const inboxPlans = (readInboxPlans(shopDomain) || []).filter(
@@ -931,7 +954,7 @@ export default function ClassicCreateWizard({ onTitleChange }) {
    */
   const serverResumeTried = useRef('');
   useEffect(() => {
-    if (!draftHydrated || !resumeId) return undefined;
+    if (!draftHydrated || !resumeId || launchedResumeId) return undefined;
     // Not `appliedSavedDraft`: seeding from the browser copy sets that too, so
     // testing it here would skip the lookup in exactly the case this exists
     // for -- a browser copy that another device has since moved past.
@@ -941,8 +964,22 @@ export default function ClassicCreateWizard({ onTitleChange }) {
     if (serverResumeTried.current === resumeId) return undefined;
     serverResumeTried.current = resumeId;
     let cancelled = false;
-    loadServerWizardDraft(shopDomain, resumeId).then(match => {
-      if (cancelled || !match) return;
+    loadServerWizardDraft(shopDomain, resumeId).then(async match => {
+      if (cancelled) return;
+      if (!match && !resumedLocalDraft) {
+        // Not a draft anywhere. If the experiment has launched since this
+        // browser last looked, it belongs to its details page; opening a blank
+        // wizard under its id would build a second experiment instead.
+        const tests = await Promise.resolve()
+          .then(() => getSmartPricingExperimentTests(shopDomain, resumeId))
+          .catch(() => []);
+        const launched = (Array.isArray(tests) ? tests : []).some(test =>
+          LAUNCHED_TEST_STATUSES.has(String(test?.status || '').trim().toLowerCase())
+        );
+        if (!cancelled && launched) setLaunchedResumeId(resumeId);
+        return;
+      }
+      if (!match) return;
       if (resumedLocalDraft) {
         // Restored from this browser already. Only a strictly newer server
         // copy is worth replacing it with, and only while the merchant has
@@ -983,6 +1020,7 @@ export default function ClassicCreateWizard({ onTitleChange }) {
   }, [
     draftHydrated,
     resumeId,
+    launchedResumeId,
     resumedLocalDraft,
     resumedFromInbox,
     shopDomain,
@@ -1542,7 +1580,9 @@ export default function ClassicCreateWizard({ onTitleChange }) {
     [
       aiMinPct,
       aiMaxPct,
+      shopGuardrails.default_cogs_percent,
       shopGuardrails.max_price_change_percent,
+      shopGuardrails.min_margin_percent,
       markArmsAiSuggested,
       priceSuggestionMeta,
     ]
@@ -2466,7 +2506,7 @@ export default function ClassicCreateWizard({ onTitleChange }) {
       ? launchProgress?.total > 1
         ? `Launching test… ${launchProgress.done} of ${launchProgress.total}`
         : 'Launching test…'
-      : launchPhase === 'opening'
+      : launchPhase === 'opening' || launchedResumeId
         ? 'Opening test…'
         : '';
   if (wizardBootstrapping || launchLoaderLabel) {

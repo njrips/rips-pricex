@@ -888,13 +888,13 @@ class AnalyticsService {
 
     const calculateProfit = variant => {
       const revenue = Number(variant.revenue) || 0;
-      const conversions = Number(variant.conversions) || 0;
+      const orders = Number(variant.orders) || 0;
       const cogs = goal?.cogs;
       if (!cogs?.enabled) {
         return revenue;
       }
       if (cogs.type === 'fixed_per_order') {
-        return revenue - conversions * (Number(cogs.value) || 0);
+        return revenue - orders * (Number(cogs.value) || 0);
       }
       return revenue - revenue * ((Number(cogs.value) || 0) / 100);
     };
@@ -905,18 +905,26 @@ class AnalyticsService {
         const visitors = Number(variant.visitors) || 0;
         const revenue = Number(variant.revenue) || 0;
         const conversions = Number(variant.conversions) || 0;
-        const profit = calculateProfit({ ...variant, visitors, revenue, conversions });
+        // Older callers and stubs report buyers only; each bought at least once.
+        const orders = Math.max(Number(variant.orders) || 0, conversions);
+        const profit = calculateProfit({ ...variant, visitors, revenue, conversions, orders });
         const v = {
           id: variant.variant_id,
           name: variant.variant_name,
           visitors,
           conversions,
+          orders,
           conversionRate: this.calculateConversionRate(conversions, visitors),
           revenue,
           revenuePerVisitor: visitors > 0 ? revenue / visitors : 0,
           profit,
           profitPerVisitor: visitors > 0 ? profit / visitors : 0,
-          avgOrderValue: conversions > 0 ? revenue / conversions : 0,
+          avgOrderValue: orders > 0 ? revenue / orders : 0,
+          testedOrders: Number(variant.tested_orders) || 0,
+          avgTestedRevenue:
+            Number(variant.tested_orders) > 0 && Number.isFinite(Number(variant.tested_revenue))
+              ? Number(variant.tested_revenue) / Number(variant.tested_orders)
+              : null,
           secondaryEvents: {},
           checkoutSectionEvents: {},
         };
@@ -966,6 +974,7 @@ class AnalyticsService {
         summary: {
           totalVisitors,
           totalConversions: variants.reduce((sum, v) => sum + (v.conversions || 0), 0),
+          totalOrders: variants.reduce((sum, v) => sum + (v.orders || 0), 0),
           totalRevenue: variants.reduce((sum, v) => sum + (v.revenue || 0), 0),
         },
       };
@@ -1121,6 +1130,7 @@ class AnalyticsService {
       summary: {
         totalVisitors,
         totalConversions: variants.reduce((sum, v) => sum + v.conversions, 0),
+        totalOrders: variants.reduce((sum, v) => sum + (v.orders || 0), 0),
         totalRevenue: variants.reduce((sum, v) => sum + v.revenue, 0),
       },
     };

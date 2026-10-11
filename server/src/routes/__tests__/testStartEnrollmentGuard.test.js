@@ -42,6 +42,9 @@ function loadRouter() {
         rearmedTestIds.push(id);
       },
     },
+    '../services/smartPricing/smartPricingPausedSettingsService': {
+      applyPlanSettingsToPausedTests: async ids => ({ applied: ids, skipped: [] }),
+    },
     '../services/smartPricing/priceTestEnrollmentService': {
       assertTestIsFreeToStart: async ({ test }) => {
         // The real check knows which types can collide over a price; here the

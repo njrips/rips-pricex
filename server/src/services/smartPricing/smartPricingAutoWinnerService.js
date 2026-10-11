@@ -306,6 +306,8 @@ function loadDeps(overrides = {}) {
     rolloutLeaseSeconds: require('../../utils/jobLease').ROLLOUT_LEASE_SECONDS,
     maybeAutoQueueRound2Plan: (shop, planId) =>
       require('./smartPricingAutoRound2Service').maybeAutoQueueRound2Plan(shop, planId),
+    recordWinnerApplied: (...args) =>
+      require('./smartPricingProductLifecycleService').recordWinnerApplied(...args),
     syncSmartPricingInboxForTest,
     logger,
     ...overrides,
@@ -478,6 +480,17 @@ async function evaluateSmartPricingAutoWinner(input = {}, depOverrides = {}) {
 
       const stopped = await deps.stopTest(testId, shopDomain);
       test = stopped || (await deps.getTestById(testId, shopDomain));
+      // Deleted while this pass was deciding it. Publishing now would write a
+      // winner into the catalog for a test the merchant has thrown away.
+      if (String(test?.status || '') === 'archived') {
+        return {
+          skipped: true,
+          enforced: false,
+          test_id: testId,
+          reason: 'test_deleted',
+          action: decision.action,
+        };
+      }
       const decidedAt = new Date().toISOString();
       try {
         const winnerVariant = await deps.resolveWinnerVariantForPublish(
@@ -549,8 +562,7 @@ async function evaluateSmartPricingAutoWinner(input = {}, depOverrides = {}) {
         }
         if (publish) {
           try {
-            const { recordWinnerApplied } = require('./smartPricingProductLifecycleService');
-            await recordWinnerApplied({
+            await deps.recordWinnerApplied({
               shopDomain,
               testId,
               test: updated,
@@ -624,7 +636,21 @@ async function evaluateSmartPricingAutoWinner(input = {}, depOverrides = {}) {
     }
 
     const decidedAt = new Date().toISOString();
-    await deps.stopTest(testId, shopDomain);
+    const stoppedTest = await deps.stopTest(testId, shopDomain);
+    if (!stoppedTest) {
+      const current = await Promise.resolve()
+        .then(() => deps.getTestById(testId, shopDomain))
+        .catch(() => null);
+      if (String(current?.status || '') === 'archived') {
+        return {
+          skipped: true,
+          enforced: false,
+          test_id: testId,
+          reason: 'test_deleted',
+          action: decision.action,
+        };
+      }
+    }
     const isControl = decision.action === 'retain_control' || decision.reason === 'control_win';
     const updated = await deps.updateTest(testId, shopDomain, {
       status: 'completed',

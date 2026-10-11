@@ -23,6 +23,9 @@ import {
   collectProductWarnings,
   describeDecisionProgress,
   formatDaysRunning,
+  productCatalogPrice,
+  productHeading,
+  productVariantLine,
   resolveAdminProductHref,
   resolveNeighbourProducts,
   resolveStorefrontProductHref,
@@ -68,6 +71,46 @@ function Delta({ value }) {
   if (!text) return <span className={styles.productSub}>—</span>;
   const tone = value > 0 ? styles.deltaPlainPos : value < 0 ? styles.deltaPlainNeg : '';
   return <span className={`${styles.deltaPlain} ${tone}`}>{text}</span>;
+}
+
+function formatShare(percent) {
+  const n = Number(percent);
+  return `${Number.isInteger(n) ? n : n.toFixed(1)}%`;
+}
+
+function trafficHint(arm) {
+  if (arm.trafficShare === null) return 'No visitors yet';
+  if (arm.allocation === null) return `${formatShare(arm.trafficShare)} of this product's visitors`;
+  const got = `Received ${formatShare(arm.trafficShare)} of visitors against a plan of ${formatShare(arm.allocation)}.`;
+  return arm.trafficOffPlan
+    ? `${got} The split is further from plan than chance explains, which usually means some visitors are not being tracked.`
+    : `${got} Visitors are assigned at random, so a small gap from plan is expected.`;
+}
+
+function avgOrderHint(arm, currency) {
+  if (arm.avgOrderValue === null) return 'No orders yet';
+  const parts = ['Average order subtotal after discounts, including anything else in the cart.'];
+  if (arm.productPerOrder !== null) {
+    parts.push(`This product accounts for ${formatMetricMoney(arm.productPerOrder, currency)} of it.`);
+  }
+  if (arm.fewOrders) parts.push('Based on few orders, so one more can move it a lot.');
+  return parts.join(' ');
+}
+
+/** A table figure, with the comparison bar when it is the figure the test is judged on. */
+function MetricCell({ arm, metricKey, goalKey, children }) {
+  if (metricKey !== goalKey) return children;
+  return (
+    <div className={styles.productDetailMetricCell}>
+      <span>{children}</span>
+      <div className={styles.barTrack} aria-hidden>
+        <div
+          className={`${styles.barFill} ${arm.isWinner || arm.isLeading ? styles.barFillWinner : ''}`}
+          style={{ width: `${arm.barPercent}%` }}
+        />
+      </div>
+    </div>
+  );
 }
 
 function StatCard({ label, value, note = null }) {
@@ -243,6 +286,7 @@ export default function ClassicProductDetailPanel({
     }
   };
 
+  const catalogPrice = productCatalogPrice(report, plan);
   const armTable = useMemo(
     () =>
       buildProductArmRows(
@@ -250,9 +294,12 @@ export default function ClassicProductDetailPanel({
         {
           primaryMetric,
           winnerArmId: analytics?.winner_arm_id || decision?.winner?.arm_id || null,
+          catalogPrice,
+          currency,
+          srmDetected: analytics?.significance?.srm?.detected === true,
         }
       ),
-    [row, primaryMetric, analytics, decision]
+    [row, primaryMetric, analytics, decision, catalogPrice, currency]
   );
   const stats = useMemo(() => summarizeProductAnalytics(analytics), [analytics]);
   const progress = describeDecisionProgress(decision);
@@ -261,8 +308,8 @@ export default function ClassicProductDetailPanel({
   const history = buildProductHistory(report?.events);
   const visibleHistory = historyExpanded ? history : history.slice(0, HISTORY_PREVIEW);
 
-  const title = plan?.title || row?.productTitle || row?.title || 'Product';
-  const variantTitle = plan?.variant_title || row?.variantTitle || '';
+  const variantTitle = productVariantLine(plan, row);
+  const title = productHeading(plan, row, variantTitle);
   const imageUrl = plan?.image_url || row?.imageUrl || null;
   const handle =
     plan?.handle || plan?.product_handle || plan?.metadata?.handle || row?.handle || '';
@@ -272,10 +319,19 @@ export default function ClassicProductDetailPanel({
     variantId: plan?.variant_id || row?.variantId,
   });
   const winner = decision?.winner || null;
+  const winnerRow = winner
+    ? armTable.rows.find(arm => winner.arm_id != null && String(arm.armId) === String(winner.arm_id)) ||
+      null
+    : null;
+  const winnerPrice = winner?.price ?? winnerRow?.price ?? null;
   const significance = analytics?.significance || null;
   const autoApplyAt = decision?.auto?.eligible && decision?.auto?.apply_at ? decision.auto.apply_at : null;
 
   const metricColumnLabel = armTable.metric.label;
+  // Average order is revenue per visitor over conversion rate, both already
+  // shown, and a higher price raises it whether or not the price earns more.
+  // It earns a column only on a test judged on it.
+  const showAvgOrder = armTable.metric.key === 'avgOrderValue';
 
   return (
     <div className={styles.detailStack} data-testid="classic-product-detail">
@@ -319,9 +375,11 @@ export default function ClassicProductDetailPanel({
             <h3 className={styles.panelTitle}>{title}</h3>
             {variantTitle ? <div className={styles.productSub}>{variantTitle}</div> : null}
             <div className={styles.detailChipRow}>
-              <span className={styles.detailChip}>
-                Catalog price {formatMetricMoney(plan?.current_price, currency)}
-              </span>
+              {catalogPrice !== null ? (
+                <span className={styles.detailChip}>
+                  Catalog price {formatMetricMoney(catalogPrice, currency)}
+                </span>
+              ) : null}
               {stats.startedAt ? (
                 <span className={styles.detailChip}>
                   Started {formatWhen(stats.startedAt, { withTime: false })}
@@ -370,9 +428,8 @@ export default function ClassicProductDetailPanel({
           {winner && winner.label && decision?.state === 'ready_challenger' ? (
             <p className={styles.help}>
               <strong>{winner.label}</strong>
-              {winner.price !== null && winner.price !== undefined
-                ? ` at ${formatMetricMoney(winner.price, currency)}`
-                : ''}
+              {winnerPrice !== null ? ` at ${formatMetricMoney(winnerPrice, currency)}` : ''}
+              {winnerRow?.offerText ? ` (${winnerRow.offerText})` : ''}
               {Number(winner.price_change_percent)
                 ? ` (${formatSignedPercent(winner.price_change_percent)} on price)`
                 : ''}
@@ -531,10 +588,12 @@ export default function ClassicProductDetailPanel({
               value={formatMetricMoney(stats.revenuePerVisitor, currency)}
             />
             <StatCard label="Revenue" value={formatMetricMoney(stats.revenue, currency)} />
-            <StatCard
-              label="Average order value"
-              value={formatMetricMoney(stats.avgOrderValue, currency)}
-            />
+            {showAvgOrder ? (
+              <StatCard
+                label="Average order value"
+                value={formatMetricMoney(stats.avgOrderValue, currency)}
+              />
+            ) : null}
           </div>
 
           {armTable.rows.length ? (
@@ -554,12 +613,18 @@ export default function ClassicProductDetailPanel({
                     <tr>
                       <th>Variation</th>
                       <th>Price</th>
-                      <th>Traffic</th>
-                      <th>Visitors</th>
-                      <th>Orders</th>
-                      <th>Conv. rate</th>
-                      <th>Avg order</th>
-                      <th>Revenue / visitor</th>
+                      <th title="Shoppers shown this variation">Visitors</th>
+                      <th title="Orders placed. A shopper who buys twice counts twice.">Orders</th>
+                      <th title="Share of visitors who bought at least once">Conv. rate</th>
+                      {showAvgOrder ? (
+                        <th title="Order subtotal after discounts, including anything else in the cart">
+                          Avg order
+                        </th>
+                      ) : null}
+                      <th title="Order revenue divided by visitors">Revenue / visitor</th>
+                      {armTable.showProfit ? (
+                        <th title="Revenue less cost of goods, divided by visitors">Profit / visitor</th>
+                      ) : null}
                       <th>
                         {metricColumnLabel} vs control
                       </th>
@@ -581,37 +646,74 @@ export default function ClassicProductDetailPanel({
                             </span>
                           ) : null}
                         </td>
-                        <td>
-                          {formatMetricMoney(arm.price, currency)}{' '}
+                        <td
+                          title={
+                            arm.priceFromCatalog
+                              ? arm.offerText
+                                ? `Catalog price with ${arm.offerText.toLowerCase()} applied`
+                                : 'Catalog price'
+                              : undefined
+                          }
+                        >
+                          {arm.price !== null || !arm.offerText
+                            ? formatMetricMoney(arm.price, currency)
+                            : null}{' '}
                           {arm.priceDeltaPercent !== null ? (
                             <span className={styles.productSub}>
                               {formatSignedPercent(arm.priceDeltaPercent)}
                             </span>
                           ) : null}
-                        </td>
-                        <td>
-                          {arm.trafficShare !== null ? `${Math.round(arm.trafficShare)}%` : '—'}
-                          {arm.allocation !== null ? (
-                            <span className={styles.productSub}> of {Math.round(arm.allocation)}% planned</span>
+                          {arm.offerText ? (
+                            <div className={styles.productSub}>{arm.offerText}</div>
                           ) : null}
                         </td>
-                        <td>{formatNumber(arm.visitors)}</td>
-                        <td>{formatNumber(arm.conversions)}</td>
-                        <td>{formatRate(arm.conversionRate)}</td>
-                        <td>{formatMetricMoney(arm.avgOrderValue, currency)}</td>
-                        <td>
-                          <div className={styles.productDetailMetricCell}>
-                            <span>{formatMetricMoney(arm.revenuePerVisitor, currency)}</span>
-                            {armTable.metric.key === 'revenuePerVisitor' ? (
-                              <div className={styles.barTrack} aria-hidden>
-                                <div
-                                  className={`${styles.barFill} ${arm.isWinner || arm.isLeading ? styles.barFillWinner : ''}`}
-                                  style={{ width: `${arm.barPercent}%` }}
-                                />
-                              </div>
-                            ) : null}
-                          </div>
+                        <td title={trafficHint(arm)}>
+                          {formatNumber(arm.visitors)}
+                          {arm.trafficOffPlan ? (
+                            <span className={`${styles.controlBadge} ${styles.trapBadge}`}>Off plan</span>
+                          ) : null}
                         </td>
+                        <td>{arm.orders !== null ? formatNumber(arm.orders) : '—'}</td>
+                        <td>
+                          <MetricCell arm={arm} metricKey="conversionRate" goalKey={armTable.metric.key}>
+                            {formatRate(arm.conversionRate)}
+                          </MetricCell>
+                        </td>
+                        {showAvgOrder ? (
+                        <td title={avgOrderHint(arm, currency)}>
+                          <MetricCell arm={arm} metricKey="avgOrderValue" goalKey={armTable.metric.key}>
+                            {formatMetricMoney(arm.avgOrderValue, currency)}
+                            {arm.avgOrderDeltaPercent !== null ? (
+                              <span className={styles.productSub}>
+                                {' '}
+                                {formatSignedPercent(arm.avgOrderDeltaPercent)}
+                              </span>
+                            ) : null}
+                          </MetricCell>
+                          {arm.productPerOrder !== null ? (
+                            <div className={styles.productSub}>
+                              This product {formatMetricMoney(arm.productPerOrder, currency)}
+                            </div>
+                          ) : null}
+                          {arm.fewOrders ? (
+                            <div className={styles.productSub}>
+                              From {arm.orders} {arm.orders === 1 ? 'order' : 'orders'}
+                            </div>
+                          ) : null}
+                        </td>
+                        ) : null}
+                        <td>
+                          <MetricCell arm={arm} metricKey="revenuePerVisitor" goalKey={armTable.metric.key}>
+                            {formatMetricMoney(arm.revenuePerVisitor, currency)}
+                          </MetricCell>
+                        </td>
+                        {armTable.showProfit ? (
+                          <td>
+                            <MetricCell arm={arm} metricKey="profitPerVisitor" goalKey={armTable.metric.key}>
+                              {formatMetricMoney(arm.profitPerVisitor, currency)}
+                            </MetricCell>
+                          </td>
+                        ) : null}
                         <td>{arm.isControl ? <span className={styles.productSub}>Baseline</span> : <Delta value={arm.liftPercent} />}</td>
                       </tr>
                     ))}
@@ -622,7 +724,9 @@ export default function ClassicProductDetailPanel({
                 {armTable.metric.fallback
                   ? 'This test is judged on a custom goal, so variations are compared here on revenue per visitor. '
                   : ''}
-                Traffic is the share of this product&apos;s visitors each variation received.
+                Revenue per visitor is the clearest single measure: it counts both how many
+                shoppers buy and how much they spend. Revenue uses each order&apos;s subtotal after
+                discounts, so it includes anything else in the cart.
               </p>
             </div>
           ) : null}

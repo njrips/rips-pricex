@@ -46,7 +46,10 @@ const { isSmartPricingEnabled } = require('../services/smartPricing/smartPricing
 const {
   listInboxPlans,
   restoreOrphanedLivePlans,
+  repairRestoredPlanPrices,
   deleteExperimentEverywhere,
+  listRestorableExperiments,
+  restoreDeletedExperiment,
   listExperimentTests,
   saveInboxPlans,
   deleteInboxPlan,
@@ -55,6 +58,11 @@ const {
   getInboxPlanById,
   summarizeInboxPlans,
 } = require('../models/smartPricingInboxStore');
+const {
+  isRecordableExperimentId,
+  listRecentlyDeletedExperimentIds,
+  TEST_PURGE_GRACE_DAYS,
+} = require('../models/smartPricingDeletionStore');
 const logger = require('../utils/logger');
 const {
   getShopWizardDrafts,
@@ -532,6 +540,12 @@ router.get(
         message: err.message,
       })
     );
+    await repairRestoredPlanPrices(req.shopDomain).catch(err =>
+      logger.warn('inbox restored-plan repair failed', {
+        shop: req.shopDomain,
+        message: err.message,
+      })
+    );
     const payload = await listInboxPlans(req.shopDomain, {
       q: req.query.q || req.query.search || '',
       status: req.query.status || '',
@@ -681,6 +695,57 @@ router.get(
   })
 );
 
+/**
+ * The draft goes after the commit rather than inside it: it lives in a shared
+ * key/value row with its own compare-and-set, and the recorded deletion already
+ * refuses any save of it that is still in flight.
+ */
+async function deleteExperimentAndDraft(shopDomain, experimentId, ids = {}) {
+  const result = await deleteExperimentEverywhere(shopDomain, experimentId, ids);
+  let draftDeleted = false;
+  if (experimentId && isRecordableExperimentId(experimentId)) {
+    draftDeleted = await deleteShopWizardDraft(shopDomain, experimentId)
+      .then(() => true)
+      .catch(err => {
+        logger.warn('experiment draft delete failed', {
+          shop: shopDomain,
+          experimentId,
+          message: err?.message,
+        });
+        return false;
+      });
+  }
+  logger.info('experiment deleted', {
+    shop: shopDomain,
+    experimentId: experimentId || null,
+    archivedTests: result.archived_test_ids.length,
+    deletedPlans: result.deleted_plan_ids.length,
+  });
+  return { ...result, draft_deleted: draftDeleted };
+}
+
+const DELETE_REFUSAL_CODES = new Set(['EXPERIMENT_LIVE', 'EXPERIMENT_NOT_ARCHIVED']);
+
+async function sendExperimentDelete(res, shopDomain, experimentId, ids) {
+  try {
+    const result = await deleteExperimentAndDraft(shopDomain, experimentId, ids);
+    return sendSuccess(res, HTTP_STATUS.OK, result);
+  } catch (err) {
+    if (!DELETE_REFUSAL_CODES.has(err?.code)) throw err;
+    return sendError(res, HTTP_STATUS.CONFLICT, err.message, {
+      code: err.code,
+      test_ids: err.testIds || [],
+    });
+  }
+}
+
+function idListFromBody(body, ...keys) {
+  for (const key of keys) {
+    if (Array.isArray(body?.[key])) return body[key];
+  }
+  return [];
+}
+
 router.delete(
   '/experiments/:experimentId',
   asyncHandler(async (req, res) => {
@@ -688,7 +753,87 @@ router.delete(
     if (!experimentId) {
       return sendValidationError(res, ['experimentId is required']);
     }
-    const result = await deleteExperimentEverywhere(req.shopDomain, experimentId);
+    return sendExperimentDelete(res, req.shopDomain, experimentId);
+  })
+);
+
+/**
+ * Delete an experiment in one request: its tests, its plans, its draft.
+ *
+ * A POST so the ids the browser can see travel in a body; a DELETE body is
+ * dropped by some proxies. Safe to repeat, so a merchant retrying after a
+ * failed request gets the same answer instead of a half-deleted experiment.
+ */
+router.post(
+  '/experiments/delete',
+  asyncHandler(async (req, res) => {
+    const body = req.body && typeof req.body === 'object' ? req.body : {};
+    const experimentId = String(body.experiment_id ?? body.experimentId ?? '').trim();
+    const planIds = idListFromBody(body, 'plan_ids', 'planIds');
+    const testIds = idListFromBody(body, 'test_ids', 'testIds');
+    if (!experimentId && !planIds.length && !testIds.length) {
+      return sendValidationError(res, ['experiment_id, plan_ids or test_ids is required']);
+    }
+    return sendExperimentDelete(res, req.shopDomain, experimentId, { planIds, testIds });
+  })
+);
+
+/** Experiments deleted recently enough that Restore can still bring them back. */
+router.get(
+  '/experiments/deleted',
+  asyncHandler(async (req, res) => {
+    const experiments = await listRestorableExperiments(req.shopDomain);
+    return sendSuccess(res, HTTP_STATUS.OK, {
+      experiments,
+      grace_days: TEST_PURGE_GRACE_DAYS,
+    });
+  })
+);
+
+/**
+ * Undo a delete within the grace period. The experiment comes back archived,
+ * which is where Delete was offered from.
+ */
+router.post(
+  '/experiments/restore',
+  asyncHandler(async (req, res) => {
+    const body = req.body && typeof req.body === 'object' ? req.body : {};
+    const experimentId = String(body.experiment_id ?? body.experimentId ?? '').trim();
+    const testIds = idListFromBody(body, 'test_ids', 'testIds');
+    if (!experimentId && !testIds.length) {
+      return sendValidationError(res, ['experiment_id or test_ids is required']);
+    }
+    try {
+      const result = await restoreDeletedExperiment(req.shopDomain, experimentId, { testIds });
+      logger.info('experiment restored', {
+        shop: req.shopDomain,
+        experimentId: experimentId || null,
+        restoredTests: result.restored_test_ids.length,
+        restoredPlans: result.restored_plan_ids.length,
+      });
+      return sendSuccess(res, HTTP_STATUS.OK, result);
+    } catch (err) {
+      if (err?.code !== 'NOTHING_TO_RESTORE') throw err;
+      return sendError(res, HTTP_STATUS.NOT_FOUND, err.message, { code: err.code });
+    }
+  })
+);
+
+/**
+ * Carry the settings saved on a paused experiment's plans onto its tests, so
+ * Resume starts them with what the merchant just edited. Running tests are
+ * reported as skipped and keep their launch settings.
+ */
+router.post(
+  '/experiments/apply-paused-settings',
+  asyncHandler(async (req, res) => {
+    const body = req.body && typeof req.body === 'object' ? req.body : {};
+    const testIds = idListFromBody(body, 'test_ids', 'testIds');
+    if (!testIds.length) {
+      return sendValidationError(res, ['test_ids is required']);
+    }
+    const { applyPlanSettingsToPausedTests } = require('../services/smartPricing/smartPricingPausedSettingsService');
+    const result = await applyPlanSettingsToPausedTests(req.shopDomain, testIds);
     return sendSuccess(res, HTTP_STATUS.OK, result);
   })
 );
@@ -702,8 +847,16 @@ router.delete(
 router.get(
   '/wizard-drafts',
   asyncHandler(async (req, res) => {
-    const drafts = await getShopWizardDrafts(req.shopDomain);
-    return sendSuccess(res, HTTP_STATUS.OK, { drafts });
+    const [drafts, deletedExperimentIds] = await Promise.all([
+      getShopWizardDrafts(req.shopDomain),
+      listRecentlyDeletedExperimentIds(req.shopDomain).catch(() => []),
+    ]);
+    // Browsers keep their own copy of each draft. Naming what was deleted lets
+    // a second device drop its copy instead of showing it, or saving it back.
+    return sendSuccess(res, HTTP_STATUS.OK, {
+      drafts,
+      deleted_experiment_ids: deletedExperimentIds,
+    });
   })
 );
 
@@ -719,6 +872,7 @@ router.get(
 function wizardDraftRefusalBody(reason) {
   const messages = {
     draft_too_large: 'Draft is too large to save on the server',
+    experiment_deleted: 'This test was deleted, so its draft was not saved',
     experiment_id_required: 'draft.experiment_id is required',
     shop_required: 'shop is required',
   };
@@ -1388,7 +1542,10 @@ router.get(
   '/products/:planId/report',
   asyncHandler(async (req, res) => {
     try {
-      const report = await buildSmartPricingProductReport(req.shopDomain, req.params.planId);
+      const accessToken = await resolveShopifyAccessToken(req).catch(() => null);
+      const report = await buildSmartPricingProductReport(req.shopDomain, req.params.planId, {
+        accessToken,
+      });
       return sendSuccess(res, HTTP_STATUS.OK, report);
     } catch (err) {
       return sendValidationError(res, [err.message]);

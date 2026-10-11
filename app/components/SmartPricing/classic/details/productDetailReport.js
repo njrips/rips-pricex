@@ -1,7 +1,16 @@
 /**
  * Pure mappers for the per-product drill-down on the test Overview.
  */
-import { formatPrimaryMetricLabel } from '../classicExperimentDetailsHelpers';
+import {
+  formatPrimaryMetricLabel,
+  splitProductVariantTitle,
+} from '../classicExperimentDetailsHelpers';
+import {
+  getPlanProductTitle,
+  isDefaultVariantTitle,
+  stripDefaultVariantTitle,
+} from '../classicExperimentHelpers';
+import { computeOfferPdpCutout, formatOfferRule } from '../offerSelection';
 import { mapServerEventToActivity } from '../productActionAvailability';
 
 function finite(value) {
@@ -55,10 +64,56 @@ export function resolveArmMetric(primaryMetric) {
  * variations have a reading, and one of them is strictly best: an early leader
  * is useful to see, but it must never read like a result.
  */
-export function buildProductArmRows(arms, { primaryMetric, winnerArmId = null } = {}) {
+/**
+ * What a shopper in this arm paid. A price test's arms carry that price. An
+ * offer test leaves the product's price alone and discounts at checkout, so
+ * its arms carry the catalog price (or nothing, on plans rebuilt from old
+ * tests) and the offer is taken off it here.
+ */
+function armShopperPrice(arm, isControl, catalogPrice) {
+  const own = finite(arm?.price);
+  const catalog = finite(catalogPrice);
+  const offer = arm?.offer && typeof arm.offer === 'object' ? arm.offer : null;
+  const base = own !== null ? own : catalog !== null && catalog > 0 ? catalog : null;
+  if (offer && base !== null) {
+    if (offer.discount_type === 'free_shipping') return { price: base, derived: own === null };
+    const cutout = computeOfferPdpCutout(base, offer);
+    if (cutout) return { price: cutout.now, derived: true };
+  }
+  if (own !== null) return { price: own, derived: false };
+  return isControl && base !== null ? { price: base, derived: true } : { price: null, derived: false };
+}
+
+function armOfferText(offer, currency) {
+  if (!offer || typeof offer !== 'object') return null;
+  if (offer.discount_type === 'free_shipping') return 'Free shipping';
+  const rule = formatOfferRule(offer, currency);
+  return rule === 'No offer' ? null : rule;
+}
+
+const FEW_ORDERS = 10;
+
+/** Launch names offer variations "15% off Variation A"; the offer has its own line. */
+function withoutOfferPrefix(label, offerText) {
+  const text = String(label || '').trim();
+  if (!offerText) return text;
+  const prefix = `${offerText.toLowerCase()} `;
+  return text.toLowerCase().startsWith(prefix) ? text.slice(prefix.length).trim() || text : text;
+}
+
+export function buildProductArmRows(
+  arms,
+  {
+    primaryMetric,
+    winnerArmId = null,
+    catalogPrice = null,
+    currency = 'USD',
+    srmDetected = false,
+  } = {}
+) {
   const metric = resolveArmMetric(primaryMetric);
   const list = Array.isArray(arms) ? arms : [];
-  if (!list.length) return { rows: [], metric, hasWinner: false };
+  if (!list.length) return { rows: [], metric, hasWinner: false, showProfit: false };
 
   const explicitControl = list.findIndex(isControlArm);
   const controlIndex = explicitControl >= 0 ? explicitControl : 0;
@@ -66,21 +121,27 @@ export function buildProductArmRows(arms, { primaryMetric, winnerArmId = null } 
 
   const base = list.map((arm, index) => {
     const visitors = Number(arm?.visitors) || 0;
+    const shopperPrice = armShopperPrice(arm, index === controlIndex, catalogPrice);
+    const offerText = armOfferText(arm?.offer, currency);
     const row = {
       key: String(arm?.arm_id ?? arm?.variant_id ?? arm?.label ?? index),
       armId: arm?.arm_id ?? null,
       variantId: arm?.variant_id ?? null,
       variantName: arm?.variant_name ?? null,
       label:
-        arm?.label ||
+        withoutOfferPrefix(arm?.label, offerText) ||
         (index === controlIndex ? 'Control' : `Variation ${String.fromCharCode(64 + index)}`),
       isControl: index === controlIndex,
-      price: finite(arm?.price),
+      price: shopperPrice.price,
+      priceFromCatalog: shopperPrice.derived,
+      offerText,
       allocation: finite(arm?.allocation_percent),
       visitors,
       conversions: finite(arm?.conversions),
+      orders: finite(arm?.orders) ?? finite(arm?.conversions),
       conversionRate: finite(arm?.conversion_rate),
       avgOrderValue: finite(arm?.avg_order_value),
+      productPerOrder: finite(arm?.product_revenue_per_order),
       revenuePerVisitor: finite(arm?.revenue_per_visitor),
       profitPerVisitor: finite(arm?.profit_per_visitor),
       revenue: finite(arm?.revenue),
@@ -113,17 +174,47 @@ export function buildProductArmRows(arms, { primaryMetric, winnerArmId = null } 
       !row.isControl && row.metricValue !== null && control.metricValue > 0
         ? round1(((row.metricValue - control.metricValue) / control.metricValue) * 100)
         : null;
+    const avgOrderDeltaPercent =
+      !row.isControl && row.avgOrderValue !== null && control.avgOrderValue > 0
+        ? round1(((row.avgOrderValue - control.avgOrderValue) / control.avgOrderValue) * 100)
+        : null;
+    const trafficShare = totalVisitors > 0 ? round1((row.visitors / totalVisitors) * 100) : null;
     return {
       ...row,
       priceDeltaPercent,
       liftPercent,
-      trafficShare: totalVisitors > 0 ? round1((row.visitors / totalVisitors) * 100) : null,
+      avgOrderDeltaPercent,
+      // An order more or less moves an average a long way; say when it might.
+      fewOrders: row.orders !== null && row.orders > 0 && row.orders < FEW_ORDERS,
+      // A product's lines are part of its orders, so a share above the order
+      // is a partial refund caught between the two figures, not a reading.
+      productPerOrder:
+        row.productPerOrder !== null && row.avgOrderValue !== null
+          ? Math.min(row.productPerOrder, row.avgOrderValue)
+          : row.productPerOrder,
+      trafficShare,
+      // Random assignment never lands exactly on plan. Only the server's
+      // sample ratio check can say a gap is more than chance, and then only
+      // the variations visibly off plan are the ones to look at.
+      trafficOffPlan:
+        srmDetected === true &&
+        trafficShare !== null &&
+        row.allocation !== null &&
+        Math.abs(trafficShare - row.allocation) >= 1,
       barPercent: row.metricValue !== null && best > 0 ? (row.metricValue / best) * 100 : 0,
       isLeading: row.key === leaderKey,
     };
   });
 
-  return { rows, metric, hasWinner };
+  // Without cost of goods, profit is revenue and a second column says nothing.
+  const showProfit = rows.some(
+    row =>
+      row.profitPerVisitor !== null &&
+      row.revenuePerVisitor !== null &&
+      Math.abs(row.profitPerVisitor - row.revenuePerVisitor) > 0.0001
+  );
+
+  return { rows, metric, hasWinner, showProfit: showProfit || metric.key === 'profitPerVisitor' };
 }
 
 /** Whole days between two instants, or null when either is not a date. */
@@ -145,7 +236,7 @@ export function summarizeProductAnalytics(analytics, { now = new Date() } = {}) 
   const summary = analytics?.summary && typeof analytics.summary === 'object' ? analytics.summary : {};
   const arms = Array.isArray(analytics?.arms) ? analytics.arms : [];
   const visitors = finite(summary.visitors);
-  const orders = finite(summary.conversions);
+  const orders = finite(summary.orders) ?? finite(summary.conversions);
   const armRevenue = arms.map(arm => finite(arm?.revenue)).filter(n => n !== null);
   const revenue =
     finite(summary.revenue) ?? (armRevenue.length ? armRevenue.reduce((a, b) => a + b, 0) : null);
@@ -375,6 +466,48 @@ export function buildDailyChart(daily, rows, { metric = 'revenue_per_visitor', c
 }
 
 /** The products either side of this one, in the order the test lists them. */
+/**
+ * The product's own name for the product view's heading.
+ *
+ * A plan is titled "Test name · Product", and the test name is already the
+ * page title directly above, so it is left off. When the variant has its own
+ * line under the heading it is left off the heading too.
+ */
+export function productHeading(plan, row = null, variantTitle = '') {
+  const fromPlan = plan ? getPlanProductTitle(plan) : '';
+  const fromRow =
+    stripDefaultVariantTitle(row?.productTitle) ||
+    (row?.title ? getPlanProductTitle({ title: row.title }) : '');
+  let title = (fromPlan && fromPlan !== 'Product' ? fromPlan : '') || fromRow || 'Product';
+  const variant = String(variantTitle || '').trim();
+  if (variant) {
+    const split = splitProductVariantTitle(title);
+    if (split.variantTitle && split.variantTitle.toLowerCase() === variant.toLowerCase()) {
+      title = split.productTitle;
+    }
+  }
+  return title;
+}
+
+/** The variant line under the heading; none for Shopify's "Default Title". */
+export function productVariantLine(plan, row = null) {
+  const title = String(plan?.variant_title || row?.variantTitle || '').trim();
+  return isDefaultVariantTitle(title) ? '' : title;
+}
+
+/**
+ * What the product sold at before the test. The report resolves this from the
+ * plan, the control arm or Shopify; an older server only sends the plan. Zero
+ * is never a real starting price.
+ */
+export function productCatalogPrice(report, plan) {
+  for (const value of [report?.catalog_price, plan?.current_price]) {
+    const price = finite(value);
+    if (price !== null && price > 0) return price;
+  }
+  return null;
+}
+
 export function resolveNeighbourProducts(products, currentPlanId) {
   const list = (Array.isArray(products) ? products : []).filter(p => p?.planId);
   const index = list.findIndex(p => String(p.planId) === String(currentPlanId));

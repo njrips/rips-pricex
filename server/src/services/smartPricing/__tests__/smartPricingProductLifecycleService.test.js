@@ -2,6 +2,7 @@ const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const {
   inferFollowUpBasePrice,
+  resolveCatalogPrice,
   resolveLearningRound,
   resolveMaxLearningRounds,
   extractBaselineFromPublish,
@@ -30,6 +31,73 @@ describe('smartPricingProductLifecycleService helpers', () => {
       46
     );
     assert.equal(inferFollowUpBasePrice({ current_price: 33 }, { catalogPrice: 55 }), 55);
+  });
+
+  it('never builds a follow-up from arms that carry no price', () => {
+    const offerArms = [
+      { role: 'control', price: null },
+      { role: 'challenger', price: null },
+    ];
+    assert.equal(inferFollowUpBasePrice({ price_arms: offerArms, current_price: 30 }), 30);
+    assert.equal(inferFollowUpBasePrice({ price_arms: offerArms, current_price: 0 }), null);
+    assert.equal(inferFollowUpBasePrice({}), null);
+    assert.equal(
+      inferFollowUpBasePrice({
+        price_arms: [{ role: 'control', price: 40 }, { role: 'challenger', price: null }],
+      }),
+      40
+    );
+  });
+
+  describe('resolveCatalogPrice', () => {
+    it('prefers the plan, then a priced control arm, and ignores zero', async () => {
+      assert.deepEqual(await resolveCatalogPrice('s', { current_price: 25 }, null, null), {
+        price: 25,
+        source: 'plan',
+      });
+      assert.deepEqual(
+        await resolveCatalogPrice(
+          's',
+          { current_price: 0, price_arms: [{ role: 'control', price: null }] },
+          { arms: [{ role: 'control', price: 600 }] },
+          null
+        ),
+        { price: 600, source: 'control_arm' }
+      );
+      assert.deepEqual(await resolveCatalogPrice('s', { product_id: 'p' }, null, null), {
+        price: null,
+        source: null,
+      });
+    });
+
+    it("reads the variant's Shopify price when nothing stored has one", async () => {
+      const shopifyService = require('../../shopifyService');
+      const original = shopifyService.getProductWithVariants;
+      const calls = [];
+      shopifyService.getProductWithVariants = async (...args) => {
+        calls.push(args);
+        return {
+          variants: [
+            { id: 'gid://shopify/ProductVariant/1', price: '19.00' },
+            { id: 'gid://shopify/ProductVariant/2', price: '24.50' },
+          ],
+        };
+      };
+      try {
+        const plan = { product_id: 'gid://shopify/Product/9', variant_id: 'gid://shopify/ProductVariant/2' };
+        assert.deepEqual(await resolveCatalogPrice('s', plan, null, 'tok'), {
+          price: 24.5,
+          source: 'shopify',
+        });
+        assert.deepEqual(calls[0].slice(0, 3), ['s', 'tok', 'gid://shopify/Product/9']);
+        assert.deepEqual(
+          await resolveCatalogPrice('s', { ...plan, variant_id: 'gid://shopify/ProductVariant/7' }, null, 'tok'),
+          { price: null, source: null }
+        );
+      } finally {
+        shopifyService.getProductWithVariants = original;
+      }
+    });
   });
 
   it('resolves learning round and max rounds from plan and guardrails', () => {

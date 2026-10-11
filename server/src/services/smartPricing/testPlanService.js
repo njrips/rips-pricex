@@ -278,7 +278,9 @@ function buildSmartPricingTestPlan(input = {}) {
   const recommendedOption = variantCountOptions.find(o => o.recommended);
 
   return {
-    id: planId || `SP-${Date.now().toString().slice(-4)}`,
+    // Four digits of the clock repeated every ten seconds, so two plans built
+    // close together could share an id and one would overwrite the other.
+    id: planId || `SP-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     shop_domain: shopDomain,
     status: 'draft',
     schema_version: '1.0.0',

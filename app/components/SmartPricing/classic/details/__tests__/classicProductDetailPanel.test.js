@@ -113,6 +113,131 @@ describe('ClassicProductDetailPanel', () => {
     expect(container.textContent).toContain('Still collecting traffic.');
   });
 
+  it('heads the view with the product alone; the test name is the page title', async () => {
+    api.getSmartPricingProductReport.mockResolvedValue(
+      report({ plan: { title: 'Spring sale · Merino Beanie' } })
+    );
+    await render();
+
+    expect(container.querySelector('h3')?.textContent).toBe('Merino Beanie');
+  });
+
+  it('shows the catalog price the report resolved when the plan has none', async () => {
+    api.getSmartPricingProductReport.mockResolvedValue(
+      report({
+        catalog_price: 600,
+        plan: { title: 'T · Snowboard - Default Title', variant_title: 'Default Title', current_price: null },
+      })
+    );
+    await render();
+
+    expect(container.querySelector('h3')?.textContent).toBe('Snowboard');
+    expect(container.textContent).toContain('Catalog price $600.00');
+    expect(container.textContent).not.toContain('Default Title');
+  });
+
+  it("fills an offer test's Variations prices from the catalog price", async () => {
+    api.getSmartPricingProductReport.mockResolvedValue(
+      report({
+        catalog_price: 14,
+        plan: { current_price: null },
+        analytics: {
+          test_status: 'running',
+          arms: [
+            { arm_id: 'c', role: 'control', label: 'Control', price: null, visitors: 10 },
+            { arm_id: 'a', role: 'challenger', label: 'Variation A', price: null, visitors: 10, offer: { discount_type: 'percent', discount_value: 20 } },
+          ],
+        },
+      })
+    );
+    await render();
+
+    const cells = Array.from(container.querySelectorAll('tbody tr')).map(tr => tr.children[1].textContent);
+    expect(cells[0]).toContain('$14.00');
+    expect(cells[1]).toContain('$11.20');
+    expect(cells[1]).toContain('20% off');
+  });
+
+  it('adds profit when cost of goods is set, and draws the bar under the goal metric', async () => {
+    api.getSmartPricingProductReport.mockResolvedValue(
+      report({
+        analytics: {
+          test_status: 'running',
+          arms: [
+            { arm_id: 'c', role: 'control', label: 'Control', price: 40, visitors: 100, conversions: 4, orders: 5, conversion_rate: 4, revenue_per_visitor: 2, profit_per_visitor: 0.9 },
+            { arm_id: 'a', role: 'challenger', label: 'Variation A', price: 44, visitors: 100, conversions: 6, orders: 6, conversion_rate: 6, revenue_per_visitor: 2.64, profit_per_visitor: 1.19 },
+          ],
+        },
+      })
+    );
+    await render({ primaryMetric: 'conversion_rate' });
+
+    const headers = Array.from(container.querySelectorAll('thead th')).map(th => th.textContent.trim());
+    expect(headers).toContain('Profit / visitor');
+    const columnOf = name => headers.indexOf(name);
+    const control = container.querySelector('tbody tr').children;
+    expect(control[columnOf('Orders')].textContent).toBe('5');
+    expect(control[columnOf('Profit / visitor')].textContent).toBe('$0.90');
+    expect(control[columnOf('Conv. rate')].querySelector('[aria-hidden]')).toBeTruthy();
+    expect(control[columnOf('Revenue / visitor')].querySelector('[aria-hidden]')).toBeNull();
+  });
+
+  const splitReport = (srmDetected, visitors) =>
+    report({
+      analytics: {
+        test_status: 'running',
+        significance: { srm: { detected: srmDetected } },
+        arms: [
+          { arm_id: 'c', role: 'control', label: 'Control', price: 40, allocation_percent: 50, visitors: visitors[0], orders: 20, avg_order_value: 50, product_revenue_per_order: 40 },
+          { arm_id: 'a', role: 'challenger', label: 'Variation A', price: 44, allocation_percent: 50, visitors: visitors[1], orders: 4, avg_order_value: 55 },
+        ],
+      },
+    });
+  const headerNames = () =>
+    Array.from(container.querySelectorAll('thead th')).map(th => th.textContent.trim());
+
+  it('judges on conversion and revenue per visitor, without traffic share or average order', async () => {
+    api.getSmartPricingProductReport.mockResolvedValue(splitReport(false, [497, 503]));
+    await render({ primaryMetric: 'conversion_rate' });
+
+    const headers = headerNames();
+    expect(headers).not.toContain('Traffic');
+    expect(headers).not.toContain('Avg order');
+    expect(headers).toEqual(expect.arrayContaining(['Visitors', 'Orders', 'Conv. rate', 'Revenue / visitor']));
+    expect(container.textContent).not.toContain('Average order value');
+    expect(container.textContent).not.toContain('Off plan');
+  });
+
+  it('marks the visitor count when the split is further off plan than chance', async () => {
+    api.getSmartPricingProductReport.mockResolvedValue(splitReport(true, [700, 300]));
+    await render();
+
+    const visitors = headerNames().indexOf('Visitors');
+    const control = container.querySelector('tbody tr').children[visitors];
+    expect(control.textContent).toBe('700Off plan');
+    expect(control.getAttribute('title')).toContain('not being tracked');
+  });
+
+  it('keeps average order, with its detail, on a test judged on it', async () => {
+    api.getSmartPricingProductReport.mockResolvedValue(splitReport(false, [497, 503]));
+    await render({ primaryMetric: 'aov' });
+
+    const aov = headerNames().indexOf('Avg order');
+    expect(aov).toBeGreaterThan(-1);
+    const [control, variation] = Array.from(container.querySelectorAll('tbody tr')).map(tr => tr.children);
+    expect(control[aov].textContent).toContain('This product $40.00');
+    expect(variation[aov].textContent).toContain('+10.0%');
+    expect(variation[aov].textContent).toContain('From 4 orders');
+    expect(container.textContent).toContain('Average order value');
+  });
+
+  it('leaves the catalog price out rather than show it blank', async () => {
+    api.getSmartPricingProductReport.mockResolvedValue(report({ plan: { current_price: null } }));
+    await render();
+
+    expect(container.textContent).not.toContain('Catalog price');
+  });
+
   it('offers Stop while the product is running, and nothing destructive once stopped', async () => {
     await render();
     expect(buttonLabels()).toContain('Stop this product');

@@ -21,6 +21,10 @@ const ROUTES = path.join(__dirname, '..', 'testLifecycleRoutes.js');
 let statusUpdates;
 let syncCalls;
 let eventCalls;
+let recordedDeletions;
+let currentStatus;
+let deletedMidRequest;
+let settingsApplyFails;
 /** Whether the shop has a paid plan, as the real middleware would find it. */
 let entitled;
 
@@ -31,9 +35,12 @@ function installModuleStubs() {
         id,
         shop_domain: 'demo.myshopify.com',
         type: 'price',
-        status: 'running',
+        status: currentStatus,
       }),
       updateTestStatus: async (id, shop, status) => {
+        // The model refuses to move a deleted test; this stands in for a
+        // delete that landed between the route's check and its update.
+        if (deletedMidRequest) return null;
         statusUpdates.push({ id, status });
         return { id, status };
       },
@@ -52,6 +59,21 @@ function installModuleStubs() {
     },
     '../services/smartPricing/smartPricingProductLifecycleService': {
       rearmRevenueGuardrailForResume: async () => {},
+    },
+    '../services/smartPricing/smartPricingPausedSettingsService': {
+      applyPlanSettingsToPausedTests: async (shop, ids) => {
+        // Recorded in the same list as status changes, so a test can see
+        // which happened first.
+        statusUpdates.push({ id: ids[0], status: 'settings_applied' });
+        if (settingsApplyFails) throw new Error('plan unreadable');
+        return { applied: ids, skipped: [] };
+      },
+    },
+    '../models/smartPricingDeletionStore': {
+      recordDeletions: async (shop, ids) => {
+        recordedDeletions.push({ shop, ...ids });
+        return 1;
+      },
     },
     '../services/smartPricing/priceTestEnrollmentService': {
       assertTestIsFreeToStart: async () => {},
@@ -131,7 +153,110 @@ beforeEach(() => {
   statusUpdates = [];
   syncCalls = [];
   eventCalls = [];
+  recordedDeletions = [];
+  currentStatus = 'running';
+  deletedMidRequest = false;
+  settingsApplyFails = false;
   entitled = true;
+});
+
+/**
+ * Settings edited on the details page used to reach only the plan. Resume
+ * restarted the test exactly as it was, so an edit was shown and never used.
+ */
+describe('resuming a paused test', () => {
+  it('applies the settings edited since the pause before it goes live', async () => {
+    currentStatus = 'paused';
+    const { status } = await post('/:id/start');
+
+    assert.equal(status, 200);
+    assert.deepEqual(statusUpdates, [
+      { id: 'test-1', status: 'settings_applied' },
+      { id: 'test-1', status: 'running' },
+    ]);
+  });
+
+  it('still resumes when the edited settings cannot be read', async () => {
+    currentStatus = 'paused';
+    settingsApplyFails = true;
+    const { status } = await post('/:id/start');
+
+    assert.equal(status, 200);
+    assert.deepEqual(statusUpdates.at(-1), { id: 'test-1', status: 'running' });
+  });
+
+  it('leaves a draft launch alone; it was built from the plan moments ago', async () => {
+    currentStatus = 'draft';
+    await post('/:id/start');
+
+    assert.deepEqual(statusUpdates, [{ id: 'test-1', status: 'running' }]);
+  });
+});
+
+describe('starting a test deleted while the request was in flight', () => {
+  it('answers that it was deleted instead of reporting a start', async () => {
+    currentStatus = 'paused';
+    deletedMidRequest = true;
+
+    const { status, payload } = await post('/:id/start');
+
+    assert.equal(status, 409);
+    assert.equal(payload.code, 'TEST_DELETED');
+    assert.deepEqual(syncCalls, []);
+  });
+});
+
+/**
+ * Archived is how a deleted test is kept. Anything that moved it back -- a
+ * Resume from a stale tab, a Stop clicked twice -- brought a deleted test back
+ * into the list, and a running one back onto the storefront.
+ */
+describe('a deleted test', () => {
+  beforeEach(() => {
+    currentStatus = 'archived';
+  });
+
+  it('cannot be started again', async () => {
+    const { status, payload } = await post('/:id/start');
+
+    assert.equal(status, 409);
+    assert.equal(payload.code, 'TEST_DELETED');
+    assert.deepEqual(statusUpdates, []);
+  });
+
+  it('stays archived when paused or stopped', async () => {
+    await post('/:id/pause');
+    await post('/:id/stop');
+
+    assert.deepEqual(statusUpdates, []);
+    assert.deepEqual(syncCalls, []);
+  });
+});
+
+describe('deleting a test', () => {
+  it('refuses one that is still running, because its results are purged for good', async () => {
+    const { status, payload } = await post('/:id', 'test-1', 'delete');
+
+    assert.equal(status, 409);
+    assert.equal(payload.code, 'TEST_LIVE');
+    assert.deepEqual(statusUpdates, []);
+    assert.deepEqual(recordedDeletions, []);
+  });
+
+  it('refuses one that is paused, which still holds its product', async () => {
+    currentStatus = 'paused';
+    const { status } = await post('/:id', 'test-1', 'delete');
+
+    assert.equal(status, 409);
+  });
+
+  it('remembers the deletion so a stale copy cannot restore it', async () => {
+    currentStatus = 'stopped';
+    await post('/:id', 'test-1', 'delete');
+
+    assert.deepEqual(statusUpdates, [{ id: 'test-1', status: 'archived' }]);
+    assert.deepEqual(recordedDeletions, [{ shop: 'demo.myshopify.com', testIds: ['test-1'] }]);
+  });
 });
 
 describe('pausing an experiment', () => {
@@ -221,6 +346,7 @@ describe('a shop with no plan', () => {
   });
 
   it('may still archive a test it has finished with', async () => {
+    currentStatus = 'stopped';
     const { status } = await post('/:id', 'test-1', 'delete');
 
     assert.equal(status, 200);

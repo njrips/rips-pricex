@@ -3422,6 +3422,41 @@ button.stepItem {
   margin: 0;
 }
 
+.recentlyDeleted {
+  margin-top: 16px;
+  background: var(--classic-card);
+  border: 1px solid var(--classic-line);
+  border-radius: 8px;
+}
+
+.recentlyDeletedToggle {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 20px;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: var(--classic-ink);
+}
+
+.recentlyDeletedRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 20px;
+  border-top: 1px solid var(--classic-line);
+}
+
+.recentlyDeletedRow > div {
+  min-width: 0;
+}
+
 .listFooterLinks {
   margin-top: 16px;
   display: flex;
@@ -4578,19 +4613,43 @@ button.stepItem {
   vertical-align: top;
 }
 
-.rolloutProductLink {
+/* A product name that opens its results: underlined like a link at rest. */
+.productResultsTitle {
+  display: block;
+  max-width: 100%;
   padding: 0;
   border: 0;
   background: none;
   font: inherit;
-  font-weight: var(--classic-fw-semibold);
+  font-weight: var(--classic-fw-medium);
+  font-size: var(--classic-fs-label);
+  line-height: 1.3;
   color: var(--classic-ink);
   text-align: left;
+  text-decoration: underline;
+  text-decoration-color: var(--classic-line-strong);
+  text-underline-offset: 3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   cursor: pointer;
 }
 
-.rolloutProductLink:hover {
-  text-decoration: underline;
+.productResultsTitle:hover {
+  text-decoration-color: currentColor;
+}
+
+.productResultsTitle:focus-visible {
+  outline: 2px solid var(--classic-orange);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.productActionsCell {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .rolloutDecisionNote {

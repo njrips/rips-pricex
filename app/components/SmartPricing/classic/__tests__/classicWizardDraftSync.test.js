@@ -137,6 +137,20 @@ describe('loadWizardDrafts', () => {
     expect(reachedServer).toBe(false);
     expect(drafts.map(d => d.name)).toEqual(['Local one']);
   });
+
+  it('drops and forgets a local draft whose experiment was deleted elsewhere', async () => {
+    writeClassicWizardDraft(SHOP, { experiment_id: 'exp_gone', name: 'Deleted on laptop' });
+    writeClassicWizardDraft(SHOP, { experiment_id: 'exp_kept', name: 'Still here' });
+    getSmartPricingWizardDrafts.mockResolvedValue({
+      drafts: [],
+      deleted_experiment_ids: ['exp_gone'],
+    });
+
+    const { drafts } = await loadWizardDrafts(SHOP);
+
+    expect(drafts.map(d => d.name)).toEqual(['Still here']);
+    expect(readClassicWizardDrafts(SHOP).map(d => d.experiment_id)).toEqual(['exp_kept']);
+  });
 });
 
 describe('saveWizardDraftEverywhere', () => {

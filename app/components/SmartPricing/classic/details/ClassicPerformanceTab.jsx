@@ -23,6 +23,7 @@ import { IconTrophy } from '../classicIcons';
 import { TooltipWrapper } from '../../../shared';
 import ClassicApplyAllReadyConfirmModal from './ClassicApplyAllReadyConfirmModal';
 import ClassicRolloutReadinessPanel from './ClassicRolloutReadinessPanel';
+import { ProductResultsTitle, ViewProductResultsButton } from './ClassicProductResultsLink';
 import {
   formatGuardrailMonitoringMessage,
   formatGuardrailStopMessage,
@@ -542,12 +543,17 @@ export default function ClassicPerformanceTab({
                   </th>
                 ))}
                 <th scope="col">Apply winner</th>
+                {onOpenProduct ? (
+                  <th scope="col" className={styles.variationsActionsCol}>
+                    Details
+                  </th>
+                ) : null}
               </tr>
             </thead>
             <tbody>
               {!pageData.items.length ? (
                 <tr>
-                  <td colSpan={armColumns.length + 4}>
+                  <td colSpan={armColumns.length + (onOpenProduct ? 5 : 4)}>
                     <p className={styles.help}>
                       {query.trim() ? 'No products match that search.' : 'No products to show.'}
                     </p>
@@ -574,6 +580,8 @@ export default function ClassicPerformanceTab({
                     armColumns.map(arm => ({ id: arm.id, label: arm.label, role: arm.role })),
                     { winnerArmId: rollout?.winnerArmId || null }
                   );
+                  const openRow =
+                    onOpenProduct && row.planId ? () => onOpenProduct(row.planId) : null;
                   const statusBadgeVariant = productPerformanceStatusBadgeVariant(statusLabel);
                   const statusTone =
                     statusBadgeVariant === 'attention'
@@ -587,24 +595,10 @@ export default function ClassicPerformanceTab({
                   <tr key={row.key} className={styles.productPriceRow}>
                     <td>
                       <div className={styles.productMeta}>
-                        <button
-                          type="button"
-                          className={styles.linkButton || undefined}
-                          style={{
-                            background: 'none',
-                            border: 0,
-                            padding: 0,
-                            color: 'inherit',
-                            textAlign: 'left',
-                            cursor: onOpenProduct && row.planId ? 'pointer' : 'default',
-                            font: 'inherit',
-                          }}
-                          onClick={() => {
-                            if (onOpenProduct && row.planId) onOpenProduct(row.planId);
-                          }}
-                        >
-                          <div className={styles.productName}>{row.productTitle || row.title}</div>
-                        </button>
+                        <ProductResultsTitle
+                          title={row.productTitle || row.title}
+                          onOpen={openRow}
+                        />
                         <div className={styles.productSub}>
                           {row.variantTitle ? `${row.variantTitle} · ` : ''}
                           {row.handle ? `/${row.handle}` : row.productId || '—'}
@@ -693,6 +687,14 @@ export default function ClassicPerformanceTab({
                         <span className={styles.help}>—</span>
                       )}
                     </td>
+                    {onOpenProduct ? (
+                      <td className={styles.variationsActionsCol}>
+                        <ViewProductResultsButton
+                          title={row.productTitle || row.title}
+                          onOpen={openRow}
+                        />
+                      </td>
+                    ) : null}
                   </tr>
                   );
                 })

@@ -114,8 +114,10 @@ export async function hydrateInboxFromServer(domain, localPlans = [], options = 
       if (localOnly.length) {
         try {
           const saved = await persistInboxPlansNow(domain, merged);
+          // The server's answer, even an empty one: it leaves out plans whose
+          // test was deleted, and this browser's copy is what still has them.
           return {
-            plans: Array.isArray(saved?.plans) && saved.plans.length ? saved.plans : merged,
+            plans: Array.isArray(saved?.plans) ? saved.plans : merged,
             source: 'server_merged_local',
             serverUpdatedAt: saved?.updated_at || data?.updated_at || null,
             revision: saved?.revision || data?.revision || null,
@@ -145,7 +147,7 @@ export async function hydrateInboxFromServer(domain, localPlans = [], options = 
         setInboxServerRevision(domain, saved.revision);
       }
       return {
-        plans: localPlans,
+        plans: Array.isArray(saved?.plans) ? saved.plans : localPlans,
         source: 'local_migrated',
         serverUpdatedAt: saved?.updated_at || new Date().toISOString(),
         revision: saved?.revision || null,

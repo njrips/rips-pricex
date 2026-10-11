@@ -1,3 +1,12 @@
+// Launch records a `launched` product event through the real event store.
+// Unmocked, every run wrote rows for the fake test 99 into whatever database
+// .env pointed at.
+jest.mock('../../../utils/database', () => ({
+  query: jest.fn(async () => ({ rows: [], rowCount: 0 })),
+  getClient: jest.fn(),
+  withTransaction: jest.fn(),
+}));
+
 jest.mock('../../abTestEngine', () => ({
   validateTest: jest.fn(),
   startTest: jest.fn(),
@@ -47,6 +56,11 @@ jest.mock('../../../models/smartPricingInboxStore', () => ({
   linkInboxPlanToTest: jest.fn(),
 }));
 
+jest.mock('../../../models/smartPricingDeletionStore', () => ({
+  ...jest.requireActual('../../../models/smartPricingDeletionStore'),
+  findDeletions: jest.fn(),
+}));
+
 const mockEnsureDefaultSchedule = jest.fn().mockResolvedValue({});
 const mockStartQaRun = jest.fn().mockResolvedValue({});
 jest.mock('../../selfQa/selfQaOrchestratorService', () => ({
@@ -69,6 +83,7 @@ const { resolveSmartPricingCheckoutReadiness } = require('../smartPricingCheckou
 const { ensureOfferCheckoutDiscount } = require('../offerCheckoutDiscountService');
 const { getShopSession } = require('../../../models/shopSession');
 const { linkInboxPlanToTest } = require('../../../models/smartPricingInboxStore');
+const { findDeletions } = require('../../../models/smartPricingDeletionStore');
 const { launchSmartPricingPlanAsTest } = require('../smartPricingLaunchService');
 
 describe('smartPricingLaunchService', () => {
@@ -86,6 +101,34 @@ describe('smartPricingLaunchService', () => {
     mockEnsureDefaultSchedule.mockResolvedValue({});
     mockStartQaRun.mockResolvedValue({});
     ensureOfferCheckoutDiscount.mockResolvedValue({ created: false });
+    findDeletions.mockResolvedValue({ experiments: new Set(), tests: new Set() });
+  });
+
+  it('refuses a plan from an experiment that was deleted', async () => {
+    // A wizard left open in another tab still holds the deleted experiment's
+    // plans; launching one would start a test with no row to stop it from.
+    findDeletions.mockResolvedValue({ experiments: new Set(['exp-gone']), tests: new Set() });
+
+    await expect(
+      launchSmartPricingPlanAsTest(
+        { id: 'plan-1', metadata: { experiment_id: 'exp-gone' } },
+        'demo.myshopify.com',
+        { autoStart: true }
+      )
+    ).rejects.toMatchObject({ isValidation: true });
+    expect(createTest).not.toHaveBeenCalled();
+  });
+
+  it('still launches when the deletion check itself fails', async () => {
+    findDeletions.mockRejectedValue(new Error('connection lost'));
+
+    await launchSmartPricingPlanAsTest(
+      { id: 'plan-1', metadata: { experiment_id: 'exp-1' } },
+      'demo.myshopify.com',
+      { autoStart: true }
+    );
+
+    expect(createTest).toHaveBeenCalled();
   });
 
   it('links inbox plan after launch when plan id is present', async () => {
