@@ -294,7 +294,7 @@ export function useClassicExperimentDetails(shopDomain, planId) {
           analytics: merged,
         }));
 
-        const [testRes, productEventLists, ...qaLists] = await Promise.all([
+        const [testRes, productEventLists, qaLists] = await Promise.all([
           testId
             ? apiGet(`/tests/${encodeURIComponent(testId)}`)
                 .then(res => unwrapTest(unwrapData(res)))
@@ -314,7 +314,7 @@ export function useClassicExperimentDetails(shopDomain, planId) {
               }
             }
           ).then(lists => lists.flat()),
-          ...experimentTestIds.map(id =>
+          mapWithConcurrency(experimentTestIds, id =>
             apiGet(`/qa/tests/${encodeURIComponent(id)}/runs`)
               .then(res => {
                 const body = unwrapData(res);

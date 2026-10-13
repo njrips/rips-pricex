@@ -129,6 +129,7 @@ import {
   normalizeClassicCreatePrimaryMetric,
   normalizeCustomGoals,
   normalizeSecondaryEvents,
+  BUILTIN_SECONDARY_METRICS,
 } from '../targeting/smartPricingAudienceHelpers';
 import ClassicWizardShell from './ClassicWizardShell';
 import { CLASSIC_CREATE_STEPS, classicCreateStepIndex } from './classicCreateSteps';
@@ -325,6 +326,17 @@ async function fetchCatalog(shopDomain) {
       error: formatCatalogLoadError(err),
     };
   }
+}
+
+/**
+ * Whether a saved plan belongs to the draft named by `?resume=`. A plan that
+ * names no experiment is resumed by its own id, which is all the list has
+ * for it.
+ */
+function planMatchesResumeId(plan, resumeId) {
+  const experimentId = getPlanExperimentId(plan);
+  if (experimentId) return experimentId === resumeId;
+  return String(plan?.id || '') === resumeId;
 }
 
 /**
@@ -872,7 +884,7 @@ export default function ClassicCreateWizard({ onTitleChange }) {
     setDraftHydrated(true);
     if (resumeId) {
       const launchedHere = (readInboxPlans(shopDomain) || []).some(
-        plan => getPlanExperimentId(plan) === resumeId && isLaunchedPlan(plan)
+        plan => planMatchesResumeId(plan, resumeId) && isLaunchedPlan(plan)
       );
       if (launchedHere) {
         setLaunchedResumeId(resumeId);
@@ -880,7 +892,7 @@ export default function ClassicCreateWizard({ onTitleChange }) {
         applyWizardSnapshot(resumedLocalDraft);
       } else {
         const inboxPlans = (readInboxPlans(shopDomain) || []).filter(
-          plan => getPlanExperimentId(plan) === resumeId
+          plan => planMatchesResumeId(plan, resumeId)
         );
         if (inboxPlans.length) {
           setAppliedSavedDraft(true);
@@ -966,17 +978,19 @@ export default function ClassicCreateWizard({ onTitleChange }) {
     let cancelled = false;
     loadServerWizardDraft(shopDomain, resumeId).then(async match => {
       if (cancelled) return;
-      if (!match && !resumedLocalDraft) {
-        // Not a draft anywhere. If the experiment has launched since this
-        // browser last looked, it belongs to its details page; opening a blank
-        // wizard under its id would build a second experiment instead.
-        const tests = await Promise.resolve()
-          .then(() => getSmartPricingExperimentTests(shopDomain, resumeId))
-          .catch(() => []);
-        const launched = (Array.isArray(tests) ? tests : []).some(test =>
-          LAUNCHED_TEST_STATUSES.has(String(test?.status || '').trim().toLowerCase())
-        );
-        if (!cancelled && launched) setLaunchedResumeId(resumeId);
+      // If the experiment has launched, it belongs to its details page, even
+      // when a draft copy outlived the launch here or on the server: opening
+      // that copy showed a paused test's Edit as the new-test form, and
+      // launching it would build a second experiment.
+      const tests = await Promise.resolve()
+        .then(() => getSmartPricingExperimentTests(shopDomain, resumeId))
+        .catch(() => []);
+      if (cancelled) return;
+      const launched = (Array.isArray(tests) ? tests : []).some(test =>
+        LAUNCHED_TEST_STATUSES.has(String(test?.status || '').trim().toLowerCase())
+      );
+      if (launched) {
+        setLaunchedResumeId(resumeId);
         return;
       }
       if (!match) return;
@@ -1345,14 +1359,18 @@ export default function ClassicCreateWizard({ onTitleChange }) {
   const enrichPlansForLaunch = useCallback(
     (sourcePlans = plans, { status = 'queued' } = {}) => {
       const rawAudienceState = audience || createDefaultAudienceState();
+      const launchPrimary = normalizeClassicCreatePrimaryMetric(rawAudienceState.primaryMetric);
       const audienceState = {
         ...rawAudienceState,
-        primaryMetric: normalizeClassicCreatePrimaryMetric(rawAudienceState.primaryMetric),
+        primaryMetric: launchPrimary,
         primaryCustomGoal: null,
-        // Secondary metrics are no longer offered. A draft saved before that,
-        // or a test duplicated from an older one, still carries them, and
-        // nothing on screen would say they were about to launch.
-        secondaryMetrics: [],
+        // Only what Step 4 shows. A draft saved before custom goals and event
+        // secondaries were retired, or a test duplicated from an older one,
+        // can still carry them, and nothing on screen would say they were
+        // about to launch.
+        secondaryMetrics: normalizeSecondaryEvents(rawAudienceState.secondaryMetrics).filter(
+          key => BUILTIN_SECONDARY_METRICS.has(key) && key !== launchPrimary
+        ),
         customGoals: [],
         guardrails: ensureRevenueGuardrailRows(
           rawAudienceState.guardrails,

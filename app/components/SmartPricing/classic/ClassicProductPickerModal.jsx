@@ -362,6 +362,7 @@ export default function ClassicProductPickerModal({
     catalogSearching,
     hasRemoteSearch: Boolean(onCatalogSearch),
     remoteSearchHint: catalogSearchHint,
+    storeProductCount: storeCatalogProductCount,
   });
 
   if (typeof document === 'undefined') return null;

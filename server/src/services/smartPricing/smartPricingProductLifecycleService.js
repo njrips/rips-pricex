@@ -751,6 +751,10 @@ async function buildFollowUpPlan({
     rebuilt = applyPriceArmOverrides(rebuilt, armPrices, guardrails);
   }
 
+  // The test can know the experiment when its plan does not (an older plan, or
+  // one restored from its test), and a round with no id shows as its own draft.
+  const experimentId =
+    plan.metadata?.experiment_id || plan.experiment_id || test?.metadata?.experiment_id || null;
   const followUp = {
     ...rebuilt,
     status: 'queued',
@@ -763,15 +767,11 @@ async function buildFollowUpPlan({
     rerun_note: note ? String(note).trim().slice(0, 500) : null,
     metadata: {
       ...(rebuilt.metadata && typeof rebuilt.metadata === 'object' ? rebuilt.metadata : {}),
-      experiment_id:
-        plan.metadata?.experiment_id ||
-        plan.experiment_id ||
-        null,
+      experiment_id: experimentId,
     },
   };
-  // Preserve experiment grouping when present on the parent.
-  if (plan.experiment_id || plan.metadata?.experiment_id) {
-    followUp.experiment_id = plan.experiment_id || plan.metadata.experiment_id;
+  if (experimentId) {
+    followUp.experiment_id = experimentId;
   }
 
   // Insert this one row rather than rewriting the shop's whole inbox.

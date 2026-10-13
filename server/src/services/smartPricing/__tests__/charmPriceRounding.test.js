@@ -164,3 +164,44 @@ describe('the window a price may be rounded inside', () => {
     assert.deepEqual(window, { low: 5, high: 9 });
   });
 });
+
+describe('rounding never closes on the current price', () => {
+  const current = { current: 10, minControlGapPercent: 3 };
+
+  it('used to turn a +3% rise on a $10 product into a one-cent cut', () => {
+    assert.equal(snapProductArmPrices([10.3], { low: 9.4, high: 10.6 })[0], 9.99);
+    const [price] = snapProductArmPrices([10.3], { low: 9.4, high: 10.6, ...current });
+    assert.ok(price >= 10.3, `snapped to ${price}`);
+  });
+
+  it('keeps a cut a cut', () => {
+    const [price] = snapProductArmPrices([9.7], { low: 9.4, high: 10.6, ...current });
+    assert.ok(price <= 9.7, `snapped to ${price}`);
+  });
+
+  it('still lets a price far from the current one round towards it', () => {
+    const [price] = snapProductArmPrices([12.1], { low: 9.4, high: 13, ...current });
+    assert.equal(price, 11.99);
+  });
+
+  it('applies to every arm of a several-price test', () => {
+    const prices = snapProductArmPrices([10.3, 11.2], { low: 9.4, high: 12, ...current });
+    assert.ok(prices.every(price => price > 10.29), JSON.stringify(prices));
+  });
+});
+
+describe('rounding keeps several test prices apart', () => {
+  it('does not let two neighbours each spend half the gap between them', () => {
+    const after = snapProductArmPrices([46.37, 48.23], {
+      low: 45,
+      high: 50,
+      current: 41.23,
+      minArmGapPercent: 4.5,
+    });
+    assert.ok(after[1] - after[0] >= 41.23 * 0.045 * 0.85 - 0.01, `snapped to ${after}`);
+  });
+
+  it('still rounds a dollar band, which asks for no particular gap', () => {
+    assert.deepEqual(snapProductArmPrices([105, 110], { low: 105, high: 110, current: 100 }), [105.99, 109.99]);
+  });
+});

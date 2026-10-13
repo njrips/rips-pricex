@@ -15,6 +15,20 @@ const TEST_PURGE_GRACE_DAYS = 7;
 const NOTHING_CHANGED_MESSAGE =
   "Couldn't delete this test, and nothing was changed. Check your connection and try again.";
 
+/**
+ * What a successful delete tells the merchant, wherever it was started.
+ * Only launched tests are kept for the grace period, so only they get the
+ * restore hint.
+ */
+export function deletedTestMessage(result, experiment) {
+  if (experiment?.wizardDraft) return 'Draft deleted.';
+  const count = Array.isArray(result?.deletedTestIds) ? result.deletedTestIds.length : 0;
+  if (!count) return 'Test deleted.';
+  return `Test deleted, including results for ${count} product${
+    count === 1 ? '' : 's'
+  }. You can restore it from Recently deleted for ${TEST_PURGE_GRACE_DAYS} days.`;
+}
+
 export function getClassicExperimentDeleteTargets(experiment) {
   const plans = Array.isArray(experiment?.plans) ? experiment.plans : [];
   const planIds = plans.map(plan => String(plan?.id || '').trim()).filter(Boolean);

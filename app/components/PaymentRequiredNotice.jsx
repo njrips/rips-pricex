@@ -9,7 +9,9 @@ import { useUpgradeRedirect } from '../lib/useUpgradeRedirect';
 export default function PaymentRequiredNotice({ upgradeUrl = '' }) {
   const [open, setOpen] = useState(false);
   const [remoteUrl, setRemoteUrl] = useState('');
-  const openPlans = useUpgradeRedirect(remoteUrl || upgradeUrl);
+  // The loader's URL carries the handle Shopify reported; the API's is only as
+  // right as SHOPIFY_APP_HANDLE.
+  const openPlans = useUpgradeRedirect(upgradeUrl || remoteUrl);
 
   useEffect(() => {
     const onRequired = event => {

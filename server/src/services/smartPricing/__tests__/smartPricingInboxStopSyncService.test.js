@@ -114,6 +114,32 @@ describe('smartPricingInboxStopSyncService', () => {
     expect(result.winner_ready).toBe(false);
   });
 
+  it('keeps a paused plan paused when its test is stopped for Archive', async () => {
+    // Synced as finished, Restore brought a paused experiment back as Finished.
+    getTestById.mockResolvedValueOnce({
+      id: 'test-archive',
+      status: 'stopped',
+      metadata: { smart_pricing_plan_id: 'SP-archive', smart_pricing_source: 'smart_pricing' },
+    });
+    syncInboxPlanEntry.mockResolvedValueOnce({
+      plan_id: 'SP-archive',
+      test_id: 'test-archive',
+      synced: true,
+      inbox_status: 'winner_ready',
+      winner_ready: true,
+      winner_applied: false,
+      test_status: 'stopped',
+    });
+    patchInboxPlansFromSync.mockResolvedValueOnce({ plans: [] });
+
+    const result = await syncSmartPricingInboxForTest('demo.myshopify.com', 'test-archive', {
+      reason: 'merchant_archive',
+    });
+
+    expect(result.inbox_status).toBe('paused');
+    expect(result.winner_ready).toBe(false);
+  });
+
   it('maps merchant_finish to completed, so a stopped experiment stays stopped', async () => {
     // Reported as paused, the next list load read the server's answer back
     // over the client's and offered Resume on an experiment the merchant had

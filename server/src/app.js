@@ -8,12 +8,13 @@ const { requireShopifySession } = require('./middleware/shopifySessionContext');
 const { requireEntitlement } = require('./services/billing/entitlementService');
 const coreRoutes = require('./routes/coreRoutes');
 const logger = require('./utils/logger');
+const { resolveTrustProxy } = require('./utils/trustProxy');
 
 const app = express();
 const PORT = Number(process.env.RIPSPRICEX_API_PORT || process.env.PORT || 3456);
 
 // Shopify CLI / Cloudflare tunnels set X-Forwarded-* (storefront apiUrl + proxy)
-app.set('trust proxy', 1);
+app.set('trust proxy', resolveTrustProxy());
 
 // Storefront traffic arrives from arbitrary merchant domains, so tracking has to
 // accept any origin. The admin API does not: it is same-origin behind the app's

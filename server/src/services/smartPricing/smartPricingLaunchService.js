@@ -18,6 +18,7 @@ const {
 const { ensureOfferCheckoutDiscount } = require('./offerCheckoutDiscountService');
 const { getShopSession } = require('../../models/shopSession');
 const { linkInboxPlanToTest } = require('../../models/smartPricingInboxStore');
+const logger = require('../../utils/logger');
 const { findDeletions, planExperimentId } = require('../../models/smartPricingDeletionStore');
 
 async function launchSmartPricingPlanAsTest(
@@ -219,9 +220,22 @@ async function launchSmartPricingPlanAsTest(
   let inboxPlan = null;
   const planId = String(plan?.id || '').trim();
   if (planId && test?.id) {
-    inboxPlan = await linkInboxPlanToTest(shopDomain, planId, test.id, {
-      status: started ? 'running' : 'draft',
-    }).catch(() => null);
+    const link = () =>
+      linkInboxPlanToTest(shopDomain, planId, test.id, {
+        status: started ? 'running' : 'draft',
+      });
+    inboxPlan = await link()
+      .catch(link)
+      .catch(err => {
+        // The test is live either way; the inbox list relinks it on next load.
+        logger.warn('smart pricing launch could not link its plan', {
+          shop: shopDomain,
+          plan_id: planId,
+          test_id: test.id,
+          message: err?.message,
+        });
+        return null;
+      });
   }
 
   if (started && test?.id) {

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router';
+import { useLocation, useNavigate, useSearchParams } from 'react-router';
 import { Badge, Button, TextField } from '@shopify/polaris';
 import PageShell from '../../shared/PageShell';
 import ClassicPageLoader from '../../shared/ClassicPageLoader';
@@ -7,7 +7,7 @@ import { ROUTES } from '../../../constants';
 import useClassicShopDomain from '../../../hooks/useClassicShopDomain';
 import { useKeyedState } from '../../../hooks/useKeyedState';
 import { readInboxPlans, setInboxPersistHandler, writeInboxPlans } from '../smartPricingConstants';
-import { filterPlansByQuery } from '../smartPricingUiHelpers';
+import { classicExperimentMatchesQuery } from './classicExperimentSearch';
 import { hydrateInboxFromServer, schedulePersistInboxPlans } from '../smartPricingInboxPersistence';
 import {
   formatClassicStatusLabel,
@@ -23,8 +23,10 @@ import { formatOfferRule, isOfferExperimentType } from './offerSelection';
 import ClassicExperimentRowActions from './ClassicExperimentRowActions';
 import ClassicRecentlyDeleted from './ClassicRecentlyDeleted';
 import {
+  buildClassicExperimentEditTarget,
   buildClassicWizardResumePath,
   filterClassicExperimentsByTab,
+  isClassicDraftExperiment,
   listTabAfterClassicAction,
 } from './classicExperimentListActions';
 import {
@@ -32,7 +34,6 @@ import {
   fetchListAnalyticsForEditGating,
 } from './classicExperimentListAnalytics';
 import { classicCreateStepId } from './classicCreateSteps';
-import { useSmartPricingCheckoutReadiness } from '../../../hooks/useSmartPricingCheckoutReadiness';
 import {
   ButtonIconPlus,
   IconChevron,
@@ -63,12 +64,13 @@ const FILTERS = [
   { id: 'draft', label: 'Drafts' },
   { id: 'paused', label: 'Paused' },
   { id: 'finished', label: 'Finished' },
+  { id: 'archived', label: 'Archived' },
 ];
 
 function statusVisual(experiment) {
   const status = experiment.status;
   if (status === 'archived' || experiment.archived) {
-    return { tone: undefined, text: 'Finished' };
+    return { tone: undefined, text: 'Archived' };
   }
   if (status === 'winner_ready' || status === 'applied' || status === 'completed') {
     return {
@@ -85,7 +87,24 @@ function statusVisual(experiment) {
   return { tone: undefined, text: 'Draft' };
 }
 
-function emptyFilterCopy(filter, { reachedDraftServer = true } = {}) {
+const LIST_MESSAGE_TYPES = new Set(['success', 'warning', 'error']);
+
+/**
+ * A message another page handed over with `navigate(..., { state: { listMessage } })`,
+ * for an outcome that page could not show itself because it was leaving.
+ */
+function listMessageFromLocation(location) {
+  const handed = location?.state?.listMessage;
+  const text = String(handed?.text || '').trim();
+  if (!text) return null;
+  return { text, type: LIST_MESSAGE_TYPES.has(handed.type) ? handed.type : 'success' };
+}
+
+function emptyFilterCopy(filter, { reachedDraftServer = true, search = '' } = {}) {
+  const query = String(search || '').trim();
+  if (query) {
+    return `No tests match “${query}”. Search looks at test names, hypotheses, products, variants and IDs.`;
+  }
   // Drafts are the one tab whose contents can be somewhere this page failed to
   // reach. On a device with no local copy -- the second device, which is the
   // whole point of saving them server-side -- a network blip would otherwise
@@ -97,6 +116,7 @@ function emptyFilterCopy(filter, { reachedDraftServer = true } = {}) {
   if (filter === 'draft') return 'No draft tests.';
   if (filter === 'paused') return 'No paused tests.';
   if (filter === 'finished') return 'No finished tests.';
+  if (filter === 'archived') return 'No archived tests.';
   return 'No tests yet.';
 }
 
@@ -165,15 +185,24 @@ export default function ClassicExperimentsList() {
   // Starts busy for each shop; the first load below never has to flip it on.
   const [loading, setLoading] = useKeyedState(shopDomain, true);
   const [gridBusy, setGridBusy] = useState('');
-  const [message, setMessage] = useState('');
-  const [messageType, setMessageType] = useState('error');
+  const location = useLocation();
+  const [message, setMessage] = useState(() => listMessageFromLocation(location)?.text || '');
+  const [messageType, setMessageType] = useState(
+    () => listMessageFromLocation(location)?.type || 'error'
+  );
+
+  // Clear the handed-over message from history so Back or a reload does not
+  // announce the same delete again.
+  useEffect(() => {
+    if (!listMessageFromLocation(location)) return;
+    navigate(`${location.pathname}${location.search}${location.hash}`, {
+      replace: true,
+      state: null,
+    });
+  }, [location, navigate]);
   const [expandedIds, setExpandedIds] = useState(() => new Set());
   // Bumped on every load, so Recently deleted picks up a delete just made.
   const [loadCount, setLoadCount] = useState(0);
-  const {
-    checkoutReady,
-    offerCheckoutReady,
-  } = useSmartPricingCheckoutReadiness(shopDomain);
 
   useEffect(() => {
     setInboxPersistHandler((d, nextPlans) => {
@@ -232,19 +261,14 @@ export default function ClassicExperimentsList() {
     return sortExperimentRowsByRecency([...draftRows, ...fromPlans]);
   }, [plans, localDrafts]);
 
-  const experiments = useMemo(() => {
-    const queried = filterPlansByQuery(plans, search);
-    const fromPlans = groupPlansIntoExperiments(queried);
-    const needle = search.trim().toLowerCase();
-    const draftRows = selectUnlistedWizardDrafts(localDrafts, plans.map(getPlanExperimentId))
-      .map(wizardDraftAsExperimentRow)
-      .filter(Boolean)
-      .filter(row => !needle || row.title.toLowerCase().includes(needle));
-    return filterClassicExperimentsByTab(
-      sortExperimentRowsByRecency([...draftRows, ...fromPlans]),
-      filter
-    );
-  }, [plans, localDrafts, filter, search]);
+  const experiments = useMemo(
+    () =>
+      filterClassicExperimentsByTab(
+        inboxExperimentRows.filter(row => classicExperimentMatchesQuery(row, search)),
+        filter
+      ),
+    [inboxExperimentRows, filter, search]
+  );
 
   const [listAnalyticsByTestId, setListAnalyticsByTestId] = useState({});
 
@@ -305,14 +329,17 @@ export default function ClassicExperimentsList() {
       );
       return;
     }
+    if (isClassicDraftExperiment(experiment)) {
+      navigate(buildClassicExperimentEditTarget(experiment));
+      return;
+    }
     const plan = experiment.representative;
     if (!plan?.id) return;
-    // Always open experiment details. Drafts can resume from Overview → Continue editing.
     navigate(ROUTES.appSmartPricingPlan(shopDomain, plan.id));
   };
 
   const handleListMessage = ({ type = 'error', text = '' }) => {
-    setMessageType(type === 'success' ? 'success' : 'error');
+    setMessageType(LIST_MESSAGE_TYPES.has(type) ? type : 'error');
     setMessage(text);
   };
 
@@ -338,9 +365,7 @@ export default function ClassicExperimentsList() {
         ? 'Resuming test…'
         : gridBusy === 'delete'
           ? 'Deleting test…'
-          : gridBusy === 'launch'
-            ? 'Launching test…'
-            : gridBusy === 'archive'
+          : gridBusy === 'archive'
               ? 'Archiving test…'
               : gridBusy === 'restore'
                 ? 'Restoring test…'
@@ -461,7 +486,9 @@ export default function ClassicExperimentsList() {
               value={search}
               onChange={setSearch}
               autoComplete="off"
-              placeholder="Search tests"
+              placeholder="Search by name, hypothesis, product or ID"
+              clearButton
+              onClearButtonClick={() => setSearch('')}
             />
           </div>
         </div>
@@ -497,9 +524,11 @@ export default function ClassicExperimentsList() {
                   <td colSpan={7}>
                     <div className={styles.listEmptyState}>
                       <p className={styles.subtitle}>
-                        {emptyFilterCopy(filter, { reachedDraftServer })}
+                        {emptyFilterCopy(filter, { reachedDraftServer, search })}
                       </p>
-                      {filter === 'all' || filter === 'draft' ? (
+                      {search.trim() ? (
+                        <Button onClick={() => setSearch('')}>Clear search</Button>
+                      ) : filter === 'all' || filter === 'draft' ? (
                         <Button
                           variant="primary"
                           icon={ButtonIconPlus}
@@ -597,11 +626,6 @@ export default function ClassicExperimentsList() {
                           <ClassicExperimentRowActions
                             experiment={experiment}
                             shopDomain={shopDomain}
-                            checkoutReady={
-                              isOfferExperimentType(experiment.experimentType)
-                                ? offerCheckoutReady
-                                : checkoutReady
-                            }
                             listBusy={Boolean(gridBusy) || loading}
                             onBusy={handleRowBusy}
                             onRefresh={handleRowRefresh}

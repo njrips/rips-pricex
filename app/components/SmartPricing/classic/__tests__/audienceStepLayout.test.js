@@ -279,12 +279,78 @@ describe('revenue guardrail switch', () => {
     expect(field.value).toBe('14');
   });
 
-  it('documents the guardrail evidence floor', async () => {
+  it('uses the proposed guardrail copy', async () => {
     await renderPanel();
-    expect(container.textContent).toMatch(/about 5,000 visitors and at least 10 conversions/i);
-    expect(container.textContent).not.toMatch(/minimum visitors per variation is reached/i);
-    expect(container.textContent).toMatch(/This is a safety net/i);
-    expect(container.textContent).toMatch(/doesn(&rsquo;|’|')t declare a winner/i);
+    const card = container.querySelector('input[aria-label="Maximum revenue per visitor drop, percent"]')
+      .closest('div').parentElement;
+    expect(card.textContent.replace(/\s+/g, ' ')).toMatch(
+      /Stop testing a product if revenue per visitor for any variation drops more than\s?%\s?below the control, after the minimum visitors per variation is reached\./
+    );
+    expect(container.textContent).toContain(
+      'This is a safety net. It doesn’t declare a winner; it only prevents a bad variation from running for too long.'
+    );
     expect(container.textContent).not.toMatch(/margin floors/i);
+  });
+
+  it('names the guardrail floor when the shop minimum is below it', async () => {
+    await renderPanel({ value: { minSampleSize: '1000' } });
+    expect(container.textContent).toMatch(/after each variation has 5,000 visitors\./);
+    expect(container.textContent).not.toMatch(/minimum visitors per variation is reached/);
+  });
+});
+
+describe('secondary metrics', () => {
+  function secondaryPills() {
+    const group = container.querySelector('[aria-labelledby="classic-secondary-metrics"]');
+    return [...group.querySelectorAll('button')];
+  }
+  function pillNamed(label) {
+    return secondaryPills().find(node => (node.textContent || '').trim() === label);
+  }
+
+  it('offers the standard metrics as optional secondaries, with the primary locked', async () => {
+    await renderPanel({ showTrafficAllocation: false, value: { primaryMetric: 'revenue_per_visitor' } });
+    expect(container.textContent).toMatch(/Secondary metrics \(optional\)/);
+    expect(secondaryPills().map(node => (node.textContent || '').trim())).toEqual([
+      'Revenue per visitor',
+      'Conversion rate',
+      'Average order value',
+    ]);
+    expect(pillNamed('Revenue per visitor').disabled).toBe(true);
+    expect(pillNamed('Conversion rate').disabled).toBe(false);
+  });
+
+  it('toggles a secondary metric on and off', async () => {
+    const { onChange } = await renderPanel({
+      showTrafficAllocation: false,
+      value: { primaryMetric: 'revenue_per_visitor', secondaryMetrics: ['aov'] },
+    });
+    expect(pillNamed('Average order value').getAttribute('aria-pressed')).toBe('true');
+    await click(pillNamed('Conversion rate'));
+    expect(lastChange(onChange).secondaryMetrics).toEqual(['aov', 'conversion_rate']);
+    await click(pillNamed('Average order value'));
+    expect(lastChange(onChange).secondaryMetrics).toEqual([]);
+  });
+
+  it('drops a secondary that becomes the primary', async () => {
+    const { onChange } = await renderPanel({
+      showTrafficAllocation: false,
+      value: { primaryMetric: 'revenue_per_visitor', secondaryMetrics: ['conversion_rate', 'aov'] },
+    });
+    const primary = [...container.querySelectorAll('#classic-metrics-editor button')].find(
+      node => (node.textContent || '').trim() === 'Conversion rate'
+    );
+    await click(primary);
+    const next = lastChange(onChange);
+    expect(next.primaryMetric).toBe('conversion_rate');
+    expect(next.secondaryMetrics).toEqual(['aov']);
+  });
+
+  it('hides retired event secondaries in the create flow', async () => {
+    await renderPanel({
+      showTrafficAllocation: false,
+      value: { primaryMetric: 'revenue_per_visitor', secondaryMetrics: ['bounce_rate'] },
+    });
+    expect(secondaryPills()).toHaveLength(3);
   });
 });

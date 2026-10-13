@@ -5,12 +5,10 @@ import { useNavigate } from 'react-router';
 import { Button, Modal } from '@shopify/polaris';
 import { ROUTES } from '../../../constants';
 import { apiPost } from '../../../services';
-import { getSmartPricingGuardrails } from '../../../services/smartPricingApi';
-import { useSmartPricingLaunch } from '../../../hooks/useSmartPricingLaunch';
 import { readInboxPlans, writeInboxPlans } from '../smartPricingConstants';
 import { persistInboxPlansNow } from '../smartPricingInboxPersistence';
 import { ButtonIconMore } from './classicIcons';
-import { enrichInboxPlansForLaunch, rollupExperimentStatus } from './classicExperimentHelpers';
+import { rollupExperimentStatus } from './classicExperimentHelpers';
 import { appendActivityToPlans, createActivityEntry } from './classicActivity';
 import { planResume, resumeConflictListMessage } from './resumeConflicts';
 import {
@@ -20,14 +18,20 @@ import {
   classicBatchOutcomeMessage,
   collectExperimentTestIds,
   isSettledClassicPlan,
-  splitSettledByIds,
   resolveClassicExperimentMenuActions,
+  archiveActivityDetail,
+  restoreActivityDetail,
 } from './classicExperimentListActions';
 import {
   buildClassicExperimentDeleteConfirmMessage,
   deleteClassicExperimentSynchronized,
+  deletedTestMessage,
 } from './classicExperimentDelete';
 import {
+  ARCHIVE_STOP_BODY,
+  lifecycleFailureError,
+  postToEachExperimentTest,
+  runningExperimentTestIds,
   stopPausedTestsBeforeArchive,
   withUnlistedExperimentTests,
 } from './classicExperimentTestScope';
@@ -75,7 +79,6 @@ function measureActionMenuBox(triggerEl) {
 export default function ClassicExperimentRowActions({
   experiment,
   shopDomain,
-  checkoutReady = false,
   listBusy = false,
   onBusy,
   onRefresh,
@@ -89,9 +92,8 @@ export default function ClassicExperimentRowActions({
   const [menuBox, setMenuBox] = useState(null);
   const [busy, setBusy] = useState('');
   const [deleteOpen, setDeleteOpen] = useState(false);
-  const { launching, launchMany } = useSmartPricingLaunch(shopDomain);
 
-  const actions = resolveClassicExperimentMenuActions(experiment, { checkoutReady });
+  const actions = resolveClassicExperimentMenuActions(experiment);
   const planIds = (experiment?.plans || []).map(p => p.id).filter(Boolean);
   const planIdSet = new Set(planIds);
 
@@ -174,12 +176,8 @@ export default function ClassicExperimentRowActions({
    * the merchant got a failure message over a row where some products had
    * genuinely stopped and nothing said which.
    */
-  const postToEachTest = async (testIds, action) => {
-    const results = await Promise.allSettled(
-      testIds.map(id => apiPost(`/tests/${encodeURIComponent(id)}/${action}`, {}))
-    );
-    return splitSettledByIds(testIds, results);
-  };
+  const postToEachTest = (testIds, action) =>
+    postToEachExperimentTest(testIds, action, apiPost);
 
   const refreshList = async (hydrateOptions = {}) => {
     if (typeof onRefresh === 'function') {
@@ -188,7 +186,7 @@ export default function ClassicExperimentRowActions({
   };
 
   const runBusy = async (action, fn) => {
-    if (busy || launching || listBusy) return;
+    if (busy || listBusy) return;
     setBusy(action);
     onBusy?.(action);
     setOpen(false);
@@ -209,45 +207,20 @@ export default function ClassicExperimentRowActions({
     navigate(ROUTES.appSmartPricingPlan(shopDomain, plan.id));
   };
 
-  const handleLaunch = () =>
-    runBusy('launch', async () => {
-      const toLaunch = (experiment?.plans || []).filter(plan => {
-        const status = String(plan.status || 'draft')
-          .trim()
-          .toLowerCase();
-        return status === 'draft' || status === 'queued';
-      });
-      if (!toLaunch.length) {
-        throw new Error('Nothing to launch for this test.');
-      }
-      const guardrailsPayload = await getSmartPricingGuardrails(shopDomain).catch(() => ({}));
-      await launchMany(enrichInboxPlansForLaunch(toLaunch, guardrailsPayload));
-      await persistInboxPlansNow(shopDomain, readInboxPlans(shopDomain)).catch(() => null);
-      const detailPlanId = toLaunch.find(plan => plan?.id)?.id || experiment?.representative?.id;
-      if (detailPlanId) {
-        navigate(ROUTES.appSmartPricingPlan(shopDomain, detailPlanId));
-        return;
-      }
-      notify('success', 'Test launched.');
-      await refreshList({ preferLocalIds: planIds, quiet: true });
-    });
-
   const handlePause = () =>
     runBusy('pause', async () => {
-      // A product whose winner is already applied is not part of what Pause
-      // acts on: its price is published and its traffic is no longer split.
       const testIds = await withUnlistedExperimentTests(
         shopDomain,
         experiment?.plans,
-        collectExperimentTestIds(experiment?.plans, { skipSettled: true }),
-        { statuses: ['running'] }
+        runningExperimentTestIds(experiment?.plans),
+        { statuses: ['running'], dropListedOutsideStatuses: true }
       );
       if (!testIds.length) {
         throw new Error('No linked test to pause.');
       }
       const { succeeded, failed } = await postToEachTest(testIds, 'pause');
       if (!succeeded.length) {
-        throw failed[0]?.reason || new Error('Could not pause test.');
+        throw lifecycleFailureError(failed[0]?.reason, 'pause');
       }
       const pauseEntry = createActivityEntry({
         kind: 'paused',
@@ -293,7 +266,7 @@ export default function ClassicExperimentRowActions({
       }
       const { succeeded, failed } = await postToEachTest(testIds, 'stop');
       if (!succeeded.length) {
-        throw failed[0]?.reason || new Error('Could not stop test.');
+        throw lifecycleFailureError(failed[0]?.reason, 'stop');
       }
       const stopEntry = createActivityEntry({
         kind: 'stopped',
@@ -376,27 +349,21 @@ export default function ClassicExperimentRowActions({
   const handleArchive = () =>
     runBusy('archive', async () => {
       const at = new Date().toISOString();
+      const stopped = new Set(
+        await stopPausedTestsBeforeArchive(shopDomain, experiment?.plans, ids =>
+          postToEachExperimentTest(ids, 'stop', apiPost, { body: ARCHIVE_STOP_BODY })
+        )
+      );
       const archiveEntry = createActivityEntry({
-        id: 'archived',
         kind: 'archived',
         title: 'Test archived',
-        detail: 'Hidden from the active tests list',
+        detail: archiveActivityDetail(experiment, { stoppedCount: stopped.size }),
         at,
         actor: experiment?.representative?.owner_name || experiment?.representative?.created_by_name || 'You',
       });
-      const stopped = new Set(
-        await stopPausedTestsBeforeArchive(shopDomain, experiment?.plans, ids =>
-          postToEachTest(ids, 'stop')
-        )
+      await patchExperimentPlans(plan =>
+        appendActivityToPlans([{ ...plan, archived: true, archived_at: at }], archiveEntry)[0]
       );
-      await patchExperimentPlans(plan => {
-        const planTestId = String(plan?.test_id || plan?.metadata?.test_id || '').trim();
-        const ended = stopped.has(planTestId) ? { status: CLASSIC_STOPPED_PLAN_STATUS } : {};
-        return appendActivityToPlans(
-          [{ ...plan, ...ended, archived: true, archived_at: at }],
-          archiveEntry
-        )[0];
-      });
       notify('success', 'Test archived.');
       await refreshList({ preferLocalIds: planIds, quiet: true });
     });
@@ -406,7 +373,7 @@ export default function ClassicExperimentRowActions({
       const restoreEntry = createActivityEntry({
         kind: 'restored',
         title: 'Test restored',
-        detail: 'Moved back to the active tests list',
+        detail: restoreActivityDetail(experiment),
         actor: experiment?.representative?.owner_name || experiment?.representative?.created_by_name || 'You',
       });
       await patchExperimentPlans(plan =>
@@ -432,16 +399,10 @@ export default function ClassicExperimentRowActions({
         throw new Error(result.errors[0] || 'Could not delete test.');
       }
       if (result.ok) {
-        const detail =
-          result.deletedTestIds.length > 0
-            ? ` Removed results for ${result.deletedTestIds.length} product${
-                result.deletedTestIds.length === 1 ? '' : 's'
-              }.`
-            : '';
-        notify('success', `Test deleted.${detail}`);
+        notify('success', deletedTestMessage(result, experiment));
       } else {
         notify(
-          'error',
+          'warning',
           result.errors[0] ||
             'Test was partially deleted. Refresh the list and delete it again if it still shows.'
         );
@@ -450,7 +411,7 @@ export default function ClassicExperimentRowActions({
     });
 
   const runAction = actionId => {
-    if (busy || launching || listBusy) return;
+    if (busy || listBusy) return;
     switch (actionId) {
       case 'view':
         setOpen(false);
@@ -472,9 +433,6 @@ export default function ClassicExperimentRowActions({
           await refreshList({ quiet: true });
           navigate(buildClassicWizardResumePath(result.experimentId));
         });
-        break;
-      case 'launch':
-        handleLaunch();
         break;
       case 'pause':
         handlePause();
@@ -500,7 +458,7 @@ export default function ClassicExperimentRowActions({
     }
   };
 
-  const isBusy = Boolean(busy || launching || listBusy);
+  const isBusy = Boolean(busy || listBusy);
 
   const menuStyle =
     menuBox && typeof document !== 'undefined'
@@ -526,7 +484,7 @@ export default function ClassicExperimentRowActions({
                 disabled={isBusy}
                 onClick={() => runAction(action.id)}
               >
-                {busy === action.id || (action.id === 'launch' && launching)
+                {busy === action.id
                   ? `${action.label}…`
                   : action.label}
               </button>

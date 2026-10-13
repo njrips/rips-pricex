@@ -65,6 +65,7 @@ async function syncSmartPricingInboxForTest(shopDomain, testId, { reason = 'test
     .toLowerCase();
   const merchantPaused =
     (normalizedReason === 'merchant_pause' ||
+      normalizedReason === 'merchant_archive' ||
       normalizedReason === 'merchant_stop' ||
       normalizedReason === 'merchant_stop_product' ||
       normalizedReason === 'guardrail_breach') &&

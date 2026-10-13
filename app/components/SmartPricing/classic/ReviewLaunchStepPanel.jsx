@@ -4,22 +4,17 @@ import { getOfferCheckoutBlockReason, isOfferExperimentType } from './offerSelec
 import { formatApproxTestDuration, PRACTICAL_TEST_MAX_DAYS } from './estimateSignificanceDuration';
 import { priceSurfacesUnmapped } from '../../../utils/checkoutReadinessClient';
 import TooltipWrapper from '../../shared/TooltipWrapper';
-import {
-  buildReviewOverviewLines,
-  REVIEW_OVERVIEW_LABELS,
-  REVIEW_OVERVIEW_LINE_ORDER,
-} from './reviewLaunchOverview';
+import { buildReviewSections } from './reviewLaunchOverview';
 import styles from './SmartPricingClassic.module.css';
 
 const TRAFFIC_TOO_LOW_BODY =
   'At your current traffic and number of variations, this test may take a long time to reach your minimum visitors per variation. To get a clearer result, try testing fewer products or fewer variations.';
 
 /**
- * The last page before launch: the five-line summary and nothing else to read.
- *
- * Per-section cards used to repeat every step underneath the summary, each
- * with its own Edit link. The stepper and "Back to edit" already go back to any
- * step, and anything still stopping the launch is named beside the button.
+ * The last page before launch: one section per part of the setup, as
+ * label/value rows. There are no per-section Edit links; the stepper and
+ * "Back to edit" already go back to any step, and anything still stopping the
+ * launch is named beside the button.
  */
 export default function ReviewLaunchStepPanel({
   name,
@@ -84,9 +79,9 @@ export default function ReviewLaunchStepPanel({
     !estimatedDays ||
     Boolean(String(estimatedTimeDetail || '').trim() && !significanceEstimate?.summary);
 
-  const overviewLines = useMemo(
+  const sections = useMemo(
     () =>
-      buildReviewOverviewLines({
+      buildReviewSections({
         name,
         experimentType,
         experimentTypeLabel,
@@ -219,16 +214,27 @@ export default function ReviewLaunchStepPanel({
         </Banner>
       ) : null}
 
-      <section className={styles.reviewOverview} aria-label="Test summary">
-        <ul className={styles.reviewOverviewList}>
-          {REVIEW_OVERVIEW_LINE_ORDER.map(key => (
-            <li key={key}>
-              <span className={styles.reviewOverviewLabel}>{REVIEW_OVERVIEW_LABELS[key]}:</span>{' '}
-              {overviewLines[key]}
-            </li>
-          ))}
-        </ul>
-      </section>
+      <div className={styles.reviewOverview} aria-label="Test summary" role="group">
+        {sections.map(section => (
+          <section
+            key={section.id}
+            className={styles.reviewSection}
+            aria-labelledby={`review-section-${section.id}`}
+          >
+            <h3 id={`review-section-${section.id}`} className={styles.reviewSectionTitle}>
+              {section.title}
+            </h3>
+            <dl className={styles.reviewSectionRows}>
+              {section.rows.map(row => (
+                <div key={row.label} className={styles.reviewSectionRow}>
+                  <dt>{row.label}</dt>
+                  <dd>{row.value}</dd>
+                </div>
+              ))}
+            </dl>
+          </section>
+        ))}
+      </div>
     </div>
   );
 }

@@ -83,9 +83,36 @@ function normalizeTrafficSourceRules(rules) {
     );
 }
 
+/**
+ * The source choices the audience step offers, each as the rule values it
+ * writes. Older saves wrote Email without `sms`, so a choice counts as picked
+ * when any of its values is.
+ */
+const AUDIENCE_SOURCE_CHOICES = [
+  ['direct'],
+  ['organic_search', 'paid_search'],
+  ['social'],
+  ['email', 'sms'],
+  ['paid'],
+  ['referral'],
+];
+
+function includesEveryAudienceSource(includeValues) {
+  const picked = new Set(includeValues);
+  return AUDIENCE_SOURCE_CHOICES.every(choice => choice.some(value => picked.has(value)));
+}
+
 function matchesTrafficSourceRules(rules, contextSource) {
   const normalizedRules = normalizeTrafficSourceRules(rules);
   if (normalizedRules.length === 0) {
+    return null;
+  }
+  // Every choice included means every visitor -- including an SMS click and a
+  // visit the storefront could not classify, which the list itself leaves out.
+  if (
+    normalizedRules.every(rule => rule.type === 'include') &&
+    includesEveryAudienceSource(normalizedRules.map(rule => rule.value))
+  ) {
     return null;
   }
   const ctx = String(contextSource || '')

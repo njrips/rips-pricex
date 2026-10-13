@@ -3,6 +3,14 @@ import {
   resolveArmPositionWithSkuSignals,
   resolveProductBandSlice,
 } from './aiSuggestHeuristics';
+import {
+  MIN_CONTROL_GAP_PERCENT,
+  armSpacingFor,
+  bandNeededForArms,
+  perGapMinimumPercent,
+  spaceTestPricePercents,
+  widenedProductSlice,
+} from './testPriceSpacing';
 
 /** Same SKU grouping the Products step pricing table uses. */
 export function productGroupKey(row) {
@@ -179,6 +187,7 @@ export function spreadAiBandPriceEntries({
   const maxChange = Number.isFinite(shopMax) && shopMax > 0 ? shopMax : 15;
   const safeMin = resolveBandEdge(min, 10);
   const safeMax = resolveBandEdge(max, 20);
+  const { minBandWidth, minArmGap } = armSpacingFor(safeMin, safeMax, armCount);
 
   rows.forEach(row => {
     const base = Number(row.current_price ?? row.price) || 0;
@@ -202,10 +211,16 @@ export function spreadAiBandPriceEntries({
     const productBand =
       unit === 'amount'
         ? { min: safeMin, max: safeMax }
-        : resolveProductBandSlice(row, safeMin, safeMax);
+        : widenedProductSlice(resolveProductBandSlice(row, safeMin, safeMax), {
+            min: safeMin,
+            max: safeMax,
+            minBandWidth,
+            armCount,
+            minArmGap,
+          });
     const sliceMin = productBand.min;
     const sliceMax = productBand.max;
-    arms.forEach((arm, armIndex) => {
+    const placed = arms.map((arm, armIndex) => {
       const position = variationPositionInBand({
         armIndex,
         armCount,
@@ -213,7 +228,24 @@ export function spreadAiBandPriceEntries({
         max: sliceMax,
         row,
       });
-      const bandSpan = sliceMin + (sliceMax - sliceMin) * position;
+      return sliceMin + (sliceMax - sliceMin) * position;
+    });
+    // Spaced inside the stretch the guardrails allow, as the server does, so
+    // the clamp below cannot fold two variations onto one price.
+    let spans = placed;
+    if (unit !== 'amount' && base > 0) {
+      const floorPct = (floor / base - 1) * 100;
+      const ceilingPct = (ceiling / base - 1) * 100;
+      const overlap = Math.max(sliceMin, floorPct) <= Math.min(sliceMax, ceilingPct);
+      spans = spaceTestPricePercents(placed, {
+        lo: overlap ? Math.max(sliceMin, floorPct) : floorPct,
+        hi: overlap ? Math.min(sliceMax, ceilingPct) : ceilingPct,
+        minGap: minArmGap,
+        controlGap: MIN_CONTROL_GAP_PERCENT,
+      });
+    }
+    arms.forEach((arm, armIndex) => {
+      const bandSpan = spans[armIndex];
       const raw = unit === 'amount' ? base + bandSpan : base * (1 + bandSpan / 100);
       const clamped = Math.min(ceiling, Math.max(floor, raw));
       const price = Math.max(0, clamped);
@@ -1060,26 +1092,49 @@ export function describeCollapsedAiBand(band, { unit = 'percent' } = {}) {
 }
 
 /**
- * An edge sitting exactly on the current price wastes a variation.
+ * A band with too little room for the variations it has to hold.
  *
- * `−10% to 0%` is a reasonable thing to type — "test discounts, up to today's
- * price" — but the arm landing on that edge carries the current price, which
- * the control already tests. Two identical prices split the traffic and tell
- * the merchant nothing they were not already going to learn, and they would
- * only find that out by reading the price table after launch.
+ * Priceify keeps every test price at least 3% from the current price and
+ * neighbouring prices a few points apart, because closer than that cannot be
+ * told apart at realistic traffic. A band too narrow for both still gets
+ * prices, just closer together than the test can resolve, and the merchant
+ * would only find out from a test that never concludes. Says so while the band
+ * is typed, and names the smallest band that fits.
+ *
+ * This replaces a warning that an edge at 0% put one variation on the current
+ * price: the spacing now keeps it clear, so −10% to 0% is fine, and −2% to 0%
+ * is caught here instead.
  */
-export function describeZeroEdgeAiBand(band, { unit = 'percent' } = {}) {
+export function describeNarrowAiBand(
+  band,
+  { unit = 'percent', armCount = 1, shopMaxChangePercent = null } = {}
+) {
+  if (unit === 'amount') return '';
   const min = Number(band?.min);
   const max = Number(band?.max);
-  if (!Number.isFinite(min) || !Number.isFinite(max)) return '';
-  if (min !== 0 && max !== 0) return '';
-  if (min === max) return '';
-  const other = min === 0 ? max : min;
-  const wording = other < 0 ? 'lower' : 'higher';
-  return `One end of the band is ${formatBandValue(
-    0,
-    unit
-  )}, so one variation would carry your current price — the same price the control already tests. Move that end ${wording} to make every variation count.`;
+  if (!Number.isFinite(min) || !Number.isFinite(max) || min === max) return '';
+  const arms = Math.max(0, Math.floor(Number(armCount) || 0));
+  if (arms < 1) return '';
+  const cap = Number(shopMaxChangePercent);
+  const need = bandNeededForArms({ min, max }, arms, {
+    cap: Number.isFinite(cap) && cap > 0 ? cap : Infinity,
+  });
+  if (!need) return '';
+  const clear = formatBandValue(MIN_CONTROL_GAP_PERCENT, unit);
+  const problem =
+    arms === 1
+      ? `This band leaves no room for a test price at least ${clear} from your current price, so the variation would be too close to it to tell apart.`
+      : `With ${arms} test variations, this band is too narrow to keep them about ${formatBandValue(
+          perGapMinimumPercent(arms),
+          unit
+        )} apart and at least ${clear} from your current price, so some would sit too close to tell apart.`;
+  const widened = describeAiBandRange(need.min, need.max, unit);
+  if (!need.reachable) {
+    return `${problem} That needs ${widened}, more than your ${cap}% max price change allows${
+      arms > 1 ? ', so test fewer variations or raise the max price change' : ''
+    }.`;
+  }
+  return `${problem} Widen it to ${widened}${arms > 1 ? ' or test fewer variations' : ''}.`;
 }
 
 /** Copy for a band field that the shop guardrail had to reduce. */

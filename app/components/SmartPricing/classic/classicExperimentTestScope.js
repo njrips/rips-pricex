@@ -1,8 +1,85 @@
 import { getSmartPricingExperimentTests } from '../../../services/smartPricingApi';
 import { getPlanExperimentId, normalizePlanStatus } from './classicExperimentHelpers';
-import { collectExperimentTestIds, isSettledClassicPlan } from './classicExperimentListActions';
+import {
+  collectExperimentTestIds,
+  isSettledClassicPlan,
+  splitSettledByIds,
+} from './classicExperimentListActions';
 
 const testIdOfPlan = plan => String(plan?.test_id || plan?.metadata?.test_id || '').trim();
+
+/**
+ * The products an experiment-level Pause should reach: the running ones.
+ *
+ * An experiment keeps every product it ever tested, and Pause used to be sent
+ * to all of them. The finished ones were put back on hold, and a product whose
+ * winner was ready came back as one waiting to resume.
+ */
+export function runningExperimentTestIds(plans) {
+  const rows = Array.isArray(plans) ? plans : [];
+  return collectExperimentTestIds(
+    rows.filter(plan => normalizePlanStatus(plan) === 'running'),
+    { skipSettled: true }
+  );
+}
+
+/** No answer at all, or the server failing rather than refusing. */
+export function isTransientLifecycleFailure(error) {
+  if (!error) return false;
+  const status = Number(error?.response?.status);
+  if (!error.response) return true;
+  return status >= 500 || status === 429;
+}
+
+const RETRY_DELAY_MS = 800;
+
+/**
+ * Posts `/tests/:id/:action` for each id and reports which were accepted.
+ *
+ * Products that failed for a transient reason are sent once more. Pause and
+ * Stop are safe to repeat, and a brief overload used to fail the whole click
+ * with the experiment left running and nothing visibly changed.
+ *
+ * @param {string[]} testIds
+ * @param {'pause'|'stop'} action
+ * @param {(path: string, body: object) => Promise<unknown>} post
+ */
+export async function postToEachExperimentTest(
+  testIds,
+  action,
+  post,
+  { retryDelayMs = RETRY_DELAY_MS, body = {} } = {}
+) {
+  const ids = Array.isArray(testIds) ? testIds : [];
+  const send = id => post(`/tests/${encodeURIComponent(id)}/${action}`, body);
+  const results = await Promise.allSettled(ids.map(send));
+  const retry = results
+    .map((row, index) =>
+      row.status === 'rejected' && isTransientLifecycleFailure(row.reason) ? index : -1
+    )
+    .filter(index => index >= 0);
+  if (retry.length) {
+    if (retryDelayMs > 0) await new Promise(resolve => setTimeout(resolve, retryDelayMs));
+    const again = await Promise.allSettled(retry.map(index => send(ids[index])));
+    retry.forEach((index, k) => {
+      results[index] = again[k];
+    });
+  }
+  return splitSettledByIds(ids, results);
+}
+
+/**
+ * The error to show when no product accepted the action.
+ *
+ * The server's own words for a refusal; for an outage, something the merchant
+ * can act on instead of "Network Error" or a database timeout.
+ */
+export function lifecycleFailureError(reason, verb = 'pause') {
+  if (reason && !isTransientLifecycleFailure(reason) && reason.message) return reason;
+  return new Error(
+    `Could not ${verb} this test because Priceify did not respond. It is still running; try again in a moment.`
+  );
+}
 
 /**
  * The test ids an experiment-level Pause, Stop or Resume should reach.
@@ -21,7 +98,7 @@ export async function withUnlistedExperimentTests(
   shopDomain,
   plans,
   listedTestIds,
-  { statuses = [] } = {}
+  { statuses = [], dropListedOutsideStatuses = false } = {}
 ) {
   const rows = Array.isArray(plans) ? plans : [];
   const listed = Array.isArray(listedTestIds) ? listedTestIds : [];
@@ -36,11 +113,21 @@ export async function withUnlistedExperimentTests(
   }
   const settled = new Set(rows.filter(isSettledClassicPlan).map(testIdOfPlan).filter(Boolean));
   const seen = new Set(listed);
-  const extra = (Array.isArray(tests) ? tests : [])
+  const serverRows = Array.isArray(tests) ? tests : [];
+  const extra = serverRows
     .filter(row => statuses.includes(String(row?.status || '').toLowerCase()))
     .map(row => String(row?.id || '').trim())
     .filter(id => id && !seen.has(id) && !settled.has(id));
-  return [...listed, ...extra];
+  // A plan can still read running after its test was stopped elsewhere, and
+  // Pause sent to that test is refused. Only ids the server reported are
+  // dropped, so one it left out is still tried.
+  const kept = dropListedOutsideStatuses
+    ? listed.filter(id => {
+        const row = serverRows.find(test => String(test?.id || '').trim() === id);
+        return !row || statuses.includes(String(row?.status || '').toLowerCase());
+      })
+    : listed;
+  return [...kept, ...extra];
 }
 
 /**
@@ -51,9 +138,13 @@ export async function withUnlistedExperimentTests(
  * holding every product, and the create wizard counted them as "in other
  * tests" with nothing on the list that could free them.
  *
- * `stopEach(ids)` posts the stops and resolves `{ succeeded }`; the ids that
- * stopped are returned so their plans can be marked finished.
+ * `stopEach(ids)` posts the stops and resolves `{ succeeded }`, and the ids
+ * that stopped are returned. Their plans stay `paused` under the archive, so
+ * Restore brings the experiment back as Paused; send the stops with
+ * `ARCHIVE_STOP_BODY` so the server keeps it that way too.
  */
+export const ARCHIVE_STOP_BODY = Object.freeze({ reason: 'archive' });
+
 export async function stopPausedTestsBeforeArchive(shopDomain, plans, stopEach) {
   const rows = Array.isArray(plans) ? plans : [];
   const listed = collectExperimentTestIds(

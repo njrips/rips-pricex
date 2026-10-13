@@ -102,11 +102,13 @@ function charmCandidates(target, currency) {
  *   collision rejects the candidate rather than the arm.
  * @param {number} [options.maxDistance] How far the price may move. Past this
  *   the ending is not worth the distortion of the uplift being tested.
+ * @param {(candidate: number) => boolean} [options.accept] Rejects candidates
+ *   on grounds only the caller can judge, such as closing on another arm.
  * @returns {number}
  */
 function snapToCharmPrice(
   target,
-  { low, high, currency = 'USD', taken = [], maxDistance = null } = {}
+  { low, high, currency = 'USD', taken = [], maxDistance = null, accept = null } = {}
 ) {
   const value = Number(target);
   if (!Number.isFinite(value) || value <= 0) return value;
@@ -139,6 +141,7 @@ function snapToCharmPrice(
     if (used.has(round2(candidate))) return;
     const distance = Math.abs(candidate - value);
     if (distance > limit) return;
+    if (typeof accept === 'function' && !accept(candidate)) return;
     const score = distance + endingWeight(candidate, currency) * scale;
     // Ties resolve to the higher price: where two endings are equally good, the
     // one that earns more wins. That held when every band was an uplift and it
@@ -182,39 +185,99 @@ function defaultSnapDistance(value) {
 }
 
 /**
+ * Share of the gap between two arms that rounding may spend. The rest is the
+ * spacing the test was built with, and the prompt promises.
+ */
+const ARM_GAP_KEPT = 0.85;
+
+/**
+ * The same share when no spacing was asked for, as with a dollar band, whose
+ * arms are as far apart as the merchant's amounts put them.
+ */
+const UNTARGETED_GAP_KEPT = 0.5;
+
+/**
  * Snap every arm of one product together.
  *
  * Done one arm at a time this could reorder them or land two on the same
  * price: the arms share a window, so the ending nearest one arm's target can
- * sit on the other side of its neighbour. Snapping as a set bounds each move
- * by half the distance to the closest neighbouring arm, which makes crossing
- * impossible, and feeds each chosen price back in so no two can collide.
+ * sit on the other side of its neighbour. Each arm is snapped against the
+ * others, and must keep `ARM_GAP_KEPT` of the gap they need: the smaller of
+ * the gap they started with and `minArmGapPercent` of the current price. An
+ * arm not yet snapped is measured at its target. Bounding each move by half
+ * the gap instead let two neighbours each spend their half, and $41.23 went
+ * out as a test of $46.50 against $46.99.
  *
  * @param {number[]} rawPrices Arm prices in arm order.
  * @returns {number[]} Same length and order.
  */
-function snapProductArmPrices(rawPrices = [], { low, high, currency = 'USD' } = {}) {
+function snapProductArmPrices(
+  rawPrices = [],
+  {
+    low,
+    high,
+    currency = 'USD',
+    current = null,
+    minControlGapPercent = 0,
+    minArmGapPercent = 0,
+  } = {}
+) {
   const prices = (Array.isArray(rawPrices) ? rawPrices : []).map(Number);
+  const windowFor = price => clearOfCurrentWindow(price, { low, high, current, minControlGapPercent });
   if (prices.length <= 1) {
-    return prices.map(price =>
-      snapToCharmPrice(price, { low, high, currency })
-    );
+    return prices.map(price => snapToCharmPrice(price, { ...windowFor(price), currency }));
   }
 
-  const sorted = [...prices].sort((a, b) => a - b);
-  let minGap = Infinity;
-  for (let i = 1; i < sorted.length; i += 1) {
-    minGap = Math.min(minGap, sorted[i] - sorted[i - 1]);
-  }
-  const taken = [];
-  return prices.map(price => {
-    const bound = Number.isFinite(minGap) && minGap > 0 ? minGap / 2 : null;
-    const maxDistance =
-      bound === null ? null : Math.min(bound, defaultSnapDistance(price));
-    const snapped = snapToCharmPrice(price, { low, high, currency, taken, maxDistance });
-    taken.push(snapped);
-    return snapped;
+  const base = Number(current);
+  const armGap =
+    Number.isFinite(base) && base > 0 ? (base * Math.max(0, Number(minArmGapPercent) || 0)) / 100 : 0;
+  const snapped = [...prices];
+  prices.forEach((price, index) => {
+    const accept = candidate =>
+      prices.every((other, otherIndex) => {
+        const apart = price - other;
+        if (otherIndex === index || apart === 0) return true;
+        const needed =
+          armGap > 0
+            ? Math.min(Math.abs(apart), armGap) * ARM_GAP_KEPT
+            : Math.abs(apart) * UNTARGETED_GAP_KEPT;
+        return (candidate - snapped[otherIndex]) * Math.sign(apart) >= needed - 0.005;
+      });
+    snapped[index] = snapToCharmPrice(price, {
+      ...windowFor(price),
+      currency,
+      taken: snapped.filter((_, otherIndex) => otherIndex < index),
+      accept,
+    });
   });
+  return snapped;
+}
+
+/**
+ * The window one arm may snap within, kept from closing on the current price.
+ *
+ * Snapping moves a price to the nearest good ending, and nearest can mean
+ * towards the current price or past it: a +3% arm on a $10 product is $10.30,
+ * and $9.99 is the closer ending, which turns a rise into a one-cent cut. So
+ * an arm on one side of the current price may move towards it only while it
+ * stays `minControlGapPercent` away, and never past where it started when it
+ * began closer than that.
+ */
+function clearOfCurrentWindow(price, { low, high, current, minControlGapPercent }) {
+  const base = Number(current);
+  const value = Number(price);
+  if (!Number.isFinite(base) || base <= 0 || !Number.isFinite(value) || value === base) {
+    return { low, high };
+  }
+  const gap = Math.max(0, Number(minControlGapPercent) || 0) / 100;
+  if (value > base) {
+    const keep = Math.min(value, base * (1 + gap));
+    const floor = Number.isFinite(Number(low)) ? Math.max(Number(low), keep) : keep;
+    return { low: Math.max(floor, round2(base + 0.01)), high };
+  }
+  const keep = Math.max(value, base * (1 - gap));
+  const ceiling = Number.isFinite(Number(high)) ? Math.min(Number(high), keep) : keep;
+  return { low, high: Math.min(ceiling, round2(base - 0.01)) };
 }
 
 /**

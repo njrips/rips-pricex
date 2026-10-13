@@ -1,75 +1,7 @@
 import { preserveEmbeddedSearch } from '../../../utils/shopifyEmbeddedSearch';
 import { canEditClassicTestSetup } from './classicAudienceEdit';
 import { classicCreateStepId } from './classicCreateSteps';
-import { getPlanExperimentId, getPlanExperimentTitle, rollupExperimentStatus } from './classicExperimentHelpers';
-import {
-  isActionableOfferConfig,
-  isOfferExperimentType,
-  resolveExperimentType,
-} from './offerSelection';
-
-/**
- * Classic wizard completion checks for list-row Launch action.
- * Launch only when setup, products/pricing, and audience are configured on every plan.
- */
-export function getClassicExperimentLaunchReadiness(experiment) {
-  const plans = Array.isArray(experiment?.plans) ? experiment.plans : [];
-  if (!plans.length) {
-    return { ready: false, missing: ['products'] };
-  }
-
-  const title = String(experiment?.title || getPlanExperimentTitle(plans[0]) || '').trim();
-  if (!title || title.toLowerCase() === 'untitled test') {
-    return { ready: false, missing: ['setup'] };
-  }
-
-  const missing = new Set();
-  for (const plan of plans) {
-    if (!String(plan.product_id || '').trim()) {
-      missing.add('products');
-    }
-    const arms = Array.isArray(plan.price_arms) ? plan.price_arms : [];
-    const offerExperiment = isOfferExperimentType(resolveExperimentType(experiment) || resolveExperimentType(plan));
-    if (arms.length < 2) {
-      missing.add(offerExperiment ? 'offers' : 'pricing');
-    } else if (offerExperiment) {
-      const hasOffer = arms.some(
-        (arm, index) =>
-          index > 0 &&
-          arm?.role !== 'control' &&
-          arm?.id !== 'control' &&
-          isActionableOfferConfig(arm.offer)
-      );
-      if (!hasOffer) missing.add('offers');
-    } else if (!arms.every(arm => Number.isFinite(Number(arm?.price)) && Number(arm.price) > 0)) {
-      missing.add('pricing');
-    }
-    const audienceUi =
-      plan.metadata?.audience_ui && typeof plan.metadata.audience_ui === 'object'
-        ? plan.metadata.audience_ui
-        : null;
-    const primary =
-      audienceUi?.primaryMetric ||
-      audienceUi?.primary_metric ||
-      plan.goal?.primary_metric ||
-      plan.objective;
-    if (!String(primary || '').trim()) {
-      missing.add('audience');
-    }
-  }
-
-  const allDraftLike = plans.every(plan => {
-    const status = String(plan.status || 'draft')
-      .trim()
-      .toLowerCase();
-    return status === 'draft' || status === 'queued';
-  });
-  if (!allDraftLike) {
-    return { ready: false, missing: ['live'] };
-  }
-
-  return { ready: missing.size === 0, missing: [...missing] };
-}
+import { getPlanExperimentId, rollupExperimentStatus } from './classicExperimentHelpers';
 
 /**
  * A product whose price has already been decided and written to Shopify.
@@ -165,7 +97,23 @@ export function isClassicExperimentEnded(status) {
   );
 }
 
-export function resolveClassicExperimentMenuActions(experiment, { checkoutReady = false } = {}) {
+/**
+ * Whether the experiment has never launched: an unfinished wizard draft, or
+ * plans saved (or queued as a follow-up round) that no test has run yet.
+ * Drafts open in the setup wizard; only launched tests have a details page.
+ */
+export function isClassicDraftExperiment(experiment) {
+  if (experiment?.wizardDraft) return true;
+  const plans = Array.isArray(experiment?.plans) ? experiment.plans : [];
+  if (!plans.length) return false;
+  if (experiment?.archived || plans.every(plan => plan?.archived === true)) return false;
+  const status = String(rollupExperimentStatus(plans) || '')
+    .trim()
+    .toLowerCase();
+  return status === 'draft' || status === 'queued';
+}
+
+export function resolveClassicExperimentMenuActions(experiment) {
   const plans = Array.isArray(experiment?.plans) ? experiment.plans : [];
   const archived =
     Boolean(experiment?.archived) ||
@@ -174,7 +122,6 @@ export function resolveClassicExperimentMenuActions(experiment, { checkoutReady 
   const status = String(rollupExperimentStatus(plans) || experiment?.status || '')
     .trim()
     .toLowerCase();
-  const launch = getClassicExperimentLaunchReadiness(experiment);
   const testIds = collectExperimentTestIds(plans);
 
   const isDraft = !archived && (status === 'draft' || status === 'queued');
@@ -182,19 +129,15 @@ export function resolveClassicExperimentMenuActions(experiment, { checkoutReady 
   const isPaused = !archived && (status === 'paused' || status === 'stopped');
   const isEnded = !archived && isClassicExperimentEnded(status);
 
-  // An unfinished wizard draft has no plan behind it, so there is no detail
-  // page to open and offering one led to a menu item that did nothing.
-  const actions = plans.length ? [{ id: 'view', label: 'View results' }] : [];
+  // A draft has never run, so it has no results to view; it opens in the setup
+  // wizard, and that is where it is launched from, on the Review step.
+  const actions = plans.length && !isDraft ? [{ id: 'view', label: 'View results' }] : [];
 
   if (isDraft) {
     actions.push({ id: 'edit', label: 'Edit test' });
     actions.push({ id: 'duplicate', label: 'Duplicate' });
   } else if ((isRunning || isPaused) && canEditClassicTestSetup(experiment)) {
     actions.push({ id: 'edit', label: 'Edit test' });
-  }
-
-  if (isDraft && launch.ready && checkoutReady) {
-    actions.push({ id: 'launch', label: 'Launch test' });
   }
 
   if (isRunning && testIds.length) {
@@ -283,7 +226,11 @@ export function canDeleteClassicExperimentNow({
 export function getClassicExperimentResumeId(experiment) {
   const plans = Array.isArray(experiment?.plans) ? experiment.plans : [];
   const rep = experiment?.representative || plans[0];
-  return getPlanExperimentId(rep) || experiment?.id || rep?.id || '';
+  const groupId = String(experiment?.id || '');
+  // `title:` and `plan:` ids are made up by the list to group plans that name
+  // no experiment; nothing else knows them, so the wizard is given the plan.
+  const synthetic = /^(title|plan):/.test(groupId);
+  return getPlanExperimentId(rep) || (synthetic ? '' : groupId) || rep?.id || '';
 }
 
 export const CLASSIC_DETAILS_TABS = ['Overview', 'History', 'Settings'];
@@ -337,7 +284,13 @@ export function buildClassicExperimentEditTarget(experiment) {
   const status = String(rollupExperimentStatus(plans) || experiment?.status || '')
     .trim()
     .toLowerCase();
-  const launched = status !== 'draft' && status !== 'queued' && collectExperimentTestIds(plans).length > 0;
+  // Running or paused is only ever reached by launching, so it is enough on
+  // its own: a copy whose test link was lost still opens its editor, not a
+  // blank wizard.
+  const launched =
+    status === 'running' ||
+    status === 'paused' ||
+    (status !== 'draft' && status !== 'queued' && collectExperimentTestIds(plans).length > 0);
   const planId = experiment?.representative?.id || plans[0]?.id || '';
   if (launched && planId) return buildClassicExperimentEditPath(planId);
   return buildClassicWizardResumePath(
@@ -371,13 +324,13 @@ export function filterClassicExperimentsByTab(experiments = [], filter = 'all') 
   const isArchived = experiment =>
     Boolean(experiment?.archived) || String(experiment?.status || '') === 'archived';
 
-  if (tab === 'finished' || tab === 'archived' || tab === 'completed') {
-    return rows.filter(
-      experiment => isArchived(experiment) || isClassicExperimentEnded(experiment.status)
-    );
-  }
+  // Archived rows show only in the Archived tab, so Archive visibly moves a finished test.
+  if (tab === 'archived') return rows.filter(isArchived);
 
   const live = rows.filter(experiment => !isArchived(experiment));
+  if (tab === 'finished' || tab === 'completed') {
+    return live.filter(experiment => isClassicExperimentEnded(experiment.status));
+  }
   if (tab === 'running') return live.filter(experiment => experiment.status === 'running');
   if (tab === 'draft') {
     return live.filter(experiment => experiment.status === 'draft' || experiment.status === 'queued');
@@ -395,7 +348,7 @@ export function listTabAfterClassicAction(action, experiment, currentTab = 'all'
     .toLowerCase();
   if (key === 'pause') return 'paused';
   if (key === 'resume' || key === 'launch') return 'running';
-  if (key === 'archive') return 'finished';
+  if (key === 'archive') return 'archived';
   // Stopping finishes the test, so it leaves the live tabs entirely.
   if (key === 'stop') return 'finished';
   if (key === 'duplicate') return 'draft';
@@ -404,14 +357,48 @@ export function listTabAfterClassicAction(action, experiment, currentTab = 'all'
       ...plan,
       archived: false,
     }));
-    const status = String(rollupExperimentStatus(plans) || experiment?.status || '')
-      .trim()
-      .toLowerCase();
-    if (status === 'running') return 'running';
-    if (status === 'paused' || status === 'stopped') return 'paused';
-    if (isClassicExperimentEnded(status)) return 'finished';
-    if (status === 'draft' || status === 'queued') return 'draft';
-    return 'all';
+    return listTabOfClassicStatus(rollupExperimentStatus(plans) || experiment?.status);
   }
   return currentTab || 'all';
+}
+
+const LIST_TAB_LABELS = Object.freeze({
+  running: 'Running',
+  paused: 'Paused',
+  finished: 'Finished',
+  draft: 'Drafts',
+  archived: 'Archived',
+});
+
+/** The list tab an experiment with this rollup status appears under. */
+export function listTabOfClassicStatus(status) {
+  const key = String(status || '')
+    .trim()
+    .toLowerCase();
+  if (key === 'archived') return 'archived';
+  if (key === 'running') return 'running';
+  if (key === 'paused' || key === 'stopped') return 'paused';
+  if (isClassicExperimentEnded(key)) return 'finished';
+  if (key === 'draft' || key === 'queued') return 'draft';
+  return 'all';
+}
+
+/** History detail for an archive, naming the tab the test left. */
+export function archiveActivityDetail(experiment, { stoppedCount = 0 } = {}) {
+  const stopped = Math.max(0, Number(stoppedCount) || 0);
+  if (stopped > 0) {
+    return `Moved from Paused to the Archived tab. ${stopped} paused product${stopped === 1 ? ' was' : 's were'} released so other tests can use ${stopped === 1 ? 'it' : 'them'}; Restore brings the test back as Paused.`;
+  }
+  const plans = Array.isArray(experiment?.plans) ? experiment.plans : [];
+  const from =
+    LIST_TAB_LABELS[listTabOfClassicStatus(rollupExperimentStatus(plans) || experiment?.status)];
+  return from && from !== 'Archived'
+    ? `Moved from ${from} to the Archived tab.`
+    : 'Moved to the Archived tab.';
+}
+
+/** History detail for a restore, naming the tab the test returns to. */
+export function restoreActivityDetail(experiment) {
+  const to = LIST_TAB_LABELS[listTabAfterClassicAction('restore', experiment)];
+  return to ? `Moved from Archived back to ${to}.` : 'Moved out of the Archived tab.';
 }

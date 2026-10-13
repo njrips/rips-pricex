@@ -4,22 +4,16 @@ import { formatVisitorCount } from './estimateSignificanceDuration';
 import { formatTrafficPercent } from './variationsStepHelpers';
 import { MIN_VISITORS_FOR_REVENUE_GUARDRAIL } from './revenueGuardrail';
 import {
+  BUILTIN_SECONDARY_METRICS,
   classicSegmentLabel,
+  normalizeSecondaryEvents,
   primaryMetricLabel,
+  secondaryMetricLabel,
 } from '../targeting/smartPricingAudienceHelpers';
 import { isOfferExperimentType } from './offerSelection';
 
 const ALL_DEVICES = ['Desktop', 'Mobile', 'Tablet'];
 const ALL_SOURCES = ['Direct', 'Search', 'Social', 'Email', 'Paid ads', 'Referral'];
-
-/** @type {Array<'test' | 'traffic' | 'audience' | 'results' | 'safety'>} */
-export const REVIEW_OVERVIEW_LINE_ORDER = [
-  'test',
-  'traffic',
-  'audience',
-  'results',
-  'safety',
-];
 
 /** Merchant-facing pricing mode labels (Step 5 spec §3.1). */
 export function formatReviewPricingModeLabel(mode) {
@@ -82,10 +76,9 @@ function variationOverviewLabel(arm) {
   return name || 'Variation';
 }
 
-function productsOverviewText(selectedCount, plansLength, pickMode) {
+function productCountText(selectedCount, plansLength) {
   const count = Number(selectedCount) || Number(plansLength) || 0;
-  const scope = pickMode === 'all' ? 'All products' : 'Picked products';
-  return `${count} ${count === 1 ? 'product' : 'products'} · ${scope}`;
+  return `${count} ${count === 1 ? 'product' : 'products'}`;
 }
 
 function variationOverviewSummary(variations = []) {
@@ -122,25 +115,28 @@ function countriesOverviewText(audience) {
 }
 
 /**
- * The guardrail is checked per product and starts at its own visitor floor,
- * not at the results sample, so neither is borrowed from minSampleSize.
+ * The guardrail is checked per product and never below its own visitor floor,
+ * so a results sample under that floor is not when it starts.
  */
 function guardrailOverviewText(audience) {
   const revenueGuardrailRow = (audience?.guardrails || []).find(row => row?.id === 'revenue');
   if (revenueGuardrailRow && revenueGuardrailRow.on === false) {
-    return 'Guardrail OFF';
+    return 'Off';
   }
   const thresholdRaw = String(revenueGuardrailRow?.threshold || '-10%').replace(/^-/, '');
   const thresholdPercent = thresholdRaw.replace(/%$/, '') || '10';
-  const minVisitors = formatVisitorCount(MIN_VISITORS_FOR_REVENUE_GUARDRAIL);
-  return `Guardrail ON · Stop a product if Rev/visitor drops >${thresholdPercent}% vs control, after ${minVisitors} visitors/variation`;
+  const startsAt = formatVisitorCount(
+    Math.max(MIN_VISITORS_FOR_REVENUE_GUARDRAIL, parseMinSampleSize(audience?.minSampleSize))
+  );
+  return `On · Stop testing a product if revenue per visitor for any variation drops more than ${thresholdPercent}% below the control, after ${startsAt} visitors per variation`;
 }
 
 /**
- * Five-line review overview (Google doc Step 5, page 32+).
- * @returns {{ test: string, traffic: string, audience: string, results: string, safety: string }}
+ * Step 5 summary, one section per part of the setup (Google doc Step 5
+ * section titles). Rows are label/value pairs; a row with no value is left out.
+ * @returns {Array<{ id: string, title: string, rows: Array<{ label: string, value: string }> }>}
  */
-export function buildReviewOverviewLines({
+export function buildReviewSections({
   name,
   experimentType = 'price_test',
   experimentTypeLabel = 'Price test',
@@ -155,38 +151,81 @@ export function buildReviewOverviewLines({
 }) {
   const isOfferTest = isOfferExperimentType(experimentType);
   const typeLabel = experimentTypeLabel || (isOfferTest ? 'Offer test' : 'Price test');
-  const productsText = productsOverviewText(selectedCount, plans?.length, pickMode);
   const pricingText = resolvePricingOverviewText({
     isOfferTest,
     priceMode,
     pricingByArm,
     variations,
   });
-
-  const testTitle = String(name || '').trim() || 'Untitled test';
-  const trafficAllocation = audience?.trafficAllocation ?? 100;
-  const variationSummary = variationOverviewSummary(variations);
-  const primaryLabel = primaryMetricLabel(audience?.primaryMetric, {
-    primaryCustomGoal: audience?.primaryCustomGoal,
-  });
+  const primaryKey = audience?.primaryCustomGoal ? '' : audience?.primaryMetric;
+  // Only the standard metrics: the launch drops anything else Step 4 no
+  // longer shows, so the summary must not promise it.
+  const secondaryLabels = normalizeSecondaryEvents(audience?.secondaryMetrics)
+    .filter(key => BUILTIN_SECONDARY_METRICS.has(key) && key !== primaryKey)
+    .map(key => secondaryMetricLabel(key));
   const confidence = significanceEstimate?.confidenceLevel || 90;
-  const minVisitors = formatVisitorCount(parseMinSampleSize(audience?.minSampleSize));
 
-  return {
-    test: `${testTitle} — ${typeLabel} · ${productsText} · ${pricingText}`,
-    traffic: `${trafficAllocation}% of eligible visitors · ${variationSummary}`,
-    audience: `${classicSegmentLabel(audience?.segment)} · ${devicesOverviewText(
-      audience,
-    )} · ${sourcesOverviewText(audience)} · ${countriesOverviewText(audience)}`,
-    results: `Primary: ${primaryLabel} · ${confidence}% confidence · ${minVisitors} visitors/variation`,
-    safety: guardrailOverviewText(audience),
-  };
+  const sections = [
+    {
+      id: 'basics',
+      title: 'Basics',
+      rows: [
+        { label: 'Test name', value: String(name || '').trim() || 'Untitled test' },
+        { label: 'Test type', value: typeLabel },
+      ],
+    },
+    {
+      id: 'products',
+      title: 'Products & prices',
+      rows: [
+        { label: 'Products', value: productCountText(selectedCount, plans?.length) },
+        { label: 'Selection', value: pickMode === 'all' ? 'All products' : 'Picked products' },
+        { label: isOfferTest ? 'Offers' : 'Prices', value: pricingText },
+      ],
+    },
+    {
+      id: 'variations',
+      title: 'Variations & traffic',
+      rows: [
+        {
+          label: 'Traffic allocation',
+          value: `${audience?.trafficAllocation ?? 100}% of eligible visitors`,
+        },
+        { label: 'Traffic split', value: variationOverviewSummary(variations) },
+      ],
+    },
+    {
+      id: 'audience',
+      title: 'Audience',
+      rows: [
+        { label: 'Audience segment', value: classicSegmentLabel(audience?.segment) },
+        { label: 'Device type', value: devicesOverviewText(audience) },
+        { label: 'Traffic source', value: sourcesOverviewText(audience) },
+        { label: 'Countries', value: countriesOverviewText(audience) },
+      ],
+    },
+    {
+      id: 'metrics',
+      title: 'Metrics & guardrail',
+      rows: [
+        {
+          label: 'Primary success metric',
+          value: primaryMetricLabel(audience?.primaryMetric, {
+            primaryCustomGoal: audience?.primaryCustomGoal,
+          }),
+        },
+        { label: 'Secondary metrics', value: secondaryLabels.join(', ') },
+        { label: 'Confidence level', value: `${confidence}%` },
+        {
+          label: 'Minimum visitors per variation',
+          value: formatVisitorCount(parseMinSampleSize(audience?.minSampleSize)),
+        },
+        { label: 'Revenue guardrail', value: guardrailOverviewText(audience) },
+      ],
+    },
+  ];
+  return sections.map(section => ({
+    ...section,
+    rows: section.rows.filter(row => String(row.value || '').trim()),
+  }));
 }
-
-export const REVIEW_OVERVIEW_LABELS = {
-  test: 'Test',
-  traffic: 'Traffic',
-  audience: 'Audience',
-  results: 'Results',
-  safety: 'Safety',
-};

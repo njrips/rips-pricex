@@ -81,7 +81,9 @@ function mapTestToStorefrontPayload(test) {
   const excludedProductIds = normalizeProductIdList(test.segments?.excluded_product_ids);
   const goalEvents = (Array.isArray(test.goal?.secondary) ? test.goal.secondary : [])
     .map(item => {
-      if (!item || typeof item !== 'object') {
+      // Built-in secondaries (conversion rate, AOV, …) come from orders, not
+      // storefront events.
+      if (!item || typeof item !== 'object' || item.source === 'builtin') {
         return null;
       }
       const eventName = String(item.event_name || item.eventName || '').trim();

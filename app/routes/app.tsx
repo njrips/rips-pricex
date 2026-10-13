@@ -36,6 +36,7 @@ import {
   withCurrentEmbeddedSearch,
 } from "../utils/shopifyEmbeddedSearch";
 import { buildPricingPlansUrl } from "../utils/pricingPlansUrl";
+import { resolveAppHandle } from "../utils/appHandle.server";
 import "../styles/classic-theme.css";
 
 function SupportLinkHandler() {
@@ -189,8 +190,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   const shop = session.shop;
   const accessToken = session.accessToken || "";
-  const appHandle = process.env.SHOPIFY_APP_HANDLE || "ripspricex";
-  const upgradeUrl = buildPricingPlansUrl(shop, appHandle);
+  const appHandleRequest = resolveAppHandle(admin);
   // Mirrors devEntitleAllEnabled on the server: the local-pilot unlock ships
   // switched on in .env.example, so production must ignore it or a copied env
   // would unlock the paid tiers for every install.
@@ -226,6 +226,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   }
 
   syncShopIntoExpressApi({ apiBase, shop, accessToken, scope });
+  const appHandle = await appHandleRequest;
+  const upgradeUrl = buildPricingPlansUrl(shop, appHandle);
 
   const staffEmail = String(
     (session as { email?: string | null }).email ||
@@ -245,6 +247,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     // activeSubscriptions query is timing out, and the merchant is seeing a
     // stale answer rather than a wrong one.
     entitlementSource,
+    appHandle,
   });
 
   return {

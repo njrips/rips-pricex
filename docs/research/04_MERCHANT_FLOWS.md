@@ -32,7 +32,7 @@ Create (/app/experiments/new)
   4 Audience + success metric
   5 Review & launch
        · Subtitle: check settings before launching (pause/stop anytime)
-       · Five-line summary: Test · Traffic · Audience · Results · Safety
+       · Sections: Basics · Products & prices · Variations & traffic · Audience · Metrics & guardrail (label/value rows, no per-section Edit)
          (`reviewLaunchOverview.js` — matches Global naming doc Step 5)
        · Section cards: Basics · Products & prices (or Products & offers) ·
          Variations & traffic · Audience · Metrics & guardrail (Edit per section)

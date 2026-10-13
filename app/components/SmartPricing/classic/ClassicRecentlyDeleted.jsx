@@ -72,7 +72,7 @@ export default function ClassicRecentlyDeleted({ shopDomain, refreshKey, onResto
       setItems(current => current.filter(other => other.key !== item.key));
       onMessage?.({
         type: 'success',
-        text: `Restored ${item.title}. It is under Finished, archived.`,
+        text: `Restored ${item.title}. It is in the Archived tab.`,
       });
       await onRestored?.();
     } catch (err) {

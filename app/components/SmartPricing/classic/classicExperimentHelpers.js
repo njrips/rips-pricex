@@ -199,12 +199,35 @@ export function formatExperimentTypeLabel(raw) {
   return key.replace(/_/g, ' ').toUpperCase();
 }
 
+/**
+ * The experiment a follow-up round belongs to when it carries no id itself.
+ *
+ * A round inherits its parent's experiment id when it is queued, so one queued
+ * before the parent had an id never got one. Grouped by title instead, it
+ * showed as a separate draft test under the parent's name.
+ */
+function inheritedExperimentId(plan, plansById) {
+  const seen = new Set();
+  let parentId = String(plan?.parent_plan_id || '').trim();
+  while (parentId && !seen.has(parentId)) {
+    seen.add(parentId);
+    const parent = plansById.get(parentId);
+    if (!parent) return null;
+    const id = getPlanExperimentId(parent);
+    if (id) return id;
+    parentId = String(parent.parent_plan_id || '').trim();
+  }
+  return null;
+}
+
 export function groupPlansIntoExperiments(plans = []) {
   const buckets = new Map();
+  const rows = Array.isArray(plans) ? plans : [];
+  const plansById = new Map(rows.filter(plan => plan?.id).map(plan => [String(plan.id), plan]));
 
-  (Array.isArray(plans) ? plans : []).forEach(plan => {
+  rows.forEach(plan => {
     if (!plan?.id) return;
-    let experimentId = getPlanExperimentId(plan);
+    let experimentId = getPlanExperimentId(plan) || inheritedExperimentId(plan, plansById);
     let title = getPlanExperimentTitle(plan);
 
     if (!experimentId) {
@@ -473,7 +496,7 @@ export function formatClassicStatusLabel(status, _experimentType) {
   }
   if (key === 'running') return 'Running';
   if (key === 'paused') return 'Paused';
-  if (key === 'archived') return 'Finished';
+  if (key === 'archived') return 'Archived';
   return 'Draft';
 }
 

@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 /**
- * Step 5 is the five-line summary and the launch buttons. The per-step cards
- * that used to sit underneath it (Basics, Products & prices, Variations &
- * traffic, Audience, Metrics & guardrail) repeated every earlier step and are
- * gone; the stepper and "Back to edit" go back to any step.
+ * Step 5 is one section per part of the setup (Basics, Products & prices,
+ * Variations & traffic, Audience, Metrics & guardrail) as label/value rows,
+ * without per-section Edit links: the stepper and "Back to edit" go back to
+ * any step.
  */
 import { act, createElement as h } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -90,20 +90,61 @@ async function renderPanel(props = {}) {
   });
 }
 
-describe('overview summary', () => {
-  it('reads as the five Step 5 lines', async () => {
+function sectionText() {
+  return [...container.querySelectorAll('section')].map(section => ({
+    title: section.querySelector('h3')?.textContent,
+    rows: [...section.querySelectorAll('dt')].map(
+      dt => `${dt.textContent}: ${dt.nextElementSibling?.textContent}`
+    ),
+  }));
+}
+
+describe('section summary', () => {
+  it('reads as the five Step 5 sections', async () => {
     await renderPanel({
       priceMode: 'ai',
       pricingByArm: { var_a: { priceMode: 'ai' }, var_b: { priceMode: 'manual' } },
     });
-    const items = [...container.querySelectorAll('li')].map(node => node.textContent);
-    expect(items).toEqual([
-      'Test: Test 007 — Price test · 2 products · All products · Mixed pricing per variation',
-      'Traffic: 100% of eligible visitors · Control 34% · Var A 33% · Var B 33%',
-      'Audience: All visitors · All devices · All sources · All countries',
-      'Results: Primary: Revenue per visitor · 90% confidence · 5,000 visitors/variation',
-      'Safety: Guardrail ON · Stop a product if Rev/visitor drops >10% vs control, after 5,000 visitors/variation',
+    expect(sectionText()).toEqual([
+      { title: 'Basics', rows: ['Test name: Test 007', 'Test type: Price test'] },
+      {
+        title: 'Products & prices',
+        rows: ['Products: 2 products', 'Selection: All products', 'Prices: Mixed pricing per variation'],
+      },
+      {
+        title: 'Variations & traffic',
+        rows: [
+          'Traffic allocation: 100% of eligible visitors',
+          'Traffic split: Control 34% · Var A 33% · Var B 33%',
+        ],
+      },
+      {
+        title: 'Audience',
+        rows: [
+          'Audience segment: All visitors',
+          'Device type: All devices',
+          'Traffic source: All sources',
+          'Countries: All countries',
+        ],
+      },
+      {
+        title: 'Metrics & guardrail',
+        rows: [
+          'Primary success metric: Revenue per visitor',
+          'Confidence level: 90%',
+          'Minimum visitors per variation: 5,000',
+          'Revenue guardrail: On · Stop testing a product if revenue per visitor for any variation drops more than 10% below the control, after 5,000 visitors per variation',
+        ],
+      },
     ]);
+  });
+
+  it('names each section for assistive tech', async () => {
+    await renderPanel();
+    for (const section of container.querySelectorAll('section')) {
+      const heading = document.getElementById(section.getAttribute('aria-labelledby'));
+      expect(heading?.tagName).toBe('H3');
+    }
   });
 
   it('says Off rather than a threshold it will not enforce', async () => {
@@ -113,24 +154,14 @@ describe('overview summary', () => {
         guardrails: [{ id: 'revenue', label: 'Revenue per visitor', threshold: '-12%', on: false }],
       },
     });
-    expect(container.textContent).toContain('Safety: Guardrail OFF');
+    const metrics = sectionText().find(section => section.title === 'Metrics & guardrail');
+    expect(metrics.rows).toContain('Revenue guardrail: Off');
   });
 });
 
-describe('nothing underneath the summary', () => {
-  it('drops the per-step cards and their Edit links', async () => {
+describe('no per-section editing', () => {
+  it('has no Edit links in the sections', async () => {
     await renderPanel();
-    expect(container.querySelectorAll('h2, h3')).toHaveLength(0);
-    for (const heading of [
-      'Basics',
-      'Products & prices',
-      'Variations & traffic',
-      'Metrics & guardrail',
-      'Secondary',
-      'Analysis',
-    ]) {
-      expect(container.textContent).not.toContain(heading);
-    }
     const edits = [...container.querySelectorAll('button')].filter(
       node => (node.textContent || '').trim() === 'Edit'
     );
@@ -149,12 +180,12 @@ describe('banner order', () => {
   it('puts checkout trouble above the Step 5 overview', async () => {
     await renderPanel({ checkoutReady: false, checkoutReadiness: { message: 'Fix setup.' } });
     const text = container.textContent;
-    expect(text.indexOf('Checkout is not ready')).toBeLessThan(text.indexOf('Test: Test 007'));
+    expect(text.indexOf('Checkout is not ready')).toBeLessThan(text.indexOf('Basics'));
   });
 
   it('leads with the overview when the timeline is on track', async () => {
     await renderPanel();
-    expect(container.textContent.startsWith('Test: Test 007')).toBe(true);
+    expect(container.textContent.startsWith('Basics')).toBe(true);
     expect(container.textContent).not.toContain('Estimated collection window');
   });
 
@@ -168,7 +199,7 @@ describe('banner order', () => {
     });
     const text = container.textContent;
     expect(text.indexOf('Traffic may be too low for a reliable result')).toBeLessThan(
-      text.indexOf('Test: Test 007')
+      text.indexOf('Basics')
     );
   });
 

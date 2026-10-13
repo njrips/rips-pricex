@@ -85,7 +85,11 @@ function initDatabase() {
       ssl: sslConfig,
       max: getPoolMax(),
       idleTimeoutMillis: parseInt(process.env.DATABASE_POOL_IDLE_TIMEOUT_MS, 10) || 30000,
-      connectionTimeoutMillis: parseInt(process.env.DATABASE_POOL_CONNECT_TIMEOUT_MS, 10) || 2000,
+      // Queries take ~100ms, so a full pool frees up quickly. At 2s, an admin
+      // page loading every product's results made storefront visits fail
+      // outright, and those shoppers were never counted. The storefront gives
+      // up after 8s, so this stays well inside that.
+      connectionTimeoutMillis: parseInt(process.env.DATABASE_POOL_CONNECT_TIMEOUT_MS, 10) || 5000,
     });
 
     pool.on('error', err => {
@@ -218,6 +222,7 @@ initDatabase();
 module.exports = {
   query,
   getClient,
+  getPoolMax,
   initDatabase,
   closeDatabase,
   withTransaction,

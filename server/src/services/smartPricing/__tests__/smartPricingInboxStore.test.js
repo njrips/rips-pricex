@@ -86,6 +86,42 @@ describe('smartPricingInboxStore', () => {
     expect(client.release).toHaveBeenCalled();
   });
 
+  it('keeps a launched plan linked when a stale pre-launch copy is saved over it', async () => {
+    const client = {
+      query: jest.fn(async sql => {
+        if (typeof sql === 'string' && sql.includes('FOR UPDATE')) {
+          return {
+            rows: [{ plan_id: 'SP-1', archived: false, status: 'running', test_id: 't-1' }],
+          };
+        }
+        return { rowCount: 0, rows: [] };
+      }),
+      release: jest.fn(),
+    };
+    getClient.mockResolvedValueOnce(client);
+    query.mockResolvedValue({ rows: [] });
+
+    await saveInboxPlans('demo.myshopify.com', [
+      { id: 'SP-1', title: 'Tj - basket redesign', status: 'queued' },
+    ]);
+
+    const insert = findCall(client, 'INSERT INTO smart_pricing_inbox_plans');
+    expect(JSON.parse(insert[1][2])).toMatchObject({ status: 'running', test_id: 't-1' });
+    expect(insert[1][3]).toBe('running');
+    expect(insert[1][4]).toBe('t-1');
+  });
+
+  it('still lets a save move a launched plan forward', () => {
+    const { keepLaunchedState } = require('../../../models/smartPricingInboxStore');
+    const stored = { status: 'running', test_id: 't-1' };
+    expect(keepLaunchedState({ id: 'SP-1', status: 'paused', test_id: 't-1' }, stored)).toMatchObject(
+      { status: 'paused', test_id: 't-1' }
+    );
+    expect(keepLaunchedState({ id: 'SP-2', status: 'queued' }, null)).toMatchObject({
+      status: 'queued',
+    });
+  });
+
   it('does not check out a client when plans and deletes are empty', async () => {
     query.mockResolvedValueOnce({ rows: [] });
 
@@ -143,6 +179,49 @@ describe('smartPricingInboxStore', () => {
 
     const update = findCall(client, 'UPDATE smart_pricing_inbox_plans');
     expect(JSON.parse(update[1][2]).status).toBe('paused');
+  });
+
+  it('keeps an archived plan at the status it was shelved with', async () => {
+    const client = lockingClient({
+      'SP-1': {
+        plan_id: 'SP-1',
+        plan_json: { id: 'SP-1', status: 'paused', test_id: 't-1', archived: true },
+        archived: true,
+      },
+    });
+    getClient.mockResolvedValueOnce(client);
+    query.mockResolvedValueOnce({ rows: [] });
+
+    await patchInboxPlansFromSync('demo.myshopify.com', [
+      { plan_id: 'SP-1', synced: true, inbox_status: 'completed', test_status: 'stopped' },
+    ]);
+
+    const update = findCall(client, 'UPDATE smart_pricing_inbox_plans');
+    expect(JSON.parse(update[1][2]).status).toBe('paused');
+  });
+
+  it('does not finish a paused plan on data alone, only on the test’s own decision', async () => {
+    const paused = () =>
+      lockingClient({
+        'SP-1': { plan_id: 'SP-1', plan_json: { id: 'SP-1', status: 'paused', test_id: 't-1' } },
+      });
+    const row = { plan_id: 'SP-1', synced: true, inbox_status: 'completed', test_status: 'stopped' };
+
+    let client = paused();
+    getClient.mockResolvedValueOnce(client);
+    query.mockResolvedValueOnce({ rows: [] });
+    await patchInboxPlansFromSync('demo.myshopify.com', [row]);
+    expect(JSON.parse(findCall(client, 'UPDATE smart_pricing_inbox_plans')[1][2]).status).toBe(
+      'paused'
+    );
+
+    client = paused();
+    getClient.mockResolvedValueOnce(client);
+    query.mockResolvedValueOnce({ rows: [] });
+    await patchInboxPlansFromSync('demo.myshopify.com', [{ ...row, auto_decision: 'control' }]);
+    expect(JSON.parse(findCall(client, 'UPDATE smart_pricing_inbox_plans')[1][2]).status).toBe(
+      'completed'
+    );
   });
 
   // A patch used to rewrite the shop's whole plan set from a snapshot read
@@ -323,6 +402,192 @@ describe('smartPricingInboxStore', () => {
     });
   });
 
+  describe('archive, restore and delete go into the lifecycle log', () => {
+    const EVENT_INSERT = 'INSERT INTO smart_pricing_product_events';
+
+    function eventInsert() {
+      return query.mock.calls.find(call => String(call[0]).includes(EVENT_INSERT));
+    }
+
+    function eventRows(call) {
+      const [, planIds, testIds, , , types, payloads] = call[1];
+      return planIds.map((planId, i) => ({
+        plan_id: planId,
+        test_id: testIds[i],
+        event_type: types[i],
+        payload: JSON.parse(payloads[i]),
+      }));
+    }
+
+    function savingClient(previous = []) {
+      return {
+        query: jest.fn(async sql =>
+          String(sql).includes("plan_json->>'archived'") && String(sql).includes('FOR UPDATE')
+            ? { rows: previous }
+            : { rowCount: 0, rows: [] }
+        ),
+        release: jest.fn(),
+      };
+    }
+
+    beforeEach(() => {
+      query.mockImplementation(async () => ({ rows: [] }));
+    });
+
+    afterEach(() => {
+      query.mockReset();
+    });
+
+    it('logs a save that archives a plan, under the id the browser logged it with', async () => {
+      const at = new Date().toISOString();
+      getClient.mockResolvedValueOnce(savingClient([{ plan_id: 'SP-1', archived: false }]));
+
+      await saveInboxPlans('demo.myshopify.com', [
+        {
+          id: 'SP-1',
+          test_id: 't1',
+          product_title: 'Hoodie',
+          status: 'completed',
+          archived: true,
+          archived_at: at,
+          metadata: {
+            experiment_id: 'exp-1',
+            activity_log: [
+              {
+                id: 'archived_1',
+                kind: 'archived',
+                at,
+                actor: 'Ripon',
+                detail: 'Moved from Finished to the Archived tab.',
+              },
+            ],
+          },
+        },
+      ]);
+
+      const [row] = eventRows(eventInsert());
+      expect(row).toMatchObject({ plan_id: 'SP-1', test_id: 't1', event_type: 'archived' });
+      expect(row.payload).toMatchObject({
+        activity_id: 'archived_1',
+        actor_name: 'Ripon',
+        detail: 'Moved from Finished to the Archived tab.',
+        experiment_id: 'exp-1',
+        product_title: 'Hoodie',
+        status: 'completed',
+      });
+    });
+
+    it('logs a restore, and does not borrow an old entry from the plan history', async () => {
+      getClient.mockResolvedValueOnce(savingClient([{ plan_id: 'SP-1', archived: true }]));
+
+      await saveInboxPlans('demo.myshopify.com', [
+        {
+          id: 'SP-1',
+          test_id: 't1',
+          archived: false,
+          metadata: {
+            activity_log: [{ id: 'restored_old', kind: 'restored', at: '2026-01-01T00:00:00.000Z' }],
+          },
+        },
+      ]);
+
+      const [row] = eventRows(eventInsert());
+      expect(row.event_type).toBe('restored');
+      expect(row.payload.source).toBe('archive');
+      expect(row.payload.activity_id).toBeUndefined();
+    });
+
+    it('logs nothing for a save that leaves archived as it was, or a plan that is new', async () => {
+      getClient.mockResolvedValueOnce(savingClient([{ plan_id: 'SP-1', archived: true }]));
+
+      await saveInboxPlans('demo.myshopify.com', [
+        { id: 'SP-1', test_id: 't1', archived: true },
+        { id: 'SP-2', archived: true },
+      ]);
+
+      expect(eventInsert()).toBeUndefined();
+    });
+
+    it('still saves when the log cannot be written', async () => {
+      getClient.mockResolvedValueOnce(savingClient([{ plan_id: 'SP-1', archived: false }]));
+      query.mockImplementation(async sql => {
+        if (String(sql).includes(EVENT_INSERT)) throw new Error('constraint violation');
+        return { rows: [] };
+      });
+      const consoleError = jest.spyOn(console, 'error').mockImplementation(() => {});
+
+      try {
+        await expect(
+          saveInboxPlans('demo.myshopify.com', [{ id: 'SP-1', test_id: 't1', archived: true }])
+        ).resolves.toBeTruthy();
+        expect(String(consoleError.mock.calls[0]?.[0])).toContain(
+          'Failed to record Smart Pricing lifecycle events'
+        );
+      } finally {
+        consoleError.mockRestore();
+      }
+    });
+
+    it('logs an archive made through a single-plan patch', async () => {
+      const client = lockingClient({
+        'SP-1': { plan_id: 'SP-1', plan_json: { id: 'SP-1', status: 'completed', test_id: 't1' } },
+      });
+      getClient.mockResolvedValueOnce(client);
+
+      await patchInboxPlan('demo.myshopify.com', 'SP-1', { archived: true });
+
+      const [row] = eventRows(eventInsert());
+      expect(row).toMatchObject({ plan_id: 'SP-1', event_type: 'archived' });
+    });
+
+    it('logs a delete for each plan Restore can bring back, with when it is purged', async () => {
+      getClient.mockResolvedValueOnce({
+        query: jest.fn(async sql => {
+          if (String(sql).includes('DELETE FROM smart_pricing_inbox_plans')) {
+            return {
+              rows: [
+                { plan_id: 'SP-1', test_id: 't1', plan_json: { id: 'SP-1', test_id: 't1' } },
+                { plan_id: 'SP-draft', test_id: null, plan_json: { id: 'SP-draft' } },
+              ],
+            };
+          }
+          return { rows: [] };
+        }),
+        release: jest.fn(),
+      });
+
+      await deleteExperimentEverywhere('demo.myshopify.com', 'exp-1', { testIds: ['t1'] });
+
+      const rows = eventRows(eventInsert());
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({ plan_id: 'SP-1', event_type: 'deleted' });
+      expect(new Date(rows[0].payload.purge_after).getTime()).toBeGreaterThan(Date.now());
+    });
+
+    it('logs a restore from Recently deleted as such', async () => {
+      getClient.mockResolvedValueOnce({
+        query: jest.fn(async sql => {
+          const text = String(sql);
+          if (text.startsWith('UPDATE tests')) {
+            return { rows: [{ id: 't1', name: 'Smart Pricing · Spring · Hoodie', status: 'completed', metadata: {} }] };
+          }
+          if (text.includes("details->'plan'")) {
+            return { rows: [{ entity_id: 't1', plan: { id: 'SP-1', status: 'completed' } }] };
+          }
+          if (text.includes('INSERT INTO smart_pricing_inbox_plans')) return { rowCount: 1 };
+          return { rows: [], rowCount: 0 };
+        }),
+        release: jest.fn(),
+      });
+
+      await restoreDeletedExperiment('demo.myshopify.com', 'exp-1');
+
+      const [row] = eventRows(eventInsert());
+      expect(row).toMatchObject({ plan_id: 'SP-1', test_id: 't1', event_type: 'restored' });
+      expect(row.payload.source).toBe('recently_deleted');
+    });
+  });
+
   it('deletes an experiment by archiving all its tests and removing its plans', async () => {
     const client = {
       query: jest.fn(async sql => {
@@ -362,6 +627,51 @@ describe('smartPricingInboxStore', () => {
       deleted_plan_ids: ['SP-1'],
       test_ids: ['t1', 't3', 't2'],
     });
+  });
+
+  it('records a never-launched plan with no experiment under its own id, so it stays deleted', async () => {
+    const client = {
+      query: jest.fn(async sql => {
+        if (String(sql).includes('DELETE FROM smart_pricing_inbox_plans')) {
+          return {
+            rows: [
+              { plan_id: 'SP-2153', test_id: null, plan_json: { id: 'SP-2153', metadata: { experiment_id: null } } },
+              { plan_id: 'SP-9', test_id: null, plan_json: { id: 'SP-9', metadata: { experiment_id: 'exp-2' } } },
+            ],
+          };
+        }
+        return { rows: [] };
+      }),
+      release: jest.fn(),
+    };
+    getClient.mockResolvedValueOnce(client);
+
+    await deleteExperimentEverywhere('demo.myshopify.com', '', { planIds: ['SP-2153', 'SP-9'] });
+
+    const record = findCall(client, 'INSERT INTO smart_pricing_deletions');
+    // SP-9 belongs to exp-2, whose other plans must stay saveable.
+    expect(record[1]).toEqual(['demo.myshopify.com', ['experiment'], ['SP-2153']]);
+  });
+
+  it('refuses to save a deleted never-launched plan back from a stale copy', async () => {
+    const client = {
+      query: jest.fn(async (sql, params) => {
+        if (String(sql).includes('FROM smart_pricing_deletions')) {
+          expect(params[1]).toContain('SP-2153');
+          return { rows: [{ entity_type: 'experiment', entity_id: 'SP-2153' }] };
+        }
+        return { rows: [], rowCount: 0 };
+      }),
+      release: jest.fn(),
+    };
+    getClient.mockResolvedValueOnce(client);
+    query.mockResolvedValue({ rows: [] });
+
+    const result = await saveInboxPlans('demo.myshopify.com', [
+      { id: 'SP-2153', status: 'queued', metadata: { experiment_id: null } },
+    ]);
+
+    expect(result.refused_plan_ids).toEqual(['SP-2153']);
   });
 
   describe('only deletes what was archived first', () => {
@@ -666,18 +976,52 @@ describe('smartPricingInboxStore', () => {
     });
 
     it('looks only at live Smart Pricing tests with no plan, and inserts without overwriting', async () => {
+      query.mockResolvedValueOnce({ rows: [] });
       query.mockResolvedValueOnce({ rows: [orphan] });
       query.mockResolvedValue({ rows: [] });
 
       await restoreOrphanedLivePlans('Demo.myshopify.com');
 
-      const [selectSql, selectParams] = query.mock.calls[0];
+      const [selectSql, selectParams] = query.mock.calls[1];
       expect(selectSql).toContain("t.status IN ('running', 'paused')");
       expect(selectSql).toContain('NOT EXISTS');
       expect(selectParams[0]).toBe('demo.myshopify.com');
       const insert = query.mock.calls.find(call => String(call[0]).includes('INSERT INTO'));
       expect(insert[0]).toContain('ON CONFLICT (shop_domain, plan_id) DO NOTHING');
       expect(insert[1][1]).toBe('SP-249');
+    });
+
+    it('relinks a live test to its own plan when that plan lost its test id', async () => {
+      query.mockResolvedValueOnce({
+        rows: [
+          {
+            id: 'test-basket',
+            status: 'running',
+            started_at: new Date('2026-10-12T10:00:00Z'),
+            plan_id: 'SP-basket',
+          },
+        ],
+      });
+      query.mockResolvedValue({ rows: [] });
+      const client = lockingClient({
+        'SP-basket': {
+          plan_id: 'SP-basket',
+          plan_json: { id: 'SP-basket', title: 'Tj - basket redesign', status: 'queued' },
+          status: 'queued',
+          test_id: null,
+        },
+      });
+      getClient.mockResolvedValueOnce(client);
+
+      const result = await restoreOrphanedLivePlans('Demo.myshopify.com');
+
+      const [relinkSql] = query.mock.calls[0];
+      expect(relinkSql).toContain("p.plan_id = t.metadata->>'smart_pricing_plan_id'");
+      expect(relinkSql).toContain('p.test_id IS NULL');
+      const update = findCall(client, 'UPDATE smart_pricing_inbox_plans');
+      const saved = JSON.parse(update[1].find(value => String(value).startsWith('{')));
+      expect(saved).toMatchObject({ status: 'running', test_id: 'test-basket' });
+      expect(result.relinked).toBe(1);
     });
 
     const classicOrphan = {

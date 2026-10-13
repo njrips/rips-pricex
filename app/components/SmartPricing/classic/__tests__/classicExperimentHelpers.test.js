@@ -97,6 +97,59 @@ describe('classicExperimentHelpers', () => {
     expect(experiments[0].productCount).toBe(2);
   });
 
+  it('keeps a follow-up round that names no experiment with its parent', () => {
+    // Queued before the parent had an experiment id, Round 2 fell back to
+    // title grouping and showed as a separate draft under the parent's name.
+    const plans = [
+      {
+        id: 'parent',
+        title: 'Smart Price Test 1 · Snowboard',
+        status: 'applied',
+        test_id: 't1',
+        metadata: { experiment_id: 'legacy_abc' },
+      },
+      {
+        id: 'sibling',
+        title: 'Smart Price Test 1 · Hydrogen',
+        status: 'running',
+        test_id: 't2',
+        metadata: { experiment_id: 'legacy_abc' },
+      },
+      {
+        id: 'round2',
+        title: 'Smart Price Test 1 · Snowboard · Round 2',
+        status: 'queued',
+        parent_plan_id: 'parent',
+        metadata: { experiment_id: null },
+      },
+    ];
+    const experiments = groupPlansIntoExperiments(plans);
+    expect(experiments).toHaveLength(1);
+    expect(experiments[0].id).toBe('legacy_abc');
+    expect(experiments[0].plans.map(plan => plan.id).sort()).toEqual(['parent', 'round2', 'sibling']);
+    expect(experiments[0].status).toBe('running');
+  });
+
+  it('follows a chain of rounds back to the experiment, and survives a loop', () => {
+    const plans = [
+      { id: 'r1', title: 'A · X', status: 'applied', metadata: { experiment_id: 'exp-1' } },
+      { id: 'r2', title: 'A · X · Round 2', status: 'applied', parent_plan_id: 'r1' },
+      { id: 'r3', title: 'A · X · Round 3', status: 'queued', parent_plan_id: 'r2' },
+      { id: 'l1', title: 'B · Y', status: 'queued', parent_plan_id: 'l2' },
+      { id: 'l2', title: 'B · Y', status: 'queued', parent_plan_id: 'l1' },
+    ];
+    const byId = Object.fromEntries(
+      groupPlansIntoExperiments(plans).flatMap(exp => exp.plans.map(plan => [plan.id, exp.id]))
+    );
+    expect(byId).toEqual({
+      r1: 'exp-1',
+      r2: 'exp-1',
+      r3: 'exp-1',
+      l1: 'title:b',
+      l2: 'title:b',
+    });
+  });
+
   it('stamps shared experiment metadata onto plans', () => {
     const stamped = stampClassicExperimentMetadata(
       [{ id: '1', title: 'Shirt', product_title: 'Shirt' }],
@@ -113,6 +166,7 @@ describe('classicExperimentHelpers', () => {
     expect(formatClassicStatusLabel('winner_ready', 'price_test')).toBe('Finished');
     expect(formatClassicStatusLabel('applied', 'price_test')).toBe('Finished');
     expect(formatClassicStatusLabel('completed', 'price_test')).toBe('Finished');
+    expect(formatClassicStatusLabel('archived', 'price_test')).toBe('Archived');
   });
 
   it('enriches inbox drafts from audience_ui before list launch', () => {

@@ -458,12 +458,18 @@ describe('event constants match the migration', () => {
     delete require.cache[storePath];
     const { EVENT_TYPES, ACTORS } = require(storePath);
 
-    const sql = require('node:fs').readFileSync(
-      path.resolve(__dirname, '../../../../../migrations/007_smart_pricing_product_events.sql'),
-      'utf8'
-    );
+    const fs = require('node:fs');
+    const dir = path.resolve(__dirname, '../../../../../migrations');
+    const sqls = fs
+      .readdirSync(dir)
+      .filter(file => file.endsWith('.sql'))
+      .sort()
+      .map(file => fs.readFileSync(path.join(dir, file), 'utf8'))
+      .filter(sql => sql.includes('smart_pricing_product_events'));
+    // The constraint the database ends up with is the one the last migration wrote.
     const listFor = column => {
-      const match = new RegExp(`${column} IN \\(([^)]*)\\)`).exec(sql);
+      const pattern = new RegExp(`${column} IN \\(([^)]*)\\)`);
+      const match = sqls.map(sql => pattern.exec(sql)).filter(Boolean).pop();
       assert.ok(match, `no CHECK constraint found for ${column}`);
       return match[1]
         .split(',')

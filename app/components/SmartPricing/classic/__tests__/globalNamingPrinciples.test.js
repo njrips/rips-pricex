@@ -57,14 +57,14 @@ describe('global naming principles (PDF spot checks)', () => {
     expect(plan).toMatch(/Open setup checklist/);
   });
 
-  it('keeps plan locking separate from setup and returns archived tests to Finished', () => {
+  it('keeps plan locking separate from setup and sends archived tests to Archived', () => {
     const dashboard = read('../../../routes/app._index.tsx');
     const create = read('../../../routes/app.experiments.new.tsx');
     const overview = read('ClassicExperimentOverview.jsx');
     expect(dashboard).toContain('An active Priceify plan is required to create a test.');
     expect(create).toContain('An active Priceify plan is required to create a test.');
-    expect(overview).toContain('?tab=finished');
-    expect(overview).not.toContain('?tab=archived');
+    expect(overview).toContain('?tab=archived');
+    expect(overview).not.toContain('?tab=finished');
   });
 
   it('aligns store setup card titles with the spec', () => {
@@ -148,7 +148,7 @@ describe('global naming principles (PDF spot checks)', () => {
     expect(wizard).toContain("'Launch test'");
     const audience = read('AudienceSuccessStepPanel.jsx');
     expect(audience).toContain('MIN_VISITORS_FOR_REVENUE_GUARDRAIL');
-    expect(audience).not.toMatch(/minimum visitors per variation is reached/i);
+    expect(audience).toContain('after the minimum visitors per variation is reached.');
     expect(audience).toMatch(/This is a safety net/i);
     expect(audience).toMatch(/doesn(&rsquo;|’|')t declare a winner/i);
     expect(CLASSIC_CREATE_STEPS.find(step => step.id === 'audience')?.description).toBe('');
@@ -163,13 +163,19 @@ describe('global naming principles (PDF spot checks)', () => {
     expect(review).toContain('Open App settings → Price locations');
     expect(review).not.toMatch(/Fix setup before launching/i);
     expect(review).toContain('Traffic may be too low for a reliable result');
-    expect(review).toContain('reviewOverviewLabel');
-    // Step 5 is the summary alone; the per-step cards underneath were removed.
-    expect(review).not.toContain("'Products & prices'");
+    expect(review).toContain('buildReviewSections');
     const overview = read('reviewLaunchOverview.js');
+    for (const title of [
+      'Basics',
+      'Products & prices',
+      'Variations & traffic',
+      'Audience',
+      'Metrics & guardrail',
+    ]) {
+      expect(overview).toContain(`title: '${title}'`);
+    }
     expect(overview).toContain('Picked products');
     expect(overview).toContain('AI suggested prices');
-    expect(overview).toContain('REVIEW_OVERVIEW_LINE_ORDER');
     expect(overview).toContain('formatReviewPricingModeLabel');
     expect(overview).toContain('Mixed pricing per variation');
     expect(review).toContain('showDurationBanner');
@@ -249,5 +255,28 @@ describe('global naming principles (PDF spot checks)', () => {
     expect(panel).toMatch(/80% \(faster, less strict\)/);
     expect(panel).toContain('Both apply to new tests from now on.');
     expect(panel.replace(/\s+/g, ' ')).toContain('when Priceify may call a winner');
+  });
+});
+
+describe('Steps 2 and 3 label case', () => {
+  function rule(css, selector) {
+    const start = css.indexOf(`${selector} {`);
+    return css.slice(start, css.indexOf('}', start));
+  }
+
+  it('shows variation, traffic and price-table labels in sentence case, as written', () => {
+    const css = read('SmartPricingClassic.module.css');
+    expect(rule(css, '.variationTag')).not.toContain('uppercase');
+    expect(rule(css, '.trafficLabel')).not.toContain('uppercase');
+    expect(rule(css, '.tableSentenceCase th')).toContain('text-transform: none');
+
+    const variations = read('VariationsStepPanel.jsx');
+    expect(variations).toContain("'Control – current price'");
+    expect(variations).toContain('>Current price<');
+    expect(variations).toContain('>Traffic<');
+
+    const products = read('ProductsPricingStepPanel.jsx');
+    expect(products).toContain('styles.tableSentenceCase');
+    expect(products).toContain('<th>Base price</th>');
   });
 });

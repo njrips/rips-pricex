@@ -7,6 +7,8 @@ const analyticsService = require('../analytics');
 const { findInboxPlanByTestId } = require('../../models/smartPricingInboxStore');
 const { isSmartPricingTest } = require('./smartPricingTestIdentity');
 const { variantFixedPrice, synthesizeArmsFromTestVariants } = require('./testVariantArms');
+const { getPoolMax } = require('../../utils/database');
+const { createConcurrencyGate } = require('../../utils/concurrencyGate');
 
 /**
  * A measured number, or null when there is nothing to measure.
@@ -316,7 +318,29 @@ function buildSignificanceSummary(analytics) {
   };
 }
 
-async function buildSmartPricingTestAnalytics(shopDomain, testId) {
+/**
+ * How many analytics builds may run at once in this process.
+ *
+ * Each build runs several queries side by side, and a details page asks for
+ * one per product. Ungated, an experiment of a few dozen products took every
+ * pool connection, and the requests queued behind it -- a merchant's Pause, a
+ * shopper's assignment -- timed out and failed. A quarter of the pool leaves
+ * the rest for them.
+ */
+function analyticsConcurrency(env = process.env) {
+  const configured = parseInt(env.RIPSPRICEX_ANALYTICS_CONCURRENCY, 10);
+  if (Number.isFinite(configured) && configured >= 1) return configured;
+  return Math.max(2, Math.floor(getPoolMax() / 4));
+}
+
+let analyticsGate = null;
+
+function buildSmartPricingTestAnalytics(shopDomain, testId) {
+  if (!analyticsGate) analyticsGate = createConcurrencyGate(analyticsConcurrency());
+  return analyticsGate.run(() => buildTestAnalyticsNow(shopDomain, testId));
+}
+
+async function buildTestAnalyticsNow(shopDomain, testId) {
   const test = await getTestById(testId, shopDomain);
   if (!test) {
     throw new Error('Test not found');
@@ -529,6 +553,7 @@ async function buildSmartPricingTestAnalytics(shopDomain, testId) {
 
 module.exports = {
   buildSmartPricingTestAnalytics,
+  analyticsConcurrency,
   matchVariantToArm,
   variantFixedPrice,
   resolveWinnerArm,

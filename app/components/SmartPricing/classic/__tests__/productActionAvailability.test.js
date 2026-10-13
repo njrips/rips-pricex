@@ -232,3 +232,55 @@ describe('mergeServerAndLegacyActivity', () => {
     expect(merged.some(row => row.title === 'Created')).toBe(true);
   });
 });
+
+describe('archive, restore and delete in History', () => {
+  const at = '2026-10-12T10:00:00.000Z';
+
+  it('labels each one and says where the test went', () => {
+    const archived = mapServerEventToActivity({
+      id: 'e1',
+      event_type: 'archived',
+      actor: 'merchant',
+      created_at: at,
+      payload: { detail: 'Moved from Finished to the Archived tab.', actor_name: 'Ripon' },
+    });
+    expect(archived).toMatchObject({
+      kind: 'archived',
+      title: 'Test archived',
+      detail: 'Moved from Finished to the Archived tab.',
+      actor: 'Ripon',
+    });
+
+    const restored = mapServerEventToActivity({
+      id: 'e2',
+      event_type: 'restored',
+      actor: 'merchant',
+      created_at: at,
+      payload: { source: 'recently_deleted' },
+    });
+    expect(restored).toMatchObject({ kind: 'restored', title: 'Restored from Recently deleted' });
+    expect(restored.detail).toMatch(/Archived tab/);
+
+    const deleted = mapServerEventToActivity({
+      id: 'e3',
+      event_type: 'deleted',
+      actor: 'merchant',
+      created_at: at,
+      payload: { purge_after: '2026-10-19T10:00:00.000Z' },
+    });
+    expect(deleted).toMatchObject({ kind: 'deleted', title: 'Test deleted', actor: 'You' });
+    expect(deleted.detail).toMatch(/^Moved to Recently deleted\. It can be restored until /);
+  });
+
+  it("takes the browser entry's id so the action is listed once", () => {
+    const row = mapServerEventToActivity({
+      id: 'e1',
+      event_type: 'archived',
+      actor: 'merchant',
+      created_at: at,
+      payload: { activity_id: 'archived_1700000000000' },
+    });
+    expect(row.id).toBe('archived_1700000000000');
+    expect(PRODUCT_EVENT_LABELS.archived).toBe('Test archived');
+  });
+});

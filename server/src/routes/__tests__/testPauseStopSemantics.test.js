@@ -109,7 +109,7 @@ function installModuleStubs() {
 }
 
 /** Drive one route's handler chain directly rather than standing up a server. */
-async function post(routePath, id = 'test-1', method = 'post') {
+async function post(routePath, id = 'test-1', method = 'post', body = {}) {
   const { router, restore } = installModuleStubs();
   try {
   const layer = router.stack.find(
@@ -117,7 +117,7 @@ async function post(routePath, id = 'test-1', method = 'post') {
   );
   assert.ok(layer, `${method.toUpperCase()} ${routePath} is not registered`);
   const handlers = layer.route.stack.map(entry => entry.handle);
-  const req = { params: { id }, query: {}, body: {}, headers: {}, shopDomain: 'demo.myshopify.com' };
+  const req = { params: { id }, query: {}, body, headers: {}, shopDomain: 'demo.myshopify.com' };
   let payload = null;
   let status = 200;
   const res = {
@@ -281,6 +281,30 @@ describe('pausing an experiment', () => {
     assert.equal(eventCalls[0][2], 'stopped');
     assert.equal(eventCalls[0][3]?.payload?.reason, 'merchant_pause');
   });
+
+  it('answers a second pause as done without writing or logging it again', async () => {
+    currentStatus = 'paused';
+    const { status } = await post('/:id/pause');
+
+    assert.equal(status, 200);
+    assert.deepEqual(statusUpdates, []);
+    assert.deepEqual(eventCalls, []);
+  });
+
+  // An experiment's batch Pause used to reach every product it ever had, so
+  // finished ones were put back on hold and a winner-ready product came back
+  // as one waiting to resume.
+  for (const finished of ['stopped', 'completed', 'draft']) {
+    it(`refuses a ${finished} test rather than reserving its product again`, async () => {
+      currentStatus = finished;
+      const { status, payload } = await post('/:id/pause');
+
+      assert.equal(status, 409);
+      assert.equal(payload.code, 'TEST_NOT_RUNNING');
+      assert.deepEqual(statusUpdates, []);
+      assert.deepEqual(syncCalls, []);
+    });
+  }
 });
 
 describe('stopping an experiment', () => {
@@ -305,6 +329,27 @@ describe('stopping an experiment', () => {
     assert.equal(eventCalls.length, 1);
     assert.equal(eventCalls[0][2], 'stopped');
     assert.equal(eventCalls[0][3]?.payload?.reason, 'merchant_finish');
+  });
+});
+
+describe('stopping a paused test on the way to Archive', () => {
+  beforeEach(() => {
+    currentStatus = 'paused';
+  });
+
+  it('frees the product but tells the inbox the plan is still paused', async () => {
+    // Synced as finished, Restore brought the experiment back as Finished.
+    const { status } = await post('/:id/stop', 'test-1', 'post', { reason: 'archive' });
+
+    assert.equal(status, 200);
+    assert.deepEqual(statusUpdates, [{ id: 'test-1', status: 'stopped' }]);
+    assert.deepEqual(syncCalls, [{ id: 'test-1', reason: 'merchant_archive' }]);
+  });
+
+  it('leaves History to the archive entry instead of adding a Stopped one', async () => {
+    await post('/:id/stop', 'test-1', 'post', { reason: 'archive' });
+
+    assert.deepEqual(eventCalls, []);
   });
 });
 

@@ -9,6 +9,13 @@
 
 const MIN_BAND_WIDTH_SHARE = 0.4;
 
+/**
+ * The smallest move, in percent, that a test price should make from the
+ * current price, and between two neighbouring test prices of a two-price
+ * test. Closer than this, typical Shopify traffic cannot tell them apart.
+ */
+const MIN_CONTROL_GAP_PERCENT = 3;
+
 function round2(n) {
   return Math.round(Number(n) * 100) / 100;
 }
@@ -109,9 +116,173 @@ function computeMinDetectableBandWidth(min, max, variationCount = 2) {
   const shareWidth = Math.max(1, room * MIN_BAND_WIDTH_SHARE);
   const arms = Math.max(1, Number(variationCount) || 1);
   const gaps = Math.max(1, arms - 1);
-  const perGapMin = arms <= 2 ? 3 : arms === 3 ? 4.5 : 5.5;
+  const perGapMin = arms <= 2 ? MIN_CONTROL_GAP_PERCENT : arms === 3 ? 4.5 : 5.5;
   const trafficWidth = perGapMin * gaps;
   return round2(Math.min(hi - lo, Math.max(shareWidth, trafficWidth)));
+}
+
+/**
+ * Move a lone test price, given as percent from the current price, at least
+ * `minGap` away from it, staying inside [lo, hi].
+ *
+ * A one-variation test compares one price against the current one, so the
+ * band's width says nothing about whether the two can be told apart: a band of
+ * -4..+4 with the price placed at +0.5% is a test of nothing. The price stays
+ * on the side it was placed on, because that side is the model's or the
+ * merchant's call; when the band does not reach `minGap` on that side, the
+ * price goes as far as the band allows.
+ */
+function keepClearOfControl(pct, lo, hi, minGap = MIN_CONTROL_GAP_PERCENT) {
+  const value = Number(pct);
+  const low = Number(lo);
+  const high = Number(hi);
+  if (!Number.isFinite(value) || !Number.isFinite(low) || !Number.isFinite(high)) return pct;
+  if (Math.abs(value) >= minGap) return value;
+  const rise = value > 0 || (value === 0 && Math.abs(high) >= Math.abs(low));
+  if (rise) {
+    return high > 0 ? Math.min(high, Math.max(value, minGap)) : value;
+  }
+  return low < 0 ? Math.max(low, Math.min(value, -minGap)) : value;
+}
+
+/** Clamp ascending points into [low, high], then push them `gap` apart where the room allows. */
+function spreadInside(points, low, high, gap) {
+  const out = points.map(point => Math.min(high, Math.max(low, point)));
+  const count = out.length;
+  if (count < 2) return out;
+  const step = Math.min(gap, (high - low) / (count - 1));
+  for (let i = 1; i < count; i += 1) out[i] = Math.max(out[i], out[i - 1] + step);
+  if (out[count - 1] > high) {
+    out[count - 1] = high;
+    for (let i = count - 2; i >= 0; i -= 1) out[i] = Math.min(out[i], out[i + 1] - step);
+  }
+  return out;
+}
+
+function evenGap(length, count) {
+  return count <= 1 ? Infinity : length / (count - 1);
+}
+
+/**
+ * How well a set of test prices can be told apart, from 0 to 1: the tightest
+ * of the narrowest gap between two of them against `minGap`, and the nearest
+ * one to the current price against `controlGap`.
+ */
+function testPriceSeparation(percents, { minGap = 0, controlGap = MIN_CONTROL_GAP_PERCENT } = {}) {
+  const points = [...percents].map(Number).sort((a, b) => a - b);
+  let score = 1;
+  if (minGap > 0) {
+    for (let i = 1; i < points.length; i += 1) {
+      score = Math.min(score, (points[i] - points[i - 1]) / minGap);
+    }
+  }
+  if (controlGap > 0) {
+    points.forEach(point => {
+      score = Math.min(score, Math.abs(point) / controlGap);
+    });
+  }
+  return Math.max(0, score);
+}
+
+/** The separation `count` arms spread over lo..hi end up with once spaced. */
+function bandSeparation(lo, hi, count, { minGap = 0, controlGap = MIN_CONTROL_GAP_PERCENT } = {}) {
+  const arms = Math.max(1, Number(count) || 1);
+  const even = Array.from({ length: arms }, (_, index) =>
+    arms > 1 ? lo + ((hi - lo) * index) / (arms - 1) : (lo + hi) / 2
+  );
+  return testPriceSeparation(spaceTestPricePercents(even, { lo, hi, minGap, controlGap }), {
+    minGap,
+    controlGap,
+  });
+}
+
+/**
+ * One product's test prices, as percent changes, moved apart where they sit
+ * too close to each other or to the current price. Same length and order.
+ *
+ * Arms are placed by position inside the band, then nudged by a per-product
+ * jitter and an opportunity lean, and both shrink the gaps: two arms of a
+ * 10..20 band could land a fraction of a percent apart, which is one price
+ * tested twice. A band that crosses 0 also put the middle arm of three on the
+ * current price itself. Prices already far enough apart do not move; the
+ * rest move as little as keeps them `minGap` apart and `controlGap` clear of
+ * 0, on whichever side of it leaves the widest gaps. When the band is too
+ * narrow for both, keeping the arms apart wins, because an arm on the current
+ * price still teaches the merchant something an identical pair does not.
+ */
+function spaceTestPricePercents(
+  percents = [],
+  { lo, hi, minGap = 0, controlGap = MIN_CONTROL_GAP_PERCENT } = {}
+) {
+  const values = (Array.isArray(percents) ? percents : []).map(Number);
+  const low = Number(lo);
+  const high = Number(hi);
+  if (
+    !values.length ||
+    values.some(value => !Number.isFinite(value)) ||
+    !Number.isFinite(low) ||
+    !Number.isFinite(high) ||
+    high < low
+  ) {
+    return percents;
+  }
+  const clear = Math.max(0, Number(controlGap) || 0);
+  if (values.length === 1) return [keepClearOfControl(values[0], low, high, clear)];
+
+  const gap = Math.max(0, Number(minGap) || 0);
+  const order = values
+    .map((value, index) => ({ value, index }))
+    .sort((a, b) => a.value - b.value || a.index - b.index);
+  const sorted = order.map(point => point.value);
+
+  let placed = null;
+  // Band edges arrive through price-to-percent maths, as -2.9999999999999987.
+  const reaches = edge => edge >= clear - 1e-6;
+  const lower = clear > 0 && reaches(-low) ? [low, Math.min(high, -clear)] : null;
+  const upper = clear > 0 && reaches(high) ? [Math.max(low, clear), high] : null;
+  if (lower || upper) {
+    const towardsUpper = Math.abs(high) >= Math.abs(low);
+    const naturalBelow = sorted.filter(v => v < 0 || (v === 0 && !towardsUpper)).length;
+    const wanted = gap > 0 ? gap : clear;
+    let best = null;
+    for (let below = 0; below <= sorted.length; below += 1) {
+      const above = sorted.length - below;
+      if ((below && !lower) || (above && !upper)) continue;
+      const score = Math.min(
+        wanted,
+        below ? evenGap(lower[1] - lower[0], below) : Infinity,
+        above ? evenGap(upper[1] - upper[0], above) : Infinity
+      );
+      const distance = Math.abs(below - naturalBelow);
+      if (
+        !best ||
+        score > best.score + 1e-9 ||
+        (Math.abs(score - best.score) <= 1e-9 && distance < best.distance)
+      ) {
+        best = { below, score, distance };
+      }
+    }
+    const plain = spreadInside(sorted, low, high, gap);
+    const separation = points => testPriceSeparation(points, { minGap: wanted, controlGap: clear });
+    if (best) {
+      const clearOfControl = [
+        ...(best.below ? spreadInside(sorted.slice(0, best.below), lower[0], lower[1], gap) : []),
+        ...(best.below < sorted.length
+          ? spreadInside(sorted.slice(best.below), upper[0], upper[1], gap)
+          : []),
+      ];
+      placed = separation(clearOfControl) >= separation(plain) ? clearOfControl : plain;
+    } else {
+      placed = plain;
+    }
+  }
+  if (!placed) placed = spreadInside(sorted, low, high, gap);
+
+  const out = new Array(values.length);
+  order.forEach((point, rank) => {
+    out[point.index] = round2(placed[rank]);
+  });
+  return out;
 }
 
 /**
@@ -366,6 +537,11 @@ function sanitizeModelConfidence(raw) {
 
 module.exports = {
   MIN_BAND_WIDTH_SHARE,
+  MIN_CONTROL_GAP_PERCENT,
+  keepClearOfControl,
+  spaceTestPricePercents,
+  testPriceSeparation,
+  bandSeparation,
   classifyPriceTier,
   classifyTrafficTier,
   classifyMarginTier,

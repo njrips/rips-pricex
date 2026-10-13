@@ -9,6 +9,7 @@ const {
   findDeletions,
   listRecentlyDeletedExperimentIds,
   planExperimentId,
+  planDeletionKey,
 } = require('../../../models/smartPricingDeletionStore');
 
 function missingTable() {
@@ -88,5 +89,14 @@ describe('smartPricingDeletionStore', () => {
     expect(planExperimentId({ experiment_id: 'b', batch_id: 'c' })).toBe('b');
     expect(planExperimentId({ batch_id: 'c' })).toBe('c');
     expect(planExperimentId({})).toBeNull();
+  });
+
+  it('keys a never-launched plan with no experiment by the plan itself', () => {
+    // Otherwise a deleted draft like that has nothing to be refused by, and
+    // the next save from a browser still holding it puts it straight back.
+    expect(planDeletionKey({ id: 'SP-2153', metadata: { experiment_id: null } })).toBe('SP-2153');
+    expect(planDeletionKey({ id: 'p', metadata: { experiment_id: 'exp-1' } })).toBe('exp-1');
+    expect(planDeletionKey({ id: 'p', test_id: 't1' })).toBeNull();
+    expect(planDeletionKey({})).toBeNull();
   });
 });

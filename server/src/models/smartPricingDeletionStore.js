@@ -182,7 +182,22 @@ function planExperimentId(plan) {
   );
 }
 
+/**
+ * What a delete of this plan is recorded and checked under: its experiment, or,
+ * for a plan that names no experiment and never launched, the plan itself.
+ * Without the second, a deleted draft like that had nothing to be refused by,
+ * and the next save from a browser still holding it put it straight back.
+ */
+function planDeletionKey(plan) {
+  const experimentId = planExperimentId(plan);
+  if (experimentId) return experimentId;
+  const testId = String(plan?.test_id || plan?.metadata?.test_id || '').trim();
+  if (testId) return null;
+  return String(plan?.id || '').trim() || null;
+}
+
 module.exports = {
+  planDeletionKey,
   recordDeletions,
   findDeletions,
   listRecentlyDeletedExperimentIds,

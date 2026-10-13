@@ -164,7 +164,7 @@ describe('unfinished drafts in the experiments list', () => {
       (node.textContent || '').trim()
     );
 
-    expect(filterLabels).toEqual(['All', 'Running', 'Drafts', 'Paused', 'Finished']);
+    expect(filterLabels).toEqual(['All', 'Running', 'Drafts', 'Paused', 'Finished', 'Archived']);
     expect(headers).toEqual([
       'Test',
       'Status',
@@ -316,6 +316,24 @@ describe('unfinished drafts in the experiments list', () => {
       expect(document.body.textContent).toContain('2 chosen products');
       expect(document.body.textContent).toContain('cannot be undone');
     });
+  });
+
+  it('opens a saved draft in the wizard rather than a results page it does not have', async () => {
+    inboxPlans.current = [
+      {
+        id: 'SP-2153',
+        title: 'Smart Price Test 1 · Snowboard · Round 2',
+        status: 'queued',
+        metadata: { experiment_id: null },
+      },
+    ];
+    await renderList();
+
+    const draftRow = row('Smart Price Test 1');
+    expect(draftRow.textContent).toContain('Draft');
+    await click(draftRow.querySelector('button'));
+
+    expect(currentPath).toBe('/app/experiments/new?resume=SP-2153');
   });
 
   it('drops out of the list once the experiment has real plans', async () => {

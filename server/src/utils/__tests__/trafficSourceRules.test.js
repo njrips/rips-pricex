@@ -49,3 +49,26 @@ describe('traffic source rules', () => {
     );
   });
 });
+
+describe('an include list of every audience source', () => {
+  const everySource = ['direct', 'organic_search', 'paid_search', 'social', 'email', 'paid', 'referral'].map(
+    value => ({ type: 'include', value })
+  );
+
+  it('lets in every visitor, as saved before Email covered SMS', () => {
+    assert.equal(matchesTrafficSourceRules(everySource, 'sms'), null);
+    assert.equal(matchesTrafficSourceRules(everySource, ''), null);
+    assert.equal(matchesTrafficSourceRules(everySource, 'direct'), null);
+  });
+
+  it('still restricts a list that leaves a source out', () => {
+    const noReferral = everySource.filter(rule => rule.value !== 'referral');
+    assert.equal(matchesTrafficSourceRules(noReferral, 'referral'), false);
+    assert.equal(matchesTrafficSourceRules(noReferral, 'direct'), true);
+  });
+
+  it('still applies an exclude alongside the includes', () => {
+    const rules = [...everySource, { type: 'exclude', value: 'email' }];
+    assert.equal(matchesTrafficSourceRules(rules, 'email'), false);
+  });
+});

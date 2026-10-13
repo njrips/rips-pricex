@@ -19,9 +19,12 @@ const {
 } = require('./aiPriceLiftBand');
 const { snapProductArmPrices, priceWindowForSnap } = require('./charmPriceRounding');
 const {
+  MIN_CONTROL_GAP_PERCENT,
   computeMinDetectableBandWidth,
   computeOpportunityScoreBoost,
   enrichProductSignalsForPriceSuggest,
+  spaceTestPricePercents,
+  bandSeparation,
   resolveProductBandSlice,
   resolveArmPositionWithSkuSignals,
   mergeModelBandWithHeuristics,
@@ -195,6 +198,80 @@ function normalizeModelBand(item, { min, max, minWidth }) {
     return null;
   }
   return { lo: round2(lo), hi: round2(hi) };
+}
+
+/**
+ * The narrowest band that can still tell its arms apart, and the gap that
+ * width leaves between neighbouring arms. The prompt quotes both numbers, so
+ * the spacing code works from the same ones.
+ */
+function armSpacingFor(min, max, armCount) {
+  const minBandWidth = computeMinDetectableBandWidth(min, max, armCount);
+  const minArmGap = armCount > 1 ? round2(minBandWidth / (armCount - 1)) : minBandWidth;
+  return { minBandWidth, minArmGap };
+}
+
+/**
+ * A product's band with the stretch no arm can use cut off.
+ *
+ * Arms are kept `MIN_CONTROL_GAP_PERCENT` clear of the current price, so a
+ * band of -1..5 has nowhere to put an arm below 0 and only 3..5 above it, and
+ * its width overstates the room by two thirds. The side that cannot reach the
+ * gap is dropped; a band that reaches it on neither side keeps the side its
+ * middle is on. Left alone when the merchant's own range cannot reach the gap.
+ */
+function trimControlDeadZone(lo, hi, { min, max }) {
+  const clear = MIN_CONTROL_GAP_PERCENT;
+  const below = lo <= -clear;
+  const above = hi >= clear;
+  if (below && above) return { lo, hi };
+  if (above) return { lo: Math.max(lo, clear), hi };
+  if (below) return { lo, hi: Math.min(hi, -clear) };
+  const preferUpper = lo + hi >= 0;
+  if (preferUpper && max >= clear) return { lo: clear, hi: clear };
+  if (min <= -clear) return { lo: -clear, hi: -clear };
+  if (max >= clear) return { lo: clear, hi: clear };
+  return { lo, hi };
+}
+
+/**
+ * A per-product band, widened to the detectable minimum and kept clear of the
+ * stretch around the current price that arms cannot use. A deterministic
+ * slice can come out at under a third of the merchant's band, which on 10..20
+ * left three arms 1.4% apart.
+ *
+ * Trimming to one side is usually right, but not when that side runs into the
+ * merchant's limit first: on -5..5 a slice of -1..4 trimmed and widened is
+ * 2..5, two arms 2% apart, where spanning both sides gives -5 and 5. So the
+ * trimmed band, the band as given, and the band given room on both sides of
+ * the current price are compared by how far apart they keep the arms, in that
+ * order of preference.
+ */
+function widenedProductSlice(slice, { min, max, minBandWidth, armCount = 1, minArmGap = 0 }) {
+  const widen = (band, minWidth) => {
+    const widened = normalizeModelBand(band, { min, max, minWidth });
+    return widened ? { min: widened.lo, max: widened.hi } : null;
+  };
+  const candidates = [
+    widen(trimControlDeadZone(slice.min, slice.max, { min, max }), minBandWidth),
+    widen({ lo: slice.min, hi: slice.max }, minBandWidth),
+    widen({ lo: slice.min, hi: slice.max }, minBandWidth + 2 * MIN_CONTROL_GAP_PERCENT),
+  ].filter(Boolean);
+  if (!candidates.length) return slice;
+  if (armCount <= 1) return candidates[0];
+  let best = candidates[0];
+  let bestScore = -Infinity;
+  candidates.forEach(band => {
+    const score = bandSeparation(band.min, band.max, armCount, {
+      minGap: minArmGap,
+      controlGap: MIN_CONTROL_GAP_PERCENT,
+    });
+    if (score > bestScore + 1e-9) {
+      best = band;
+      bestScore = score;
+    }
+  });
+  return best;
 }
 
 /**
@@ -525,6 +602,33 @@ async function runWithinBudget(items, limit, deadline, task) {
 }
 
 /**
+ * Raw arm prices moved apart, inside the stretch of the band the guardrails
+ * also allow. Spacing them before the guardrail clamp would let the clamp
+ * fold two arms back onto its ceiling.
+ */
+function spaceArmTargets(targets, { current, minPct, maxPct, band, minArmGapPercent }) {
+  if (minArmGapPercent === null || minArmGapPercent === undefined) return targets;
+  if (!(current > 0) || !Number.isFinite(minPct) || !Number.isFinite(maxPct)) return targets;
+  const toPct = price => ((price - current) / current) * 100;
+  const floorPct = Number.isFinite(band.floor) && band.floor > 0 ? toPct(band.floor) : -Infinity;
+  const ceilingPct = Number.isFinite(band.ceiling) && band.ceiling > 0 ? toPct(band.ceiling) : Infinity;
+  let lo = Math.max(Math.min(minPct, maxPct), floorPct);
+  let hi = Math.min(Math.max(minPct, maxPct), ceilingPct);
+  if (lo > hi) {
+    if (!Number.isFinite(floorPct) || !Number.isFinite(ceilingPct)) return targets;
+    lo = floorPct;
+    hi = ceilingPct;
+  }
+  const spaced = spaceTestPricePercents(targets.map(toPct), {
+    lo,
+    hi,
+    minGap: minArmGapPercent,
+    controlGap: MIN_CONTROL_GAP_PERCENT,
+  });
+  return spaced.map(pct => current * (1 + pct / 100));
+}
+
+/**
  * Price one product's arms across a band, and round the results to prices a
  * merchant would have picked themselves.
  *
@@ -537,6 +641,9 @@ async function runWithinBudget(items, limit, deadline, task) {
  *   from 0 (bottom of the band) to 1 (top).
  * @param {number} args.requestedLow Lowest price the merchant's band allows.
  * @param {number} args.requestedHigh Highest price the merchant's band allows.
+ * @param {number|null} [args.minArmGapPercent] Spacing to keep between arms,
+ *   and the cue to keep them clear of the current price. Null leaves the raw
+ *   targets where they are, as a dollar band does.
  * @returns {Array<{arm_id: string, price: number, delta_percent: number, delta_amount: number}>}
  */
 function priceArmsAcrossBand({
@@ -548,6 +655,7 @@ function priceArmsAcrossBand({
   requestedLow,
   requestedHigh,
   scoreBoost = 0,
+  minArmGapPercent = null,
 }) {
   const band = buildGuardrailBand(row.current_price, {
     minMarginPercent: guardrails.min_margin_percent ?? 35,
@@ -563,7 +671,7 @@ function priceArmsAcrossBand({
   const maxPct =
     current > 0 && Number.isFinite(bandMax) ? ((bandMax - current) / current) * 100 : null;
 
-  const raw = testArms.map((arm, armIndex) => {
+  const targets = testArms.map((arm, armIndex) => {
     const armPosition = resolveArmPositionWithSkuSignals(row, {
       merchantLo: minPct,
       merchantHi: maxPct,
@@ -572,8 +680,18 @@ function priceArmsAcrossBand({
     });
     // High-opportunity SKUs lean toward the top of the band, never past it.
     const offset = Math.min(1, armPosition + scoreBoost * (1 - armPosition));
-    return clampPrice(roundPrice(targetAt(offset), row.currency), band.floor, band.ceiling);
+    return targetAt(offset);
   });
+  const spaced = spaceArmTargets(targets, {
+    current,
+    minPct,
+    maxPct,
+    band,
+    minArmGapPercent,
+  });
+  const raw = spaced.map(price =>
+    clampPrice(roundPrice(price, row.currency), band.floor, band.ceiling)
+  );
 
   // Rounding spends the slack the merchant left and nothing more. Asked for
   // "between 10% and 20%" they plainly do not mind which cent inside that, but
@@ -595,6 +713,9 @@ function priceArmsAcrossBand({
         low: window.low,
         high: window.high,
         currency: row.currency,
+        current: row.current_price,
+        minControlGapPercent: MIN_CONTROL_GAP_PERCENT,
+        minArmGapPercent: minArmGapPercent ?? 0,
       })
     : raw;
 
@@ -632,13 +753,20 @@ function deterministicPriceSuggestions({
     guardrails
   );
   const amountBand = resolveAmountBand(unit, minAmount, maxAmount);
+  const { minBandWidth, minArmGap } = armSpacingFor(min, max, testArms.length);
   const suggestions = [];
 
   rows.forEach(row => {
     const scoreBoost = computeOpportunityScoreBoost(row);
     const productBand = amountBand
       ? { min: amountBand.min, max: amountBand.max }
-      : resolveProductBandSlice(row, min, max);
+      : widenedProductSlice(resolveProductBandSlice(row, min, max), {
+          min,
+          max,
+          minBandWidth,
+          armCount: testArms.length,
+          minArmGap,
+        });
     const spread = productBand.max - productBand.min;
     // A dollar band is a flat per-product uplift, so it must not be turned into
     // a catalog-average percent; the guardrail clamp still caps each SKU.
@@ -648,6 +776,7 @@ function deterministicPriceSuggestions({
       guardrails,
       shopMax,
       scoreBoost,
+      minArmGapPercent: amountBand ? null : minArmGap,
       targetAt: offset =>
         amountBand
           ? row.current_price + productBand.min + spread * offset
@@ -833,11 +962,7 @@ async function suggestPricesForAllArms({
   const groups = groupRowsByProduct(rows);
   const aiGroups = groups.slice(0, MAX_AI_PRODUCTS_PER_REQUEST);
 
-  const minBandWidth = computeMinDetectableBandWidth(min, max, testArms.length);
-  const minGapHint =
-    testArms.length > 1
-      ? round2(minBandWidth / (testArms.length - 1))
-      : minBandWidth;
+  const { minBandWidth, minArmGap: minGapHint } = armSpacingFor(min, max, testArms.length);
 
   /**
    * The model chooses each product's band; Priceify spaces the variations
@@ -876,6 +1001,8 @@ async function suggestPricesForAllArms({
       max,
       minBandWidth,
       minGapHint,
+      variationCount: testArms.length,
+      minControlGap: MIN_CONTROL_GAP_PERCENT,
       withWebSearch,
     });
 
@@ -1022,10 +1149,15 @@ async function suggestPricesForAllArms({
     const answer = answered.get(group);
     if (!answer) return;
     const { normalized, item, duplicateBand } = answer;
-    const band = mergeModelBandWithHeuristics(group.product, normalized, min, max, {
+    const merged = mergeModelBandWithHeuristics(group.product, normalized, min, max, {
       duplicateBand,
       varietyAttempt,
     });
+    const widened = widenedProductSlice(
+      { min: merged.lo, max: merged.hi },
+      { min, max, minBandWidth, armCount: testArms.length, minArmGap: minGapHint }
+    );
+    const band = { lo: widened.min, hi: widened.max };
     const scoreBoost = computeOpportunityScoreBoost(group.product);
     const aiRationale = sanitizeModelRationale(item?.rationale);
     const aiDirection = sanitizeModelDirection(item?.direction);
@@ -1036,7 +1168,10 @@ async function suggestPricesForAllArms({
     // One variation is one price to test, so it goes where the model expects
     // the most. With several, they stay spread across the band: the spread is
     // what lets the test tell which price earns more, the model's pick included.
-    const singleAtBest = aiBest !== null && testArms.length === 1;
+    const single = testArms.length === 1;
+    const singleAtBest = aiBest !== null && single;
+    const targetPercent = offset =>
+      singleAtBest ? aiBest : band.lo + (band.hi - band.lo) * offset;
     group.variants.forEach(row => {
       const priced = priceArmsAcrossBand({
         row,
@@ -1044,9 +1179,8 @@ async function suggestPricesForAllArms({
         guardrails,
         shopMax,
         scoreBoost: singleAtBest ? 0 : scoreBoost,
-        targetAt: offset =>
-          row.current_price *
-          (1 + (singleAtBest ? aiBest : band.lo + (band.hi - band.lo) * offset) / 100),
+        minArmGapPercent: minGapHint,
+        targetAt: offset => row.current_price * (1 + targetPercent(offset) / 100),
         requestedLow: row.current_price * (1 + band.lo / 100),
         requestedHigh: row.current_price * (1 + band.hi / 100),
       });

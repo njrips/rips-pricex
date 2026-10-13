@@ -31,7 +31,7 @@
 | Create Step 2 | `13:544` | `VariationsStepPanel.jsx` |
 | Create Step 3 (manual / AI / all products / modal variants) | `13:797`, `13:1495`, `13:2193`, `60:9176`, `13:3437` | `ProductsPricingStepPanel.jsx` + `ClassicProductPickerModal.jsx` |
 | Create Step 4 Audience Setup | `13:4071` / content `13:4072` | `AudienceSuccessStepPanel.jsx` |
-| Create Step 5 Review & launch | `13:4501` | `ReviewLaunchStepPanel.jsx` + `reviewLaunchOverview.js` (5-line summary per naming doc) |
+| Create Step 5 Review & launch | `13:4501` | `ReviewLaunchStepPanel.jsx` + `reviewLaunchOverview.js` (five sections per naming doc: Basics, Products & prices, Variations & traffic, Audience, Metrics & guardrail) |
 | Experiment Details / Overview | `13:4884` | `ClassicExperimentOverview.jsx` + `details/ClassicOverviewTab.jsx` |
 | Experiment Details / Audience | `245:350` | `details/ClassicAudienceTab.jsx` |
 | Experiment Details / Metrics | `245:609` | `details/ClassicMetricsTab.jsx` |
@@ -57,7 +57,7 @@ Wizard step copy in code follows `CLASSIC_CREATE_STEPS` (Global naming doc):
 2. Traffic — Traffic & variations  
 3. Products & prices — Choose products & set test prices  
 4. Audience & goals — Audience & goals  
-5. Review & launch — five-line summary + section cards (`reviewLaunchOverview.js`)  
+5. Review & launch — five label/value sections (`reviewLaunchOverview.js`)
 
 ---
 

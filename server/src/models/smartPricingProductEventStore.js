@@ -16,6 +16,9 @@ const EVENT_TYPES = Object.freeze([
   'rerun_queued',
   'guardrail_stopped',
   'auto_applied',
+  'archived',
+  'restored',
+  'deleted',
 ]);
 
 const ACTORS = Object.freeze(['merchant', 'system', 'auto_winner', 'guardrail']);

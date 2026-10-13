@@ -107,5 +107,22 @@ technical conflicts in the baseline:
   lengths. Unknown benchmark prices use JSON `null`.
 - Product cost and margin are not sent to OpenAI. Priceify applies those safety
   rules after validating the response.
+- The band-width line depends on how many test prices there are. With several,
+  it states the minimum width, the gap Priceify keeps between neighbouring
+  prices, and that every price stays at least 3% from the current one, so a
+  band crossing 0 loses the stretch around it. With one, there is no gap to
+  keep: that price is placed at `best`, so the prompt asks for `best` to sit at
+  least 3% from the current price instead.
+- Priceify enforces all of it itself rather than trusting the band:
+  - Every band, the model's or the fallback's per-product slice, is widened to
+    the minimum width. A side of 0 that cannot reach 3% is trimmed off first,
+    unless spanning both sides keeps the prices further apart.
+  - Prices are spaced at least the stated gap apart and 3% from the current
+    price, inside the stretch the max-change and margin guardrails allow, so a
+    guardrail cannot fold two onto the same price. Where the band is too narrow
+    for both, the gap between prices wins over the clearance.
+  - Charm rounding keeps 85% of the gap between neighbouring prices, and never
+    moves a price back towards the current price past the clearance, or across
+    it. A dollar band asks for no gap, so rounding there keeps half of it.
 
 Runtime source: `smartPricingAiSuggestPrompt.js`.

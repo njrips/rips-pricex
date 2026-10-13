@@ -136,19 +136,36 @@ export function buildProductsStepEmptyMessage({
   availableProductCount = 0,
   withheldCount = 0,
   catalogTruncated = false,
+  storeProductCount = 0,
 } = {}) {
   if (loading || loadError) return '';
   if (availableProductCount > 0) return '';
+  // Active products that never became rows: sold out with "continue selling"
+  // off, unavailable for sale, gift cards, or no price. On a store where that
+  // is every product, "no active products" was simply untrue.
+  const untestable = Math.max(0, (Number(storeProductCount) || 0) - (Number(withheldCount) || 0));
+  const untestableText =
+    untestable > 0
+      ? `${untestable} active product${untestable === 1 ? '' : 's'} can’t be tested because ${
+          untestable === 1 ? 'it is' : 'they are'
+        } sold out, not available for sale, gift cards, or have no price. Restock a product or turn on “Continue selling when out of stock” to test it.`
+      : '';
   if (withheldCount > 0) {
-    return `No products available to pick here. ${withheldCount} product${
-      withheldCount === 1 ? ' is' : 's are'
-    } in another test — end ${withheldCount === 1 ? 'that test' : 'those tests'} to add ${
-      withheldCount === 1 ? 'it' : 'them'
-    }.`;
+    return [
+      `No products available to pick here. ${withheldCount} product${
+        withheldCount === 1 ? ' is' : 's are'
+      } in another test — end ${withheldCount === 1 ? 'that test' : 'those tests'} to add ${
+        withheldCount === 1 ? 'it' : 'them'
+      }.`,
+      untestableText,
+    ]
+      .filter(Boolean)
+      .join(' ');
   }
   if (catalogTruncated) {
     return 'No products appear in this snapshot. Open Browse products and search your catalog to find products to test.';
   }
+  if (untestableText) return `No products available to pick here. ${untestableText}`;
   return 'No active products found in your catalog.';
 }
 
@@ -166,6 +183,7 @@ export function buildProductPickerEmptyMessage({
   catalogSearching = false,
   hasRemoteSearch = false,
   remoteSearchHint = null,
+  storeProductCount = 0,
 } = {}) {
   const available = countCatalogProducts(opportunities);
   if (available === 0) {
@@ -173,6 +191,7 @@ export function buildProductPickerEmptyMessage({
       availableProductCount: 0,
       withheldCount,
       catalogTruncated,
+      storeProductCount,
     });
   }
   if (matchedCount > 0) return '';

@@ -64,8 +64,10 @@ describe('Basics step requirements', () => {
       'If we change… then… because…'
     );
     expect(container.textContent).toContain('Hypothesis (optional)');
-    expect(container.textContent).not.toContain('For your notes only.');
-    expect(container.textContent).not.toContain('Optional, for your notes only.');
+    const hypothesisHelp = document.getElementById(
+      container.querySelector('#classic-hypothesis').getAttribute('aria-describedby')
+    );
+    expect(hypothesisHelp?.textContent).toBe('Optional, for your notes only.');
     expect(container.textContent).toContain(
       'Compare different price points for the same product.'
     );

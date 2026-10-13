@@ -311,7 +311,27 @@ describe('a product a live test is already pricing', () => {
  * set to average order value could go live judged on something else.
  */
 describe('what the launched test is judged on', () => {
-  it('uses the metric picked on the Audience step and no secondary metrics', async () => {
+  it('launches the standard secondary metrics picked on the Audience step', async () => {
+    launchMany.mockClear();
+    await renderAtReview({
+      id: 'exp_secondary',
+      audience: {
+        primaryMetric: 'revenue_per_visitor',
+        secondaryMetrics: ['conversion_rate', 'revenue_per_visitor', 'bounce_rate', 'aov'],
+        customGoals: [],
+      },
+    });
+
+    await act(async () => {
+      container.querySelector('[data-testid="continue"]').click();
+    });
+
+    const [launched] = launchMany.mock.calls[0][0];
+    expect(launched.goal.secondary_events).toEqual(['conversion_rate', 'aov']);
+    expect(launched.goal.secondary.every(item => item.source === 'builtin')).toBe(true);
+  });
+
+  it('uses the metric picked on the Audience step and drops retired secondary metrics', async () => {
     launchMany.mockClear();
     await renderAtReview({
       id: 'exp_metric',

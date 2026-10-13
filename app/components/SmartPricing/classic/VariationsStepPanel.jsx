@@ -339,18 +339,22 @@ export default function VariationsStepPanel({
         );
       })}
 
-      {variations.length < 4 ? (
-        <Button icon={ButtonIconPlus} onClick={addVariation}>
-          Add variation
-        </Button>
-      ) : (
-        <p className={styles.help}>Up to 3 price variations plus control.</p>
-      )}
+      <div className={styles.variationsFooter}>
+        {variations.length < 4 ? (
+          <div>
+            <Button icon={ButtonIconPlus} onClick={addVariation}>
+              Add variation
+            </Button>
+          </div>
+        ) : (
+          <p className={styles.help}>Up to 3 price variations plus control.</p>
+        )}
 
-      <p className={styles.help}>
-        If you pause a variation, its traffic is automatically redistributed to the remaining
-        variations.
-      </p>
+        <p className={styles.help}>
+          If you pause a variation, its traffic is automatically redistributed to the remaining
+          variations.
+        </p>
+      </div>
     </div>
   );
 }

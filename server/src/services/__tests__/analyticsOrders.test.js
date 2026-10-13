@@ -10,6 +10,19 @@ const { getTestAnalytics } = require('../../models/analytics');
 const { getTestById } = require('../../models/test');
 const analyticsService = require('../analytics');
 
+describe('secondary metrics counted as storefront events', () => {
+  it('skips the standard metrics, which come from orders', () => {
+    const names = analyticsService._getSecondaryEventNames({
+      secondary: [
+        { event_name: 'conversion_rate', source: 'builtin' },
+        { event_name: 'aov', source: 'catalog' },
+        { event_name: 'add_to_cart', source: 'catalog' },
+      ],
+    });
+    expect(names).toEqual(['add_to_cart']);
+  });
+});
+
 describe('orders and buyers in test analytics', () => {
   beforeEach(() => {
     getTestById.mockResolvedValue({

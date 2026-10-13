@@ -11,6 +11,7 @@ const {
 } = require('../services/smartPricing/testVariantArms');
 const {
   findDeletions,
+  planDeletionKey,
   planExperimentId,
   recordDeletions,
   TEST_PURGE_GRACE_DAYS,
@@ -55,6 +56,86 @@ function normalizePlanJson(plan = {}) {
     archived: Boolean(archived),
     archived_at: archived ? archivedAt : null,
   };
+}
+
+/** How far back a plan's own activity entry can be and still describe this save. */
+const ACTIVITY_MATCH_MS = 15 * 60 * 1000;
+
+function recentActivityEntry(plan, kind, now = Date.now()) {
+  const log = Array.isArray(plan?.metadata?.activity_log) ? plan.metadata.activity_log : [];
+  const entry = log.find(row => row && row.kind === kind);
+  if (!entry?.id) return null;
+  const at = new Date(entry.at).getTime();
+  if (!Number.isFinite(at) || Math.abs(now - at) > ACTIVITY_MATCH_MS) return null;
+  return entry;
+}
+
+/**
+ * One lifecycle event for a plan.
+ *
+ * `activity_id` names the browser's own entry for the same action, so History
+ * shows the two as one line rather than twice.
+ */
+function planLifecycleEvent(plan, eventType, { matchActivity = true, ...extra } = {}) {
+  const { planId, testId, status } = extractPlanFields(plan);
+  const entry = matchActivity ? recentActivityEntry(plan, eventType) : null;
+  const optionalId = value => (value === undefined || value === null || value === '' ? null : String(value));
+  return {
+    plan_id: planId,
+    test_id: testId,
+    product_id: optionalId(plan?.product_id),
+    variant_id: optionalId(plan?.variant_id),
+    event_type: eventType,
+    payload: {
+      product_title: String(plan?.product_title || plan?.title || '').trim() || null,
+      experiment_id: planExperimentId(plan) || null,
+      status,
+      ...(entry
+        ? {
+            activity_id: String(entry.id),
+            detail: entry.detail ? String(entry.detail) : null,
+            actor_name: entry.actor ? String(entry.actor) : null,
+          }
+        : {}),
+      ...extra,
+    },
+  };
+}
+
+/**
+ * Writes archive / restore / delete into the durable lifecycle log.
+ *
+ * Called after the change commits and never throws: the merchant's action has
+ * happened either way, and a logging fault must not report it as failed.
+ */
+async function recordPlanLifecycleEvents(domain, events = []) {
+  const rows = (Array.isArray(events) ? events : []).filter(row => row?.plan_id);
+  if (!domain || !rows.length) return;
+  try {
+    await query(
+      `INSERT INTO smart_pricing_product_events
+         (shop_domain, plan_id, test_id, product_id, variant_id, event_type, actor, payload)
+       SELECT $1, u.plan_id, u.test_id, u.product_id, u.variant_id, u.event_type, 'merchant', u.payload
+         FROM unnest($2::text[], $3::text[], $4::text[], $5::text[], $6::text[], $7::jsonb[])
+           AS u(plan_id, test_id, product_id, variant_id, event_type, payload)`,
+      [
+        domain,
+        rows.map(row => row.plan_id),
+        rows.map(row => row.test_id),
+        rows.map(row => row.product_id),
+        rows.map(row => row.variant_id),
+        rows.map(row => row.event_type),
+        rows.map(row => JSON.stringify(row.payload || {})),
+      ]
+    );
+  } catch (error) {
+    logger.error('Failed to record Smart Pricing lifecycle events', {
+      shopDomain: domain,
+      eventTypes: [...new Set(rows.map(row => row.event_type))],
+      count: rows.length,
+      message: error.message,
+    });
+  }
 }
 
 function summarizeInboxPlans(plans = []) {
@@ -248,6 +329,29 @@ async function listInboxPlansUnfiltered(domain) {
   return { plans: result.rows.map(mapRowToPlan) };
 }
 
+const UNLAUNCHED_STATUSES = new Set(['queued', 'draft']);
+
+/**
+ * A save is the browser's copy of a plan, and that copy can predate its
+ * launch: a debounced write, another tab, or the wizard's own pre-launch save
+ * landing after the launch linked the plan. Taken as-is it unlinked the
+ * running test and put the plan back to queued, so the list said Draft for a
+ * test that was live. Once linked, only the launch and test sync move a plan.
+ */
+function keepLaunchedState(plan, stored) {
+  if (!stored?.test_id) return plan;
+  const incomingTestId = String(plan.test_id || '').trim();
+  const incomingStatus = String(plan.status || '').trim().toLowerCase();
+  const dropsLink = !incomingTestId;
+  const revertsToDraft = UNLAUNCHED_STATUSES.has(incomingStatus) || !incomingStatus;
+  if (!dropsLink && !revertsToDraft) return plan;
+  return {
+    ...plan,
+    test_id: incomingTestId || String(stored.test_id),
+    status: revertsToDraft && stored.status ? stored.status : plan.status,
+  };
+}
+
 async function saveInboxPlans(
   shopDomain,
   plans = [],
@@ -290,6 +394,7 @@ async function saveInboxPlans(
 
   const client = await getClient();
   let refusedPlanIds = [];
+  let lifecycleEvents = [];
   try {
     await client.query('BEGIN');
 
@@ -299,13 +404,13 @@ async function saveInboxPlans(
     const deleted = await findDeletions(
       domain,
       {
-        experimentIds: normalized.map(planExperimentId).filter(Boolean),
+        experimentIds: normalized.map(planDeletionKey).filter(Boolean),
         testIds: normalized.map(plan => extractPlanFields(plan).testId).filter(Boolean),
       },
       { client }
     );
     const isDeleted = plan => {
-      const experimentId = planExperimentId(plan);
+      const experimentId = planDeletionKey(plan);
       const { testId } = extractPlanFields(plan);
       return (
         (experimentId && deleted.experiments.has(experimentId)) ||
@@ -313,9 +418,39 @@ async function saveInboxPlans(
       );
     };
     refusedPlanIds = normalized.filter(isDeleted).map(plan => plan.id);
-    const accepted = refusedPlanIds.length
+    let accepted = refusedPlanIds.length
       ? normalized.filter(plan => !isDeleted(plan))
       : normalized;
+
+    // Archive and restore are only ever a save that flips `archived`, from
+    // whichever screen did it, so the flip is what gets logged.
+    const wasArchived = new Map();
+    const launchedState = new Map();
+    if (accepted.length) {
+      const previous = await client.query(
+        `SELECT plan_id, COALESCE(plan_json->>'archived', '') = 'true' AS archived,
+                COALESCE(plan_json->>'status', status) AS status,
+                COALESCE(NULLIF(plan_json->>'test_id', ''), test_id::text) AS test_id
+           FROM smart_pricing_inbox_plans
+          WHERE shop_domain = $1 AND plan_id = ANY($2::varchar[])
+          FOR UPDATE`,
+        [domain, accepted.map(plan => plan.id)]
+      );
+      for (const row of previous.rows || []) {
+        wasArchived.set(String(row.plan_id), row.archived === true);
+        if (row.test_id) launchedState.set(String(row.plan_id), row);
+      }
+    }
+    accepted = accepted.map(plan => keepLaunchedState(plan, launchedState.get(plan.id)));
+    lifecycleEvents = accepted
+      .filter(plan => wasArchived.has(plan.id) && wasArchived.get(plan.id) !== plan.archived)
+      .map(plan =>
+        planLifecycleEvent(
+          plan,
+          plan.archived ? 'archived' : 'restored',
+          plan.archived ? {} : { source: 'archive' }
+        )
+      );
 
     // The array is the caller's view of the inbox, and that view can be stale:
     // a browser whose local copy stopped updating, or one that never loaded
@@ -392,6 +527,7 @@ async function saveInboxPlans(
     client.release();
   }
 
+  await recordPlanLifecycleEvents(domain, lifecycleEvents);
   const snapshot = await listInboxPlans(domain);
   // Named so the browser can drop them from its own copy instead of sending
   // them again on every save.
@@ -413,7 +549,7 @@ async function upsertInboxPlan(shopDomain, plan, { allowDeleted = false } = {}) 
   }
   const { status, testId, archived, archivedAt } = extractPlanFields(normalized);
   if (!allowDeleted) {
-    const experimentId = planExperimentId(normalized);
+    const experimentId = planDeletionKey(normalized);
     const deleted = await findDeletions(domain, {
       experimentIds: experimentId ? [experimentId] : [],
       testIds: testId ? [testId] : [],
@@ -496,6 +632,7 @@ async function patchInboxPlanRows(domain, planIds, merge) {
 
   const client = await getClient();
   let archivedColumns = true;
+  const lifecycleEvents = [];
   try {
     await client.query('BEGIN');
     for (const planId of ids) {
@@ -524,9 +661,19 @@ async function patchInboxPlanRows(domain, planIds, merge) {
       }
       if (!locked.rows.length) continue;
 
-      const next = normalizePlanJson(merge(mapRowToPlan(locked.rows[0])));
+      const current = mapRowToPlan(locked.rows[0]);
+      const next = normalizePlanJson(merge(current));
       if (!next) continue;
       const { status, testId, archived, archivedAt } = extractPlanFields(next);
+      if (current.archived !== archived) {
+        lifecycleEvents.push(
+          planLifecycleEvent(
+            next,
+            archived ? 'archived' : 'restored',
+            archived ? {} : { source: 'archive' }
+          )
+        );
+      }
 
       if (archivedColumns) {
         await client.query(
@@ -562,6 +709,7 @@ async function patchInboxPlanRows(domain, planIds, merge) {
   } finally {
     client.release();
   }
+  await recordPlanLifecycleEvents(domain, lifecycleEvents);
   return patched;
 }
 
@@ -621,11 +769,21 @@ async function patchInboxPlansFromSync(shopDomain, syncRows = []) {
       test_status: sync.test_status,
       test_sync_at: new Date().toISOString(),
     };
+    // Archive stops a paused test to free its products, and the stopped test's
+    // data can then read as decided. Neither is the merchant finishing it: an
+    // archived plan keeps the status it was shelved with so Restore brings it
+    // back as it was, and a paused one only finishes on the test's own
+    // automatic decision.
+    const merchantPaused = plan.status === 'paused' && !sync.auto_decision;
     if (sync.winner_applied || sync.inbox_status === 'applied') {
       patch.status = 'applied';
       patch.winner_applied_at = sync.winner_applied_at || new Date().toISOString();
+    } else if (plan.archived === true) {
+      // status unchanged
     } else if (sync.inbox_status === 'paused') {
       patch.status = 'paused';
+    } else if (sync.inbox_status === 'completed' && merchantPaused) {
+      // status unchanged
     } else if (sync.inbox_status === 'completed') {
       patch.status = 'completed';
       if (sync.auto_decision === 'control') {
@@ -871,9 +1029,55 @@ function planFromOrphanedTest(test) {
  * is restored as a plan in the experiment it was launched from. Insert-only:
  * a plan that exists is never touched.
  */
+/**
+ * Live tests whose own plan is still there but lost its link: a launch whose
+ * link write failed, or a save of a pre-launch copy. The plan reads as a
+ * draft while its test runs on the storefront.
+ */
+async function relinkUnlinkedLivePlans(domain) {
+  const result = await query(
+    `SELECT t.id, t.status, t.started_at, p.plan_id
+       FROM tests t
+       JOIN smart_pricing_inbox_plans p
+         ON p.shop_domain = $1
+        AND p.plan_id = t.metadata->>'smart_pricing_plan_id'
+      WHERE LOWER(TRIM(t.shop_domain)) = $1
+        AND t.status IN ('running', 'paused')
+        AND p.test_id IS NULL
+        AND COALESCE(p.plan_json->>'test_id', '') = ''
+        AND NOT EXISTS (
+          SELECT 1 FROM smart_pricing_inbox_plans other
+           WHERE other.shop_domain = $1 AND other.test_id = t.id
+        )
+      LIMIT $2`,
+    [domain, MAX_PLANS_PER_SHOP]
+  );
+  const rows = result.rows || [];
+  if (!rows.length) return [];
+  const byPlan = new Map(rows.map(row => [String(row.plan_id), row]));
+  await patchInboxPlanRows(domain, [...byPlan.keys()], plan => {
+    const test = byPlan.get(plan.id);
+    if (!test) return plan;
+    return {
+      ...plan,
+      test_id: String(test.id),
+      status: test.status === 'paused' ? 'paused' : 'running',
+      launched_at:
+        plan.launched_at ||
+        (test.started_at ? new Date(test.started_at).toISOString() : new Date().toISOString()),
+    };
+  });
+  logger.warn('relinked inbox plans to live tests that had lost them', {
+    shop: domain,
+    test_ids: rows.map(row => row.id).slice(0, 50),
+  });
+  return rows.map(row => String(row.id));
+}
+
 async function restoreOrphanedLivePlans(shopDomain) {
   const domain = normalizeShopDomain(shopDomain);
   if (!domain) return { restored: 0 };
+  const relinked = await relinkUnlinkedLivePlans(domain);
   const result = await query(
     `SELECT t.id, t.name, t.type, t.status, t.target_id, t.variants, t.goal, t.metadata,
             t.started_at, t.created_at, t.updated_at
@@ -905,7 +1109,7 @@ async function restoreOrphanedLivePlans(shopDomain) {
       test_ids: plans.map(plan => plan.test_id).slice(0, 50),
     });
   }
-  return { restored, test_ids: plans.map(plan => plan.test_id) };
+  return { restored, relinked: relinked.length, test_ids: plans.map(plan => plan.test_id) };
 }
 
 const EMPTY_ARMS_SQL = `COALESCE(jsonb_array_length(CASE WHEN jsonb_typeof(plan_json->'price_arms') = 'array'
@@ -1163,9 +1367,15 @@ async function deleteExperimentEverywhere(
       RETURNING plan_id, test_id::text AS test_id, plan_json`,
       [domain, plans, allTestIds, id]
     );
+    // Only plans that name no experiment and have no test: keying anything else
+    // by its own experiment would refuse that experiment's other plans too.
+    const orphanPlanIds = (deleted.rows || [])
+      .filter(row => row.plan_json && !row.test_id && !planExperimentId(row.plan_json))
+      .map(row => planDeletionKey({ ...(row.plan_json || {}), id: row.plan_id }))
+      .filter(Boolean);
     await recordDeletions(
       domain,
-      { experimentIds: id ? [id] : [], testIds: allTestIds },
+      { experimentIds: [...(id ? [id] : []), ...orphanPlanIds], testIds: allTestIds },
       { client }
     );
     // Restore within the grace period puts back the plan exactly as it was --
@@ -1188,6 +1398,18 @@ async function deleteExperimentEverywhere(
       );
     }
     await client.query('COMMIT');
+    // Only plans that Restore can bring back: the entry is read from the
+    // restored plan's History, and the purge removes it with the test.
+    const purgeAfter = new Date(Date.now() + TEST_PURGE_GRACE_DAYS * 24 * 60 * 60 * 1000);
+    await recordPlanLifecycleEvents(
+      domain,
+      keptPlans.map(row =>
+        planLifecycleEvent({ ...row.plan_json, id: row.plan_id }, 'deleted', {
+          matchActivity: false,
+          purge_after: purgeAfter.toISOString(),
+        })
+      )
+    );
     return {
       archived_test_ids: archivedIds,
       deleted_plan_ids: (deleted.rows || []).map(row => row.plan_id),
@@ -1337,6 +1559,7 @@ async function restoreDeletedExperiment(
 
     const archivedAt = new Date().toISOString();
     const restoredPlanIds = [];
+    const lifecycleEvents = [];
     for (const test of rows) {
       const kept = keptPlanByTest.get(test.id);
       const base = kept && typeof kept === 'object' ? kept : planFromOrphanedTest(test);
@@ -1357,10 +1580,19 @@ async function restoreDeletedExperiment(
          RETURNING plan_id`,
         [domain, plan.id, JSON.stringify(plan), fields.status, test.id, fields.archivedAt || archivedAt]
       );
-      if (inserted.rowCount) restoredPlanIds.push(plan.id);
+      if (inserted.rowCount) {
+        restoredPlanIds.push(plan.id);
+        lifecycleEvents.push(
+          planLifecycleEvent(plan, 'restored', {
+            matchActivity: false,
+            source: 'recently_deleted',
+          })
+        );
+      }
     }
 
     await client.query('COMMIT');
+    await recordPlanLifecycleEvents(domain, lifecycleEvents);
     return { restored_test_ids: restoredIds, restored_plan_ids: restoredPlanIds };
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
@@ -1381,6 +1613,7 @@ module.exports = {
   listExperimentTests,
   planFromOrphanedTest,
   saveInboxPlans,
+  keepLaunchedState,
   deleteInboxPlan,
   patchInboxPlan,
   patchInboxPlansFromSync,

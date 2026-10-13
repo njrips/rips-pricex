@@ -59,6 +59,14 @@ const CHECKOUT_DELIVERY_EVENT_NAMES = Object.freeze([
   'checkout_delivery_method_action',
   'checkout_customization_match',
 ]);
+// Secondary metrics computed from orders, not storefront events; every
+// variation already reports them.
+const BUILTIN_SECONDARY_METRICS = new Set([
+  'revenue_per_visitor',
+  'conversion_rate',
+  'aov',
+  'avg_order_value',
+]);
 
 function normalizeAnalyticsEventName(value) {
   return String(value || '')
@@ -833,8 +841,9 @@ class AnalyticsService {
     }
     if (Array.isArray(goal.secondary)) {
       return goal.secondary
+        .filter(s => s?.source !== 'builtin')
         .map(s => normalizeAnalyticsEventName(s?.event_name || s?.eventName))
-        .filter(Boolean);
+        .filter(name => name && !BUILTIN_SECONDARY_METRICS.has(name));
     }
     return [];
   }

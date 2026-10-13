@@ -257,3 +257,49 @@ describe('buildActivityTimeline log merge', () => {
     expect(items.some(item => item.title === 'Kept catalog price')).toBe(false);
   });
 });
+
+describe('archive history', () => {
+  it('shows an archive of a many-product test once, from the server copy', () => {
+    const logged = [
+      {
+        id: 'archived_1',
+        kind: 'archived',
+        title: 'Test archived',
+        at: '2026-10-12T10:00:00.000Z',
+        detail: 'Moved from Finished to the Archived tab.',
+      },
+    ];
+    const serverEvents = ['SP-1', 'SP-2', 'SP-3'].map((planId, i) => ({
+      id: `e${i}`,
+      plan_id: planId,
+      event_type: 'archived',
+      actor: 'merchant',
+      created_at: '2026-10-12T10:00:01.000Z',
+      payload: { activity_id: 'archived_1', detail: 'Moved from Finished to the Archived tab.' },
+    }));
+
+    const items = mergeActivityTimeline([], logged, serverEvents);
+    const archives = items.filter(item => item.kind === 'archived');
+    expect(archives).toHaveLength(1);
+    expect(archives[0].source).toBe('server');
+  });
+
+  it('keeps every archive when a test is archived, restored and archived again', () => {
+    const plans = appendActivityToPlans(
+      appendActivityToPlans(
+        appendActivityToPlans(
+          [{ id: 'SP-1' }],
+          createActivityEntry({ kind: 'archived', title: 'Test archived', at: '2026-10-10T10:00:00.000Z' })
+        ),
+        createActivityEntry({ kind: 'restored', title: 'Test restored', at: '2026-10-11T10:00:00.000Z' })
+      ),
+      createActivityEntry({ kind: 'archived', title: 'Test archived', at: '2026-10-12T10:00:00.000Z' })
+    );
+    const kinds = plans[0].metadata.activity_log.map(item => item.kind);
+    expect(kinds).toEqual(['archived', 'restored', 'archived']);
+  });
+
+  it('marks a delete as critical', () => {
+    expect(activityKindTone({ kind: 'deleted' })).toBe('critical');
+  });
+});

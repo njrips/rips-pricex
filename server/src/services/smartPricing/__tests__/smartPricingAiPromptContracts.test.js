@@ -61,6 +61,32 @@ describe('Priceify AI prompt contracts', () => {
     });
   });
 
+  it('states the gap between test prices only when there is more than one', () => {
+    const several = buildPriceSuggestionSystemPrompt({
+      min: -10,
+      max: 20,
+      minBandWidth: 9,
+      minGapHint: 4.5,
+      variationCount: 3,
+    });
+    const one = buildPriceSuggestionSystemPrompt({
+      min: -10,
+      max: 20,
+      minBandWidth: 8,
+      minGapHint: 8,
+      variationCount: 1,
+      minControlGap: 3,
+    });
+
+    expect(several).toContain('hi - lo is at least 9%');
+    expect(several).toContain('3 test prices across lo..hi, at least about 4.5% apart');
+    expect(several).toContain('at least 3% away from 0 (the current price)');
+    expect(several).toMatch(/crosses 0 loses the stretch within 3% of 0/);
+    expect(one).toContain('hi - lo is at least 8%');
+    expect(one).toContain('keep best at least 3% away from 0');
+    expect(one).not.toMatch(/apart/);
+  });
+
   it('has an honest non-search prompt and a strict response schema', () => {
     const prompt = buildPriceSuggestionSystemPrompt({
       min: 5,

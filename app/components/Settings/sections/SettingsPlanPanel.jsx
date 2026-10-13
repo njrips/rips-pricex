@@ -69,7 +69,9 @@ export function usePlanBillingState(ctx, { enabled = true } = {}) {
 
   const entitled = remote?.entitled ?? ctx.entitled;
   const planHandle = remote?.planHandle || ctx.planHandle || 'none';
-  const upgradeUrl = remote?.upgradeUrl || ctx.upgradeUrl;
+  // The loader's URL carries the handle Shopify reported; the API's is built
+  // from SHOPIFY_APP_HANDLE alone and is a "page not found" when that is wrong.
+  const upgradeUrl = ctx.upgradeUrl || remote?.upgradeUrl;
   const upgrade = useUpgradeRedirect(upgradeUrl);
   const checkoutReady = launchSummary.anyReady;
   const priceReady = launchSummary.priceReady;

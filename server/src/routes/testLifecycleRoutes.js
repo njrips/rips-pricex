@@ -26,6 +26,8 @@ const router = express.Router();
 
 const isArchived = test => String(test?.status || '') === 'archived';
 
+const PAUSABLE_STATUSES = new Set(['running', 'scheduled']);
+
 router.get(
   '/:id',
   asyncHandler(async (req, res) => {
@@ -144,7 +146,23 @@ router.post(
     if (isArchived(test)) {
       return res.json({ test });
     }
+    const status = String(test.status || '').toLowerCase();
+    // A second click, or a batch that also lists an already-paused product.
+    if (status === 'paused') {
+      return res.json({ test });
+    }
+    // Pause reserves the product so Resume can have it back. Applied to a
+    // finished test it put that product back on hold and turned a decided
+    // product (winner ready, completed) into one waiting to resume.
+    if (!PAUSABLE_STATUSES.has(status)) {
+      return res.status(409).json({
+        error: 'Only a running test can be paused.',
+        code: 'TEST_NOT_RUNNING',
+        status,
+      });
+    }
     await updateTestStatus(req.params.id, req.shopDomain, 'paused');
+    logger.info('Test paused by merchant', { shop: req.shopDomain, testId: req.params.id });
     await syncSmartPricingInboxForTest(req.shopDomain, req.params.id, {
       reason: 'merchant_pause',
     }).catch(() => null);
@@ -176,14 +194,23 @@ router.post(
     if (isArchived(test)) {
       return res.json({ test });
     }
+    // Archiving a paused experiment frees its products the same way, but the
+    // experiment is shelved, not decided: it must come back from Restore as
+    // Paused. Marked finished here, the plan returned as Finished instead.
+    const forArchive = String(req.body?.reason || '').toLowerCase() === 'archive';
     await updateTestStatus(req.params.id, req.shopDomain, 'stopped');
     // The inbox plan has to hear that this is finished rather than paused, or
     // the next list load reads the server's `paused` back over the client's
     // `completed` and the experiment reappears with Resume on it.
     await syncSmartPricingInboxForTest(req.shopDomain, req.params.id, {
-      reason: 'merchant_finish',
+      reason: forArchive ? 'merchant_archive' : 'merchant_finish',
     }).catch(() => null);
     const updated = await getTestById(req.params.id, req.shopDomain);
+    // The archive itself is the history entry for this; a "Stopped" beside it
+    // would read as though the merchant had ended the experiment.
+    if (forArchive) {
+      return res.json({ test: updated });
+    }
     const { recordEventForTest } = require('../models/smartPricingProductEventStore');
     await recordEventForTest(req.shopDomain, req.params.id, 'stopped', {
       actor: 'merchant',

@@ -15,7 +15,8 @@ import {
   describeAiBandCap,
   describeAiBandClamp,
   describeCollapsedAiBand,
-  describeZeroEdgeAiBand,
+  describeNarrowAiBand,
+  resolveAiSuggestSpreadArms,
   findUnpricedTestArms,
   getAiSuggestCopy,
   describeAiBandDirectionTooltip,
@@ -536,12 +537,18 @@ export default function ProductsPricingStepPanel({
     bandOptions
   );
   const aiBandCollapsedNotice = describeCollapsedAiBand(aiBandCap, { unit: aiUnit });
-  const aiBandZeroEdgeNotice = describeZeroEdgeAiBand(aiBandCap, { unit: aiUnit });
+  const aiBandNarrowNotice = aiBandCollapsedNotice
+    ? ''
+    : describeNarrowAiBand(aiBandCap, {
+        unit: aiUnit,
+        armCount: resolveAiSuggestSpreadArms(variations).length,
+        shopMaxChangePercent,
+      });
   const aiBandCapNotice =
     [
       aiBandClampNotice || describeAiBandCap(aiBandCap, { unit: aiUnit }),
       aiBandCollapsedNotice,
-      aiBandZeroEdgeNotice,
+      aiBandNarrowNotice,
     ]
       .filter(Boolean)
       .join(' ') || '';
@@ -825,18 +832,19 @@ export default function ProductsPricingStepPanel({
     loading,
     loadError,
   });
+  const storeCatalogProductCount = resolveStoreCatalogProductCount({
+    catalogLoadedProductCount,
+    availableProductCount,
+    withheldCount,
+    opportunities,
+  });
   const productsStepEmptyMessage = buildProductsStepEmptyMessage({
     loading,
     loadError,
     availableProductCount,
     withheldCount,
     catalogTruncated,
-  });
-  const storeCatalogProductCount = resolveStoreCatalogProductCount({
-    catalogLoadedProductCount,
-    availableProductCount,
-    withheldCount,
-    opportunities,
+    storeProductCount: storeCatalogProductCount,
   });
   const storeCatalogStatusText = buildStoreCatalogStatusText({
     storeProductCount: storeCatalogProductCount,
@@ -876,7 +884,7 @@ export default function ProductsPricingStepPanel({
           {
             id: 'all',
             title: 'All products',
-            desc: 'Include every eligible product available on your live store.',
+            desc: 'Include every product in your catalog.',
             icon: <IconCheckCircle size={16} />,
           },
         ].map(mode => {
@@ -990,7 +998,7 @@ export default function ProductsPricingStepPanel({
         ) : null}
       </div>
 
-      {pickMode === 'manual' && productsStepEmptyMessage ? (
+      {productsStepEmptyMessage ? (
         <p className={styles.help}>{productsStepEmptyMessage}</p>
       ) : null}
 
@@ -1382,7 +1390,7 @@ export default function ProductsPricingStepPanel({
       </div>
 
       <div className={styles.tableScroll}>
-        <table className={styles.table}>
+        <table className={`${styles.table} ${styles.tableSentenceCase}`}>
           <thead>
             <tr>
               <th>Product</th>

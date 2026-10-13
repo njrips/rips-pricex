@@ -172,8 +172,17 @@ export const CLASSIC_SOURCE_TO_RULES = {
 const PRIMARY_METRIC_SET = new Set(
   [...ALL_CLASSIC_METRIC_OPTIONS, ...LEGACY_GOAL_METRIC_OPTIONS].map(o => o.value)
 );
-const SECONDARY_BY_VALUE = new Map(SECONDARY_METRIC_OPTIONS.map(o => [o.value, o]));
-const SECONDARY_BY_LABEL = new Map(SECONDARY_METRIC_OPTIONS.map(o => [o.label.toLowerCase(), o]));
+// The standard metrics can be secondaries too, and need their own names back
+// ("Average order value", not "Aov").
+const SECONDARY_LOOKUP_OPTIONS = [...GOAL_METRIC_OPTIONS, ...SECONDARY_METRIC_OPTIONS];
+const SECONDARY_BY_VALUE = new Map(SECONDARY_LOOKUP_OPTIONS.map(o => [o.value, o]));
+const SECONDARY_BY_LABEL = new Map(SECONDARY_LOOKUP_OPTIONS.map(o => [o.label.toLowerCase(), o]));
+
+/**
+ * Secondary keys that name a metric computed from visits and orders, rather
+ * than a storefront event to count.
+ */
+export const BUILTIN_SECONDARY_METRICS = new Set(GOAL_METRIC_OPTIONS.map(o => o.value));
 
 export function createEmptyAudienceSegments() {
   return {
@@ -594,7 +603,7 @@ export function buildSecondaryGoalPayload(secondaryMetrics = [], customGoals = [
         aggregation: 'count',
         direction: 'increase',
         metric_role: 'secondary',
-        source: 'catalog',
+        source: BUILTIN_SECONDARY_METRICS.has(key) ? 'builtin' : 'catalog',
       })),
     ...customs,
   ];

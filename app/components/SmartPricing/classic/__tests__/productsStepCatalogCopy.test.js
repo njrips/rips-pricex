@@ -98,6 +98,32 @@ describe('productsStepCatalogCopy', () => {
     expect(picker).toBe(step);
   });
 
+  it('says why nothing is offered when every active product is sold out or unsellable', () => {
+    const step = buildProductsStepEmptyMessage({
+      availableProductCount: 0,
+      withheldCount: 0,
+      storeProductCount: 274,
+    });
+    expect(step).toMatch(/^No products available to pick here\. 274 active products can’t be tested/);
+    expect(step).toContain('Continue selling when out of stock');
+    expect(step).not.toContain('No active products found');
+
+    const mixed = buildProductsStepEmptyMessage({
+      availableProductCount: 0,
+      withheldCount: 3,
+      storeProductCount: 10,
+    });
+    expect(mixed).toContain('3 products are in another test');
+    expect(mixed).toContain('7 active products can’t be tested');
+
+    expect(
+      buildProductPickerEmptyMessage({ opportunities: [], storeProductCount: 274 })
+    ).toBe(step);
+    expect(buildProductsStepEmptyMessage({ availableProductCount: 0 })).toBe(
+      'No active products found in your catalog.'
+    );
+  });
+
   it('explains filter and search misses differently from an empty catalog', () => {
     const opportunities = [
       { product_id: 'p1', variant_id: 'v1', title: 'Alpha' },

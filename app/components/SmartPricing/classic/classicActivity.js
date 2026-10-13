@@ -12,6 +12,7 @@ export const ACTIVITY_KIND_META = {
   resumed: { label: 'Resumed', group: 'lifecycle' },
   archived: { label: 'Archived', group: 'lifecycle' },
   restored: { label: 'Restored', group: 'lifecycle' },
+  deleted: { label: 'Deleted', group: 'lifecycle' },
   updated: { label: 'Settings changed', group: 'lifecycle' },
   qa: { label: 'QA check', group: 'lifecycle' },
   guardrail: { label: 'Guardrail', group: 'guardrail' },
@@ -134,7 +135,7 @@ function activityGroup(item = {}) {
 export function activityKindTone(item = {}) {
   const kind = String(item.kind || '').trim();
   const status = String(item.status || '').trim().toLowerCase();
-  if (kind === 'guardrail') return 'critical';
+  if (kind === 'guardrail' || kind === 'deleted') return 'critical';
   if (kind === 'qa') {
     if (status === 'fail' || status === 'failed' || status === 'error') return 'critical';
     if (status === 'pass' || status === 'passed' || status === 'success') return 'success';
@@ -368,8 +369,9 @@ export function createActivityEntry({
   at = '',
   status = '',
 } = {}) {
+  const stamp = at ? new Date(at).getTime() : Date.now();
   return normalizeActivityEntry({
-    id: id || `${kind}_${Date.now()}`,
+    id: id || `${kind}_${Number.isFinite(stamp) ? stamp : Date.now()}`,
     at: at || new Date().toISOString(),
     kind,
     title,

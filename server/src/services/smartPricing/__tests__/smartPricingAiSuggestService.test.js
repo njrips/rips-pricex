@@ -245,6 +245,34 @@ describe('smartPricingAiSuggestService', () => {
       expect(result.suggestions[0].delta_percent).toBeLessThanOrEqual(20);
     });
 
+    it('moves a single variation the model put on the current price far enough to test', async () => {
+      // One variation is judged against the current price; +0.5% is a test of nothing.
+      chatJson.mockResolvedValue({ bands: [{ v: 0, lo: -6, hi: 6, best: 0.5 }] });
+      const result = await suggestPrices({
+        ...tee,
+        minPct: -10,
+        maxPct: 10,
+        arms: [{ id: 'var_a' }],
+      });
+
+      expect(result.suggestions[0].ai_best_delta_percent).toBe(0.5);
+      expect(result.suggestions[0].delta_percent).toBeGreaterThanOrEqual(2.5);
+      expect(result.suggestions[0].delta_percent).toBeLessThanOrEqual(6);
+    });
+
+    it('tells the model a single variation has no gap to keep, only a distance from today', async () => {
+      chatJson.mockResolvedValue({ bands: [{ v: 0, lo: 10, hi: 20, best: 15 }] });
+      await suggestPrices({ ...tee, arms: [{ id: 'var_a' }] });
+      const single = chatJson.mock.calls[0][0].systemPrompt;
+      chatJson.mockClear();
+      await suggestPrices({ ...tee, arms: [{ id: 'var_a' }, { id: 'var_b' }, { id: 'var_c' }] });
+      const several = chatJson.mock.calls[0][0].systemPrompt;
+
+      expect(single).toContain('keep best at least 3% away from 0');
+      expect(single).not.toMatch(/apart/);
+      expect(several).toMatch(/3 test prices across lo\.\.hi, at least about [\d.]+% apart/);
+    });
+
     it('keeps the best price inside the band', async () => {
       chatJson.mockResolvedValue({ bands: [{ v: 0, lo: 10, hi: 20, best: 45 }] });
       const result = await suggestPrices({ ...tee, arms: [{ id: 'var_a' }] });
@@ -820,6 +848,34 @@ describe('a band the model returned badly', () => {
     // Not pinned exactly: the prices are rounded to real price endings after
     // the band is widened, so the final spread lands a hair either side of it.
     expect(Math.max(...deltas) - Math.min(...deltas)).toBeGreaterThan(2.9);
+  });
+
+  it('keeps every variation clear of the current price when the band crosses it', async () => {
+    jest.clearAllMocks();
+    hasOpenAiKey.mockReturnValue(true);
+    chatJson.mockResolvedValue({ bands: [{ v: 0, lo: -6, hi: 6, best: 1 }] });
+    const result = await suggestPrices({
+      ...product,
+      arms: [{ id: 'a' }, { id: 'b' }, { id: 'c' }],
+      minPct: -15,
+      maxPct: 20,
+    });
+    const deltas = result.suggestions.map(row => row.delta_percent);
+
+    // An even spread of -6..6 puts the middle variation on the current price.
+    deltas.forEach(delta => expect(Math.abs(delta)).toBeGreaterThanOrEqual(2.9));
+    expect(new Set(deltas).size).toBe(3);
+  });
+
+  it('moves a band that barely crosses the current price to the side it leans to', async () => {
+    jest.clearAllMocks();
+    hasOpenAiKey.mockReturnValue(true);
+    chatJson.mockResolvedValue({ bands: [{ v: 0, lo: -1, hi: 5, best: 2 }] });
+    const result = await suggestPrices({ ...product, minPct: -15, maxPct: 20 });
+    const deltas = result.suggestions.map(row => row.delta_percent).sort((a, b) => a - b);
+
+    expect(deltas[0]).toBeGreaterThanOrEqual(2.9);
+    expect(deltas[1] - deltas[0]).toBeGreaterThan(2.5);
   });
 
   it('falls back for a row whose band is not numbers at all', async () => {

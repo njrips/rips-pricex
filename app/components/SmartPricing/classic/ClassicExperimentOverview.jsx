@@ -58,12 +58,17 @@ import {
 import {
   buildClassicExperimentDeleteConfirmMessage,
   deleteClassicExperimentSynchronized,
+  deletedTestMessage,
 } from './classicExperimentDelete';
 import {
+  ARCHIVE_STOP_BODY,
+  lifecycleFailureError,
+  postToEachExperimentTest,
+  runningExperimentTestIds,
   stopPausedTestsBeforeArchive,
   withUnlistedExperimentTests,
 } from './classicExperimentTestScope';
-import { buildClassicWizardResumePath, canDeleteClassicExperimentNow, classicBatchOutcomeMessage, CLASSIC_STOPPED_PLAN_STATUS, getClassicExperimentResumeId, isClassicExperimentEnded, isSettledClassicPlan, resolveClassicDetailsTab, resolveClassicEditFocus, splitSettledByIds } from './classicExperimentListActions';
+import { archiveActivityDetail, buildClassicExperimentEditTarget, buildClassicWizardResumePath, canDeleteClassicExperimentNow, isClassicDraftExperiment, restoreActivityDetail, classicBatchOutcomeMessage, CLASSIC_STOPPED_PLAN_STATUS, getClassicExperimentResumeId, isClassicExperimentEnded, isSettledClassicPlan, resolveClassicDetailsTab, resolveClassicEditFocus } from './classicExperimentListActions';
 import { isOfferExperimentType } from './offerSelection';
 import {
   applyPausedSmartPricingSettings,
@@ -190,7 +195,21 @@ export default function ClassicExperimentOverview() {
 
   const experimentTitle = experiment?.title || plan?.title || 'Untitled test';
   const currency = plan?.currency || analytics?.currency || 'USD';
-  const resumeId = getClassicExperimentResumeId(experiment) || experiment?.id || planId;
+  const resumeId = getClassicExperimentResumeId(experiment) || planId;
+
+  // A draft has no results, history or live settings to show. Bookmarks and
+  // old links still land here, so pass them on to the setup wizard.
+  // The test's own status is checked too: the wizard sends launched tests back
+  // here, so a plan whose stored status lags its test must not bounce between them.
+  const testLeftDraft = ['running', 'active', 'paused', 'scheduled', 'stopped', 'completed'].includes(
+    String(test?.status || '').trim().toLowerCase()
+  );
+  const openDraftInWizard =
+    !loading && isDraft && !testLeftDraft && isClassicDraftExperiment(experiment);
+  useEffect(() => {
+    if (!openDraftInWizard) return;
+    navigate(buildClassicExperimentEditTarget(experiment), { replace: true });
+  }, [openDraftInWizard, experiment, navigate]);
 
   const experimentForEditGating = useMemo(() => {
     if (!experiment) return experiment;
@@ -464,12 +483,16 @@ export default function ClassicExperimentOverview() {
       const testIds = await withUnlistedExperimentTests(
         shopDomain,
         experimentPlans,
-        actionableTestIds,
-        { statuses: ['running'] }
+        runningExperimentTestIds(experimentPlans).filter(id => actionableTestIds.includes(id)),
+        { statuses: ['running'], dropListedOutsideStatuses: true }
       );
+      if (!testIds.length) {
+        showError(null, 'No running product to pause.');
+        return;
+      }
       const { succeeded, failed } = await postToEachTest(testIds, 'pause');
       if (!succeeded.length) {
-        showError(failed[0]?.reason, 'Could not pause test.');
+        showError(lifecycleFailureError(failed[0]?.reason, 'pause'), 'Could not pause test.');
         return;
       }
       await replaceExperimentPlansLocal(
@@ -522,7 +545,7 @@ export default function ClassicExperimentOverview() {
       );
       const { succeeded, failed } = await postToEachTest(testIds, 'stop');
       if (!succeeded.length) {
-        showError(failed[0]?.reason, 'Could not stop test.');
+        showError(lifecycleFailureError(failed[0]?.reason, 'stop'), 'Could not stop test.');
         return;
       }
       await replaceExperimentPlansLocal(
@@ -564,12 +587,8 @@ export default function ClassicExperimentOverview() {
    * failure over a row where some products had genuinely stopped, with
    * nothing saying which.
    */
-  const postToEachTest = async (testIds, action) => {
-    const results = await Promise.allSettled(
-      testIds.map(id => apiPost(`/tests/${encodeURIComponent(id)}/${action}`, {}))
-    );
-    return splitSettledByIds(testIds, results);
-  };
+  const postToEachTest = (testIds, action) =>
+    postToEachExperimentTest(testIds, action, apiPost);
 
   /**
    * Start the given products' tests and report what happened.
@@ -688,27 +707,25 @@ export default function ClassicExperimentOverview() {
       const archivedAt = new Date().toISOString();
       const stopped = new Set(
         await stopPausedTestsBeforeArchive(shopDomain, experimentPlans, ids =>
-          postToEachTest(ids, 'stop')
+          postToEachExperimentTest(ids, 'stop', apiPost, { body: ARCHIVE_STOP_BODY })
         )
       );
       const archived = stampPlans(
         experimentPlans,
         {
-          id: 'archived',
           kind: 'archived',
           title: 'Test archived',
-          detail: 'Hidden from the active tests list',
+          detail: archiveActivityDetail(
+            { ...experiment, plans: experimentPlans },
+            { stoppedCount: stopped.size }
+          ),
           at: archivedAt,
         },
         { archived: true, archived_at: archivedAt }
-      ).map(row =>
-        stopped.has(String(row?.test_id || row?.metadata?.test_id || '').trim())
-          ? { ...row, status: CLASSIC_STOPPED_PLAN_STATUS }
-          : row
       );
       await replaceExperimentPlansLocal(archived);
       showSuccess('Test archived.');
-      navigate(preserveEmbeddedSearch('/app?tab=finished'));
+      navigate(preserveEmbeddedSearch('/app?tab=archived'));
     } catch (err) {
       showError(err, 'Could not archive test.');
     } finally {
@@ -727,7 +744,7 @@ export default function ClassicExperimentOverview() {
           {
             kind: 'restored',
             title: 'Test restored',
-            detail: 'Moved back to the active tests list',
+            detail: restoreActivityDetail({ ...experiment, plans: experimentPlans }),
           },
           { archived: false, archived_at: null }
         )
@@ -763,12 +780,20 @@ export default function ClassicExperimentOverview() {
       if (!result.ok && !result.partial) {
         throw new Error(result.errors[0] || 'Could not delete test.');
       }
-      showSuccess(
-        result.ok
-          ? 'Test deleted.'
-          : result.errors[0] || 'Test was partially deleted.'
-      );
-      navigate(ROUTES.appSmartPricing(shopDomain));
+      // This page unmounts on the way to the list, taking its own toast with
+      // it, so the list is the one that reports the outcome.
+      navigate(ROUTES.appSmartPricing(shopDomain), {
+        state: {
+          listMessage: result.ok
+            ? { type: 'success', text: deletedTestMessage(result, experiment) }
+            : {
+                type: 'warning',
+                text:
+                  result.errors[0] ||
+                  'Test was partially deleted. Delete it again from the list if it still shows.',
+              },
+        },
+      });
     } catch (err) {
       showError(err, 'Could not delete test.');
     } finally {
@@ -955,10 +980,10 @@ export default function ClassicExperimentOverview() {
     }
   };
 
-  if (loading) {
+  if (loading || openDraftInWizard) {
     return (
       <PageShell>
-        <ClassicPageLoader label="Loading test…" />
+        <ClassicPageLoader label={openDraftInWizard ? 'Opening draft…' : 'Loading test…'} />
       </PageShell>
     );
   }
@@ -1404,7 +1429,6 @@ function statusLabel(status, experimentType) {
   if (status === 'winner_ready') return formatClassicStatusLabel(status, experimentType);
   if (status === 'applied') return formatClassicStatusLabel(status, experimentType);
   if (status === 'completed') return formatClassicStatusLabel(status, experimentType);
-  if (status === 'queued') return 'Queued';
   return 'Draft';
 }
 

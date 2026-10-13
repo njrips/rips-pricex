@@ -12,6 +12,9 @@ export const PRODUCT_EVENT_LABELS = Object.freeze({
   rerun_queued: 'Re-run queued',
   guardrail_stopped: 'Stopped by guardrail',
   auto_applied: 'Winner applied to catalog',
+  archived: 'Test archived',
+  restored: 'Test restored',
+  deleted: 'Test deleted',
 });
 
 /**
@@ -122,6 +125,9 @@ export function resolveProductEventTitle(event) {
     }
     return PRODUCT_EVENT_LABELS.stopped;
   }
+  if (type === 'restored' && payload.source === 'recently_deleted') {
+    return 'Restored from Recently deleted';
+  }
   return PRODUCT_EVENT_LABELS[type] || event.event_type;
 }
 
@@ -147,6 +153,9 @@ function resolveServerActivityKind(event) {
     finished_control: 'complete',
     rerun_queued: 'queued',
     guardrail_stopped: 'guardrail',
+    archived: 'archived',
+    restored: 'restored',
+    deleted: 'deleted',
   };
   return kindMap[type] || 'updated';
 }
@@ -156,15 +165,18 @@ function resolveServerActivityActor(event) {
     .trim()
     .toLowerCase();
   if (key === 'guardrail') return 'guardrail';
-  if (key === 'merchant') return 'You';
+  if (key === 'merchant') return String(event?.payload?.actor_name || '').trim() || 'You';
   if (key === 'auto_winner') return 'Auto winner';
   return event?.actor || 'system';
 }
 
 export function mapServerEventToActivity(event) {
   if (!event) return null;
+  // The server's copy of an entry the browser also logged takes that entry's
+  // id, so the timeline shows the action once -- and once for every product.
+  const activityId = String(event?.payload?.activity_id || '').trim();
   return {
-    id: event.id || `server:${event.event_type}:${event.created_at}`,
+    id: activityId || event.id || `server:${event.event_type}:${event.created_at}`,
     at: event.created_at,
     title: resolveProductEventTitle(event),
     kind: resolveServerActivityKind(event),
@@ -251,6 +263,25 @@ function formatEventDetail(event) {
   }
   if (event.event_type === 'resumed') {
     return payload.reason || 'Traffic assignment resumed.';
+  }
+  if (event.event_type === 'archived') {
+    return payload.detail || 'Moved to the Archived tab.';
+  }
+  if (event.event_type === 'restored') {
+    if (payload.source === 'recently_deleted') {
+      return 'Brought back with its results. It is in the Archived tab.';
+    }
+    return payload.detail || 'Moved out of the Archived tab.';
+  }
+  if (event.event_type === 'deleted') {
+    const until = payload.purge_after ? new Date(payload.purge_after) : null;
+    return until && !Number.isNaN(until.getTime())
+      ? `Moved to Recently deleted. It can be restored until ${until.toLocaleDateString(undefined, {
+          year: 'numeric',
+          month: 'short',
+          day: 'numeric',
+        })}.`
+      : 'Moved to Recently deleted.';
   }
   return payload.note || payload.reason || null;
 }

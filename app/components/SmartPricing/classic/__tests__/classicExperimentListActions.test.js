@@ -2,7 +2,8 @@ import {
   canDeleteClassicExperimentNow,
   CLASSIC_STOPPED_PLAN_STATUS,
   isClassicExperimentEnded,
-  getClassicExperimentLaunchReadiness,
+  getClassicExperimentResumeId,
+  isClassicDraftExperiment,
   classicBatchOutcomeMessage,
   collectExperimentTestIds,
   isSettledClassicPlan,
@@ -10,6 +11,8 @@ import {
   resolveClassicExperimentMenuActions,
   filterClassicExperimentsByTab,
   listTabAfterClassicAction,
+  archiveActivityDetail,
+  restoreActivityDetail,
   buildClassicWizardResumePath,
   buildClassicExperimentEditPath,
   buildClassicExperimentEditTarget,
@@ -17,6 +20,7 @@ import {
   resolveClassicEditFocus,
 } from '../classicExperimentListActions';
 import { classicCreateStepIndex } from '../classicCreateSteps';
+import { rollupExperimentStatus } from '../classicExperimentHelpers';
 
 /**
  * One experiment covers several products and they finish at different times.
@@ -150,64 +154,57 @@ describe('classicExperimentListActions', () => {
     ],
   };
 
-  it('marks launch-ready experiments when all wizard steps are complete', () => {
-    expect(getClassicExperimentLaunchReadiness(readyExperiment)).toEqual({
-      ready: true,
-      missing: [],
-    });
+  it('gives a draft only what can be done before launch', () => {
+    // A draft has no results, and it is launched from the wizard's Review
+    // step, so View results and Launch test both led somewhere it did not fit.
+    expect(resolveClassicExperimentMenuActions(readyExperiment).map(a => a.label)).toEqual([
+      'Edit test',
+      'Duplicate',
+      'Delete draft',
+    ]);
   });
 
-  it('hides launch until audience is configured', () => {
-    const incomplete = {
+  it('gives a follow-up round queued for review the same draft menu', () => {
+    const queued = {
       ...readyExperiment,
-      plans: [{ ...readyExperiment.plans[0], metadata: {} }],
-    };
-    expect(getClassicExperimentLaunchReadiness(incomplete).ready).toBe(false);
-    const actions = resolveClassicExperimentMenuActions(incomplete, { checkoutReady: true });
-    expect(actions.some(a => a.id === 'launch')).toBe(false);
-    expect(actions.some(a => a.id === 'edit')).toBe(true);
-  });
-
-  it('treats offer drafts as ready when a test-arm offer is set', () => {
-    const offerDraft = {
-      id: 'exp-offer',
-      title: 'Summer offer',
       status: 'draft',
-      experimentType: 'offer_test',
-      plans: [
-        {
-          id: 'p1',
-          status: 'draft',
-          product_id: 'prod-1',
-          experiment_type: 'offer_test',
-          price_arms: [
-            { id: 'control', role: 'control', price: 0 },
-            {
-              id: 'var_a',
-              role: 'challenger',
-              offer: { discount_type: 'percent', discount_value: 10 },
-            },
-          ],
-          metadata: {
-            experiment_type: 'offer_test',
-            audience_ui: { primaryMetric: 'revenue_per_visitor' },
-          },
-        },
-      ],
+      plans: [{ ...readyExperiment.plans[0], status: 'queued', price_arms: [] }],
     };
-    expect(getClassicExperimentLaunchReadiness(offerDraft)).toEqual({
-      ready: true,
-      missing: [],
-    });
-    const actions = resolveClassicExperimentMenuActions(offerDraft, { checkoutReady: true });
-    expect(actions.some(a => a.id === 'launch')).toBe(true);
+    expect(resolveClassicExperimentMenuActions(queued).map(a => a.id)).toEqual([
+      'edit',
+      'duplicate',
+      'delete',
+    ]);
   });
 
-  it('shows launch only when checkout is ready', () => {
-    const blocked = resolveClassicExperimentMenuActions(readyExperiment, { checkoutReady: false });
-    const allowed = resolveClassicExperimentMenuActions(readyExperiment, { checkoutReady: true });
-    expect(blocked.some(a => a.id === 'launch')).toBe(false);
-    expect(allowed.some(a => a.id === 'launch')).toBe(true);
+  it('counts saved, queued and unfinished experiments as drafts, and nothing launched', () => {
+    expect(isClassicDraftExperiment(readyExperiment)).toBe(true);
+    expect(
+      isClassicDraftExperiment({ plans: [{ id: 'p', status: 'queued' }] })
+    ).toBe(true);
+    expect(isClassicDraftExperiment({ wizardDraft: { name: 'x' }, plans: [] })).toBe(true);
+    expect(
+      isClassicDraftExperiment({
+        plans: [
+          { id: 'p1', status: 'running', test_id: 't1' },
+          { id: 'p2', status: 'queued' },
+        ],
+      })
+    ).toBe(false);
+    expect(
+      isClassicDraftExperiment({ archived: true, plans: [{ id: 'p', status: 'draft', archived: true }] })
+    ).toBe(false);
+  });
+
+  it('resumes a plan that names no experiment by the plan itself', () => {
+    // The list groups such a plan under a made-up `title:` id that the wizard
+    // has never heard of, so Edit opened an empty wizard.
+    const orphan = {
+      id: 'title:smart price test 1',
+      plans: [{ id: 'SP-2153', status: 'queued', metadata: { experiment_id: null } }],
+    };
+    expect(getClassicExperimentResumeId(orphan)).toBe('SP-2153');
+    expect(buildClassicExperimentEditTarget(orphan)).toContain('resume=SP-2153');
   });
 
   it('offers Edit test on a running test before the minimum visitor floor is met', () => {
@@ -224,7 +221,7 @@ describe('classicExperimentListActions', () => {
         },
       ],
     };
-    const actions = resolveClassicExperimentMenuActions(running, { checkoutReady: true });
+    const actions = resolveClassicExperimentMenuActions(running);
     expect(actions.some(a => a.id === 'edit' && a.label === 'Edit test')).toBe(true);
   });
 
@@ -245,7 +242,7 @@ describe('classicExperimentListActions', () => {
         },
       ],
     };
-    const actions = resolveClassicExperimentMenuActions(running, { checkoutReady: true });
+    const actions = resolveClassicExperimentMenuActions(running);
     expect(actions.some(a => a.id === 'edit')).toBe(false);
     expect(actions.some(a => a.id === 'duplicate')).toBe(true);
   });
@@ -256,7 +253,7 @@ describe('classicExperimentListActions', () => {
       status: 'running',
       plans: [{ ...readyExperiment.plans[0], status: 'running', test_id: 'test-1' }],
     };
-    const actions = resolveClassicExperimentMenuActions(running, { checkoutReady: true });
+    const actions = resolveClassicExperimentMenuActions(running);
     expect(actions.map(a => a.id)).toEqual(expect.arrayContaining(['view', 'pause']));
     expect(actions.some(a => a.id === 'archive')).toBe(false);
     expect(actions.some(a => a.id === 'open_test')).toBe(false);
@@ -269,7 +266,7 @@ describe('classicExperimentListActions', () => {
       status: 'paused',
       plans: [{ ...readyExperiment.plans[0], status: 'paused', test_id: 'test-1' }],
     };
-    const actions = resolveClassicExperimentMenuActions(paused, { checkoutReady: true });
+    const actions = resolveClassicExperimentMenuActions(paused);
     expect(actions.some(a => a.id === 'pause')).toBe(false);
     expect(actions.some(a => a.id === 'resume')).toBe(true);
     expect(actions.some(a => a.id === 'archive')).toBe(true);
@@ -283,7 +280,7 @@ describe('classicExperimentListActions', () => {
       status: 'winner_ready',
       plans: [{ ...readyExperiment.plans[0], status: 'winner_ready', test_id: 'test-1' }],
     };
-    const actions = resolveClassicExperimentMenuActions(ended, { checkoutReady: true });
+    const actions = resolveClassicExperimentMenuActions(ended);
     expect(actions.some(a => a.id === 'archive')).toBe(true);
     expect(actions.some(a => a.id === 'pause')).toBe(false);
     expect(actions.some(a => a.id === 'resume')).toBe(false);
@@ -295,7 +292,7 @@ describe('classicExperimentListActions', () => {
       status: 'running',
       plans: [{ ...readyExperiment.plans[0], status: 'paused', test_id: 'test-1' }],
     };
-    const actions = resolveClassicExperimentMenuActions(stale, { checkoutReady: true });
+    const actions = resolveClassicExperimentMenuActions(stale);
     expect(actions.some(a => a.id === 'pause')).toBe(false);
     expect(actions.some(a => a.id === 'resume')).toBe(true);
   });
@@ -305,7 +302,7 @@ describe('classicExperimentListActions', () => {
     // test to launch or pause. View details used to be offered anyway and did
     // nothing when clicked.
     const draftRow = { id: 'exp_draft', title: 'Spring pricing', status: 'draft', plans: [] };
-    const actions = resolveClassicExperimentMenuActions(draftRow, { checkoutReady: true });
+    const actions = resolveClassicExperimentMenuActions(draftRow);
 
     expect(actions.map(a => a.id)).toEqual(['edit', 'duplicate', 'delete']);
     expect(actions.find(a => a.id === 'delete').label).toBe('Delete draft');
@@ -326,7 +323,7 @@ describe('classicExperimentListActions', () => {
     };
 
     it('is not offered while it is running', () => {
-      const actions = resolveClassicExperimentMenuActions(running, { checkoutReady: true });
+      const actions = resolveClassicExperimentMenuActions(running);
       expect(actions.some(a => a.id === 'delete')).toBe(false);
       // Pause is the way out, so the menu is not a dead end.
       expect(actions.some(a => a.id === 'pause')).toBe(true);
@@ -337,9 +334,7 @@ describe('classicExperimentListActions', () => {
       // first and Delete is the deliberate second step.
       ['paused', 'stopped', 'completed'].forEach(status => {
         const actions = resolveClassicExperimentMenuActions(
-          { ...running, status, plans: [{ ...running.plans[0], status }] },
-          { checkoutReady: true }
-        );
+          { ...running, status, plans: [{ ...running.plans[0], status }] });
         expect(actions.some(a => a.id === 'archive')).toBe(true);
         expect(actions.some(a => a.id === 'delete')).toBe(false);
       });
@@ -352,7 +347,7 @@ describe('classicExperimentListActions', () => {
         plans: [{ ...readyExperiment.plans[0], status: 'draft' }],
       };
       expect(
-        resolveClassicExperimentMenuActions(draft, { checkoutReady: true }).some(
+        resolveClassicExperimentMenuActions(draft).some(
           a => a.id === 'delete'
         )
       ).toBe(true);
@@ -364,7 +359,7 @@ describe('classicExperimentListActions', () => {
         archived: true,
         plans: [{ ...running.plans[0], archived: true }],
       };
-      const actions = resolveClassicExperimentMenuActions(archived, { checkoutReady: true });
+      const actions = resolveClassicExperimentMenuActions(archived);
       expect(actions.map(a => a.id)).toEqual(expect.arrayContaining(['restore', 'delete']));
     });
 
@@ -375,7 +370,7 @@ describe('classicExperimentListActions', () => {
      * one of them leaves the experiment resumable.
      */
     it('offers stopping as well as pausing while it runs', () => {
-      const actions = resolveClassicExperimentMenuActions(running, { checkoutReady: true });
+      const actions = resolveClassicExperimentMenuActions(running);
       expect(actions.map(a => a.id)).toEqual(expect.arrayContaining(['pause', 'stop']));
     });
 
@@ -385,7 +380,7 @@ describe('classicExperimentListActions', () => {
         status: 'paused',
         plans: [{ ...running.plans[0], status: 'paused' }],
       };
-      const actions = resolveClassicExperimentMenuActions(paused, { checkoutReady: true });
+      const actions = resolveClassicExperimentMenuActions(paused);
       expect(actions.map(a => a.id)).toEqual(
         expect.arrayContaining(['resume', 'stop', 'archive'])
       );
@@ -394,7 +389,7 @@ describe('classicExperimentListActions', () => {
     it('does not offer stopping what never started', () => {
       const draft = { id: 'exp_draft', title: 'Spring', status: 'draft', plans: [] };
       expect(
-        resolveClassicExperimentMenuActions(draft, { checkoutReady: true }).some(
+        resolveClassicExperimentMenuActions(draft).some(
           a => a.id === 'stop'
         )
       ).toBe(false);
@@ -406,7 +401,7 @@ describe('classicExperimentListActions', () => {
         plans: [{ ...running.plans[0], test_id: '', metadata: {} }],
       };
       expect(
-        resolveClassicExperimentMenuActions(noTest, { checkoutReady: true }).some(
+        resolveClassicExperimentMenuActions(noTest).some(
           a => a.id === 'stop'
         )
       ).toBe(false);
@@ -421,7 +416,7 @@ describe('classicExperimentListActions', () => {
         plans: [{ ...running.plans[0], test_id: '', metadata: {} }],
       };
 
-      const ids = resolveClassicExperimentMenuActions(noTest, { checkoutReady: true }).map(
+      const ids = resolveClassicExperimentMenuActions(noTest).map(
         a => a.id
       );
 
@@ -434,7 +429,7 @@ describe('classicExperimentListActions', () => {
         plans: [{ ...running.plans[0], test_id: '', metadata: {} }],
       };
 
-      const ids = resolveClassicExperimentMenuActions(noTest, { checkoutReady: true }).map(
+      const ids = resolveClassicExperimentMenuActions(noTest).map(
         a => a.id
       );
 
@@ -447,7 +442,7 @@ describe('classicExperimentListActions', () => {
         status: 'completed',
         plans: [{ ...running.plans[0], status: 'completed' }],
       };
-      const actions = resolveClassicExperimentMenuActions(stopped, { checkoutReady: true });
+      const actions = resolveClassicExperimentMenuActions(stopped);
       expect(actions.some(a => a.id === 'archive')).toBe(true);
       expect(actions.some(a => a.id === 'stop')).toBe(false);
       expect(actions.some(a => a.id === 'resume')).toBe(false);
@@ -469,7 +464,7 @@ describe('classicExperimentListActions', () => {
         ...running,
         plans: [{ ...running.plans[0], status: CLASSIC_STOPPED_PLAN_STATUS }],
       };
-      const actions = resolveClassicExperimentMenuActions(stopped, { checkoutReady: true });
+      const actions = resolveClassicExperimentMenuActions(stopped);
       expect(actions.some(a => a.id === 'archive')).toBe(true);
       expect(actions.some(a => a.id === 'resume')).toBe(false);
     });
@@ -511,19 +506,13 @@ describe('classicExperimentListActions', () => {
     expect(filterClassicExperimentsByTab(rows, 'finished').map(e => e.id)).toEqual([
       'done',
       'applied',
-      'old',
     ]);
     expect(filterClassicExperimentsByTab(rows, 'completed').map(e => e.id)).toEqual([
       'done',
       'applied',
-      'old',
     ]);
     expect(filterClassicExperimentsByTab(rows, 'draft').map(e => e.id)).toEqual(['draft']);
-    expect(filterClassicExperimentsByTab(rows, 'archived').map(e => e.id)).toEqual([
-      'done',
-      'applied',
-      'old',
-    ]);
+    expect(filterClassicExperimentsByTab(rows, 'archived').map(e => e.id)).toEqual(['old']);
     expect(filterClassicExperimentsByTab(rows, 'all').map(e => e.id)).toEqual([
       'run',
       'pause',
@@ -539,7 +528,14 @@ describe('classicExperimentListActions', () => {
       plans: [{ id: 'p1', status: 'paused', archived: false }],
     };
     expect(listTabAfterClassicAction('pause', paused, 'running')).toBe('paused');
-    expect(listTabAfterClassicAction('archive', paused, 'paused')).toBe('finished');
+    expect(listTabAfterClassicAction('archive', paused, 'paused')).toBe('archived');
+    expect(
+      listTabAfterClassicAction(
+        'archive',
+        { status: 'completed', plans: [{ id: 'p1', status: 'completed', archived: false }] },
+        'finished'
+      )
+    ).toBe('archived');
     expect(listTabAfterClassicAction('resume', paused, 'paused')).toBe('running');
     expect(listTabAfterClassicAction('duplicate', paused, 'all')).toBe('draft');
     expect(
@@ -556,6 +552,44 @@ describe('classicExperimentListActions', () => {
         'archived'
       )
     ).toBe('finished');
+  });
+
+  it('archives a paused test as Archived and restores it as Paused', () => {
+    // Archive no longer rewrites the plan's status; the archived flag alone
+    // is what shows Archived.
+    const archivedPaused = [{ id: 'p1', status: 'paused', archived: true }];
+    expect(rollupExperimentStatus(archivedPaused)).toBe('archived');
+    expect(
+      listTabAfterClassicAction('restore', { status: 'archived', plans: archivedPaused })
+    ).toBe('paused');
+  });
+
+  it('says in History which tab an archive or restore moved the test between', () => {
+    const finished = {
+      status: 'completed',
+      plans: [{ id: 'p1', status: 'completed', archived: false }],
+    };
+    expect(archiveActivityDetail(finished)).toBe('Moved from Finished to the Archived tab.');
+    expect(
+      archiveActivityDetail(
+        { status: 'paused', plans: [{ id: 'p1', status: 'paused', archived: false }] },
+        { stoppedCount: 2 }
+      )
+    ).toBe(
+      'Moved from Paused to the Archived tab. 2 paused products were released so other tests can use them; Restore brings the test back as Paused.'
+    );
+    expect(
+      restoreActivityDetail({
+        status: 'archived',
+        plans: [{ id: 'p1', status: 'completed', archived: true }],
+      })
+    ).toBe('Moved from Archived back to Finished.');
+    expect(
+      restoreActivityDetail({
+        status: 'archived',
+        plans: [{ id: 'p1', status: 'paused', archived: true }],
+      })
+    ).toBe('Moved from Archived back to Paused.');
   });
 
   it('builds wizard resume paths with an optional step', () => {
@@ -591,6 +625,16 @@ describe('where Edit test goes', () => {
     expect(buildClassicExperimentEditTarget(launched('running'))).toBe(
       '/app/experiments/SP-1?tab=settings&edit=audience'
     );
+  });
+
+  it('opens the editor of a paused experiment whose copy lost its test id', () => {
+    expect(
+      buildClassicExperimentEditTarget({
+        id: 'exp-1',
+        representative: { id: 'SP-1', experiment_id: 'exp-1', status: 'paused' },
+        plans: [{ id: 'SP-1', experiment_id: 'exp-1', status: 'paused' }],
+      })
+    ).toBe('/app/experiments/SP-1?tab=settings&edit=audience');
   });
 
   it('continues a draft in the wizard at the step it was left on', () => {

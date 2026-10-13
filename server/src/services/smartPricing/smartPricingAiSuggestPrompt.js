@@ -97,8 +97,14 @@ function buildPriceSuggestionSystemPrompt({
   max,
   minBandWidth,
   minGapHint,
+  variationCount = 2,
+  minControlGap = 3,
   withWebSearch = true,
 } = {}) {
+  const spacingInstruction =
+    Number(variationCount) > 1
+      ? `Ensure hi - lo is at least ${minBandWidth}%. Priceify spreads the ${variationCount} test prices across lo..hi, at least about ${minGapHint}% apart, and keeps every one at least ${minControlGap}% away from 0 (the current price). A band that crosses 0 loses the stretch within ${minControlGap}% of 0, so either keep it on one side or give it room on both.`
+      : `Ensure hi - lo is at least ${minBandWidth}%. There is one test price and it is placed at best, so keep best at least ${minControlGap}% away from 0 (the current price) on the side you chose; any closer and the test cannot distinguish it from the current price.`;
   const marketInstruction = withWebSearch
     ? 'Search the live web for comparable products using the product title and core specifications. Ground the benchmark in current shopping results and relevant specialist or major retailers.'
     : 'Live web search is disabled. Use the supplied product data and cautious category knowledge. Lower confidence when the current market cannot be established, and do not claim that a benchmark is live.';
@@ -137,7 +143,7 @@ Perform the analysis internally in this order. Do not output private chain-of-th
 4. PRICE ELASTICITY & BAND CALCULATION
    - Calculate lo, hi and the expected best percentage change.
    - Keep lo, hi and best inside [${min}%, ${max}%].
-   - Ensure hi - lo is at least ${minBandWidth}% so test prices can remain about ${minGapHint}% apart.
+   - ${spacingInstruction}
 
 ### OUTPUT CONTRACT
 Return only the JSON object required by the supplied schema. Do not use markdown fences or expose chain-of-thought.

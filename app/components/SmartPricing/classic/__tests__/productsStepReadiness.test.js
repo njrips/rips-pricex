@@ -258,7 +258,7 @@ describe('productsStepReadiness', () => {
     expect(normalizeAiPriceBand('20', '8')).toEqual({ min: 8, max: 20 });
     expect(normalizeAiPriceBand('0', '0')).toBeNull();
     // One edge on the current price is a band the merchant may well mean;
-    // describeZeroEdgeAiBand is what points out the wasted variation.
+    // describeNarrowAiBand warns when it leaves too little room.
     expect(normalizeAiPriceBand('0', '5')).toEqual({ min: 0, max: 5 });
     expect(normalizeAiPriceBand('5', '0')).toEqual({ min: 0, max: 5 });
     // A blank box is still not a zero, even though Number('') is.
@@ -835,18 +835,36 @@ describe('a band that lowers the price', () => {
     });
   });
 
-  it('warns when an edge sits on the current price', async () => {
-    const { describeZeroEdgeAiBand } = await import('../productsStepReadiness');
+  it('warns when the band is too narrow for its variations', async () => {
+    const { describeNarrowAiBand } = await import('../productsStepReadiness');
 
-    // The arm on that edge duplicates the control, splitting traffic for
-    // nothing -- discoverable before now only by reading the price table.
-    expect(describeZeroEdgeAiBand({ min: -10, max: 0 })).toMatch(
-      /one variation would carry your current price/i
+    // Room enough: an edge on the current price no longer wastes a variation,
+    // because the spacing keeps every price at least 3% from it.
+    expect(describeNarrowAiBand({ min: -10, max: 0 }, { armCount: 2 })).toBe('');
+    expect(describeNarrowAiBand({ min: 10, max: 20 }, { armCount: 3 })).toBe('');
+    expect(describeNarrowAiBand({ min: -10, max: 10 }, { armCount: 3 })).toBe('');
+
+    // One price, but nowhere 3% from the current one.
+    expect(describeNarrowAiBand({ min: -2, max: 0 }, { armCount: 1 })).toMatch(
+      /no room for a test price at least 3% from your current price.*Widen it to 0%–3% lower\.$/
     );
-    expect(describeZeroEdgeAiBand({ min: -10, max: 0 })).toMatch(/Move that end lower/);
-    expect(describeZeroEdgeAiBand({ min: 0, max: 10 })).toMatch(/Move that end higher/);
-    expect(describeZeroEdgeAiBand({ min: -10, max: 10 })).toBe('');
-    expect(describeZeroEdgeAiBand({ min: 5, max: 15 })).toBe('');
+
+    // Three prices 4.5% apart and 3% clear need 3%..12% on one side, or one
+    // below and two above.
+    expect(describeNarrowAiBand({ min: -5, max: 5 }, { armCount: 3 })).toMatch(
+      /With 3 test variations.*about 4\.5% apart.*Widen it to 5% lower through 7\.5% higher or test fewer variations\./
+    );
+    expect(describeNarrowAiBand({ min: 2, max: 8 }, { armCount: 3 })).toMatch(
+      /Widen it to 2%–12% higher/
+    );
+
+    // Past the shop's max price change, widening alone cannot fix it.
+    expect(
+      describeNarrowAiBand({ min: 5, max: 10 }, { armCount: 4, shopMaxChangePercent: 15 })
+    ).toMatch(/more than your 15% max price change allows, so test fewer variations/);
+
+    // A dollar band asks for no spacing, so there is nothing to warn about.
+    expect(describeNarrowAiBand({ min: 1, max: 2 }, { unit: 'amount', armCount: 3 })).toBe('');
   });
 });
 

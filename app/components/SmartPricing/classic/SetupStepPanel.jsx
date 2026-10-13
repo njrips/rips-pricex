@@ -44,6 +44,7 @@ export default function SetupStepPanel({
           value={hypothesis}
           onChange={onHypothesisChange}
           placeholder="If we change… then… because…"
+          helpText="Optional, for your notes only."
           multiline={3}
           autoComplete="off"
         />

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  buildReviewOverviewLines,
+  buildReviewSections,
   formatReviewPricingModeLabel,
   resolveReviewPricingSummaryText,
 } from '../reviewLaunchOverview';
@@ -30,9 +30,19 @@ describe('formatReviewPricingModeLabel', () => {
   });
 });
 
-describe('buildReviewOverviewLines', () => {
-  it('formats the five overview lines from the Step 5 spec', () => {
-    const lines = buildReviewOverviewLines({
+/** { sectionId: { rowLabel: value } } */
+function bySection(input) {
+  return Object.fromEntries(
+    buildReviewSections(input).map(section => [
+      section.id,
+      Object.fromEntries(section.rows.map(row => [row.label, row.value])),
+    ]),
+  );
+}
+
+describe('buildReviewSections', () => {
+  it('breaks the summary into the five Step 5 sections', () => {
+    const sections = buildReviewSections({
       name: 'Growth Plan',
       experimentType: 'price_test',
       experimentTypeLabel: 'Price test',
@@ -52,23 +62,58 @@ describe('buildReviewOverviewLines', () => {
       significanceEstimate: { confidenceLevel: 90 },
     });
 
-    expect(lines.test).toBe(
-      'Growth Plan — Price test · 7 products · Picked products · AI suggested prices',
+    expect(sections.map(section => section.title)).toEqual([
+      'Basics',
+      'Products & prices',
+      'Variations & traffic',
+      'Audience',
+      'Metrics & guardrail',
+    ]);
+    const rows = Object.fromEntries(
+      sections.map(section => [
+        section.id,
+        section.rows.map(row => `${row.label}: ${row.value}`),
+      ]),
     );
-    expect(lines.traffic).toBe(
-      '100% of eligible visitors · Control 34% · Var A 33% · Var B 33%',
-    );
-    expect(lines.audience).toBe(
-      'All visitors · All devices · All sources · All countries',
-    );
-    expect(lines.results).toBe(
-      'Primary: Revenue per visitor · 90% confidence · 5,000 visitors/variation',
-    );
-    expect(lines.safety).toMatch(/^Guardrail ON · Stop a product if Rev\/visitor drops >10% vs control, after 5,000 visitors\/variation$/);
+    expect(rows.basics).toEqual(['Test name: Growth Plan', 'Test type: Price test']);
+    expect(rows.products).toEqual([
+      'Products: 7 products',
+      'Selection: Picked products',
+      'Prices: AI suggested prices',
+    ]);
+    expect(rows.variations).toEqual([
+      'Traffic allocation: 100% of eligible visitors',
+      'Traffic split: Control 34% · Var A 33% · Var B 33%',
+    ]);
+    expect(rows.audience).toEqual([
+      'Audience segment: All visitors',
+      'Device type: All devices',
+      'Traffic source: All sources',
+      'Countries: All countries',
+    ]);
+    expect(rows.metrics).toEqual([
+      'Primary success metric: Revenue per visitor',
+      'Confidence level: 90%',
+      'Minimum visitors per variation: 5,000',
+      'Revenue guardrail: On · Stop testing a product if revenue per visitor for any variation drops more than 10% below the control, after 5,000 visitors per variation',
+    ]);
   });
 
-  it('uses All products scope and guardrail off copy', () => {
-    const lines = buildReviewOverviewLines({
+  it('lists the standard secondary metrics, and nothing launch would drop', () => {
+    const { metrics } = bySection({
+      name: 'Secondaries',
+      variations: VARIATIONS,
+      audience: {
+        primaryMetric: 'revenue_per_visitor',
+        secondaryMetrics: ['conversion_rate', 'revenue_per_visitor', 'bounce_rate', 'aov'],
+        minSampleSize: '5000',
+      },
+    });
+    expect(metrics['Secondary metrics']).toBe('Conversion rate, Average order value');
+  });
+
+  it('uses All products scope and says Off for a disarmed guardrail', () => {
+    const { products, audience, metrics } = bySection({
       name: 'Catalog',
       pickMode: 'all',
       selectedCount: 120,
@@ -83,14 +128,30 @@ describe('buildReviewOverviewLines', () => {
       significanceEstimate: { confidenceLevel: 95 },
     });
 
-    expect(lines.test).toContain('120 products · All products · Manual prices');
-    expect(lines.audience).toContain('New visitors');
-    expect(lines.results).toContain('Conversion rate');
-    expect(lines.safety).toBe('Guardrail OFF');
+    expect(products).toEqual({
+      Products: '120 products',
+      Selection: 'All products',
+      Prices: 'Manual prices',
+    });
+    expect(audience['Audience segment']).toBe('New visitors');
+    expect(metrics['Primary success metric']).toBe('Conversion rate');
+    expect(metrics['Confidence level']).toBe('95%');
+    expect(metrics['Revenue guardrail']).toBe('Off');
   });
 
-  it('uses Var labels and partial audience filters in the overview', () => {
-    const lines = buildReviewOverviewLines({
+  it('starts the guardrail at its own floor when the minimum is lower, and at the minimum when higher', () => {
+    const low = bySection({
+      audience: { minSampleSize: '1000', guardrails: [{ id: 'revenue', on: true, threshold: '-15%' }] },
+    });
+    expect(low.metrics['Minimum visitors per variation']).toBe('1,000');
+    expect(low.metrics['Revenue guardrail']).toMatch(/more than 15% below the control, after 5,000 visitors per variation$/);
+
+    const high = bySection({ audience: { minSampleSize: '8000' } });
+    expect(high.metrics['Revenue guardrail']).toMatch(/after 8,000 visitors per variation$/);
+  });
+
+  it('uses Var labels and partial audience filters', () => {
+    const { variations, audience, metrics } = bySection({
       name: 'UK push',
       variations: [
         { id: 'control', name: 'Control', traffic: 50 },
@@ -106,27 +167,26 @@ describe('buildReviewOverviewLines', () => {
         countryMode: 'include',
         primaryMetric: 'aov',
         minSampleSize: '1000',
-        guardrails: [{ id: 'revenue', on: true, threshold: '-15%' }],
       },
-      significanceEstimate: { confidenceLevel: 90 },
     });
 
-    expect(lines.traffic).toContain('Control 50% · Var A 50%');
-    expect(lines.audience).toContain('Returning visitors · Mobile only · Search & Email');
-    expect(lines.audience).toContain('Include:');
-    expect(lines.results).toContain('Average order value');
+    expect(variations['Traffic split']).toBe('Control 50% · Var A 50%');
+    expect(audience['Audience segment']).toBe('Returning visitors');
+    expect(audience['Device type']).toBe('Mobile only');
+    expect(audience['Traffic source']).toBe('Search & Email');
+    expect(audience.Countries).toContain('Include:');
+    expect(metrics['Primary success metric']).toBe('Average order value');
   });
 
   it('uses bulk mode and mixed per-arm pricing labels', () => {
-    const bulkOnly = buildReviewOverviewLines({
+    const bulkOnly = bySection({
       name: 'Bulk run',
       priceMode: 'bulk',
       variations: [{ id: 'control', traffic: 50 }, { id: 'var_a', traffic: 50 }],
-      audience: { primaryMetric: 'revenue_per_visitor', minSampleSize: '1000' },
     });
-    expect(bulkOnly.test).toContain('Bulk adjusted prices');
+    expect(bulkOnly.products.Prices).toBe('Bulk adjusted prices');
 
-    const mixed = buildReviewOverviewLines({
+    const mixed = bySection({
       name: 'Mixed',
       priceMode: 'manual',
       variations: [
@@ -138,34 +198,30 @@ describe('buildReviewOverviewLines', () => {
         var_a: { priceMode: 'ai' },
         var_b: { priceMode: 'bulk' },
       },
-      audience: { primaryMetric: 'revenue_per_visitor', minSampleSize: '1000' },
     });
-    expect(mixed.test).toContain('Mixed pricing per variation');
+    expect(mixed.products.Prices).toBe('Mixed pricing per variation');
   });
 
   it('describes offer tests without price-mode wording', () => {
-    const lines = buildReviewOverviewLines({
+    const { basics, products } = bySection({
       name: 'Sale test',
       experimentType: 'offer_test',
       experimentTypeLabel: 'Offer test',
       selectedCount: 3,
       pickMode: 'manual',
       variations: [{ id: 'control', traffic: 100 }],
-      audience: { primaryMetric: 'revenue_per_visitor', minSampleSize: '500' },
     });
-    expect(lines.test).toBe(
-      'Sale test — Offer test · 3 products · Picked products · Offers per variation',
-    );
+    expect(basics['Test type']).toBe('Offer test');
+    expect(products).toEqual({
+      Products: '3 products',
+      Selection: 'Picked products',
+      Offers: 'Offers per variation',
+    });
   });
 
-  it('reads "1 product" for a single-product test', () => {
-    const lines = buildReviewOverviewLines({
-      name: 'Solo',
-      selectedCount: 1,
-      pickMode: 'manual',
-      priceMode: 'manual',
-      variations: [{ id: 'control', traffic: 50 }, { id: 'var_a', letter: 'A', traffic: 50 }],
-    });
-    expect(lines.test).toBe('Solo — Price test · 1 product · Picked products · Manual prices');
+  it('reads "1 product" for a single-product test and names an untitled test', () => {
+    const { basics, products } = bySection({ selectedCount: 1 });
+    expect(products.Products).toBe('1 product');
+    expect(basics['Test name']).toBe('Untitled test');
   });
 });

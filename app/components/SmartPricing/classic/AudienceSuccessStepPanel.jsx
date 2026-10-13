@@ -10,6 +10,8 @@ import {
   normalizeClassicCreatePrimaryMetric,
   normalizeCustomGoals,
   normalizePrimaryMetric,
+  normalizeSecondaryEvents,
+  secondaryMetricLabel,
 } from '../targeting/smartPricingAudienceHelpers';
 import ClassicCountryMultiSelect from './ClassicCountryMultiSelect';
 import {
@@ -27,9 +29,9 @@ import {
   MIN_REVENUE_DROP_PERCENT,
   DEFAULT_MAX_REVENUE_DROP_PERCENT,
   MIN_VISITORS_FOR_REVENUE_GUARDRAIL,
-  MIN_CONVERSIONS_FOR_REVENUE_GUARDRAIL,
   parseRevenueDropThreshold,
 } from './revenueGuardrail';
+import { parseMinSampleSize } from './classicAudienceEdit';
 import { formatPracticalDurationRange } from './estimateSignificanceDuration';
 import { MIN_ALLOCATION_PERCENT, sliderFillPercent } from './variationsStepHelpers';
 import styles from './SmartPricingClassic.module.css';
@@ -143,6 +145,10 @@ export default function AudienceSuccessStepPanel({
       // the number rather than resetting to the default.
       guardrails: ensureRevenueGuardrailRows([{ ...revenueGuardrail, on: on !== false }]),
     });
+  // The guardrail never checks below its own 5,000-visitor floor, so a shop
+  // minimum under that is not when it starts.
+  const guardrailWaitsForMinimum =
+    parseMinSampleSize(state.minSampleSize) >= MIN_VISITORS_FOR_REVENUE_GUARDRAIL;
   const effectiveRevenueDropMax = MAX_REVENUE_DROP_PERCENT;
   const storedRevenueDrop = parseRevenueDropThreshold(revenueGuardrail?.threshold);
   const [revenueDropDraft, setRevenueDropDraft] = useState(null);
@@ -192,12 +198,33 @@ export default function AudienceSuccessStepPanel({
     onChange({ ...state, ...partial });
   };
 
+  // The primary metric is already measured, so it cannot also be a secondary.
+  const secondaryMetrics = normalizeSecondaryEvents(state.secondaryMetrics || []).filter(
+    key => primaryCustomGoal || key !== primaryMetric
+  );
+  // Anything outside the three standard metrics -- a storefront event or a
+  // custom goal -- is no longer offered, but a test launched with one keeps
+  // its pill when edited, and clicking it removes it.
+  const legacySecondaryKeys = showTrafficAllocation
+    ? secondaryMetrics.filter(key => !GOAL_METRIC_OPTIONS.some(goal => goal.value === key))
+    : [];
+  const legacyCustomGoals = showTrafficAllocation
+    ? normalizeCustomGoals(state.customGoals || []).filter(
+        goal => String(goal.event_name || '').trim().toLowerCase() !== primaryMetric
+      )
+    : [];
+
   const selectPrimaryMetric = value => {
+    const nextPrimary = normalizePrimaryMetric(value, 'revenue_per_visitor');
     patch({
-      primaryMetric: normalizePrimaryMetric(value, 'revenue_per_visitor'),
+      primaryMetric: nextPrimary,
       primaryCustomGoal: null,
+      secondaryMetrics: secondaryMetrics.filter(key => key !== nextPrimary),
     });
   };
+
+  const toggleSecondaryMetric = value =>
+    patch({ secondaryMetrics: toggleInList(secondaryMetrics, value) });
 
   return (
     <div>
@@ -422,6 +449,61 @@ export default function AudienceSuccessStepPanel({
         </div>
         <p className={styles.help}>Choose one metric to optimise for this test.</p>
       </div>
+
+      <div className={styles.field}>
+        <div className={styles.label} id="classic-secondary-metrics">
+          Secondary metrics (optional)
+        </div>
+        <div
+          className={`${styles.pillRow} ${styles.metricPillRow}`}
+          role="group"
+          aria-labelledby="classic-secondary-metrics"
+        >
+          {GOAL_METRIC_OPTIONS.map(metric => {
+            const isPrimary = !primaryCustomGoal && primaryMetric === metric.value;
+            return (
+              <SelectablePill
+                key={`secondary-${metric.value}`}
+                label={metric.label}
+                active={!isPrimary && secondaryMetrics.includes(metric.value)}
+                disabled={disabled || isPrimary}
+                title={isPrimary ? 'Already the primary success metric' : undefined}
+                onClick={() => toggleSecondaryMetric(metric.value)}
+              />
+            );
+          })}
+          {legacySecondaryKeys.map(key => (
+            <SelectablePill
+              key={`secondary-${key}`}
+              label={secondaryMetricLabel(key)}
+              active
+              disabled={disabled}
+              title="Click to remove"
+              onClick={() => toggleSecondaryMetric(key)}
+            />
+          ))}
+          {legacyCustomGoals.map(goal => (
+            <SelectablePill
+              key={`secondary-goal-${goal.event_name}`}
+              label={goal.label}
+              active
+              disabled={disabled}
+              title={`${customGoalTriggerSummary(goal)} · click to remove`}
+              onClick={() =>
+                patch({
+                  customGoals: legacyCustomGoals.filter(
+                    other => other.event_name !== goal.event_name
+                  ),
+                })
+              }
+            />
+          ))}
+        </div>
+        <p className={styles.help}>
+          Reported alongside the primary metric for every variation. They don&rsquo;t decide the
+          winner.
+        </p>
+      </div>
       </div>
 
       {/* Last on the step: a safety net for the experiment above it, which only
@@ -463,8 +545,7 @@ export default function AudienceSuccessStepPanel({
           <>
             <div className={styles.guardrailRule}>
               <span>
-                Stop testing a product if revenue per visitor for any of its variations drops
-                more than
+                Stop testing a product if revenue per visitor for any variation drops more than
               </span>
               <span className={styles.guardrailInputWrap}>
                 <input
@@ -473,6 +554,7 @@ export default function AudienceSuccessStepPanel({
                   min={MIN_REVENUE_DROP_PERCENT}
                   max={effectiveRevenueDropMax}
                   step={1}
+                  title={`${MIN_REVENUE_DROP_PERCENT}%–${effectiveRevenueDropMax}% (default ${DEFAULT_MAX_REVENUE_DROP_PERCENT}%)`}
                   value={displayedRevenueDrop}
                   disabled={disabled}
                   aria-label="Maximum revenue per visitor drop, percent"
@@ -485,16 +567,15 @@ export default function AudienceSuccessStepPanel({
                 </span>
               </span>
               <span>
-                below that product&rsquo;s control, once each variation has about{' '}
-                {MIN_VISITORS_FOR_REVENUE_GUARDRAIL.toLocaleString()} visitors and at least{' '}
-                {MIN_CONVERSIONS_FOR_REVENUE_GUARDRAIL} conversions. The other products keep
-                running.
+                below the control,{' '}
+                {guardrailWaitsForMinimum
+                  ? 'after the minimum visitors per variation is reached.'
+                  : `after each variation has ${MIN_VISITORS_FOR_REVENUE_GUARDRAIL.toLocaleString()} visitors.`}
               </span>
             </div>
             <p className={styles.guardrailHint} id="revenue-guardrail-help">
               This is a safety net. It doesn&rsquo;t declare a winner; it only prevents a bad
-              variation from running for too long. Set {MIN_REVENUE_DROP_PERCENT}%–
-              {effectiveRevenueDropMax}% (default {DEFAULT_MAX_REVENUE_DROP_PERCENT}%).
+              variation from running for too long.
             </p>
           </>
         ) : (

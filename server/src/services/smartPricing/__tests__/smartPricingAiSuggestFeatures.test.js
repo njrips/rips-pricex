@@ -9,6 +9,9 @@ const {
   mergeModelBandWithHeuristics,
   sanitizeModelRationale,
   inferHeuristicTestDirection,
+  keepClearOfControl,
+  spaceTestPricePercents,
+  testPriceSeparation,
 } = require('../smartPricingAiSuggestFeatures');
 const { deterministicPriceSuggestions } = require('../smartPricingAiSuggestService');
 
@@ -165,5 +168,111 @@ describe('smartPricingAiSuggestFeatures', () => {
     assert.equal(sanitizeModelRationale('  ok  '), null);
     const long = 'x'.repeat(200);
     assert.equal(sanitizeModelRationale(`${long} enough text here`).length, 160);
+  });
+
+  it('moves a lone test price that sits on top of the current price out to 3%', () => {
+    // A one-price test compares against the current price, so +0.5% tests nothing.
+    assert.equal(keepClearOfControl(0.5, -4, 4), 3);
+    assert.equal(keepClearOfControl(-1, -10, 10), -3);
+    assert.equal(keepClearOfControl(7, -10, 10), 7);
+    assert.equal(keepClearOfControl(-3, -10, 10), -3);
+  });
+
+  it('keeps a lone price on its side, as far as the band reaches', () => {
+    assert.equal(keepClearOfControl(1, -10, 2), 2);
+    assert.equal(keepClearOfControl(-0.5, -1.5, 10), -1.5);
+  });
+
+  it('sends a price at exactly the current one toward the roomier side', () => {
+    assert.equal(keepClearOfControl(0, -10, 0), -3);
+    assert.equal(keepClearOfControl(0, -4, 8), 3);
+  });
+
+  it('places a lone deterministic price clear of the current price on a band straddling it', () => {
+    const result = deterministicPriceSuggestions({
+      variants: [{ variant_id: 'v1', title: 'Tee', current_price: 100, margin_percent: 60 }],
+      arms: [{ id: 'var_a' }],
+      minPct: -2,
+      maxPct: 4,
+      guardrails: { min_margin_percent: 35, max_price_change_percent: 20 },
+    });
+    const [only] = result.suggestions;
+    assert.ok(Math.abs(only.delta_percent) >= 1.9, `delta ${only.delta_percent}`);
+  });
+});
+
+describe('spacing several test prices', () => {
+  const catalog = Array.from({ length: 120 }, (_, k) => ({
+    variant_id: `gid://shopify/ProductVariant/${k}`,
+    product_id: `p${k}`,
+    title: `Product ${k}`,
+    current_price: Math.round([4.5, 12, 19.9, 38.9, 64, 129, 499][k % 7] * (1 + (k % 13) / 50) * 100) / 100,
+    opportunity_score: ((k * 37) % 100) / 100,
+    units_sold_30d: k % 50,
+    revenue_30d: (k * 97) % 5000,
+    visitors_30d: (k * 131) % 3000,
+    daily_visitors: (k * 7) % 120,
+  }));
+  const spreadFor = (minPct, maxPct, armCount) =>
+    catalog.map(variant =>
+      deterministicPriceSuggestions({
+        variants: [variant],
+        arms: Array.from({ length: armCount }, (_, i) => ({ id: `v${i}` })),
+        minPct,
+        maxPct,
+        guardrails: { max_price_change_percent: 25, min_margin_percent: 0 },
+      }).suggestions.map(s => s.delta_percent)
+    );
+  const narrowestGap = deltas => {
+    const sorted = [...deltas].sort((a, b) => a - b);
+    return Math.min(...sorted.slice(1).map((d, i) => d - sorted[i]));
+  };
+
+  it('leaves prices that are already far enough apart where they are', () => {
+    assert.deepEqual(spaceTestPricePercents([10, 15, 20], { lo: 10, hi: 20, minGap: 4.5 }), [10, 15, 20]);
+  });
+
+  it('pushes squeezed prices apart inside the band', () => {
+    assert.deepEqual(spaceTestPricePercents([10.2, 11], { lo: 10, hi: 20, minGap: 4 }), [10.2, 14.2]);
+    assert.deepEqual(spaceTestPricePercents([17, 19, 20], { lo: 10, hi: 20, minGap: 4.5 }), [11, 15.5, 20]);
+  });
+
+  it('moves a middle price off the current price when the band crosses it', () => {
+    assert.deepEqual(spaceTestPricePercents([-10, 0, 10], { lo: -10, hi: 10, minGap: 4.5 }), [-10, 3, 10]);
+  });
+
+  it('keeps prices apart rather than clear of the current price when the band cannot do both', () => {
+    const placed = spaceTestPricePercents([-1, 3], { lo: -1, hi: 3, minGap: 3 });
+    assert.ok(placed[1] - placed[0] >= 3, JSON.stringify(placed));
+  });
+
+  it('scores separation against both the gap and the current price', () => {
+    assert.equal(testPriceSeparation([-6, 0, 6], { minGap: 4.5, controlGap: 3 }), 0);
+    assert.equal(testPriceSeparation([5, 10], { minGap: 4, controlGap: 3 }), 1);
+  });
+
+  it('keeps the fallback prices of a one-sided band at least 80% of the stated gap apart', () => {
+    for (const [lo, hi, arms, gap] of [
+      [10, 20, 2, 4],
+      [10, 20, 3, 4.5],
+      [-20, -5, 3, 4.5],
+    ]) {
+      spreadFor(lo, hi, arms).forEach(deltas => {
+        assert.ok(narrowestGap(deltas) >= gap * 0.8, `${lo}..${hi} x${arms}: ${deltas}`);
+      });
+    }
+  });
+
+  it('never puts a fallback price on top of the current one when the band has room on both sides', () => {
+    for (const [lo, hi, arms] of [
+      [-10, 10, 3],
+      [-6, 6, 3],
+      [-5, 5, 2],
+    ]) {
+      spreadFor(lo, hi, arms).forEach(deltas => {
+        assert.ok(deltas.every(d => Math.abs(d) >= 2.5), `${lo}..${hi} x${arms}: ${deltas}`);
+        assert.equal(new Set(deltas).size, arms);
+      });
+    }
   });
 });
