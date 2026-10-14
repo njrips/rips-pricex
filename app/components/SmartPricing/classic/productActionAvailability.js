@@ -10,7 +10,7 @@ export const PRODUCT_EVENT_LABELS = Object.freeze({
   reverted: 'Price reverted',
   finished_control: 'Kept catalog price',
   rerun_queued: 'Re-run queued',
-  guardrail_stopped: 'Stopped by guardrail',
+  guardrail_stopped: 'Guardrail paused test',
   auto_applied: 'Winner applied to catalog',
   archived: 'Test archived',
   restored: 'Test restored',
@@ -115,11 +115,16 @@ export function resolveProductEventTitle(event) {
     .trim()
     .toLowerCase();
   const productTitle = productTitleFromEventPayload(payload);
+  const pausedWholeTest = payload.scope === 'test';
   if (type === 'guardrail_stopped') {
-    return productTitle ? 'Guardrail excluded product' : PRODUCT_EVENT_LABELS.guardrail_stopped;
+    // Before the guardrail paused whole tests it stopped one product, and
+    // those events still read as what happened then.
+    if (pausedWholeTest) return PRODUCT_EVENT_LABELS.guardrail_stopped;
+    return productTitle ? 'Guardrail excluded product' : 'Stopped by guardrail';
   }
   if (type === 'stopped') {
     if (reason === 'merchant_pause') return 'Test paused';
+    if (reason === 'guardrail_pause') return PRODUCT_EVENT_LABELS.guardrail_stopped;
     if (reason === 'guardrail_breach') {
       return productTitle ? 'Guardrail excluded product' : 'Stopped by guardrail';
     }
@@ -141,7 +146,7 @@ function resolveServerActivityKind(event) {
     .toLowerCase();
   if (type === 'stopped') {
     if (reason === 'merchant_pause') return 'paused';
-    if (reason === 'guardrail_breach') return 'guardrail';
+    if (reason === 'guardrail_breach' || reason === 'guardrail_pause') return 'guardrail';
     return 'stopped';
   }
   const kindMap = {
@@ -190,6 +195,17 @@ export function mapServerEventToActivity(event) {
   };
 }
 
+function guardrailPausedTestDetail(payload = {}) {
+  const observed = Number(payload.observed_drop_percent);
+  const limit = Number(payload.threshold_percent);
+  const variation = String(payload.variant_name || '').trim() || 'A variation';
+  const drop =
+    Number.isFinite(observed) && Number.isFinite(limit)
+      ? `${variation}'s revenue per visitor dropped ${observed.toFixed(1)}% below control (limit ${limit}%).`
+      : `${variation}'s revenue per visitor fell below the safety limit.`;
+  return `${drop} Every product in this test was paused. Resume when you're ready.`;
+}
+
 function formatEventDetail(event) {
   const payload = event?.payload && typeof event.payload === 'object' ? event.payload : {};
   if (event.event_type === 'winner_applied' || event.event_type === 'auto_applied') {
@@ -220,6 +236,13 @@ function formatEventDetail(event) {
       : payload.follow_up_plan_id
         ? 'A follow-up round was queued, ready to review and launch.'
         : null;
+  }
+  if (
+    payload.scope === 'test' &&
+    (event.event_type === 'guardrail_stopped' ||
+      String(payload.reason || '').toLowerCase() === 'guardrail_pause')
+  ) {
+    return guardrailPausedTestDetail(payload);
   }
   if (event.event_type === 'guardrail_stopped') {
     const product = productTitleFromEventPayload(payload);

@@ -175,8 +175,6 @@ export function spreadAiBandPriceEntries({
   max = 20,
   unit = 'percent',
   maxChangePct = 15,
-  minMarginPct = 35,
-  defaultCogsPct = 55,
 } = {}) {
   const entries = [];
   const arms = Array.isArray(targetArms) ? targetArms.filter(arm => arm?.id) : [];
@@ -192,22 +190,7 @@ export function spreadAiBandPriceEntries({
   rows.forEach(row => {
     const base = Number(row.current_price ?? row.price) || 0;
     const ceiling = base * (1 + maxChange / 100);
-    const configuredMargin = Number(row.margin_percent);
-    const configuredCogs = Number(defaultCogsPct);
-    const currentMargin =
-      row.margin_percent !== null &&
-      row.margin_percent !== undefined &&
-      Number.isFinite(configuredMargin)
-        ? Math.max(0, Math.min(100, configuredMargin))
-        : Math.max(
-            0,
-            Math.min(100, 100 - (Number.isFinite(configuredCogs) ? configuredCogs : 55))
-          );
-    const minimumMargin = Math.max(0, Math.min(99, Number(minMarginPct) || 35));
-    const effectiveMargin = Math.min(minimumMargin, currentMargin);
-    const unitCost = base * (1 - currentMargin / 100);
-    const floorByMargin = unitCost / (1 - effectiveMargin / 100);
-    const floor = Math.max(base * (1 - maxChange / 100), Math.min(base, floorByMargin));
+    const floor = Math.max(0, base * (1 - maxChange / 100));
     const productBand =
       unit === 'amount'
         ? { min: safeMin, max: safeMax }
@@ -268,7 +251,7 @@ export function spreadAiBandPriceEntries({
 /** Tooltip copy: how shelf prices are derived from catalog data. */
 export function describeAiPriceCalculationTooltip({ unit = 'percent' } = {}) {
   if (unit === 'amount') {
-    return 'Each suggested price starts in your min–max dollar band, is capped by max price change and minimum margin per product, then rounded to a normal price ending. Spacing follows traffic-aware rules so variations are far enough apart to learn.';
+    return 'Each suggested price starts in your min–max dollar band, is capped by max price change per product, then rounded to a normal price ending. Spacing follows traffic-aware rules so variations are far enough apart to learn.';
   }
   return 'AI picks a test range per product from perceived value, market price position, sales, and revenue per visitor; variations are spaced for statistical power, then capped by your guardrails and rounded to realistic price endings. Hover ℹ on a price for the breakdown.';
 }
@@ -554,6 +537,28 @@ export function keepArmKeys(arms = []) {
     Object.fromEntries(
       Object.entries(map || {}).filter(([key]) => ids.has(parsePriceOverrideKey(key).armId))
     );
+}
+
+/** Challenger ids in `prev` that `next` no longer has. */
+export function removedArmIds(prev = [], next = []) {
+  const kept = new Set((next || []).map(row => String(row?.id || '')));
+  return (prev || [])
+    .map(row => String(row?.id || ''))
+    .filter(id => id && id !== 'control' && !kept.has(id));
+}
+
+/**
+ * Drop the given arms from a map keyed by arm id, or by `variant::arm` when
+ * `byOverrideKey` is set. Returns `map` itself when nothing matched, so a
+ * state setter given it does not re-render.
+ */
+export function dropArmEntries(map, armIds = [], { byOverrideKey = false } = {}) {
+  const ids = new Set(armIds || []);
+  if (!ids.size || !map || typeof map !== 'object') return map;
+  const armOf = key => (byOverrideKey ? parsePriceOverrideKey(key).armId : key);
+  const keys = Object.keys(map);
+  if (!keys.some(key => ids.has(armOf(key)))) return map;
+  return Object.fromEntries(Object.entries(map).filter(([key]) => !ids.has(armOf(key))));
 }
 
 /** Skip cells the merchant edited (override kept, AI meta cleared). */

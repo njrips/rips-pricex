@@ -142,7 +142,7 @@ describe('productsStepCatalogCopy', () => {
         matchedCount: 0,
         activeGroupValue: 'gid://collection/1',
       })
-    ).toMatch(/collection or category/);
+    ).toMatch(/No products here can be added/);
   });
 
   it('counts unique products in opportunity rows', () => {

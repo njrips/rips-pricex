@@ -284,7 +284,7 @@ describe('revenue guardrail switch', () => {
     const card = container.querySelector('input[aria-label="Maximum revenue per visitor drop, percent"]')
       .closest('div').parentElement;
     expect(card.textContent.replace(/\s+/g, ' ')).toMatch(
-      /Stop testing a product if revenue per visitor for any variation drops more than\s?%\s?below the control, after the minimum visitors per variation is reached\./
+      /Pause this test if revenue per visitor for any variation drops more than\s?%\s?below the control, after the minimum visitors per variation is reached\./
     );
     expect(container.textContent).toContain(
       'This is a safety net. It doesn’t declare a winner; it only prevents a bad variation from running for too long.'
@@ -292,10 +292,10 @@ describe('revenue guardrail switch', () => {
     expect(container.textContent).not.toMatch(/margin floors/i);
   });
 
-  it('names the guardrail floor when the shop minimum is below it', async () => {
+  it('waits for the test minimum even when it is below 5,000', async () => {
     await renderPanel({ value: { minSampleSize: '1000' } });
-    expect(container.textContent).toMatch(/after each variation has 5,000 visitors\./);
-    expect(container.textContent).not.toMatch(/minimum visitors per variation is reached/);
+    expect(container.textContent).toMatch(/after the minimum visitors per variation is reached\./);
+    expect(container.textContent).not.toMatch(/5,000 visitors/);
   });
 });
 

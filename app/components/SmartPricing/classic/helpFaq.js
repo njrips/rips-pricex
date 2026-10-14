@@ -30,7 +30,7 @@ export const HELP_GLOSSARY_TERMS = [
   {
     term: 'Revenue guardrail',
     definition:
-      'Per-test limit on revenue-per-visitor drop vs control, checked for each product on its own. After every variation reaches the test’s minimum visitors (at least 5,000) and 10 conversions, Priceify stops testing a product if any variation falls more than your threshold below that product’s control. The other products keep running.',
+      'Per-test limit on revenue-per-visitor drop vs control. After every variation reaches the test’s minimum visitors, Priceify pauses the test if any variation falls more than your threshold below the control. Resume it when you’re ready.',
   },
   {
     term: 'Results settings',
@@ -67,11 +67,11 @@ export const HELP_FAQ_ITEMS = [
   },
   {
     q: 'How does AI price Suggest work?',
-    a: 'On Products & prices, choose AI suggested, set a min–max band, and click Suggest. Suggest prices only the variation whose tab is open: it asks the AI for a range inside that variation’s band for every product you selected, then places the test-variation prices across that range and clamps them to shop max price change and a cost-aware min-margin floor. Control stays at the catalog price. Variations are spread across the range rather than bunched together, because prices a point or two apart cannot be told apart at real store traffic. Every cell stays editable before launch. Open the info icon next to How would you like to set prices? for the full calculation.',
+    a: 'On Products & prices, choose AI suggested, set a min–max band, and click Suggest. Suggest prices only the variation whose tab is open: it asks the AI for a range inside that variation’s band for every product you selected, then places the test-variation prices across that range and clamps them to shop max price change. Control stays at the catalog price. Variations are spread across the range rather than bunched together, because prices a point or two apart cannot be told apart at real store traffic. Every cell stays editable before launch. Open the info icon next to How would you like to set prices? for the full calculation.',
   },
   {
     q: 'What does Suggest send to the AI?',
-    a: 'Per product you selected: its title, description, vendor, product type, main image resized to at most 1024 pixels, current price and currency, units sold in the last 30 days, a revenue level (not the amount), product page visits and revenue per visitor, stock on hand, its opportunity score, its variant count, and Priceify’s labels for its price point and traffic. Plus how many variations you are testing, the min–max band you typed, the test metric, and your max price change. Product costs and margins are not sent; your minimum margin is applied by Priceify after the reply. Nothing about a shopper is sent: no customer details, orders, or visitor records — the visit figure is only a daily count. Your shop domain and your Shopify product ids are not sent either, and nothing is stored or reused, so each click asks fresh. The reply is re-checked against your own catalog prices and limits before it becomes a price, so a suggestion cannot exceed your guardrails even if the model ignores them.',
+    a: 'Per product you selected: its title, description, vendor, product type, main image resized to at most 1024 pixels, current price and currency, units sold in the last 30 days, a revenue level (not the amount), product page visits and revenue per visitor, stock on hand, its opportunity score, its variant count, and Priceify’s labels for its price point and traffic. Plus how many variations you are testing, the min–max band you typed, the test metric, and your max price change. Product costs and margins are not sent. Nothing about a shopper is sent: no customer details, orders, or visitor records — the visit figure is only a daily count. Your shop domain and your Shopify product ids are not sent either, and nothing is stored or reused, so each click asks fresh. The reply is re-checked against your own catalog prices and limits before it becomes a price, so a suggestion cannot exceed your guardrails even if the model ignores them.',
   },
   {
     q: 'The prices filled in but the banner says they are not from AI',
@@ -91,11 +91,11 @@ export const HELP_FAQ_ITEMS = [
   },
   {
     q: 'Create is locked',
-    a: 'Create is locked only while the shop has no active Priceify plan. Choose a plan with View plans on the banner or under App settings → Plan & usage. Store setup does not lock Create: you can build and save tests while Theme connection, Checkout pricing functions, or price locations are unfinished — only Launch waits for them.',
+    a: 'Create is locked only while the shop has no active Priceify plan. Open setup on the banner shows what is left, including the plan; or choose one straight away with View plans, or under App settings → Plan & usage. Store setup does not lock Create: you can build and save tests while Theme connection, Checkout pricing functions, or price locations are unfinished — only Launch waits for them.',
   },
   {
     q: 'Where is the revenue guardrail?',
-    a: 'On each test — Audience & goals when you create it, and Settings on the test after launch. It is not in Results settings. Choose 3%–50% (default 10%). It is checked product by product after every variation reaches the test’s minimum visitors (at least 5,000) and 10 conversions. Priceify then stops testing that product if any variation’s revenue per visitor falls more than your threshold below control. The other products keep running. Max price change and margin limits are enforced on Products & prices, not here.',
+    a: 'On each test — Audience & goals when you create it, and Settings on the test after launch. It is not in Results settings. Choose 3%–50% (default 10%). It starts checking once every variation reaches the test’s minimum visitors and control has at least 10 conversions. Priceify then pauses the whole test if any variation’s revenue per visitor falls more than your threshold below control, and Resume continues it. After a resume the guardrail counts only new visitors, so it waits for the minimum again before it can pause. Max price change is enforced on Products & prices, not here.',
   },
   {
     q: 'How do I contact support?',

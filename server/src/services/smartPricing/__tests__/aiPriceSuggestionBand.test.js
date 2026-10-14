@@ -226,10 +226,7 @@ describe('a band that lowers the price', () => {
     assert.match(result.summary, /\$5–\$10 price cuts/);
   });
 
-  it('refuses to cut past the minimum margin, and says so', () => {
-    // $100 at 40% margin is $60 of cost. A 35% minimum margin puts the lowest
-    // legal price at $92.31, so a 10-20% cut is not available on this product
-    // however the merchant asks for it.
+  it('cuts a thin-margin product as far as the band asks: there is no margin floor', () => {
     const result = deterministicPriceSuggestions({
       variants: [{ variant_id: 'thin', title: 'Tee', current_price: 100, margin_percent: 40 }],
       arms: [{ id: 'var_b' }, { id: 'var_c' }],
@@ -239,13 +236,9 @@ describe('a band that lowers the price', () => {
     });
 
     prices(result).forEach(price => {
-      const margin = ((price - 60) / price) * 100;
-      assert.ok(margin >= 35, `margin at ${price} was ${margin.toFixed(1)}%`);
+      assert.ok(price >= 80 && price <= 90, `${price} should sit inside the 10-20% cut`);
     });
-    // Told, rather than left to notice that the prices ignore the band. Before,
-    // this flag only caught a price the guardrail pushed DOWN, so the discount
-    // case -- the one where the margin floor actually bites -- never reported.
-    result.suggestions.forEach(row => assert.equal(row.guardrail_limited, true));
+    result.suggestions.forEach(row => assert.notEqual(row.guardrail_limited, true));
   });
 });
 

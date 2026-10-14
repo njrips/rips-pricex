@@ -12,10 +12,7 @@
 
 function suggestGoalForPlan(plan = {}, guardrails = {}) {
   const defaultGoal = guardrails.default_goal_template || guardrails.defaultGoalTemplate || {};
-  const margin =
-    Number(plan.estimated_margin_percent ?? plan.margin_percent ?? plan.marginPercent) || null;
   const daily = Number(plan.daily_visitors) || 0;
-  const minMargin = Number(guardrails.min_margin_percent ?? 35);
 
   let primary = defaultGoal.primary_metric || 'revenue_per_visitor';
   let reason = 'Revenue per visitor is the default primary metric';
@@ -23,9 +20,6 @@ function suggestGoalForPlan(plan = {}, guardrails = {}) {
   if (daily > 0 && daily < 50) {
     primary = 'conversion_rate';
     reason = 'Low traffic — conversion rate is easier to power with fewer visitors';
-  } else if (Number.isFinite(margin) && margin < minMargin + 5 && daily >= 80) {
-    primary = 'revenue_per_visitor';
-    reason = 'Thin margin with solid traffic — prioritize revenue per visitor';
   }
 
   const cogsPercent = Number(guardrails.default_cogs_percent ?? 55) || 55;
@@ -118,7 +112,7 @@ async function detectLiveTestConflicts(shopDomain, plans = []) {
   if (!list.length) return [];
   const {
     getPriceTestEnrollment,
-    findLiveHold,
+    findLaunchBlockingHold,
     describeHold,
   } = require('./priceTestEnrollmentService');
 
@@ -165,7 +159,11 @@ async function detectLiveTestConflicts(shopDomain, plans = []) {
   list.forEach(plan => {
     const productId = plan?.product_id ?? plan?.productId;
     const variantId = plan?.variant_id ?? plan?.variantId;
-    const hold = findLiveHold(enrollment, { productId, variantId });
+    const hold = findLaunchBlockingHold(
+      enrollment,
+      { productId, variantId },
+      { experimentId, forgiveTestIds: [...previousTestIds] }
+    );
     if (!hold) return;
     if (previousTestIds.has(hold.test_id) && hold.status !== 'running') return;
     // One line per blocking test, not per SKU: a 40-product batch caught by

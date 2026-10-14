@@ -214,7 +214,7 @@ export function buildProductPickerEmptyMessage({
     return 'No products match that search in the loaded list. Try a shorter name or clear the filter on the left.';
   }
   if (activeGroupValue) {
-    return 'No products in this collection or category in the loaded catalog.';
+    return 'No products here can be added. They are in other tests, or sold out, not available for sale, gift cards, or have no price.';
   }
   return 'No products to show. Try All products or search above.';
 }

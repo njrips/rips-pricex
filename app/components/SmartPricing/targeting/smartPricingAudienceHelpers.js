@@ -613,15 +613,16 @@ export function buildSecondaryGoalPayload(secondaryMetrics = [], customGoals = [
   };
 }
 
-/** Map Classic device pills → engine device values (Tablet → mobile). */
+const ENGINE_DEVICES = ['desktop', 'mobile', 'tablet'];
+
+/** Map Classic device pills → engine device values. */
 export function mapClassicDevicesToEngine(devices = []) {
   const set = new Set();
   for (const raw of Array.isArray(devices) ? devices : []) {
     const n = String(raw || '')
       .trim()
       .toLowerCase();
-    if (n === 'desktop') set.add('desktop');
-    if (n === 'mobile' || n === 'tablet') set.add('mobile');
+    if (ENGINE_DEVICES.includes(n)) set.add(n);
   }
   return [...set];
 }
@@ -691,6 +692,8 @@ export function classicAudienceToSegments(audienceUi = {}, baseSegments = {}) {
     browser_user_agent_pattern: String(base.browser_user_agent_pattern || '').trim(),
     traffic_source: 'all',
     traffic_ramp_percent: traffic,
+    // The engine reads tablets as mobile unless the segments say otherwise.
+    tablet_separate: true,
   };
 
   delete out.device_rules;
@@ -702,8 +705,7 @@ export function classicAudienceToSegments(audienceUi = {}, baseSegments = {}) {
   } else if (deviceMode === 'include') {
     if (devices.length === 1) {
       out.device = devices[0];
-    } else if (devices.length >= 2 && devices.includes('desktop') && devices.includes('mobile')) {
-      // Include Desktop+Mobile covers all engine devices.
+    } else if (ENGINE_DEVICES.every(device => devices.includes(device))) {
       out.device = 'all';
     } else {
       out.device = 'all';
@@ -744,7 +746,7 @@ function normalizeDeviceRules(rules) {
       r =>
         r &&
         typeof r === 'object' &&
-        ['desktop', 'mobile'].includes(String(r.value || '').toLowerCase())
+        ENGINE_DEVICES.includes(String(r.value || '').toLowerCase())
     )
     .map(r => ({
       type: normalizeRuleType(r.type),
@@ -792,13 +794,16 @@ export function normalizeAudienceSegments(raw = {}) {
   const device = String(source.device || 'all').toLowerCase();
   const customer = String(source.customer || 'all').toLowerCase();
   const result = {
-    device: ['all', 'desktop', 'mobile'].includes(device) ? device : 'all',
+    device: ['all', ...ENGINE_DEVICES].includes(device) ? device : 'all',
     customer: ['all', 'new', 'returning'].includes(customer) ? customer : 'all',
     countries,
     exclude_bots: source.exclude_bots !== false,
     exclude_internal_ips: source.exclude_internal_ips !== false,
     browser_user_agent_pattern: String(source.browser_user_agent_pattern || '').trim(),
   };
+  if (source.tablet_separate === true) {
+    result.tablet_separate = true;
+  }
 
   const deviceRules = normalizeDeviceRules(source.device_rules);
   if (deviceRules.length) {

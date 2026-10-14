@@ -180,6 +180,40 @@ describe('resolveProductEventTitle', () => {
     });
     expect(row.detail).toMatch(/Guardrail excluded "Gift Card"/);
   });
+
+  it('reads a whole-test guardrail pause as one Guardrail paused test entry', () => {
+    const payload = {
+      scope: 'test',
+      reason: 'guardrail_breach',
+      activity_id: 'guardrail:exp_1:2026-09-02T12:00:00.000Z',
+      product_title: 'Gift Card',
+      variant_name: 'Variation B',
+      observed_drop_percent: 12.34,
+      threshold_percent: 10,
+    };
+    const trigger = mapServerEventToActivity({
+      id: 'e1',
+      event_type: 'guardrail_stopped',
+      actor: 'guardrail',
+      created_at: '2026-09-02T12:00:00.000Z',
+      payload,
+    });
+    const sibling = mapServerEventToActivity({
+      id: 'e2',
+      event_type: 'stopped',
+      actor: 'guardrail',
+      created_at: '2026-09-02T12:00:00.000Z',
+      payload: { ...payload, reason: 'guardrail_pause', product_title: 'Mug' },
+    });
+    expect(trigger.title).toBe('Guardrail paused test');
+    expect(sibling.title).toBe('Guardrail paused test');
+    expect(trigger.kind).toBe('guardrail');
+    expect(sibling.kind).toBe('guardrail');
+    expect(trigger.id).toBe(sibling.id);
+    expect(trigger.detail).toBe(
+      "Variation B's revenue per visitor dropped 12.3% below control (limit 10%). Every product in this test was paused. Resume when you're ready."
+    );
+  });
 });
 
 describe('mapServerEventToActivity', () => {

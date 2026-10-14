@@ -2,14 +2,25 @@
  * Runtime revenue-drop enforcement for running Smart Pricing tests.
  */
 
-const { updateTest } = require('../../models/test');
-const abTestEngine = require('../abTestEngine');
-const { syncSmartPricingInboxForTest } = require('./smartPricingInboxStopSyncService');
+const logger = require('../../utils/logger');
 const {
-  MIN_VISITORS_FOR_REVENUE_GUARDRAIL,
   MIN_CONVERSIONS_FOR_REVENUE_GUARDRAIL,
   evaluateRevenueDrop,
+  resolveGuardrailMinVisitors,
 } = require('./smartPricingRevenueGuardrail');
+
+const PAUSABLE_STATUSES = new Set(['running', 'active', 'scheduled']);
+
+const deps = {
+  updateTest: (...args) => require('../../models/test').updateTest(...args),
+  updateTestStatus: (...args) => require('../../models/test').updateTestStatus(...args),
+  listExperimentTests: (...args) =>
+    require('../../models/smartPricingInboxStore').listExperimentTests(...args),
+  syncSmartPricingInboxForTest: (...args) =>
+    require('./smartPricingInboxStopSyncService').syncSmartPricingInboxForTest(...args),
+  recordEventForTest: (...args) =>
+    require('../../models/smartPricingProductEventStore').recordEventForTest(...args),
+};
 
 function parseGuardrailConfig(raw) {
   if (!raw) return {};
@@ -51,6 +62,44 @@ function isGuardrailDisabled(test = {}) {
   const config = parseGuardrailConfig(test.guardrail_config);
   if (config.enabled === false) return true;
   return goalGuardrails(test).enabled === false;
+}
+
+function variantKey(row = {}, index = 0) {
+  return String(row.id ?? row.variant_id ?? row.variantId ?? row.name ?? index);
+}
+
+function variantTotals(row = {}) {
+  return {
+    visitors: Number(row.visitors) || 0,
+    revenue: Number(row.revenue) || 0,
+    conversions: Number(row.conversions ?? row.orders) || 0,
+  };
+}
+
+function snapshotVariants(variants = []) {
+  const out = {};
+  variants.forEach((row, index) => {
+    out[variantKey(row, index)] = variantTotals(row);
+  });
+  return out;
+}
+
+/**
+ * Results since the guardrail was re-armed. Without this, a resumed test is
+ * judged on the same totals that paused it and is paused again on the next
+ * check, so Resume could never stick.
+ */
+function variantsSinceBaseline(variants = [], baseline = {}) {
+  return variants.map((row, index) => {
+    const now = variantTotals(row);
+    const before = baseline[variantKey(row, index)] || {};
+    const visitors = Math.max(0, now.visitors - (Number(before.visitors) || 0));
+    const revenue = Math.max(0, now.revenue - (Number(before.revenue) || 0));
+    const conversions = Math.max(0, now.conversions - (Number(before.conversions) || 0));
+    // eslint-disable-next-line no-unused-vars
+    const { revenuePerVisitor, revenue_per_visitor, ...rest } = row;
+    return { ...rest, visitors, revenue, conversions, orders: conversions };
+  });
 }
 
 function resolveThreshold(test = {}, shopGuardrails = {}) {
@@ -106,13 +155,31 @@ async function enforceRevenueDropGuardrail({ shopDomain, test, analytics } = {})
     threshold = 10;
   }
 
-  const variants = Array.isArray(analytics?.variants) ? analytics.variants : [];
+  const allVariants = Array.isArray(analytics?.variants) ? analytics.variants : [];
+  if (config.rebaseline === true) {
+    if (!allVariants.length) {
+      return { skipped: true, reason: 'awaiting_baseline', test_status: test.status };
+    }
+    await deps.updateTest(test.id, shopDomain, {
+      guardrail_config: {
+        ...config,
+        rebaseline: false,
+        baseline: snapshotVariants(allVariants),
+        baseline_at: new Date().toISOString(),
+      },
+    });
+    return { skipped: true, reason: 'baseline_recorded', test_status: test.status };
+  }
+  const variants =
+    config.baseline && typeof config.baseline === 'object'
+      ? variantsSinceBaseline(allVariants, config.baseline)
+      : allVariants;
   const verdict = evaluateRevenueDrop({
     variants,
     thresholdPercent: threshold,
-    minVisitors: Math.max(
-      MIN_VISITORS_FOR_REVENUE_GUARDRAIL,
-      Number(config.min_visitors_per_variant) || 0
+    minVisitors: resolveGuardrailMinVisitors(
+      (test.goal && typeof test.goal === 'object' ? test.goal.min_sample_size : undefined) ??
+        config.min_visitors_per_variant
     ),
     minConversions: Math.max(
       MIN_CONVERSIONS_FOR_REVENUE_GUARDRAIL,
@@ -143,39 +210,104 @@ async function enforceRevenueDropGuardrail({ shopDomain, test, analytics } = {})
     action: 'paused',
   };
 
-  await updateTest(test.id, shopDomain, {
+  await deps.updateTest(test.id, shopDomain, {
     auto_stop: true,
     guardrail_config: nextConfig,
   });
-  const stopped = await abTestEngine.stopTest(test.id, shopDomain);
-  await syncSmartPricingInboxForTest(shopDomain, test.id, { reason: 'guardrail_breach' }).catch(
-    () => null
-  );
+  // Paused, not stopped: the experiment keeps its products and the merchant
+  // resumes it like any pause, which also re-arms this guardrail.
+  const paused = await deps.updateTestStatus(test.id, shopDomain, 'paused');
+  await deps
+    .syncSmartPricingInboxForTest(shopDomain, test.id, { reason: 'guardrail_breach' })
+    .catch(() => null);
 
-  const { recordEventForTest } = require('../../models/smartPricingProductEventStore');
-  await recordEventForTest(shopDomain, test.id, 'guardrail_stopped', {
-    actor: 'guardrail',
-    test: stopped || test,
-    payload: {
-      observed_drop_percent: verdict.observed_drop_percent,
-      threshold_percent: verdict.threshold_percent,
-      variant_id: verdict.variant_id || null,
-      variant_name: verdict.variant_name || null,
-      breached_at: breachedAt,
-    },
-  }).catch(() => null);
+  const experimentId = String(test?.metadata?.experiment_id || '').trim();
+  const payload = {
+    reason: 'guardrail_breach',
+    scope: 'test',
+    // One pause across every product, so the experiment's history shows it once.
+    activity_id: `guardrail:${experimentId || test.id}:${breachedAt}`,
+    observed_drop_percent: verdict.observed_drop_percent,
+    threshold_percent: verdict.threshold_percent,
+    variant_id: verdict.variant_id || null,
+    variant_name: verdict.variant_name || null,
+    breached_at: breachedAt,
+  };
+  await deps
+    .recordEventForTest(shopDomain, test.id, 'guardrail_stopped', {
+      actor: 'guardrail',
+      test: paused || test,
+      payload,
+    })
+    .catch(() => null);
+
+  const pausedSiblings = await pauseRestOfExperiment({
+    shopDomain,
+    test,
+    payload: { ...payload, triggered_by_test_id: String(test.id) },
+  });
 
   return {
     skipped: false,
     enforced: true,
     breached: true,
-    test_status: stopped?.status || 'stopped',
+    test_status: paused?.status || 'paused',
+    paused_test_ids: [String(test.id), ...pausedSiblings],
     ...verdict,
     breached_at: breachedAt,
   };
 }
 
+/**
+ * The guardrail pauses the whole test, not just the product that tripped it:
+ * the merchant set one revenue limit for the experiment, and one variation
+ * losing past it is the signal to stop and look at every price in it.
+ */
+async function pauseRestOfExperiment({ shopDomain, test, payload }) {
+  const experimentId = String(test?.metadata?.experiment_id || '').trim();
+  if (!experimentId) return [];
+  const siblings = await deps.listExperimentTests(shopDomain, experimentId).catch(() => []);
+  const pausedIds = [];
+  for (const sibling of siblings) {
+    if (String(sibling.id) === String(test.id)) continue;
+    const status = String(sibling.status || '').trim().toLowerCase();
+    if (!PAUSABLE_STATUSES.has(status)) continue;
+    try {
+      const updated = await deps.updateTestStatus(sibling.id, shopDomain, 'paused');
+      if (!updated) continue;
+      pausedIds.push(String(sibling.id));
+      // Marked so its resume also starts the guardrail on fresh results.
+      await deps
+        .updateTest(sibling.id, shopDomain, {
+          guardrail_config: {
+            ...parseGuardrailConfig(sibling.guardrail_config),
+            guardrail_paused_at: payload.breached_at,
+          },
+        })
+        .catch(() => null);
+      await deps
+        .syncSmartPricingInboxForTest(shopDomain, sibling.id, { reason: 'guardrail_breach' })
+        .catch(() => null);
+      await deps
+        .recordEventForTest(shopDomain, sibling.id, 'stopped', {
+          actor: 'guardrail',
+          test: updated,
+          payload: { ...payload, reason: 'guardrail_pause' },
+        })
+        .catch(() => null);
+    } catch (error) {
+      logger.warn('Revenue guardrail could not pause a test in the experiment', {
+        shopDomain,
+        testId: sibling.id,
+        error: error?.message,
+      });
+    }
+  }
+  return pausedIds;
+}
+
 module.exports = {
+  __deps: deps,
   enforceRevenueDropGuardrail,
   isGuardrailDisabled,
   resolveThreshold,

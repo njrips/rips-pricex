@@ -184,7 +184,7 @@ describe('smartPricingLaunchService', () => {
     expect(abTestEngine.startTest).not.toHaveBeenCalled();
   });
 
-  it('rejects final wizard prices that fall below the recorded margin floor', async () => {
+  it('launches a price cut on a thin-margin product: there is no margin floor', async () => {
     getShopSmartPricingGuardrails.mockResolvedValue({
       max_parallel_tests: 5,
       max_price_change_percent: 30,
@@ -216,10 +216,11 @@ describe('smartPricingLaunchService', () => {
       ],
     };
 
-    await expect(
-      launchSmartPricingPlanAsTest(plan, 'demo.myshopify.com', { autoStart: true })
-    ).rejects.toThrow(/minimum margin/i);
-    expect(createTest).not.toHaveBeenCalled();
+    await launchSmartPricingPlanAsTest(plan, 'demo.myshopify.com', { autoStart: true });
+    expect(createTest).toHaveBeenCalled();
+    const launchedPlan = buildPriceTestPayloadFromPlan.mock.calls[0][0];
+    expect(launchedPlan.price_arms.map(arm => arm.price)).toEqual([100, 90]);
+    expect(launchedPlan.guardrail_checks.some(check => check.id === 'margin_floor')).toBe(false);
   });
 
   it('blocks auto-start when checkout readiness fails', async () => {
@@ -380,6 +381,9 @@ describe('a product another test is already pricing', () => {
       // A plan with no experiment claims no exemption, so the product-wide
       // hold applies exactly as it always did.
       experimentId: '',
+      // A new test may not take a product a paused test is holding for resume.
+      refuseReserved: true,
+      forgiveTestIds: [],
     });
   });
 

@@ -2278,14 +2278,19 @@ button.stepItem {
   flex-shrink: 0;
 }
 
+/* Inline flow, not flex: as flex items the text runs wrapped as whole blocks,
+   so the second half of the sentence dropped under the input on its own line. */
 .guardrailRule {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
+  display: block;
   color: var(--classic-ink);
   font-size: var(--classic-fs-meta);
-  line-height: 28px;
+  line-height: 34px;
+}
+
+.guardrailRule .guardrailInputWrap,
+.guardrailRule .guardrailRuleValue {
+  margin: 0 6px;
+  vertical-align: middle;
 }
 
 .guardrailRuleValue {
@@ -2885,6 +2890,14 @@ button.stepItem {
   align-items: center;
   flex-wrap: wrap;
   gap: 10px;
+}
+
+.overviewStatusToggle {
+  margin-bottom: 0;
+}
+
+.overviewStatusToggle .segmentBtn:disabled {
+  cursor: default;
 }
 
 .winnerBadge {
@@ -3673,6 +3686,10 @@ button.stepItem {
   margin-bottom: 10px;
 }
 
+.modalSide .groupTabRow {
+  margin: 0 0 12px;
+}
+
 .collectionItem {
   display: flex;
   align-items: center;
@@ -3763,6 +3780,16 @@ button.stepItem {
 
 .modalProductList {
   margin-top: 4px;
+}
+
+.modalPager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 12px;
+  margin-top: 8px;
+  border-top: 1px solid var(--classic-line);
 }
 
 .modalThumb {

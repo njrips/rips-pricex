@@ -360,9 +360,7 @@ describe('products a live test is already pricing', () => {
     expect(preview.ready_to_launch).toBe(true);
   });
 
-  it('does not block on a paused test, which is pricing nobody right now', async () => {
-    // A paused test reserves its product rather than holding it: the catalog
-    // withholds it, but it is not a reason to refuse a launch.
+  it('blocks on a paused test, which could never resume once a new test takes its product', async () => {
     dbRows.push(runningTest({ id: 'old', name: 'Old pricing', status: 'paused' }));
 
     const preview = await buildBatchPreviewLaunch({
@@ -371,8 +369,13 @@ describe('products a live test is already pricing', () => {
       guardrails: {},
     });
 
-    expect(preview.live_conflicts).toEqual([]);
-    expect(preview.ready_to_launch).toBe(true);
+    expect(preview.live_conflicts).toEqual([
+      expect.objectContaining({
+        test_id: 'old',
+        message: expect.stringMatching(/which is paused\. End that test/),
+      }),
+    ]);
+    expect(preview.ready_to_launch).toBe(false);
   });
 
   it('does not report an experiment as colliding with its own other variants', async () => {

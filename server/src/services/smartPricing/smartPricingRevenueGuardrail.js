@@ -56,6 +56,16 @@ function isRevenueGuardrailEnabled(plan = {}) {
   return true;
 }
 
+/**
+ * Visitors each variation needs before the guardrail compares revenue: the
+ * experiment's own minimum. The 5,000 default only stands in for a test that
+ * never stored one.
+ */
+function resolveGuardrailMinVisitors(configured) {
+  const n = Number(configured);
+  return Number.isFinite(n) && n >= 1 ? Math.round(n) : MIN_VISITORS_FOR_REVENUE_GUARDRAIL;
+}
+
 function buildRevenueDropGuardrailConfig(shopGuardrails = {}, plan = {}) {
   const maxDrop = resolveEffectiveMaxRevenueDropPercent(shopGuardrails, plan);
   const configuredVisitors = Number(
@@ -63,10 +73,7 @@ function buildRevenueDropGuardrailConfig(shopGuardrails = {}, plan = {}) {
       plan.launch_preferences?.min_sample_size ??
       plan.statistical_design?.min_sample_size
   );
-  const minVisitors = Math.max(
-    MIN_VISITORS_FOR_REVENUE_GUARDRAIL,
-    Number.isFinite(configuredVisitors) ? configuredVisitors : 0
-  );
+  const minVisitors = resolveGuardrailMinVisitors(configuredVisitors);
   return {
     enabled: isRevenueGuardrailEnabled(plan),
     auto_stop: true,
@@ -140,13 +147,31 @@ function evaluateRevenueDrop({
     };
   }
 
+  // Every variation has to reach the minimum before any is judged, so the test
+  // is only paused on a full comparison. The conversion floor is control's
+  // alone: asked of a challenger too, a price nobody buys would never qualify,
+  // and that is the very variation this guardrail exists to catch.
+  const challengers = rows.filter(
+    (row, index) => index !== controlIndex && !isControlVariant(row, index)
+  );
+  const allChallengersReady =
+    challengers.length > 0 &&
+    challengers.every(row => (Number(row.visitors) || 0) >= floor && Number.isFinite(variantRpv(row)));
+  if (!allChallengersReady) {
+    return {
+      ready: false,
+      breached: false,
+      reason: 'insufficient_challenger_sample',
+      threshold_percent: threshold,
+      control_rpv: controlRpv,
+      control_visitors: controlVisitors,
+    };
+  }
+
   let worst = null;
-  rows.forEach((row, index) => {
-    if (index === controlIndex || isControlVariant(row, index)) return;
+  challengers.forEach(row => {
     const visitors = Number(row.visitors) || 0;
-    const conversions = Number(row.conversions ?? row.orders) || 0;
     const rpv = variantRpv(row);
-    if (visitors < floor || conversions < conversionFloor || !Number.isFinite(rpv)) return;
     const drop = ((controlRpv - rpv) / controlRpv) * 100;
     if (!worst || drop > worst.observed_drop_percent) {
       worst = {
@@ -158,17 +183,6 @@ function evaluateRevenueDrop({
       };
     }
   });
-
-  if (!worst) {
-    return {
-      ready: false,
-      breached: false,
-      reason: 'insufficient_challenger_sample',
-      threshold_percent: threshold,
-      control_rpv: controlRpv,
-      control_visitors: controlVisitors,
-    };
-  }
 
   return {
     ready: true,
@@ -191,5 +205,6 @@ module.exports = {
   resolveEffectiveMaxRevenueDropPercent,
   isRevenueGuardrailEnabled,
   buildRevenueDropGuardrailConfig,
+  resolveGuardrailMinVisitors,
   evaluateRevenueDrop,
 };

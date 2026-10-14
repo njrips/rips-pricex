@@ -273,8 +273,18 @@ export function buildClassicExperimentEditPath(planId, focus = 'audience') {
 }
 
 /**
- * Where Edit takes an experiment: drafts continue in the create wizard,
- * launched experiments open their settings editor.
+ * Edit test on a running or paused experiment: back into the wizard, with the
+ * variations, products and prices shoppers are already assigned to locked.
+ */
+export function buildClassicLiveEditPath(resumeId) {
+  const params = new URLSearchParams({ resume: String(resumeId || '').trim(), live: '1' });
+  return preserveEmbeddedSearch(`/app/experiments/new?${params}`);
+}
+
+/**
+ * Where Edit takes an experiment: drafts continue in the create wizard, and
+ * running or paused ones go back into it with their arms locked. Anything else
+ * that launched opens its settings on the details page.
  *
  * A draft carries its step: the wizard opens at step 1 without it, walking the
  * merchant back through everything they had already answered.
@@ -292,6 +302,14 @@ export function buildClassicExperimentEditTarget(experiment) {
     status === 'paused' ||
     (status !== 'draft' && status !== 'queued' && collectExperimentTestIds(plans).length > 0);
   const planId = experiment?.representative?.id || plans[0]?.id || '';
+  const resumeId = getClassicExperimentResumeId(experiment);
+  if (
+    (status === 'running' || status === 'paused') &&
+    resumeId &&
+    collectExperimentTestIds(plans).length > 0
+  ) {
+    return buildClassicLiveEditPath(resumeId);
+  }
   if (launched && planId) return buildClassicExperimentEditPath(planId);
   return buildClassicWizardResumePath(
     getClassicExperimentResumeId(experiment),

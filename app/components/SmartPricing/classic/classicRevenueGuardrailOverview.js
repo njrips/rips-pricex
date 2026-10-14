@@ -63,8 +63,8 @@ export function shouldShowGuardrailStopBanner(rail, guardrailArmed = true) {
 export function formatGuardrailStopMessage(rail) {
   const productTitle = String(rail?.product_title || rail?.productTitle || '').trim();
   const scope = productTitle
-    ? ` Traffic assignment stopped for “${productTitle}”; other products keep running.`
-    : ' Traffic assignment stopped for the affected product; other products keep running.';
+    ? ` Triggered by “${productTitle}”. The whole test is paused; resume it when you’re ready.`
+    : ' The whole test is paused; resume it when you’re ready.';
   if (!rail) {
     return `A variation passed the revenue guardrail limit vs control.${scope}`;
   }

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  countWinningExperiments,
   enrichInboxPlansForLaunch,
   formatClassicStatusLabel,
   formatExperimentTypeLabel,
@@ -381,5 +382,35 @@ describe('draft rows in the list tabs', () => {
   it('stays out of the tabs for experiments that have run', () => {
     expect(filterClassicExperimentsByTab([draftRow], 'running')).toEqual([]);
     expect(filterClassicExperimentsByTab([draftRow], 'finished')).toEqual([]);
+  });
+});
+
+describe('countWinningExperiments', () => {
+  const plan = (id, experimentId, status, extra = {}) => ({
+    id,
+    status,
+    metadata: { experiment_id: experimentId },
+    ...extra,
+  });
+
+  it('counts a test once any product has a winner, even while others still run', () => {
+    expect(
+      countWinningExperiments([
+        plan('p1', 'exp-a', 'winner_ready'),
+        plan('p2', 'exp-a', 'running'),
+        plan('p3', 'exp-b', 'applied'),
+      ])
+    ).toBe(2);
+  });
+
+  it('does not count tests that only finished, stopped, or were archived', () => {
+    expect(
+      countWinningExperiments([
+        plan('p1', 'exp-a', 'completed'),
+        plan('p2', 'exp-b', 'stopped'),
+        plan('p3', 'exp-c', 'winner_ready', { archived: true }),
+        plan('p4', 'exp-d', 'running'),
+      ])
+    ).toBe(0);
   });
 });

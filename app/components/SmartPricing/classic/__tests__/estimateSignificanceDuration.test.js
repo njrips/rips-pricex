@@ -99,8 +99,8 @@ describe('estimateSignificanceDuration', () => {
     expect(result.days).toBe(200);
     expect(result.recommendedSampleSize).toBe(2000);
     expect(result.planningSampleSize).toBe(2000);
-    expect(result.detail).toMatch(/40 visitors\/day/);
-    expect(result.detail).toMatch(/50% test traffic/);
+    expect(result.detail).toMatch(/about 40 visitors a day/);
+    expect(result.detail).toMatch(/50% of them enter the test/);
     expect(result.slowestVariationPercent).toBe(50);
   });
 
@@ -113,7 +113,7 @@ describe('estimateSignificanceDuration', () => {
       minSampleSize: 2000,
     });
     expect(result.days).toBe(100);
-    expect(result.detail).toMatch(/80 visitors\/day/);
+    expect(result.detail).toMatch(/about 80 visitors a day/);
   });
 
   it('does not promote an opportunity proxy baseline into powered planning', () => {
@@ -138,7 +138,7 @@ describe('estimateSignificanceDuration', () => {
     expect(result.planningSampleSize).toBe(2000);
     expect(result.powerRating).toBe('insufficient_data');
     expect(result.trafficEvidence).toBe('estimated');
-    expect(result.detail).toMatch(/qualified conversion baseline/i);
+    expect(result.detail).toMatch(/enough orders to measure its conversion rate/i);
   });
 
   it('returns no day count when there is no traffic data', () => {
@@ -189,7 +189,7 @@ describe('estimateSignificanceDuration', () => {
     expect(result.planningSampleSize).toBe(result.recommendedSampleSize);
     expect(result.powerRating).toBe('underpowered');
     expect(result.days).toBeGreaterThan(result.earliestDays);
-    expect(result.detail).toMatch(/10% relative conversion lift/);
+    expect(result.detail).toMatch(/spot a change of 10% in conversion/);
   });
 
   it('leads with the merchant floor and the lift that floor can resolve', () => {
@@ -201,9 +201,9 @@ describe('estimateSignificanceDuration', () => {
     });
     // The chosen floor must be quoted as the merchant typed it, not silently
     // replaced by the far larger powered sample.
-    expect(result.detail).toMatch(/5,000-visitor minimum/);
+    expect(result.detail).toMatch(/minimum of 5,000 visitors per variation/);
     expect(result.detectableLiftAtFloorPercent).toBeGreaterThan(10);
-    expect(result.detail).toMatch(/fixed-horizon conversion-rate sensitivity/);
+    expect(result.detail).toMatch(/spot a conversion change of about/);
     // No raw five-digit day counts in the copy.
     expect(result.detail).not.toMatch(/\d{4,} days/);
   });
@@ -226,24 +226,24 @@ describe('estimateSignificanceDuration', () => {
     expect(result.practicalDurationRange).toBe('');
     expect(result.trafficEvidence).toBe('estimated');
     expect(result.requiredDailyVisitorsForPracticalWindow).toBeGreaterThan(300);
-    expect(result.detail).toMatch(/cannot be reached inside a practical/i);
-    expect(result.detail).toMatch(/planning prior—not an AI promise/i);
-    expect(result.detail).toMatch(/needs about .+ eligible visitors\/day/i);
+    expect(result.detail).toMatch(/can't be reached within a practical test/i);
+    expect(result.detail).toMatch(/cautious estimate from your whole store/i);
+    expect(result.detail).toMatch(/needs about .+ visitors a day/i);
     expect(result.detail).not.toMatch(/years?/i);
 
     // Review prints `summary` and hides `method`, so what a merchant must act
     // on has to be in the first and the arithmetic in the second. Printed
     // together this ran to six sentences on the way to Launch.
-    expect(result.summary).toMatch(/cannot be reached inside a practical/i);
-    expect(result.summary).toMatch(/needs about .+ eligible visitors\/day/i);
-    expect(result.summary).toMatch(/Choose a higher-traffic product/i);
-    expect(result.summary).not.toMatch(/planning prior/i);
-    expect(result.summary).not.toMatch(/visitors\/variation\/day/i);
+    expect(result.summary).toMatch(/can't be reached within a practical test/i);
+    expect(result.summary).toMatch(/needs about .+ visitors a day/i);
+    expect(result.summary).toMatch(/Pick a busier product/i);
+    expect(result.summary).not.toMatch(/cautious estimate/i);
+    expect(result.summary).not.toMatch(/smallest variation gets/i);
 
-    expect(result.method).toMatch(/visitors\/variation\/day/i);
-    expect(result.method).toMatch(/planning prior—not an AI promise/i);
-    expect(result.method).toMatch(/qualified conversion baseline/i);
-    expect(result.method).not.toMatch(/Choose a higher-traffic product/i);
+    expect(result.method).toMatch(/smallest variation gets/i);
+    expect(result.method).toMatch(/cautious estimate from your whole store/i);
+    expect(result.method).toMatch(/enough orders to measure its conversion rate/i);
+    expect(result.method).not.toMatch(/Pick a busier product/i);
 
     // Between them they still say everything the one paragraph said. Splitting
     // regroups the sentences, so compare the set rather than the order.
@@ -276,7 +276,7 @@ describe('estimateSignificanceDuration', () => {
       minSampleSize: 60000,
     });
     expect(result.recommendedSampleSize).toBeLessThan(60000);
-    expect(result.detail).toMatch(/meets the fixed-horizon planning reference/);
+    expect(result.detail).toMatch(/That's enough to reliably spot/);
   });
 
   it('times the earliest call from the conversion floor when that binds', () => {
@@ -298,8 +298,8 @@ describe('estimateSignificanceDuration', () => {
     expect(withFloor.earliestCallSampleSize).toBe(10000);
     expect(withFloor.floorLimitedBy).toBe('conversions');
     expect(withFloor.earliestDays).toBeGreaterThan(visitorsOnly.earliestDays);
-    expect(withFloor.detail).toMatch(/100-conversion minimum per variation/);
-    expect(withFloor.detail).toMatch(/about 10,000 visitors\/variation/);
+    expect(withFloor.detail).toMatch(/minimum of 100 conversions per variation/);
+    expect(withFloor.detail).toMatch(/about 10,000 visitors per variation/);
   });
 
   it('keeps quoting the visitor floor when it already yields the conversions', () => {
@@ -312,7 +312,7 @@ describe('estimateSignificanceDuration', () => {
     });
     expect(result.earliestCallSampleSize).toBe(5000);
     expect(result.floorLimitedBy).toBe('visitors');
-    expect(result.detail).toMatch(/5,000-visitor minimum per variation/);
+    expect(result.detail).toMatch(/minimum of 5,000 visitors per variation/);
   });
 
   it('uses shop confidence and target lift when provided', () => {
@@ -333,8 +333,8 @@ describe('estimateSignificanceDuration', () => {
       confidenceLevel: 95,
     });
     expect(at95.recommendedSampleSize).toBeGreaterThan(at90.recommendedSampleSize);
-    expect(at95.detail).toMatch(/8% relative conversion lift/);
-    expect(at95.detail).toMatch(/95% family-wise confidence/);
+    expect(at95.detail).toMatch(/spot a change of 8% in conversion/);
+    expect(at95.detail).toMatch(/at 95% confidence/);
   });
 
   it('keeps per-SKU planning estimates for launch persistence', () => {

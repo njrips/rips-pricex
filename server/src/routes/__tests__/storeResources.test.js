@@ -30,7 +30,7 @@ function loadRouter() {
       },
       listCollections: async (shop, token, search, first, after) => {
         calls.push({ kind: 'collections', shop, token, search, first, after });
-        return collectionResult;
+        return typeof collectionResult === 'function' ? collectionResult(after) : collectionResult;
       },
     },
     '../middleware/shopContext': {
@@ -97,7 +97,11 @@ async function get(query) {
 beforeEach(() => {
   calls = [];
   productResult = { list: [{ id: 'gid://1', title: 'Tee', handle: 'sample-tee' }], pageInfo: {} };
-  collectionResult = [{ id: 'gid://c1', title: 'All', handle: 'all' }];
+  // The shape shopifyService.listCollections really answers with.
+  collectionResult = {
+    list: [{ id: 'gid://c1', title: 'All', handle: 'all' }],
+    pageInfo: { hasNextPage: false, endCursor: null },
+  };
 });
 
 describe('store-resources', () => {
@@ -111,9 +115,8 @@ describe('store-resources', () => {
     assert.equal(calls[0].kind, 'products');
   });
 
-  // listProducts pages, so it answers { list, pageInfo }; listCollections
-  // answers a bare array. Returning the wrapper object would have given the
-  // client a `resources` it could not map over.
+  // Both services page, so they answer { list, pageInfo }. Returning the
+  // wrapper object gives the client a `resources` it cannot map over.
   it('unwraps the paged product shape', async () => {
     const { payload } = await get({ type: 'product' });
     assert.ok(Array.isArray(payload.resources), 'resources must be an array');
@@ -140,6 +143,39 @@ describe('store-resources', () => {
     await get({ type: 'collection', query: 'title:Sale' });
     assert.equal(calls[0].kind, 'collections');
     assert.equal(calls[0].search, 'title:Sale');
+  });
+
+  it('unwraps the paged collection shape', async () => {
+    const { payload } = await get({ type: 'collection' });
+    assert.ok(Array.isArray(payload.resources), 'resources must be an array');
+    assert.equal(payload.resources[0].title, 'All');
+    assert.equal(calls.length, 1);
+  });
+
+  it('follows every page for all=1, sorted by title across pages', async () => {
+    collectionResult = after =>
+      after
+        ? { list: [{ id: 'c2', title: 'apples' }], pageInfo: { hasNextPage: false } }
+        : {
+            list: Array.from({ length: 100 }, (_, i) => ({ id: `p${i}`, title: `Zed ${i}` })),
+            pageInfo: { hasNextPage: true, endCursor: 'cursor-1' },
+          };
+    const { payload } = await get({ type: 'collection', all: '1' });
+    assert.equal(payload.resources.length, 101);
+    assert.equal(payload.resources[0].title, 'apples');
+    assert.deepEqual(
+      calls.map(call => call.after),
+      [null, 'cursor-1']
+    );
+  });
+
+  it('stops following pages at the cap', async () => {
+    collectionResult = () => ({
+      list: [{ id: 'x', title: 'x' }],
+      pageInfo: { hasNextPage: true, endCursor: 'again' },
+    });
+    await get({ type: 'collection', all: '1' });
+    assert.equal(calls.length, 10);
   });
 
   it('caps first at 100 and defaults it to 40', async () => {

@@ -1332,6 +1332,31 @@ class AnalyticsModel {
     return { types, names };
   }
 
+  /**
+   * Distinct shoppers who entered any of the shop's tests at or after `since`.
+   *
+   * A shopper enters when shown the tested price (`exposed_at`); tests that
+   * count every assignment have no exposure, so their assignment time stands
+   * in. One shopper in three tests is one visitor here.
+   */
+  async getShopVisitorsSince(shopDomain, since) {
+    const shop = normalizeShopDomain(shopDomain);
+    const from = since instanceof Date ? since : new Date(since);
+    if (!shop || Number.isNaN(from.getTime())) return 0;
+    await resolveCountedAssignments();
+    const source = countedAssignments();
+    const entered =
+      source === 'counted_test_assignments' ? 'COALESCE(ta.exposed_at, ta.assigned_at)' : 'ta.assigned_at';
+    const result = await query(
+      `SELECT COUNT(DISTINCT ta.user_id)::int AS visitors
+         FROM ${source} ta
+        WHERE LOWER(TRIM(ta.shop_domain)) = $1
+          AND ${entered} >= $2`,
+      [shop, from.toISOString()]
+    );
+    return Number(result.rows?.[0]?.visitors) || 0;
+  }
+
   async getAssignmentCohorts(testId, shopDomain, options = {}) {
     await resolveCountedAssignments();
     const granularity = options.granularity === 'day' ? 'day' : 'week';
@@ -1557,4 +1582,5 @@ module.exports = {
   getEventsList: (testId, shop, opts) => model.getEventsList(testId, shop, opts),
   getEventTypesForTest: (testId, shop, opts) => model.getEventTypesForTest(testId, shop, opts),
   getAssignmentCohorts: (testId, shop, opts) => model.getAssignmentCohorts(testId, shop, opts),
+  getShopVisitorsSince: (shop, since) => model.getShopVisitorsSince(shop, since),
 };

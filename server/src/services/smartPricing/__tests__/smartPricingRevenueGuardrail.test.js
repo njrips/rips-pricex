@@ -148,6 +148,41 @@ describe('smartPricingRevenueGuardrail', () => {
     assert.equal(config.enabled, false);
   });
 
+  it('starts at the experiment minimum, even below 5,000', () => {
+    const config = buildRevenueDropGuardrailConfig({}, { goal: { min_sample_size: 1000 } });
+    assert.equal(config.min_visitors_per_variant, 1000);
+  });
+
+  it('waits until every variation reaches the minimum', () => {
+    const verdict = evaluateRevenueDrop({
+      thresholdPercent: 10,
+      minVisitors: 100,
+      variants: [
+        { name: 'Control', visitors: 200, conversions: 20, revenuePerVisitor: 2 },
+        { name: 'A', visitors: 200, conversions: 20, revenuePerVisitor: 1 },
+        { name: 'B', visitors: 60, conversions: 5, revenuePerVisitor: 2 },
+      ],
+    });
+    assert.equal(verdict.ready, false);
+    assert.equal(verdict.reason, 'insufficient_challenger_sample');
+  });
+
+  // A price nobody buys earns nothing per visitor. Asking it for 10 orders too
+  // would keep the guardrail from ever looking at it.
+  it('breaches on a challenger with no sales once it has the visitors', () => {
+    const verdict = evaluateRevenueDrop({
+      thresholdPercent: 10,
+      minVisitors: 100,
+      variants: [
+        { id: 'c', name: 'Control', visitors: 200, conversions: 20, revenuePerVisitor: 2 },
+        { id: 'a', name: 'A', visitors: 200, conversions: 0, revenue: 0 },
+      ],
+    });
+    assert.equal(verdict.ready, true);
+    assert.equal(verdict.breached, true);
+    assert.equal(verdict.observed_drop_percent, 100);
+  });
+
   it('keeps auto_stop true when disarmed, so winners still apply', () => {
     const config = buildRevenueDropGuardrailConfig(
       {},

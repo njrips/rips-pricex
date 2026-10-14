@@ -59,13 +59,10 @@ export default function ExperimentsHome() {
           <Banner
             tone="warning"
             title="Create is locked"
-            action={{
-              content: 'View plans',
-              onAction: upgrade,
-            }}
-            secondaryAction={{ content: 'Open setup', onAction: () => navigate(preserveEmbeddedSearch('/app/setup')) }}
+            action={{ content: 'Open setup', onAction: () => navigate(preserveEmbeddedSearch('/app/setup')) }}
+            secondaryAction={{ content: 'View plans', onAction: upgrade }}
           >
-            <p>An active Priceify plan is required to create a test.</p>
+            <p>Finish setup to start your first test.</p>
           </Banner>
         </Box>
       ) : launchSummary.anyReady === false ? (

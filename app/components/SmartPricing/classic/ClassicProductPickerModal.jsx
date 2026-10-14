@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Button, TextField } from '@shopify/polaris';
-import { IconCheck, IconGlobe } from './classicIcons';
+import { IconCheck, IconChevronRight, IconGlobe } from './classicIcons';
+import { useKeyedState } from '../../../hooks/useKeyedState';
 import {
   groupOpportunitiesByProduct,
   limitSelectionToProducts,
@@ -22,13 +23,10 @@ import useFocusTrap from '../../../hooks/useFocusTrap';
 import styles from './SmartPricingClassic.module.css';
 
 /**
- * How many product rows this list renders at once.
- *
- * Every row carries an image, so an unbounded list makes a large catalog slow
- * to open. Anything past this is reachable through the search below, and the
- * list says how many it is holding back rather than ending without a word.
+ * Product rows per page. Every row carries an image, so the whole catalog is
+ * paged rather than rendered at once.
  */
-const MAX_VISIBLE_PRODUCTS = 200;
+export const PICKER_PAGE_SIZE = 50;
 
 /** Each remote lookup asks Shopify, so wait for the merchant to stop typing. */
 const REMOTE_SEARCH_DEBOUNCE_MS = 600;
@@ -143,34 +141,40 @@ export default function ClassicProductPickerModal({
   }, [opportunities]);
 
   /**
-   * Collections the loaded products are actually in, when the catalog says so.
+   * Every collection in the shop, plus any the loaded products name that the
+   * shop-wide list did not reach.
    *
-   * The shop-wide list is fetched separately and stops at 40, so a shop with
-   * more never saw the rest, and it listed collections with nothing testable
-   * in them. Built from the products, it is every collection worth picking.
+   * Built from the products alone, a collection whose products are all in
+   * other tests or untestable vanished, so the picker showed one collection
+   * where Shopify showed three. Those now stay listed at 0 and say why when
+   * opened.
    */
   const collectionGroups = useMemo(() => {
-    const fromProducts = new Map();
-    (opportunities || []).forEach(row => {
-      (Array.isArray(row?.collections) ? row.collections : []).forEach(collection => {
-        const id = String(collection?.id || '');
-        if (id && !fromProducts.has(id)) {
-          fromProducts.set(id, String(collection.title || '').trim() || 'Untitled collection');
-        }
+    const byId = new Map();
+    const add = (id, title) => {
+      const key = String(id || '');
+      if (!key || byId.has(normalizeId(key))) return;
+      byId.set(normalizeId(key), {
+        value: key,
+        label: String(title || '').trim() || 'Untitled collection',
+        kind: 'collection',
       });
+    };
+    (collectionOptions || []).forEach(opt => add(opt?.value, opt?.label));
+    (opportunities || []).forEach(row => {
+      (Array.isArray(row?.collections) ? row.collections : []).forEach(collection =>
+        add(collection?.id, collection?.title)
+      );
     });
-    if (!fromProducts.size) {
-      return (collectionOptions || []).map(opt => ({ ...opt, kind: 'collection' }));
-    }
     const allOption = (collectionOptions || []).find(opt => !opt?.value) || {
       label: 'All products',
       value: '',
     };
     return [
       { ...allOption, kind: 'collection' },
-      ...[...fromProducts.entries()]
-        .map(([value, label]) => ({ label, value, kind: 'collection' }))
-        .sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' })),
+      ...[...byId.values()].sort((a, b) =>
+        a.label.localeCompare(b.label, undefined, { sensitivity: 'base' })
+      ),
     ];
   }, [opportunities, collectionOptions]);
 
@@ -210,8 +214,13 @@ export default function ClassicProductPickerModal({
     });
   }, [allGroups, productSearch, activeGroup]);
 
-  const products = useMemo(() => matched.slice(0, MAX_VISIBLE_PRODUCTS), [matched]);
-  const hiddenByDisplayCap = Math.max(0, matched.length - products.length);
+  const pageCount = Math.max(1, Math.ceil(matched.length / PICKER_PAGE_SIZE));
+  const [page, setPage] = useKeyedState(`${groupKey(activeGroup)}|${productSearch}`, 0);
+  const safePage = Math.min(page, pageCount - 1);
+  const products = useMemo(
+    () => matched.slice(safePage * PICKER_PAGE_SIZE, (safePage + 1) * PICKER_PAGE_SIZE),
+    [matched, safePage]
+  );
 
   /**
    * Search the rest of the catalog, not just the part we were handed.
@@ -267,6 +276,8 @@ export default function ClassicProductPickerModal({
     return count;
   }, [collectionGroups, groupStats]);
 
+  const footerCollectionCount = Math.max(collectionsTouched, selectedProductCount ? 1 : 0);
+
   const mergeIds = ids => {
     const existing = (selectedIds || []).map(id => String(id));
     const normalized = (ids || []).map(id => String(id)).filter(Boolean);
@@ -298,17 +309,19 @@ export default function ClassicProductPickerModal({
     mergeIds(ids);
   };
 
-  const visibleVariantIds = useMemo(
-    () => products.flatMap(group => group.variantIds || []),
-    [products]
+  // Select all covers every product the filter matched, on every page, so its
+  // number agrees with the count in the header.
+  const matchedVariantIds = useMemo(
+    () => matched.flatMap(group => group.variantIds || []),
+    [matched]
   );
 
-  const selectAllVisible = () => {
-    mergeIds(visibleVariantIds);
+  const selectAllMatched = () => {
+    mergeIds(matchedVariantIds);
   };
 
-  const deselectVisible = () => {
-    removeIds(visibleVariantIds);
+  const deselectMatched = () => {
+    removeIds(matchedVariantIds);
   };
 
   const toggleGroupSelection = (opt, event) => {
@@ -323,8 +336,19 @@ export default function ClassicProductPickerModal({
     mergeIds(ids);
   };
 
-  const allVisibleSelected =
-    visibleVariantIds.length > 0 && visibleVariantIds.every(id => isSelectedId(id));
+  const matchedSelectedCount = matched.filter(group =>
+    (group.variantIds || []).some(id => isSelectedId(id))
+  ).length;
+  // At the cap not every match can be ticked, so "every match selected" never
+  // comes true and the button would offer Select first N for ever.
+  const allMatchedSelected =
+    matchedVariantIds.length > 0 &&
+    (matchedVariantIds.every(id => isSelectedId(id)) ||
+      (selectedProductCount >= maxSelection && matchedSelectedCount > 0));
+  const selectAllLabel =
+    matched.length > maxSelection
+      ? `Select first ${maxSelection}`
+      : `Select all ${matched.length}`;
 
   const withheldCount = Number(withheldByOtherTests?.total) || 0;
   const resolvedLoadedProductCount = useMemo(
@@ -495,12 +519,10 @@ export default function ClassicProductPickerModal({
               </div>
               <Button
                 variant="plain"
-                onClick={allVisibleSelected ? deselectVisible : selectAllVisible}
-                disabled={!products.length}
+                onClick={allMatchedSelected ? deselectMatched : selectAllMatched}
+                disabled={!matched.length}
               >
-                {allVisibleSelected
-                  ? `Deselect ${products.length}`
-                  : `Select all ${products.length}`}
+                {allMatchedSelected ? `Deselect all ${matchedSelectedCount}` : selectAllLabel}
               </Button>
             </div>
             <div className={styles.modalSearch}>
@@ -566,23 +588,43 @@ export default function ClassicProductPickerModal({
               {!products.length && pickerEmptyMessage ? (
                 <p className={styles.help}>{pickerEmptyMessage}</p>
               ) : null}
-              {hiddenByDisplayCap > 0 ? (
-                // The list used to stop at its cap without a word, so a
-                // merchant scrolling for a product simply never reached it.
-                <p className={styles.help}>
-                  Showing the first {products.length} of {matched.length}. Search above to reach
-                  the other {hiddenByDisplayCap}.
-                </p>
-              ) : null}
             </div>
+            {pageCount > 1 ? (
+              <div className={styles.modalPager}>
+                <span className={styles.help} style={{ margin: 0 }}>
+                  {safePage * PICKER_PAGE_SIZE + 1}–
+                  {Math.min((safePage + 1) * PICKER_PAGE_SIZE, matched.length)} of {matched.length}
+                </span>
+                <div className={styles.tablePager}>
+                  <Button
+                    size="slim"
+                    accessibilityLabel="Previous page"
+                    disabled={safePage <= 0}
+                    onClick={() => setPage(Math.max(0, safePage - 1))}
+                  >
+                    <span className={styles.tablePagerChevronPrev} aria-hidden>
+                      <IconChevronRight size={14} />
+                    </span>
+                  </Button>
+                  <Button
+                    size="slim"
+                    accessibilityLabel="Next page"
+                    disabled={safePage >= pageCount - 1}
+                    onClick={() => setPage(Math.min(pageCount - 1, safePage + 1))}
+                  >
+                    <IconChevronRight size={14} />
+                  </Button>
+                </div>
+              </div>
+            ) : null}
           </section>
         </div>
 
         <div className={styles.modalFooter}>
           <span className={styles.help} style={{ margin: 0 }}>
             {selectedProductCount} product{selectedProductCount === 1 ? '' : 's'} selected across{' '}
-            {Math.max(collectionsTouched, selectedProductCount ? 1 : 0)} collection
-            {collectionsTouched === 1 ? '' : 's'}
+            {footerCollectionCount} collection
+            {footerCollectionCount === 1 ? '' : 's'}
             {selectedProductCount >= maxSelection ? ` · max ${maxSelection}` : ''}
           </span>
           <Button variant="primary" onClick={onClose}>

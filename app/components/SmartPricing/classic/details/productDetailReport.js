@@ -12,6 +12,7 @@ import {
 } from '../classicExperimentHelpers';
 import { computeOfferPdpCutout, formatOfferRule } from '../offerSelection';
 import { mapServerEventToActivity } from '../productActionAvailability';
+import { variationLetterOf } from '../variationsStepHelpers';
 
 function finite(value) {
   if (value === null || value === undefined || value === '') return null;
@@ -130,7 +131,9 @@ export function buildProductArmRows(
       variantName: arm?.variant_name ?? null,
       label:
         withoutOfferPrefix(arm?.label, offerText) ||
-        (index === controlIndex ? 'Control' : `Variation ${String.fromCharCode(64 + index)}`),
+        (index === controlIndex
+          ? 'Control'
+          : `Variation ${variationLetterOf(arm) || String.fromCharCode(64 + index)}`),
       isControl: index === controlIndex,
       price: shopperPrice.price,
       priceFromCatalog: shopperPrice.derived,
@@ -312,7 +315,7 @@ export function collectProductWarnings(analytics) {
 
 const ROUND_STATUS = {
   draft: 'Draft',
-  queued: 'Queued',
+  queued: 'Draft',
   running: 'Running',
   active: 'Running',
   paused: 'Paused',

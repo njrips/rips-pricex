@@ -618,11 +618,17 @@ describe('where Edit test goes', () => {
     plans: [{ id: 'SP-1', experiment_id: 'exp-1', test_id: 't-1', status }],
   });
 
-  it('opens the settings editor of a paused or running experiment', () => {
+  it('opens a paused or running experiment in the wizard with its arms locked', () => {
     expect(buildClassicExperimentEditTarget(launched('paused'))).toBe(
-      '/app/experiments/SP-1?tab=settings&edit=audience'
+      '/app/experiments/new?resume=exp-1&live=1'
     );
     expect(buildClassicExperimentEditTarget(launched('running'))).toBe(
+      '/app/experiments/new?resume=exp-1&live=1'
+    );
+  });
+
+  it('opens the settings editor of a launched experiment that is not live', () => {
+    expect(buildClassicExperimentEditTarget(launched('completed'))).toBe(
       '/app/experiments/SP-1?tab=settings&edit=audience'
     );
   });

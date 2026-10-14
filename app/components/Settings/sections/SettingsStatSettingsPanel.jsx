@@ -45,7 +45,8 @@ export default function SettingsStatSettingsPanel({
       {error ? <p className={styles.error}>{error}</p> : null}
 
       <p className={styles.help} style={{ marginTop: 0, marginBottom: 16 }}>
-        When Priceify can call a winner.
+        Control how strict Priceify should be before calling a winner, and how many visitors each
+        variation must see.
       </p>
 
       <div className={styles.field}>

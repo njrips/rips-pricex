@@ -1248,6 +1248,10 @@ export default function ClassicVariationsTab({
           {trafficSplitLine}
         </p>
       ) : null}
+      <p className={styles.help} style={{ marginTop: 0 }}>
+        Previews, QR codes and copied preview links don&rsquo;t count as visitors, so opening a
+        variation here won&rsquo;t change the test&rsquo;s results.
+      </p>
 
       {overviewMode ? null : (
         <VariationsProductsTable

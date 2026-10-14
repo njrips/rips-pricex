@@ -144,7 +144,10 @@ async function stopSmartPricingProduct({ testId, shopDomain, reason = 'merchant_
  * the guardrail rejected, and with the latch still set nothing would be
  * watching the second time. Clearing it honours the merchant's override and
  * puts the protection back: if the variation is still losing money it pauses
- * the product again. The previous breach is kept for the product history.
+ * the product again. It judges only results gathered after the resume, or the
+ * totals that tripped it would pause it again on the next check. Products the
+ * breach paused alongside it are re-armed the same way. The previous breach is
+ * kept for the product history.
  */
 async function rearmRevenueGuardrailForResume(testId, shopDomain, test) {
   const raw = test?.guardrail_config;
@@ -159,7 +162,7 @@ async function rearmRevenueGuardrailForResume(testId, shopDomain, test) {
   } else if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
     config = raw;
   }
-  if (!config.breached_at) return;
+  if (!config.breached_at && !config.guardrail_paused_at) return;
 
   const { updateTest } = require('../../models/test');
   await updateTest(testId, shopDomain, {
@@ -170,8 +173,16 @@ async function rearmRevenueGuardrailForResume(testId, shopDomain, test) {
       variant_id: null,
       variant_name: null,
       action: null,
-      last_breach_at: config.breached_at,
-      last_breach_drop_percent: config.observed_drop_percent ?? null,
+      guardrail_paused_at: null,
+      // Judged from here on, not on the totals that paused it.
+      rebaseline: true,
+      baseline: null,
+      ...(config.breached_at
+        ? {
+            last_breach_at: config.breached_at,
+            last_breach_drop_percent: config.observed_drop_percent ?? null,
+          }
+        : {}),
     },
   });
 }

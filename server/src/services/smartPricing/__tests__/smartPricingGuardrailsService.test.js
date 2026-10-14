@@ -13,20 +13,17 @@ describe('mergePreviewGuardrails', () => {
     const merged = mergePreviewGuardrails(
       {
         max_price_change_percent: 5,
-        min_margin_percent: 40,
         max_revenue_drop_percent: 8,
         default_cogs_percent: 55,
       },
       {
         max_price_change_percent: 100,
         maxPriceChangePercent: 100,
-        min_margin_percent: 0,
         max_revenue_drop_percent: 90,
         default_cogs_percent: 5,
       }
     );
     assert.equal(merged.max_price_change_percent, 5);
-    assert.equal(merged.min_margin_percent, 40);
     assert.equal(merged.max_revenue_drop_percent, 8);
     assert.equal(merged.default_cogs_percent, 55);
     assert.equal(merged.maxPriceChangePercent, undefined);
@@ -172,7 +169,8 @@ describe('smartPricingGuardrailsService', () => {
     assert.equal(saved.notification_email, 'ops@example.com');
     assert.equal(saved.max_learning_rounds, 2);
     assert.equal(saved.max_price_change_percent, 25);
-    assert.equal(saved.min_margin_percent, 20);
+    // The margin floor was removed; an old stored value is dropped, not kept.
+    assert.equal(saved.min_margin_percent, undefined);
     assert.equal(saved.default_cogs_percent, 40);
     assert.equal(saved.min_conversions_per_variation, 100);
     assert.equal(saved.statistical_power, 80);

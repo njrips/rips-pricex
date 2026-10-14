@@ -22,6 +22,8 @@ export default function SetupStepPanel({
   onHypothesisChange,
   experimentType = 'price_test',
   onExperimentTypeChange,
+  /** A launched test keeps its type; shoppers are already in it. */
+  typeLocked = false,
 }) {
   return (
     <div>
@@ -40,7 +42,7 @@ export default function SetupStepPanel({
       <div className={styles.field}>
         <TextField
           id="classic-hypothesis"
-          label="Hypothesis (optional)"
+          label="Optional: hypothesis"
           value={hypothesis}
           onChange={onHypothesisChange}
           placeholder="If we change… then… because…"
@@ -59,8 +61,11 @@ export default function SetupStepPanel({
               key={type.id}
               type="button"
               className={`${styles.choiceCard} ${selected ? styles.choiceCardSelected : ''}`}
-              onClick={() => onExperimentTypeChange(type.id)}
+              onClick={() => {
+                if (!typeLocked) onExperimentTypeChange(type.id);
+              }}
               aria-pressed={selected}
+              disabled={typeLocked && !selected}
             >
               <div className={styles.choiceTitle}>
                 <span className={styles.choiceTitleText}>{type.title}</span>
@@ -75,6 +80,9 @@ export default function SetupStepPanel({
           );
         })}
       </div>
+      {typeLocked ? (
+        <p className={styles.help}>The test type can&rsquo;t change after launch.</p>
+      ) : null}
     </div>
   );
 }

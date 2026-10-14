@@ -43,9 +43,8 @@ import styles from '../SmartPricingClassic.module.css';
  * assumption, exactly 45% of it, in every row, with an identical ranking. It
  * added a column and a decision to read, and no information.
  *
- * Real per-variant cost does exist for the price-band and margin guardrails,
- * which read Shopify's unit cost. Live analytics never used it. Until it does,
- * this tab reports what the store actually took.
+ * Live analytics never read real per-variant cost. Until it does, this tab
+ * reports what the store actually took.
  */
 const MONEY_HELP = {
   rpvByVariation:
@@ -296,7 +295,7 @@ export default function ClassicPerformanceTab({
         </Banner>
       ) : null}
       {showGuardrailStop ? (
-        <Banner tone="warning" title="Stopped by guardrail">
+        <Banner tone="warning" title="Guardrail paused test">
           <p>{formatGuardrailStopMessage(revenueRail)}</p>
         </Banner>
       ) : null}

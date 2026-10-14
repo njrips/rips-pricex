@@ -95,7 +95,7 @@ describe('Results settings panel', () => {
 
   it('uses the detailed-table helper copy and all three confidence options', async () => {
     await render();
-    expect(text()).toContain('When Priceify can call a winner.');
+    expect(text()).toContain('Control how strict Priceify should be before calling a winner');
     expect(text()).toContain('How sure the maths must be before calling a winner.');
     expect(text()).toContain(
       'Visitors each variation must reach before results are calculated.'

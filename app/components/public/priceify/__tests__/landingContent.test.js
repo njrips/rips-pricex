@@ -38,7 +38,7 @@ describe('Priceify landing copy (Figma brochure)', () => {
     assert.match(FAQ_ITEMS[0].q, /slow down/);
     assert.match(FAQ_ITEMS[0].a, /Theme connection and Checkout pricing functions/);
     assert.match(FAQ_ITEMS[2].a, /Store setup to connect your theme and checkout/);
-    assert.match(FAQ_ITEMS[4].a, /revenue guardrail stops testing that product/);
+    assert.match(FAQ_ITEMS[4].a, /revenue guardrail can automatically pause the test/);
     assert.deepEqual(
       PUBLIC_HEADER_NAV.map(item => item.label),
       ['Features', 'How it works', 'Pricing', 'Guides', 'FAQ']

@@ -176,6 +176,23 @@ export function rollupExperimentStatus(plans = []) {
   return statuses[0] || 'draft';
 }
 
+/**
+ * Tests with a clear winner: at least one product whose variation beat control
+ * past the sample floor, ready to apply or already applied. A test still
+ * running its slower products counts once one has won. "Completed" alone does
+ * not: it also covers a control win, which kept the price rather than finding
+ * a better one.
+ */
+export function countWinningExperiments(plans = []) {
+  const live = (Array.isArray(plans) ? plans : []).filter(plan => plan && !plan.archived);
+  return groupPlansIntoExperiments(live).filter(experiment =>
+    (experiment.plans || []).some(plan => {
+      const status = normalizePlanStatus(plan);
+      return status === 'winner_ready' || status === 'applied';
+    })
+  ).length;
+}
+
 /** Short type label for experiment list sublines (Figma: "AB · Owner"). */
 export function formatExperimentTypeLabel(raw) {
   const key = String(raw || '')

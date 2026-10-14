@@ -6,7 +6,7 @@ export const ACTIVITY_KIND_META = {
   created: { label: 'Created', group: 'lifecycle' },
   started: { label: 'Launched', group: 'lifecycle' },
   linked: { label: 'Launched', group: 'lifecycle' },
-  queued: { label: 'Queued', group: 'lifecycle' },
+  queued: { label: 'Draft', group: 'lifecycle' },
   paused: { label: 'Paused', group: 'lifecycle' },
   stopped: { label: 'Stopped', group: 'lifecycle' },
   resumed: { label: 'Resumed', group: 'lifecycle' },

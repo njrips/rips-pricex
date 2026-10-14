@@ -32,6 +32,8 @@ import {
   resolveAiSuggestTargetArms,
   resolveAiSuggestSpreadArms,
   keepArmKeys,
+  removedArmIds,
+  dropArmEntries,
   hasAnyTestPriceChange,
   hasProductSelection,
   limitSelectionToProducts,
@@ -537,7 +539,7 @@ describe('productsStepReadiness', () => {
     expect(cutPrice).toBeLessThan(90);
   });
 
-  it('does not let the local fallback worsen a recorded zero margin', () => {
+  it('lets the local fallback cut a thin-margin product, limited only by max price change', () => {
     const patch = buildAiBandPriceOverrides({
       rows: [
         {
@@ -551,9 +553,10 @@ describe('productsStepReadiness', () => {
       max: -10,
       unit: 'percent',
       maxChangePct: 30,
-      minMarginPct: 35,
     });
-    expect(Number(patch['gid://shopify/ProductVariant/100::var_a'])).toBe(100);
+    const price = Number(patch['gid://shopify/ProductVariant/100::var_a']);
+    expect(price).toBeGreaterThan(80);
+    expect(price).toBeLessThan(90);
   });
 
   it('explains how band spread becomes a shelf price', () => {
@@ -1053,5 +1056,39 @@ describe('filterPriceSuggestionsRespectingEdits', () => {
     );
     expect(filtered).toHaveLength(1);
     expect(filtered[0].arm_id).toBe('var_b');
+  });
+});
+
+describe('removing a variation', () => {
+  const arms = [{ id: 'control' }, { id: 'var_b' }, { id: 'var_c' }];
+
+  it('names the challengers that went, never control', () => {
+    expect(removedArmIds(arms, [{ id: 'control' }, { id: 'var_c' }])).toEqual(['var_b']);
+    expect(removedArmIds(arms, [])).toEqual(['var_b', 'var_c']);
+    expect(removedArmIds(arms, arms)).toEqual([]);
+  });
+
+  it('drops its prices, so a refilled letter starts fresh', () => {
+    const overrides = {
+      'gid://shopify/ProductVariant/1::var_b': '12.00',
+      'gid://shopify/ProductVariant/1::var_c': '14.00',
+      legacy: '9.00',
+    };
+    expect(dropArmEntries(overrides, ['var_b'], { byOverrideKey: true })).toEqual({
+      'gid://shopify/ProductVariant/1::var_c': '14.00',
+      legacy: '9.00',
+    });
+  });
+
+  it('drops its per-variation settings by arm id', () => {
+    expect(dropArmEntries({ var_b: { priceMode: 'ai' }, var_c: {} }, ['var_b'])).toEqual({
+      var_c: {},
+    });
+  });
+
+  it('hands back the same map when nothing matched', () => {
+    const map = { var_c: {} };
+    expect(dropArmEntries(map, ['var_b'])).toBe(map);
+    expect(dropArmEntries(map, [])).toBe(map);
   });
 });

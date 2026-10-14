@@ -42,11 +42,9 @@ describe('classicRevenueGuardrailOverview', () => {
   });
 
   it('formats stop copy without undefined percentages', () => {
-    expect(formatGuardrailStopMessage({})).toMatch(
-      /Traffic assignment stopped for the affected product; other products keep running/
-    );
+    expect(formatGuardrailStopMessage({})).toMatch(/The whole test is paused/);
     expect(formatGuardrailStopMessage({ observed_drop_percent: 11, threshold_percent: 10 })).toBe(
-      'Revenue per visitor dropped 11.0% vs control (limit 10%). Traffic assignment stopped for the affected product; other products keep running.'
+      'Revenue per visitor dropped 11.0% vs control (limit 10%). The whole test is paused; resume it when you’re ready.'
     );
     expect(
       formatGuardrailStopMessage({
@@ -54,9 +52,8 @@ describe('classicRevenueGuardrailOverview', () => {
         observed_drop_percent: 11,
         threshold_percent: 10,
       })
-    ).toContain(
-      'Traffic assignment stopped for “Gift Card”; other products keep running.'
-    );
+    ).toContain('Triggered by “Gift Card”. The whole test is paused');
+    expect(formatGuardrailStopMessage({})).not.toMatch(/other products keep running/);
   });
 
   it('mergeExperimentAnalytics surfaces breached guardrail from non-primary tests', () => {

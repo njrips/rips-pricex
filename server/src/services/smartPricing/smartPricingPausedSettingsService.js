@@ -60,6 +60,42 @@ function sanitizeSegments(segments) {
   return out;
 }
 
+/**
+ * A test launched before tablets were their own device counts them as mobile.
+ * Resuming it on segments that split tablets out would change who it enrolls
+ * partway through one result, so it keeps the reading it launched with.
+ */
+function keepLaunchDeviceReading(segments, currentSegments) {
+  if (currentSegments.tablet_separate === true || segments.tablet_separate !== true) {
+    return segments;
+  }
+  const asMobile = value => (String(value || '').toLowerCase() === 'tablet' ? 'mobile' : value);
+  const out = { ...segments };
+  delete out.tablet_separate;
+  if (out.device) out.device = asMobile(out.device);
+  if (Array.isArray(out.device_rules)) {
+    const seen = new Set();
+    out.device_rules = out.device_rules
+      .map(rule => ({ ...rule, value: asMobile(rule.value) }))
+      .filter(rule => {
+        const key = `${rule.type}:${rule.value}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    const allIncludes = out.device_rules.every(rule => rule.type === 'include');
+    const values = new Set(out.device_rules.map(rule => rule.value));
+    if (allIncludes && values.has('desktop') && values.has('mobile')) {
+      delete out.device_rules;
+      out.device = 'all';
+    } else if (allIncludes && out.device_rules.length === 1) {
+      out.device = out.device_rules[0].value;
+      delete out.device_rules;
+    }
+  }
+  return out;
+}
+
 function sanitizeGoal(goal, currentGoal) {
   const out = { ...goal };
   const fallback = normalizePrimaryMetric(currentGoal.primary_metric, 'revenue_per_visitor');
@@ -88,7 +124,10 @@ function buildPausedSettingsUpdate(test, plan, guardrails = {}) {
   }
   goal.guardrails = { ...parseObject(currentGoal.guardrails), ...planGoal.guardrails };
   return {
-    segments: sanitizeSegments(resolvePlanSegments(plan, guardrails)),
+    segments: keepLaunchDeviceReading(
+      sanitizeSegments(resolvePlanSegments(plan, guardrails)),
+      parseObject(test.segments)
+    ),
     goal: sanitizeGoal(goal, currentGoal),
     // Merged, not replaced: a latched breach lives here, and only Resume may
     // clear it.

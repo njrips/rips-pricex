@@ -195,7 +195,7 @@ export const FAQ_SECTION = {
 export const FAQ_ITEMS = [
   {
     q: 'Will this slow down my store?',
-    a: "Priceify uses Theme connection and Checkout pricing functions, so it doesn't add heavy scripts or custom code to your store. A price test simply changes what price a visitor sees; it doesn't change how your pages are loaded. The revenue guardrail watches how each price affects revenue per visitor and can stop an under‑performing product, but it doesn't interfere with your store's speed.",
+    a: "Priceify uses Theme connection and Checkout pricing functions, so it doesn't add heavy scripts or custom code to your store. A price test simply changes what price a visitor sees; it doesn't change how your pages are loaded. The revenue guardrail watches how each price affects revenue per visitor and can pause a test whose prices under‑perform, but it doesn't interfere with your store's speed.",
   },
   {
     q: 'Will customers see different prices at the same time?',
@@ -211,7 +211,7 @@ export const FAQ_ITEMS = [
   },
   {
     q: 'What happens if a price test hurts conversion or refunds?',
-    a: 'Priceify tracks conversion rate, revenue per visitor, and average order value for every price variation. After every variation reaches the test’s minimum visitors (at least 5,000) and 10 conversions, the revenue guardrail stops testing that product if any variation’s revenue per visitor drops more than the percentage you set compared with control. You can still watch other effects, like refunds or support tickets, in your usual Shopify and analytics dashboards before you roll a winning price out wider.',
+    a: 'Priceify tracks conversion rate, revenue per visitor, and average order value for every price variation. The revenue guardrail can automatically pause the test if any variation’s revenue per visitor drops more than the percentage you set compared with the control, once each variation has reached your minimum visitors. You can still watch other effects, like refunds or support tickets, in your usual Shopify and analytics dashboards before you roll a winning price out wider.',
   },
   {
     q: 'Does this work with my existing checkout / apps?',
@@ -236,7 +236,7 @@ export const GET_STARTED_SECTION = {
     },
     {
       title: 'Priceify revenue guardrail',
-      body: 'Learn how the revenue guardrail monitors revenue per visitor and stops an under‑performing product while the rest of the test keeps running.',
+      body: 'Learn how the revenue guardrail monitors revenue per visitor and pauses a test before an under‑performing price hurts your store.',
       to: '/docs/settings',
     },
   ],

@@ -143,6 +143,35 @@ async function loadHoldingTests(shopDomain) {
   return (rows || []).filter(row => isPricingTestType(row?.type));
 }
 
+/**
+ * Stopped tests whose product the merchant paused rather than ended.
+ *
+ * Pausing one product of an experiment stops that product's test, and its
+ * plan stays `paused` so Resume can bring it back. Read as stopped, the
+ * product looked free and a second test could take it, leaving the first one
+ * unable to resume. Archiving releases the product on purpose, so archived
+ * plans are left out.
+ */
+async function loadProductPausedTestIds(shopDomain, tests = []) {
+  const stoppedIds = tests
+    .filter(test => String(test?.status || '').trim().toLowerCase() === 'stopped')
+    .map(test => String(test.id));
+  if (!stoppedIds.length) return new Set();
+  // test_id is a uuid column, and uuid = varchar has no operator: compare as
+  // text, preferring the id in plan_json as the inbox store does.
+  const { rows } = await query(
+    `SELECT COALESCE(NULLIF(plan_json->>'test_id', ''), test_id::text) AS test_id
+       FROM smart_pricing_inbox_plans
+      WHERE shop_domain = $1
+        AND COALESCE(NULLIF(plan_json->>'test_id', ''), test_id::text) = ANY($2::text[])
+        AND COALESCE(plan_json->>'status', status) = 'paused'
+        AND COALESCE(archived, false) = false
+        AND COALESCE(plan_json->>'archived', '') <> 'true'`,
+    [String(shopDomain || '').trim().toLowerCase(), stoppedIds]
+  );
+  return new Set((rows || []).map(row => String(row?.test_id || '')).filter(Boolean));
+}
+
 /** The experiment a test was launched from, when it recorded one. */
 function experimentIdOfTest(test) {
   const metadata = parseJsonColumn(test?.metadata, {});
@@ -194,13 +223,16 @@ async function getPriceTestEnrollment(
   );
   const sibling = String(siblingExperimentId || '').trim();
   const tests = await loadHoldingTests(shopDomain);
+  const productPaused = await loadProductPausedTestIds(shopDomain, tests);
   const byVariantId = new Map();
   const byProductId = new Map();
   let catalogWideHold = null;
 
   tests.forEach(test => {
     if (ignored.has(String(test.id))) return;
-    const kind = holdKind(test);
+    const kind = productPaused.has(String(test.id))
+      ? { status: 'paused', live: false }
+      : holdKind(test);
     if (!kind) return;
     const hold = {
       test_id: String(test.id),
@@ -266,12 +298,35 @@ function findLiveHold(enrollment, target) {
   return hold && hold.live ? hold : null;
 }
 
+/**
+ * The hold that blocks a brand-new test on this SKU.
+ *
+ * Resuming may share a product with a paused test -- the resume flow leaves
+ * whichever loses paused -- but a new test may not: once it runs, the paused
+ * one can never resume. The merchant's own experiment and a follow-up's
+ * previous round are not in the way of a new launch, so they are forgiven.
+ */
+function findLaunchBlockingHold(enrollment, target, { experimentId = '', forgiveTestIds = [] } = {}) {
+  const hold = findHold(enrollment, target);
+  if (!hold) return null;
+  if (hold.live) return hold;
+  const own = String(experimentId || '').trim();
+  if (own && hold.experiment_id === own) return null;
+  const forgiven = new Set(
+    (Array.isArray(forgiveTestIds) ? forgiveTestIds : []).map(id => String(id || '').trim())
+  );
+  return forgiven.has(hold.test_id) ? null : hold;
+}
+
 function describeHold(hold, { title = '' } = {}) {
   if (!hold) return '';
   const what = title ? `"${title}"` : 'This product';
+  // Experiment tests are named "Smart Pricing · <experiment> · <product>";
+  // the merchant knows the experiment, so that is the name to give them.
+  const holder = (hold.experiment_id && hold.experiment_title) || hold.test_name;
   return hold.live
-    ? `${what} is already being priced by "${hold.test_name}". Stop that test first, or leave this product out.`
-    : `${what} is held by "${hold.test_name}", which is paused. End that test to free the product, or leave this product out.`;
+    ? `${what} is already being priced by "${holder}". Stop that test first, or leave this product out.`
+    : `${what} is held by "${holder}", which is paused. End that test to free the product, or leave this product out.`;
 }
 
 /**
@@ -290,12 +345,16 @@ async function assertProductIsFreeToPrice({
   title = '',
   ignoreTestIds = [],
   experimentId = '',
+  refuseReserved = false,
+  forgiveTestIds = [],
 } = {}) {
   const enrollment = await getPriceTestEnrollment(shopDomain, {
     ignoreTestIds,
     siblingExperimentId: experimentId,
   });
-  const hold = findLiveHold(enrollment, { productId, variantId });
+  const hold = refuseReserved
+    ? findLaunchBlockingHold(enrollment, { productId, variantId }, { experimentId, forgiveTestIds })
+    : findLiveHold(enrollment, { productId, variantId });
   if (!hold) return null;
   const err = new Error(describeHold(hold, { title }));
   err.isValidation = true;
@@ -579,6 +638,7 @@ module.exports = {
   previewResumeConflicts,
   findHold,
   findLiveHold,
+  findLaunchBlockingHold,
   findLiveHoldForTest,
   describeHold,
   // Exported for tests and for callers that need the same notion of "holding".

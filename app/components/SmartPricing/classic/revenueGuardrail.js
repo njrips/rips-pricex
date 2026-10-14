@@ -1,7 +1,7 @@
 export const DEFAULT_MAX_REVENUE_DROP_PERCENT = 10;
 export const MIN_REVENUE_DROP_PERCENT = 3;
 export const MAX_REVENUE_DROP_PERCENT = 50;
-/** Noise floor shared with the server's runtime guardrail. */
+/** The server's stand-in when a test stored no minimum visitors. */
 export const MIN_VISITORS_FOR_REVENUE_GUARDRAIL = 5000;
 export const MIN_CONVERSIONS_FOR_REVENUE_GUARDRAIL = 10;
 
@@ -33,7 +33,7 @@ export function createRevenueGuardrailRow(
   return {
     id: 'revenue',
     label: 'Revenue guardrail',
-    hint: 'Stops testing a product if any variation drops past this vs control after at least 5,000 visitors and 10 conversions per variation.',
+    hint: 'Pauses this test if any variation drops past this vs control, after every variation reaches the minimum visitors.',
     rule: 'Must not drop',
     threshold: `-${n}%`,
     on: on !== false,

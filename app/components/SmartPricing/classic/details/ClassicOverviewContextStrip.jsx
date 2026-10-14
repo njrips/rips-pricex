@@ -1,4 +1,3 @@
-import { Button } from '@shopify/polaris';
 import {
   buildOverviewContextLine,
   formatRunningTestStatusLabel,
@@ -34,18 +33,34 @@ export default function ClassicOverviewContextStrip({
           {contextLine}
         </p>
         <div className={styles.overviewContextStatus}>
-          <span className={styles.statLabel}>Status</span>
-          <span className={styles.settingsRowValue}>{statusLabel}</span>
-          {canToggle && isRunning && onPause ? (
-            <Button size="slim" disabled={statusBusy} loading={statusBusy} onClick={onPause}>
-              Pause
-            </Button>
-          ) : null}
-          {canToggle && isPaused && onResume ? (
-            <Button size="slim" disabled={statusBusy} loading={statusBusy} onClick={onResume}>
-              Resume
-            </Button>
-          ) : null}
+          <span className={styles.statLabel} id="overview-status-label">
+            Status
+          </span>
+          {canToggle ? (
+            <div
+              className={`${styles.segment} ${styles.overviewStatusToggle}`}
+              role="group"
+              aria-labelledby="overview-status-label"
+            >
+              {[
+                { id: 'active', label: 'Active', on: isRunning, onClick: onResume },
+                { id: 'paused', label: 'Paused', on: isPaused, onClick: onPause },
+              ].map(option => (
+                <button
+                  key={option.id}
+                  type="button"
+                  className={`${styles.segmentBtn} ${option.on ? styles.segmentBtnActive : ''}`.trim()}
+                  aria-pressed={option.on}
+                  disabled={statusBusy || option.on || typeof option.onClick !== 'function'}
+                  onClick={() => option.onClick?.()}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <span className={styles.settingsRowValue}>{statusLabel}</span>
+          )}
         </div>
       </div>
       <p className={styles.help} style={{ marginBottom: 0 }}>

@@ -46,19 +46,31 @@ export function createDefaultVariations() {
   ];
 }
 
-/** Next challenger letter after Control + existing variations (A, then B, then C…). */
+/**
+ * The letter a variation already carries: its letter, its `var_x` id, or a
+ * saved "Variation X" label. Empty when it carries none, so callers can fall
+ * back to position.
+ */
+export function variationLetterOf(row) {
+  const letter = String(row?.letter || '').trim().toUpperCase();
+  if (letter.length === 1 && LETTERS.includes(letter)) return letter;
+  const fromId = /^var_([a-h])$/i.exec(String(row?.id || row?.arm_id || '').trim());
+  if (fromId) return fromId[1].toUpperCase();
+  const fromLabel = /^Variation ([A-H])$/.exec(String(row?.label || row?.name || '').trim());
+  return fromLabel ? fromLabel[1] : '';
+}
+
+/**
+ * The first letter no variation is using.
+ *
+ * Counting variations instead handed A and C (B removed) a second C, and an
+ * edit could then save a test with two Variation C's sharing one id.
+ */
 export function nextChallengerLetter(variations = []) {
-  const challengerCount = (Array.isArray(variations) ? variations : []).filter((row, index) => {
-    if (index === 0) return false;
-    const id = String(row?.id || '')
-      .trim()
-      .toLowerCase();
-    const role = String(row?.role || '')
-      .trim()
-      .toLowerCase();
-    return id !== 'control' && role !== 'control';
-  }).length;
-  return LETTERS[challengerCount] || String(challengerCount + 1);
+  const rows = Array.isArray(variations) ? variations : [];
+  const used = new Set(rows.map(variationLetterOf).filter(Boolean));
+  const free = [...LETTERS].find(letter => !used.has(letter));
+  return free || String(rows.length);
 }
 
 /** Variation traffic shares are whole percentages (34 / 33 / 33, never 33.3). */
@@ -238,7 +250,10 @@ export function variationsFromPlanArms(arms = [], experimentType = 'price_test')
       index === 0 ||
       arm?.role === 'control' ||
       String(arm?.id || '').toLowerCase() === 'control';
-    const challengerLetter = String.fromCharCode(64 + Math.max(1, index));
+    // A launched test keeps its own letters: re-lettering by position turned
+    // A and C into A and B while the second still had the id var_c.
+    const challengerLetter =
+      variationLetterOf(arm) || String.fromCharCode(64 + Math.max(1, index));
     return {
       id: arm?.id || (isControl ? 'control' : `var_${challengerLetter.toLowerCase()}`),
       letter: isControl ? null : challengerLetter,

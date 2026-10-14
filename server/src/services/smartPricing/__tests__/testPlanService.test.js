@@ -84,7 +84,7 @@ describe('testPlanService', () => {
     expect(new Set(plans.map(p => p.product_id)).size).toBe(3);
   });
 
-  it('uses imported COGS to prevent worsening a pre-existing low margin', () => {
+  it('builds a cut on a low-margin product, keeping its cost for reference only', () => {
     const plan = buildSmartPricingTestPlan({
       shopDomain: 'demo.myshopify.com',
       productId: 'gid://shopify/Product/101',
@@ -95,10 +95,8 @@ describe('testPlanService', () => {
       unitCost: 16,
       marginSource: 'imported_cogs',
     });
-    const marginCheck = plan.guardrail_checks.find(c => c.id === 'margin_floor');
-    expect(marginCheck.passed).toBe(true);
-    expect(marginCheck.actual).toMatch(/imported COGS/i);
-    expect(Math.min(...plan.price_arms.map(arm => arm.price))).toBe(20);
+    expect(plan.guardrail_checks.find(c => c.id === 'margin_floor')).toBeUndefined();
+    expect(Math.min(...plan.price_arms.map(arm => arm.price))).toBeLessThan(20);
     expect(plan.unit_cost).toBe(16);
     expect(plan.margin_source).toBe('imported_cogs');
   });

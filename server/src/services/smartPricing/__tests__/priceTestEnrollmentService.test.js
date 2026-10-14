@@ -22,6 +22,7 @@ const {
   previewResumeConflicts,
   findHold,
   findLiveHold,
+  findLaunchBlockingHold,
   findLiveHoldForTest,
   describeHold,
   holdKind,
@@ -193,6 +194,33 @@ describe('resolving a shop', () => {
     });
   });
 
+  it('keeps a product paused on its own reserved, though its test reads stopped', async () => {
+    const { query } = require('../../../utils/database');
+    query.mockImplementationOnce(async () => ({ rows: [priceTest({ status: 'stopped' })] }));
+    query.mockImplementationOnce(async (sql, params) => {
+      expect(sql).toContain("= 'paused'");
+      // test_id is uuid; comparing it with varchar[] is an error in Postgres.
+      expect(sql).toContain('::text[]');
+      expect(sql).not.toMatch(/varchar\[\]/);
+      expect(params[1]).toEqual(['test-a']);
+      return { rows: [{ test_id: 'test-a' }] };
+    });
+    const enrollment = await getPriceTestEnrollment('demo.myshopify.com');
+    expect(findHold(enrollment, { variantId: VARIANT })).toMatchObject({
+      test_id: 'test-a',
+      status: 'paused',
+      live: false,
+    });
+  });
+
+  it('still frees a stopped test whose product was ended or archived', async () => {
+    const { query } = require('../../../utils/database');
+    query.mockImplementationOnce(async () => ({ rows: [priceTest({ status: 'stopped' })] }));
+    query.mockImplementationOnce(async () => ({ rows: [] }));
+    const enrollment = await getPriceTestEnrollment('demo.myshopify.com');
+    expect(findHold(enrollment, { variantId: VARIANT })).toBeNull();
+  });
+
   it('finds the hold by product, for a variant the test did not name', async () => {
     rows.push(priceTest());
     const enrollment = await getPriceTestEnrollment('demo.myshopify.com');
@@ -308,6 +336,63 @@ describe('a live hold', () => {
   });
 });
 
+describe('launching a new test', () => {
+  const pausedElsewhere = () =>
+    priceTest({ status: 'paused', metadata: { experiment_id: 'exp-other' } });
+
+  it('is refused on a product a paused test still holds, so that test can resume', async () => {
+    rows.push(pausedElsewhere());
+    await expect(
+      assertProductIsFreeToPrice({
+        shopDomain: 'demo.myshopify.com',
+        productId: PRODUCT,
+        variantId: VARIANT,
+        title: 'Shoe',
+        experimentId: 'exp-new',
+        refuseReserved: true,
+      })
+    ).rejects.toMatchObject({
+      code: 'PRODUCT_IN_ANOTHER_TEST',
+      message: expect.stringMatching(/which is paused\. End that test/),
+    });
+  });
+
+  it('is not refused by a paused test of its own experiment', async () => {
+    rows.push(pausedElsewhere());
+    const enrollment = await getPriceTestEnrollment('demo.myshopify.com');
+    expect(
+      findLaunchBlockingHold(enrollment, { variantId: VARIANT }, { experimentId: 'exp-other' })
+    ).toBeNull();
+  });
+
+  it('is not refused by the round a follow-up replaces', async () => {
+    rows.push(pausedElsewhere());
+    const enrollment = await getPriceTestEnrollment('demo.myshopify.com');
+    expect(
+      findLaunchBlockingHold(enrollment, { variantId: VARIANT }, { forgiveTestIds: ['test-a'] })
+    ).toBeNull();
+  });
+
+  it('is still refused by a live test, forgiven or not', async () => {
+    rows.push(priceTest({ metadata: { experiment_id: 'exp-other' } }));
+    const enrollment = await getPriceTestEnrollment('demo.myshopify.com');
+    expect(
+      findLaunchBlockingHold(enrollment, { variantId: VARIANT }, { forgiveTestIds: ['test-a'] })
+    ).toMatchObject({ test_id: 'test-a', live: true });
+  });
+
+  it('leaves resumes alone: a paused hold does not block without refuseReserved', async () => {
+    rows.push(pausedElsewhere());
+    await expect(
+      assertProductIsFreeToPrice({
+        shopDomain: 'demo.myshopify.com',
+        productId: PRODUCT,
+        variantId: VARIANT,
+      })
+    ).resolves.toBeNull();
+  });
+});
+
 describe('explaining a hold to the merchant', () => {
   it('says who is pricing the product and what to do', () => {
     const message = describeHold(
@@ -317,6 +402,20 @@ describe('explaining a hold to the merchant', () => {
     expect(message).toContain('Runner Shoe');
     expect(message).toContain('Spring pricing');
     expect(message).toMatch(/stop that test/i);
+  });
+
+  it('names the experiment rather than its per-product test', () => {
+    const message = describeHold(
+      {
+        test_name: 'Smart Pricing · Summer sale · Runner Shoe',
+        experiment_id: 'exp-1',
+        experiment_title: 'Summer sale',
+        live: true,
+      },
+      { title: 'Runner Shoe' }
+    );
+    expect(message).toContain('"Summer sale"');
+    expect(message).not.toContain('Smart Pricing ·');
   });
 
   it('says a paused test has to be ended, not stopped', () => {

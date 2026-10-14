@@ -20,7 +20,14 @@ function readApp(relative) {
 
 /** Phrases that must appear in code if they appear in the snapshot spec. */
 const SNAPSHOT_PHRASES = [
-  'An active Priceify plan is required to create a test.',
+  'Finish setup to start your first test.',
+  'Guardrail paused test',
+  'Pause this test if',
+  'Edit metrics',
+  'Optional: hypothesis',
+  'Control how strict Priceify should be before calling a winner',
+  'Tests that have reached your minimum visitors and have a clear winner.',
+  'Revenue per visitor uplift vs control.',
   'Run price and offer tests to grow revenue per visitor.',
   'Launch price tests in minutes.',
   'Log of guardrail events and test changes.',
@@ -97,6 +104,7 @@ describe('doc snapshot alignment', () => {
       readClassic('classicOverviewLayout.js'),
       readClassic('classicExperimentDetailsHelpers.js'),
       readClassic('AudienceSuccessStepPanel.jsx'),
+      readClassic('SetupStepPanel.jsx'),
       readClassic('classicAudienceEdit.js'),
       readClassic('helpFaq.js'),
       readClassic('productActionAvailability.js'),

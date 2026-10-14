@@ -309,6 +309,16 @@ export async function saveSmartPricingInboxPlans(
   return unwrapData(res);
 }
 
+/** Visitors who entered any test since the start of this month, in local time. */
+export async function getSmartPricingMonthVisitors(domain, now = new Date()) {
+  const since = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+  const res = await apiGet('/smart-pricing/visitors/month', {
+    since,
+    ...(domain ? { domain } : {}),
+  });
+  return unwrapData(res);
+}
+
 export async function getSmartPricingTestAnalytics(domain, testId) {
   const res = await apiGet(`/smart-pricing/tests/${encodeURIComponent(testId)}/analytics`, {
     ...(domain ? { domain } : {}),

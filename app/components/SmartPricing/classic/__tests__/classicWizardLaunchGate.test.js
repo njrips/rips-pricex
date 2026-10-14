@@ -326,6 +326,7 @@ describe('what the launched test is judged on', () => {
       container.querySelector('[data-testid="continue"]').click();
     });
 
+    await act(() => vi.waitFor(() => expect(launchMany).toHaveBeenCalled()));
     const [launched] = launchMany.mock.calls[0][0];
     expect(launched.goal.secondary_events).toEqual(['conversion_rate', 'aov']);
     expect(launched.goal.secondary.every(item => item.source === 'builtin')).toBe(true);
@@ -354,6 +355,7 @@ describe('what the launched test is judged on', () => {
     });
 
     expect(launchMany).toHaveBeenCalledTimes(1);
+    await act(() => vi.waitFor(() => expect(launchMany).toHaveBeenCalled()));
     const [launched] = launchMany.mock.calls[0][0];
     expect(launched.goal.primary_metric).toBe('aov');
     expect(launched.goal.secondary_events).toEqual([]);

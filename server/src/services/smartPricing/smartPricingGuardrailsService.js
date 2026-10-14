@@ -21,7 +21,6 @@ const DEFAULT_GOAL_TEMPLATE = Object.freeze({
 
 const DEFAULT_GUARDRAILS = Object.freeze({
   default_cogs_percent: 55,
-  min_margin_percent: 35,
   max_price_change_percent: 15,
   max_revenue_drop_percent: 10,
   max_parallel_tests: 0,
@@ -97,7 +96,7 @@ function normalizeAudienceTemplate(raw = {}) {
     .trim()
     .toLowerCase();
   return {
-    device: ['all', 'desktop', 'mobile'].includes(device) ? device : 'all',
+    device: ['all', 'desktop', 'mobile', 'tablet'].includes(device) ? device : 'all',
     customer: ['all', 'new', 'returning'].includes(customer) ? customer : 'all',
     countries,
     exclude_bots: source.exclude_bots !== false,
@@ -172,12 +171,6 @@ function normalizeGuardrails(raw = {}) {
       5,
       95,
       DEFAULT_GUARDRAILS.default_cogs_percent
-    ),
-    min_margin_percent: clampNumber(
-      source.min_margin_percent ?? source.minMarginPercent,
-      10,
-      80,
-      DEFAULT_GUARDRAILS.min_margin_percent
     ),
     max_price_change_percent: clampNumber(
       source.max_price_change_percent ?? source.maxPriceChangePercent,
@@ -319,8 +312,6 @@ async function saveShopSmartPricingGuardrails(shopDomain, patch = {}) {
 const PRICE_SAFETY_KEYS = Object.freeze([
   'max_price_change_percent',
   'maxPriceChangePercent',
-  'min_margin_percent',
-  'minMarginPercent',
   'max_revenue_drop_percent',
   'maxRevenueDropPercent',
   'default_cogs_percent',

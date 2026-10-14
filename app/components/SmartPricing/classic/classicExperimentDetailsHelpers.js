@@ -4,6 +4,7 @@ import { rollupExperimentRevenueGuardrail } from './classicRevenueGuardrailOverv
 import { collectActivityLogs, mergeActivityTimeline } from './classicActivity';
 import { getPlanProductTitle, normalizePlanStatus } from './classicExperimentHelpers';
 import { formatOfferRule, isOfferExperimentType } from './offerSelection';
+import { variationLetterOf } from './variationsStepHelpers';
 import { buildPreviewUrl, resolvePreviewBaseUrl } from '../../../utils/previewUrl';
 import { formatCurrency } from '../smartPricingConstants';
 
@@ -195,16 +196,18 @@ export function buildOverviewKpis({ analytics = null, plan = null, experiment = 
     plan?.conversions ??
     plan?.analytics?.total_conversions ??
     null;
-  const lift =
-    summary.lift ??
-    significance.lift ??
-    experiment?.lift ??
-    plan?.analytics?.lift_pct ??
-    plan?.lift_pct ??
-    null;
   // Below the sample floors there is no reading to show. The server withholds
   // it, but these fallbacks would otherwise reach past the withheld value to a
   // figure cached on the plan from an earlier response.
+  const lift =
+    significance.sampleReady === false
+      ? null
+      : (summary.lift ??
+        significance.lift ??
+        experiment?.lift ??
+        plan?.analytics?.lift_pct ??
+        plan?.lift_pct ??
+        null);
   const confidence =
     significance.sampleReady === false
       ? null
@@ -664,7 +667,10 @@ export function buildVariationsSummary(plan = null, analytics = null, options = 
         arm.label ||
         (control
           ? 'Control'
-          : `Variation ${String.fromCharCode(65 + Math.max(0, index - (hasExplicitControl ? 0 : 1)))}`),
+          : `Variation ${
+              variationLetterOf(arm) ||
+              String.fromCharCode(65 + Math.max(0, index - (hasExplicitControl ? 0 : 1)))
+            }`),
       role: arm.role || (control ? 'control' : 'challenger'),
       isControl: control,
       isWinner: Boolean(winnerArmId && String(winnerArmId) === String(arm.id)),
@@ -1217,7 +1223,11 @@ export function buildVariationAveragePerformance({
 
     return {
       id: arm.id || `arm_${index}`,
-      label: arm.label || (control ? 'Control' : `Variation ${String.fromCharCode(65 + index)}`),
+      label:
+        arm.label ||
+        (control
+          ? 'Control'
+          : `Variation ${variationLetterOf(arm) || String.fromCharCode(65 + index)}`),
       role: arm.role || (control ? 'control' : 'challenger'),
       isControl: control,
       isWinner: Boolean(winnerArmId && String(winnerArmId) === String(arm.id)),
@@ -2052,10 +2062,10 @@ export function buildActivityTimeline({
     items.push({
       id: 'queued',
       at: plan?.updated_at || plan?.created_at,
-      title: 'Queued for launch',
+      title: 'Saved as draft',
       kind: 'queued',
       actor,
-      detail: 'Waiting for a free launch slot',
+      detail: 'Not launched yet',
     });
   }
 
@@ -2087,13 +2097,13 @@ export function buildActivityTimeline({
     items.push({
       id: `revenue_guardrail${idSuffix}`,
       at: config.breached_at,
-      title: 'Stopped by guardrail',
+      title: 'Guardrail paused test',
       kind: 'guardrail',
       actor: 'Guardrail',
       detail:
         Number.isFinite(observed) && Number.isFinite(limit)
-          ? `Revenue per visitor dropped ${observed.toFixed(1)}% vs control (limit ${limit}%). Traffic assignment stopped.`
-          : 'A variation dropped past the revenue limit versus control. Traffic assignment stopped.',
+          ? `Revenue per visitor dropped ${observed.toFixed(1)}% vs control (limit ${limit}%). The test was paused.`
+          : 'A variation dropped past the revenue limit versus control. The test was paused.',
     });
   };
 
@@ -2222,9 +2232,6 @@ export function buildSettingsSummary(
   if (Number.isFinite(revenueDrop)) {
     notes.push(`Max revenue drop: ${revenueDrop}% vs control`);
   }
-  if (Number.isFinite(Number(guardrails.min_margin_percent))) {
-    notes.push(`Min margin: ${guardrails.min_margin_percent}%`);
-  }
   if (Number.isFinite(Number(guardrails.default_cogs_percent))) {
     notes.push(`Default COGS: ${guardrails.default_cogs_percent}%`);
   }
@@ -2251,7 +2258,6 @@ export function buildSettingsSummary(
     scenarioPreset: plan?.scenario_preset || plan?.metadata?.scenario_preset || null,
     maxParallelTests: hasParallelCap ? maxParallel : null,
     maxPriceChangePercent: guardrails.max_price_change_percent ?? null,
-    minMarginPercent: guardrails.min_margin_percent ?? null,
     guardrailNotes: notes,
   };
 }

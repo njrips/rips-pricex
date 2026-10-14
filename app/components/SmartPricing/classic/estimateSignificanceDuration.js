@@ -311,9 +311,9 @@ export function estimateSignificanceDuration({
   // estimate has to answer "what does my 5,000 buy me?" before it quotes the
   // larger sample the target lift would need.
   const perVariantLabel = formatVisitors(perVariantDaily);
-  const inputs = `~${formatVisitors(slowest.daily)} visitors/day on the slowest product, ${traffic}% test traffic, and a ${formatVisitors(slowestVariationPercent)}% slowest variation — about ${perVariantLabel} ${
+  const inputs = `Based on about ${formatVisitors(slowest.daily)} visitors a day to your least-visited product. ${traffic}% of them enter the test and the smallest variation gets ${formatVisitors(slowestVariationPercent)}%, so it gains about ${perVariantLabel} ${
     perVariantLabel === '1' ? 'visitor' : 'visitors'
-  }/variation/day.`;
+  } a day.`;
 
   // Results are gated on conversions as well as visitors, so when the
   // conversion floor is the slower of the two the note has to say so. Quoting
@@ -321,46 +321,46 @@ export function estimateSignificanceDuration({
   const earliestFloor = slowest.policy.earliestCallPerVariant;
   const floorLabel =
     slowest.policy.floorLimitedBy === 'conversions'
-      ? `${formatVisitorCount(slowest.policy.minConversions)}-conversion minimum per variation (about ${formatVisitorCount(
+      ? `minimum of ${formatVisitorCount(slowest.policy.minConversions)} conversions per variation (about ${formatVisitorCount(
           earliestFloor
-        )} visitors/variation at this product's baseline)`
-      : `${formatVisitorCount(sample)}-visitor minimum per variation`;
+        )} visitors per variation for this product)`
+      : `minimum of ${formatVisitorCount(sample)} visitors per variation`;
   const floorNote = !earliestDays
     ? ''
     : earliestDays > PRACTICAL_TEST_MAX_DAYS
-      ? ` Your ${floorLabel} cannot be reached inside a practical ${formatTestDuration(PRACTICAL_TEST_MIN_DAYS)}–${formatTestDuration(PRACTICAL_TEST_MAX_DAYS)} test window at this traffic${
+      ? ` At this traffic, your ${floorLabel} can't be reached within a practical test of ${formatTestDuration(PRACTICAL_TEST_MIN_DAYS)} to ${formatTestDuration(PRACTICAL_TEST_MAX_DAYS)}.${
           detectableAtFloor
-            ? `; at that sample its fixed-horizon conversion-rate sensitivity would be about a ${detectableAtFloor}% relative lift`
+            ? ` Even then, it could only spot a conversion change of about ${detectableAtFloor}% or more.`
             : ''
-        }.`
-      : ` Your ${floorLabel} has an estimated ${formatPracticalDurationRange(
+        }`
+      : ` Your ${floorLabel} should take about ${formatPracticalDurationRange(
           earliestDays,
           slowest.trafficEvidence
-        )} collection window${
+        )} to reach.${
           detectableAtFloor
-            ? `; its fixed-horizon conversion-rate sensitivity is about a ${detectableAtFloor}% relative lift`
+            ? ` At that size, the test can spot a conversion change of about ${detectableAtFloor}% or more.`
             : ''
-        }.`;
+        }`;
 
   const targetNote = !recommended
-    ? ' A powered target-lift reference is unavailable until this product has a qualified conversion baseline; the collection window above covers only your minimum visitors per variation.'
+    ? ` We can't yet say how many visitors it takes to spot a change of ${mdePercent}%, because this product doesn't have enough orders to measure its conversion rate. The time above covers only your minimum visitors per variation.`
     : recommended > sample
-      ? ` The fixed-horizon planning reference for a ${mdePercent}% relative conversion lift at ${confidenceLevel}% family-wise confidence / ${power}% power is ${formatVisitorCount(recommended)} visitors/variation${
+      ? ` To reliably spot a change of ${mdePercent}% in conversion at ${confidenceLevel}% confidence, each variation needs about ${formatVisitorCount(recommended)} visitors${
           practical
-            ? `, with an estimated ${practicalDurationRange} collection window`
-            : ', which is beyond the practical window at current traffic'
+            ? `, which should take about ${practicalDurationRange}`
+            : ', which is longer than a practical test at this traffic'
         }.`
-      : ` That meets the fixed-horizon planning reference for a ${mdePercent}% relative conversion lift at ${confidenceLevel}% family-wise confidence / ${power}% power (${formatVisitorCount(recommended)} visitors/variation).`;
+      : ` That's enough to reliably spot a change of ${mdePercent}% in conversion at ${confidenceLevel}% confidence (about ${formatVisitorCount(recommended)} visitors per variation).`;
 
   const evidenceNote =
     slowest.trafficEvidence === 'estimated'
-      ? ' This product has too little measured storefront history, so its traffic input is a conservative shop-level planning prior—not an AI promise or a measured forecast.'
+      ? ' This product doesn’t have enough visit history yet, so this uses a cautious estimate from your whole store. Treat it as a rough guide.'
       : slowest.trafficEvidence === 'modeled'
-        ? ' Traffic is modeled from order history, so treat this as a low-confidence planning estimate.'
+        ? ' Visits are estimated from this product’s orders, so treat this as a rough guide.'
         : '';
   const feasibilityNote = practical
     ? ''
-    : ` To reach the ${formatVisitorCount(earliestFloor)} minimum by 8 weeks with the current allocation, the slowest product needs about ${formatVisitorCount(requiredProductDailyForPracticalWindow)} eligible visitors/day. Choose a higher-traffic product, use fewer variations, or increase test and slowest-arm traffic.`;
+    : ` To reach the ${formatVisitorCount(earliestFloor)} minimum within 8 weeks, your least-visited product needs about ${formatVisitorCount(requiredProductDailyForPracticalWindow)} visitors a day. Pick a busier product, use fewer variations, or send more traffic to the test and its smallest variation.`;
 
   return {
     days,

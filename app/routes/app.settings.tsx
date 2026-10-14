@@ -329,32 +329,25 @@ export default function SettingsPage() {
     }
   };
 
+  // Plan & usage keeps Manage plan inside its panel, next to Refresh status.
   const footerPrimary =
-    tab === 'plan'
+    tab === 'stats'
       ? {
-          label: planState.entitled ? 'Manage plan' : 'Upgrade',
-          onClick: () => planState.upgrade(),
-          busy: planState.loading,
-          busyLabel: 'Loading…',
-          disabled: !planState.canOpenPricing,
+          label: 'Save results settings',
+          onClick: () => void saveStatSettings(),
+          busy: saving || guardrailsLoading,
+          busyLabel: saving ? 'Saving…' : 'Loading…',
+          disabled: guardrailsLoading || !guardrailsLoaded,
         }
-      : tab === 'stats'
+      : tab === 'global-assets'
         ? {
-            label: 'Save results settings',
-            onClick: () => void saveStatSettings(),
-            busy: saving || guardrailsLoading,
+            label: 'Save global snippets',
+            onClick: () => void saveGlobalAssets(),
+            busy: saving || globalAssetsLoading,
             busyLabel: saving ? 'Saving…' : 'Loading…',
-            disabled: guardrailsLoading || !guardrailsLoaded,
+            disabled: globalAssetsLoading || !globalAssetsLoaded,
           }
-        : tab === 'global-assets'
-          ? {
-              label: 'Save global snippets',
-              onClick: () => void saveGlobalAssets(),
-              busy: saving || globalAssetsLoading,
-              busyLabel: saving ? 'Saving…' : 'Loading…',
-              disabled: globalAssetsLoading || !globalAssetsLoaded,
-            }
-          : null;
+        : null;
 
   const footerSecondary =
     tab === 'plan' && planState.needsSetup && !planState.loading

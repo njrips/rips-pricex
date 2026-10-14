@@ -63,7 +63,7 @@ describe('Basics step requirements', () => {
     expect(container.querySelector('#classic-hypothesis').placeholder).toBe(
       'If we change… then… because…'
     );
-    expect(container.textContent).toContain('Hypothesis (optional)');
+    expect(container.textContent).toContain('Optional: hypothesis');
     const hypothesisHelp = document.getElementById(
       container.querySelector('#classic-hypothesis').getAttribute('aria-describedby')
     );

@@ -10,6 +10,7 @@ import { readInboxPlans, setInboxPersistHandler, writeInboxPlans } from '../smar
 import { classicExperimentMatchesQuery } from './classicExperimentSearch';
 import { hydrateInboxFromServer, schedulePersistInboxPlans } from '../smartPricingInboxPersistence';
 import {
+  countWinningExperiments,
   formatClassicStatusLabel,
   getPlanExperimentId,
   getPlanProductTitle,
@@ -20,6 +21,8 @@ import {
 import { selectUnlistedWizardDrafts, wizardDraftStepLabel } from './classicWizardAutosave';
 import { loadWizardDrafts } from './classicWizardDraftSync';
 import { formatOfferRule, isOfferExperimentType } from './offerSelection';
+import { variationLetterOf } from './variationsStepHelpers';
+import { getSmartPricingMonthVisitors } from '../../../services/smartPricingApi';
 import ClassicExperimentRowActions from './ClassicExperimentRowActions';
 import ClassicRecentlyDeleted from './ClassicRecentlyDeleted';
 import {
@@ -291,12 +294,27 @@ export default function ClassicExperimentsList() {
   const stats = useMemo(() => {
     const allExperiments = groupPlansIntoExperiments(plans.filter(p => !p.archived));
     const running = allExperiments.filter(e => e.status === 'running').length;
-    const winning = allExperiments.filter(
-      e => e.status === 'winner_ready' || e.status === 'applied' || e.status === 'completed'
-    ).length;
-    const visitors = allExperiments.reduce((sum, e) => sum + (Number(e.visitors) || 0), 0);
-    return { running, visitors, winning };
+    return { running, winning: countWinningExperiments(plans) };
   }, [plans]);
+
+  // Counted on the server: summing the rows gave every visitor since each test
+  // began, under a card that says this month.
+  const [monthVisitors, setMonthVisitors] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    if (!shopDomain) return undefined;
+    getSmartPricingMonthVisitors(shopDomain)
+      .then(data => {
+        const n = Number(data?.visitors);
+        if (!cancelled) setMonthVisitors(Number.isFinite(n) ? n : null);
+      })
+      .catch(() => {
+        if (!cancelled) setMonthVisitors(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [shopDomain]);
 
   const setFilterAndUrl = id => {
     setFilter(id);
@@ -432,7 +450,9 @@ export default function ClassicExperimentsList() {
                 <div className={styles.statLabel}>Visitors this month</div>
               </TooltipWrapper>
             </div>
-            <div className={styles.statValue}>{stats.visitors.toLocaleString()}</div>
+            <div className={styles.statValue}>
+              {monthVisitors === null ? '—' : monthVisitors.toLocaleString()}
+            </div>
           </div>
           <div className={styles.statCard}>
             <div className={styles.statCardTop}>
@@ -685,7 +705,9 @@ export default function ClassicExperimentsList() {
                                     <div className={styles.expChildArms}>
                                       {arms.slice(0, 3).map((arm, idx) => {
                                         const isControl = idx === 0 || arm.role === 'control';
-                                        const letter = String.fromCharCode(64 + Math.max(1, idx));
+                                        const letter =
+                                          variationLetterOf(arm) ||
+                                          String.fromCharCode(64 + Math.max(1, idx));
                                         return (
                                           <span
                                             key={arm.id || idx}

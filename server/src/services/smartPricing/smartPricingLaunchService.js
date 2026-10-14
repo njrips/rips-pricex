@@ -60,25 +60,13 @@ async function launchSmartPricingPlanAsTest(
       throw err;
     }
 
-    // Wizard edits rebuild arms after the initial plan preview. Recompute from
-    // the final prices and enforce the margin floor here, at the last server
-    // boundary before a test can start.
+    // Wizard edits rebuild arms after the initial plan preview, so the stored
+    // checks describe prices the merchant may since have changed.
     if (
       Number(plan?.current_price ?? plan?.currentPrice) > 0 &&
       (plan?.price_arms ?? plan?.priceArms)?.length >= 2
     ) {
       validatedPlan = applyPriceArmOverrides(plan, {}, guardrails);
-      const marginCheck = (validatedPlan.guardrail_checks || []).find(
-        check => check?.id === 'margin_floor'
-      );
-      if (marginCheck?.passed === false) {
-        const err = new Error(
-          `A variation falls below the minimum margin (${marginCheck.actual}). Raise that price before launch.`
-        );
-        err.isValidation = true;
-        err.errors = [err.message];
-        throw err;
-      }
     }
   }
 
@@ -183,6 +171,8 @@ async function launchSmartPricingPlanAsTest(
         // they must not refuse each other. A sibling still holds its own
         // variant, so relaunching a running experiment is still refused.
         experimentId: plan?.experiment_id || plan?.metadata?.experiment_id || '',
+        refuseReserved: true,
+        forgiveTestIds: [plan?.previous_test_id || plan?.previousTestId].filter(Boolean),
       });
     }
     const created = await createTest(payload);

@@ -28,37 +28,31 @@ describe('priceBandService', () => {
   // the band silently fall back to the hardcoded 15% / 35% defaults, so a
   // merchant's configured limit did not constrain generated prices at all.
   it('honors snake_case shop guardrail keys', () => {
-    const band = buildGuardrailBand(100, {
-      max_price_change_percent: 5,
-      min_margin_percent: 40,
-    });
+    const band = buildGuardrailBand(100, { max_price_change_percent: 5 });
     expect(band.ceiling).toBe(105);
+    expect(band.floor).toBe(95);
     expect(band.max_change_percent).toBe(5);
-    expect(band.min_margin_percent).toBe(40);
   });
 
-  it('derives implied margin from default_cogs_percent', () => {
-    const thinMargin = buildGuardrailBand(100, {
-      max_price_change_percent: 60,
-      min_margin_percent: 30,
+  it('has no margin floor: cost and old min-margin settings do not move the band', () => {
+    const band = buildGuardrailBand(100, {
+      max_price_change_percent: 20,
+      min_margin_percent: 40,
       default_cogs_percent: 90,
+      marginPercent: 0,
     });
-    const unspecified = buildGuardrailBand(100, {
-      max_price_change_percent: 60,
-      min_margin_percent: 30,
-    });
-    // A 90% COGS product has little room to discount, so its floor must sit
-    // above the floor implied by the max-change limit alone.
-    expect(thinMargin.floor).toBeGreaterThan(unspecified.floor);
+    expect(band.floor).toBe(80);
+    expect(band.ceiling).toBe(120);
+    expect(band.min_margin_percent).toBeUndefined();
   });
 
-  it('uses rise-only candidates when the current margin leaves no room to cut', () => {
+  it('can cut a thin-margin product as far as max price change allows', () => {
     const prices = generateCandidatePrices(100, 8, 3, {
       maxChangePercent: 20,
       min_margin_percent: 35,
       marginPercent: 0,
     });
-    expect(prices).toEqual([100, 104, 108]);
+    expect(prices).toEqual([92, 100, 108]);
   });
 
   it('keeps generated candidates inside a snake_case configured band', () => {

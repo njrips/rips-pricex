@@ -28,10 +28,8 @@ import {
   MAX_REVENUE_DROP_PERCENT,
   MIN_REVENUE_DROP_PERCENT,
   DEFAULT_MAX_REVENUE_DROP_PERCENT,
-  MIN_VISITORS_FOR_REVENUE_GUARDRAIL,
   parseRevenueDropThreshold,
 } from './revenueGuardrail';
-import { parseMinSampleSize } from './classicAudienceEdit';
 import { formatPracticalDurationRange } from './estimateSignificanceDuration';
 import { MIN_ALLOCATION_PERCENT, sliderFillPercent } from './variationsStepHelpers';
 import styles from './SmartPricingClassic.module.css';
@@ -145,10 +143,6 @@ export default function AudienceSuccessStepPanel({
       // the number rather than resetting to the default.
       guardrails: ensureRevenueGuardrailRows([{ ...revenueGuardrail, on: on !== false }]),
     });
-  // The guardrail never checks below its own 5,000-visitor floor, so a shop
-  // minimum under that is not when it starts.
-  const guardrailWaitsForMinimum =
-    parseMinSampleSize(state.minSampleSize) >= MIN_VISITORS_FOR_REVENUE_GUARDRAIL;
   const effectiveRevenueDropMax = MAX_REVENUE_DROP_PERCENT;
   const storedRevenueDrop = parseRevenueDropThreshold(revenueGuardrail?.threshold);
   const [revenueDropDraft, setRevenueDropDraft] = useState(null);
@@ -305,8 +299,7 @@ export default function AudienceSuccessStepPanel({
             })}
           </div>
           <p className={styles.help}>
-            Which devices are eligible for the test. Tablet maps to mobile in launch
-            targeting.
+            Which devices are eligible for the test.
           </p>
         </div>
 
@@ -545,7 +538,7 @@ export default function AudienceSuccessStepPanel({
           <>
             <div className={styles.guardrailRule}>
               <span>
-                Stop testing a product if revenue per visitor for any variation drops more than
+                Pause this test if revenue per visitor for any variation drops more than
               </span>
               <span className={styles.guardrailInputWrap}>
                 <input
@@ -567,10 +560,7 @@ export default function AudienceSuccessStepPanel({
                 </span>
               </span>
               <span>
-                below the control,{' '}
-                {guardrailWaitsForMinimum
-                  ? 'after the minimum visitors per variation is reached.'
-                  : `after each variation has ${MIN_VISITORS_FOR_REVENUE_GUARDRAIL.toLocaleString()} visitors.`}
+                below the control, after the minimum visitors per variation is reached.
               </span>
             </div>
             <p className={styles.guardrailHint} id="revenue-guardrail-help">

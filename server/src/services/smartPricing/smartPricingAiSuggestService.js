@@ -13,10 +13,7 @@ const {
   buildPriceSuggestionSystemPrompt,
 } = require('./smartPricingAiSuggestPrompt');
 const { buildGuardrailBand, roundPrice, clampPrice } = require('./priceBandService');
-const {
-  resolveAiPriceLiftBand,
-  resolveSuggestionMarginPercent,
-} = require('./aiPriceLiftBand');
+const { resolveAiPriceLiftBand } = require('./aiPriceLiftBand');
 const { snapProductArmPrices, priceWindowForSnap } = require('./charmPriceRounding');
 const {
   MIN_CONTROL_GAP_PERCENT,
@@ -284,8 +281,7 @@ function widenedProductSlice(slice, { min, max, minBandWidth, armCount = 1, minA
  * Margin is deliberately absent. Most merchants never record a cost, so a
  * prompt that reasons from margin reasons from a blank for most shops; the
  * judgement rests on perceived value, the market and live revenue per
- * visitor instead. A shop that did set a margin floor still has it enforced
- * on every price in code.
+ * visitor instead.
  *
  * The currency goes too. Without it the model is comparing bare numbers, and
  * 1200 is an impulse purchase in yen and a considered one in dollars.
@@ -450,9 +446,8 @@ function resolveAmountBand(unit, minAmount, maxAmount) {
  *
  * The test is "outside the range the merchant asked for", in either direction.
  * It used to be "below the bottom of the range", which only detects a price
- * the guardrail pushed *up*. On a discount band the margin floor pushes prices
- * up too -- so the one case where a merchant most needs to be told their
- * guardrail intervened was the one case that never said so.
+ * the guardrail pushed *up*, and missed a band the max price change capped
+ * from above.
  */
 function outsideRequestedRange(value, low, high, tolerance) {
   const n = Number(value);
@@ -649,7 +644,6 @@ function spaceArmTargets(targets, { current, minPct, maxPct, band, minArmGapPerc
 function priceArmsAcrossBand({
   row,
   testArms = [],
-  guardrails = {},
   shopMax,
   targetAt,
   requestedLow,
@@ -657,11 +651,7 @@ function priceArmsAcrossBand({
   scoreBoost = 0,
   minArmGapPercent = null,
 }) {
-  const band = buildGuardrailBand(row.current_price, {
-    minMarginPercent: guardrails.min_margin_percent ?? 35,
-    maxChangePercent: shopMax,
-    marginPercent: resolveSuggestionMarginPercent(row, guardrails),
-  });
+  const band = buildGuardrailBand(row.current_price, { maxChangePercent: shopMax });
   const armCount = testArms.length;
   const current = Number(row.current_price) || 0;
   const bandMin = Number(requestedLow);
@@ -814,7 +804,7 @@ function deterministicPriceSuggestions({
         amountBand.min,
         amountBand.max,
         '$'
-      )}, capped per product by your ${shopMax}% max price change and margin guardrails.`,
+      )}, capped per product by your ${shopMax}% max price change.`,
     };
   }
 
@@ -835,7 +825,7 @@ function deterministicPriceSuggestions({
           min,
           max,
           '%'
-        )} and margin guardrails.`,
+        )}.`,
   };
 }
 

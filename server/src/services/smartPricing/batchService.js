@@ -82,11 +82,7 @@ async function createBatchFromSelection({
         variantCount,
         ...statisticalInputsFromGuardrails(guardrails),
         guardrails: guardrails
-          ? {
-              minMarginPercent: guardrails.min_margin_percent,
-              maxChangePercent: guardrails.max_price_change_percent,
-              marginPercent: opp.margin_percent ?? 100 - guardrails.default_cogs_percent,
-            }
+          ? { maxChangePercent: guardrails.max_price_change_percent }
           : {},
         planId: `SP-${Date.now()}-${index}`,
         imageUrl: opp.image_url,

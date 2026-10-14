@@ -42,53 +42,31 @@ function resolveBandInputs(options = {}) {
     return null;
   };
 
-  const cogs = pick(source.default_cogs_percent, source.defaultCogsPercent);
   return {
-    minMarginPercent:
-      pick(source.minMarginPercent, source.min_margin_percent) ?? 35,
     maxChangePercent:
       pick(source.maxChangePercent, source.max_price_change_percent) ?? 15,
-    // Implied margin comes from COGS when the caller did not compute it.
-    marginPercent:
-      pick(source.marginPercent, cogs === null ? null : 100 - cogs) ?? 50,
   };
 }
 
+/**
+ * The prices a test may use: the current price plus or minus the shop's max
+ * price change. There is no margin floor -- the merchant sets every price and
+ * the revenue guardrail is the safety net.
+ */
 function buildGuardrailBand(currentPrice, options = {}) {
-  const { minMarginPercent, maxChangePercent, marginPercent } = resolveBandInputs(options);
+  const { maxChangePercent } = resolveBandInputs(options);
   const current = Number(currentPrice);
   if (!Number.isFinite(current) || current <= 0) {
     return {
       floor: 0,
       ceiling: 0,
-      min_margin_percent: minMarginPercent,
       max_change_percent: maxChangePercent,
     };
   }
   const maxDelta = current * (maxChangePercent / 100);
-  const floorByChange = current - maxDelta;
-  // The lowest price that still leaves the shop's minimum margin: unit cost
-  // divided by the share of the price the merchant wants to keep.
-  const unitCost = current * (1 - marginPercent / 100);
-  const priceAtMinMargin = unitCost / (1 - minMarginPercent / 100);
-  // Capped at the current price, because a product already selling below the
-  // minimum margin is a pre-existing condition rather than something a price
-  // test should correct by forcing a rise. Such a product simply gets no room
-  // to go lower.
-  //
-  // This used to be halved instead, which made the merchant's minimum margin
-  // almost never bind: a $100 product at 40% margin under a 35% minimum could
-  // be priced at $88, a 31.8% margin, and the scenario presets did exactly
-  // that -- every preset prices one arm below the current price. It mattered
-  // less while nothing deliberately cut prices. It is load-bearing now that
-  // the AI band can.
-  const floorByMargin = Math.min(priceAtMinMargin, current);
-  const floor = Math.max(0, Math.max(floorByChange, floorByMargin));
-  const ceiling = current + maxDelta;
   return {
-    floor: roundPrice(floor),
-    ceiling: roundPrice(ceiling),
-    min_margin_percent: minMarginPercent,
+    floor: roundPrice(Math.max(0, current - maxDelta)),
+    ceiling: roundPrice(current + maxDelta),
     max_change_percent: maxChangePercent,
   };
 }
@@ -178,10 +156,6 @@ function applyScenarioPreset(currentPrice, presetId, guardrails = {}) {
  * limit. Generated arms are already clamped, but manually typed prices and
  * direct API callers reach launch without passing through generation, so this
  * is the funnel where "max price change" becomes binding rather than advisory.
- *
- * Deliberately checks only the max-change limit, not the margin-derived floor:
- * that floor can legitimately sit above the current price for thin-margin
- * products, which would reject an unchanged control arm.
  *
  * @returns {string[]} Empty when every arm is within the limit.
  */

@@ -122,3 +122,66 @@ describe('applyPlanSettingsToPausedTests', () => {
     assert.equal(d.updates.length, 0);
   });
 });
+
+describe('a test launched before tablets were their own device', () => {
+  const planWith = segments => ({ ...editedPlan(), audience: { segments } });
+
+  it('keeps counting tablets as mobile when resumed on new segments', () => {
+    const update = buildPausedSettingsUpdate(
+      pausedTest({ segments: { device: 'mobile' } }),
+      planWith({ device: 'mobile', tablet_separate: true }),
+      {}
+    );
+    assert.equal(update.segments.device, 'mobile');
+    assert.equal(update.segments.tablet_separate, undefined);
+  });
+
+  it('folds tablet rules into mobile', () => {
+    const update = buildPausedSettingsUpdate(
+      pausedTest({ segments: { device: 'mobile' } }),
+      planWith({
+        device: 'all',
+        tablet_separate: true,
+        device_rules: [
+          { type: 'include', value: 'desktop' },
+          { type: 'include', value: 'tablet' },
+        ],
+      }),
+      {}
+    );
+    assert.equal(update.segments.device, 'all');
+    assert.equal(update.segments.device_rules, undefined);
+
+    const mobileOnly = buildPausedSettingsUpdate(
+      pausedTest({ segments: { device: 'mobile' } }),
+      planWith({
+        device: 'all',
+        tablet_separate: true,
+        device_rules: [
+          { type: 'include', value: 'mobile' },
+          { type: 'include', value: 'tablet' },
+        ],
+      }),
+      {}
+    );
+    assert.equal(mobileOnly.segments.device, 'mobile');
+    assert.equal(mobileOnly.segments.device_rules, undefined);
+  });
+
+  it('leaves a test that already treats tablets separately alone', () => {
+    const segments = {
+      device: 'all',
+      tablet_separate: true,
+      device_rules: [
+        { type: 'include', value: 'desktop' },
+        { type: 'include', value: 'tablet' },
+      ],
+    };
+    const update = buildPausedSettingsUpdate(
+      pausedTest({ segments: { device: 'tablet', tablet_separate: true } }),
+      planWith(segments),
+      {}
+    );
+    assert.deepEqual(update.segments, segments);
+  });
+});

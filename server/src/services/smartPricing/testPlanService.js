@@ -4,48 +4,11 @@
 
 const { applyScenarioPreset, buildGuardrailBand, roundPrice } = require('./priceBandService');
 const { buildStatisticalDesign, buildVariantCountOptions } = require('./statisticalDesignService');
-const { marginPercentFromDefaultCogs } = require('./smartPricingGuardrailsService');
-
-function resolveMarginPercent(price, { unitCost, defaultCogsPercent = 55 } = {}) {
-  const parsedCost = unitCost !== undefined && unitCost !== null ? Number(unitCost) : null;
-  if (Number.isFinite(parsedCost) && parsedCost >= 0) {
-    const salePrice = Number(price);
-    if (Number.isFinite(salePrice) && salePrice > 0) {
-      return Math.max(0, Math.min(99, ((salePrice - parsedCost) / salePrice) * 100));
-    }
-  }
-  return marginPercentFromDefaultCogs(price, defaultCogsPercent);
-}
 
 function buildGuardrailChecks(currentPrice, priceArms = [], guardrails = {}, options = {}) {
   const maxChange = guardrails.maxChangePercent ?? guardrails.max_price_change_percent ?? 15;
-  const minMargin = guardrails.minMarginPercent ?? guardrails.min_margin_percent ?? 35;
-  const defaultCogs = guardrails.default_cogs_percent ?? guardrails.defaultCogsPercent ?? 55;
-  const { unitCost = null, marginSource = null, checkoutPriceFunctionActive = null } = options;
-  const currentMargin = resolveMarginPercent(currentPrice, {
-    unitCost,
-    defaultCogsPercent: defaultCogs,
-  });
-  const effectiveMarginFloor = Number.isFinite(currentMargin)
-    ? Math.min(minMargin, currentMargin)
-    : minMargin;
-  const band = buildGuardrailBand(currentPrice, {
-    ...guardrails,
-    marginPercent: currentMargin,
-  });
-
-  const marginPercents = priceArms.map(arm =>
-    resolveMarginPercent(arm.price, { unitCost, defaultCogsPercent: defaultCogs })
-  );
-  const minActualMargin = marginPercents.length
-    ? Math.min(...marginPercents.filter(Number.isFinite))
-    : null;
-  const marginLabel =
-    marginSource === 'imported_cogs'
-      ? 'imported COGS'
-      : marginSource === 'unit_cost'
-        ? 'Shopify unit cost'
-        : `~${defaultCogs}% default COGS`;
+  const { checkoutPriceFunctionActive = null } = options;
+  const band = buildGuardrailBand(currentPrice, guardrails);
 
   const checkoutActive = checkoutPriceFunctionActive;
   const checkoutActual =
@@ -90,17 +53,6 @@ function buildGuardrailChecks(currentPrice, priceArms = [], guardrails = {}, opt
       threshold: '2–4 arms',
       actual: String(priceArms.length),
       passed: priceArms.length >= 2 && priceArms.length <= 4,
-    },
-    {
-      id: 'margin_floor',
-      label: 'Minimum margin',
-      threshold:
-        effectiveMarginFloor < minMargin
-          ? `Do not fall below the current ${roundPrice(effectiveMarginFloor)}%`
-          : `≥ ${minMargin}%`,
-      actual:
-        minActualMargin === null ? 'unknown' : `${roundPrice(minActualMargin)}% (${marginLabel})`,
-      passed: minActualMargin === null ? true : minActualMargin >= effectiveMarginFloor,
     },
     {
       id: 'checkout_alignment',
@@ -217,14 +169,7 @@ function buildSmartPricingTestPlan(input = {}) {
         ? Number(currentPrice) * (1 - recordedMargin / 100)
         : null;
 
-  const marginForBand =
-    resolvedUnitCost !== null && Number(currentPrice) > 0
-      ? ((Number(currentPrice) - resolvedUnitCost) / Number(currentPrice)) * 100
-      : null;
-  const preset = applyScenarioPreset(currentPrice, scenarioPreset, {
-    ...guardrails,
-    ...(Number.isFinite(marginForBand) ? { marginPercent: marginForBand } : {}),
-  });
+  const preset = applyScenarioPreset(currentPrice, scenarioPreset, guardrails);
   const resolvedCount = variantCount || preset.variant_count;
   const candidates = preset.candidate_prices.slice(0, resolvedCount);
   while (candidates.length < resolvedCount && candidates.length > 0) {
@@ -270,8 +215,6 @@ function buildSmartPricingTestPlan(input = {}) {
     ...(conversionFloor ? { min_conversions_per_variation: conversionFloor } : {}),
   };
   const guardrailChecks = buildGuardrailChecks(currentPrice, priceArms, guardrails, {
-    unitCost: resolvedUnitCost,
-    marginSource,
     checkoutPriceFunctionActive,
   });
   const armProjections = buildArmProjections(priceArms, baselinePpv);
@@ -374,8 +317,6 @@ function applyPriceArmOverrides(plan = {}, armPrices = {}, guardrails = {}) {
     throw new Error('A test needs control and at least one price variation');
   }
   const guardrailChecks = buildGuardrailChecks(currentPrice, arms, guardrails, {
-    unitCost: plan.unit_cost ?? null,
-    marginSource: plan.margin_source ?? null,
     checkoutPriceFunctionActive: plan.checkout_price_function_active ?? null,
   });
   const baselinePpv = Number(plan.baseline_ppv) || 0;

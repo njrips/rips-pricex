@@ -42,17 +42,16 @@ function clampTrafficPercent(raw) {
   return Math.min(100, Math.max(5, Math.round(n)));
 }
 
+const ENGINE_DEVICES = ['desktop', 'mobile', 'tablet'];
+
 function mapClassicDevicesToEngine(devices = []) {
   const set = new Set();
   for (const raw of Array.isArray(devices) ? devices : []) {
     const n = String(raw || '')
       .trim()
       .toLowerCase();
-    if (n === 'desktop') {
-      set.add('desktop');
-    }
-    if (n === 'mobile' || n === 'tablet') {
-      set.add('mobile');
+    if (ENGINE_DEVICES.includes(n)) {
+      set.add(n);
     }
   }
   return [...set];
@@ -192,6 +191,7 @@ function classicAudienceToSegments(audienceUi = {}, baseSegments = {}) {
     exclude_internal_ips: base.exclude_internal_ips !== false,
     traffic_source: 'all',
     traffic_ramp_percent: traffic,
+    tablet_separate: true,
   };
 
   if (devices.length === 0) {
@@ -199,7 +199,7 @@ function classicAudienceToSegments(audienceUi = {}, baseSegments = {}) {
   } else if (deviceMode === 'include') {
     if (devices.length === 1) {
       out.device = devices[0];
-    } else if (devices.includes('desktop') && devices.includes('mobile')) {
+    } else if (ENGINE_DEVICES.every(device => devices.includes(device))) {
       out.device = 'all';
     } else {
       out.device = 'all';

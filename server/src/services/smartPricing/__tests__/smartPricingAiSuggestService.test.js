@@ -1007,20 +1007,19 @@ describe('a band that may lower the price', () => {
     expect(systemPrompt).toMatch(/This test is judged on Revenue per visitor \(RPV\)/i);
   });
 
-  it('still holds a recorded margin floor on a cut the model proposes', async () => {
-    // Margin left the prompt, not the guardrail: a shop that set a floor
-    // keeps it on every price.
+  it('has no margin floor under a cut the model proposes', async () => {
     chatJson.mockResolvedValue({ bands: [{ v: 0, lo: -15, hi: -5 }] });
 
     const result = await suggestPrices({
       ...eitherWayProduct,
-      variants: [{ ...eitherWayProduct.variants[0], margin_percent: 40 }],
+      variants: [{ ...eitherWayProduct.variants[0], margin_percent: 5 }],
       guardrails: { ...eitherWayProduct.guardrails, min_margin_percent: 35 },
     });
-    const cost = eitherWayProduct.variants[0].current_price * 0.6;
 
+    expect(result.suggestions.length).toBeGreaterThan(0);
     result.suggestions.forEach(row => {
-      expect(1 - cost / row.price).toBeGreaterThanOrEqual(0.35 - 0.01);
+      expect(row.price).toBeLessThan(100);
+      expect(row.price).toBeGreaterThanOrEqual(70);
     });
   });
 
@@ -1033,9 +1032,7 @@ describe('a band that may lower the price', () => {
     expect(JSON.parse(upOnly.userPrompt).allowed_band.direction_allowed).toBe('up');
   });
 
-  it('reports a cut the margin floor refused', async () => {
-    // $100 at 40% margin is $60 of cost; a 35% minimum margin puts the lowest
-    // legal price at $92.31, so a 12-18% cut is not available here.
+  it('lets a thin-margin product take the cut the model proposed', async () => {
     chatJson.mockResolvedValue({ bands: [{ v: 0, lo: -18, hi: -12 }] });
 
     const result = await suggestPrices({
@@ -1044,9 +1041,8 @@ describe('a band that may lower the price', () => {
     });
 
     result.suggestions.forEach(row => {
-      const margin = ((row.price - 60) / row.price) * 100;
-      expect(margin).toBeGreaterThanOrEqual(35);
-      expect(row.guardrail_limited).toBe(true);
+      expect(row.price).toBeLessThan(92.31);
+      expect(row.guardrail_limited).toBeFalsy();
     });
   });
 });

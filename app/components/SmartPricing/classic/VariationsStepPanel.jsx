@@ -140,7 +140,16 @@ export default function VariationsStepPanel({
   // merchant has already set is the behaviour this step moved away from.
   const addVariation = () => {
     if (variations.length >= 4) return;
-    onChange([...variations, buildNextVariation(variations)]);
+    const next = buildNextVariation(variations);
+    // A refilled B goes back between A and C, not after C.
+    const at = variations.findIndex(
+      (row, index) => index > 0 && row?.letter && row.letter > next.letter
+    );
+    onChange(
+      at === -1
+        ? [...variations, next]
+        : [...variations.slice(0, at), next, ...variations.slice(at)]
+    );
   };
 
   return (

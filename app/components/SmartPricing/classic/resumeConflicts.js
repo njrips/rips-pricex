@@ -88,7 +88,8 @@ export function resumeConflictListMessage(plan) {
 /** One line per held product: what it is, and who has it. */
 export function describeBlockedProduct(row) {
   const title = String(row?.title || 'This product');
-  const holder = String(row?.blocked_by?.test_name || 'another test');
+  const by = row?.blocked_by || {};
+  const holder = String((by.experiment_id && by.experiment_title) || by.test_name || 'another test');
   const paused = row?.blocked_by?.status === 'paused' ? ' (paused)' : '';
   return `${title} — ${holder}${paused}`;
 }

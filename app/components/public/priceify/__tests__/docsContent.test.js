@@ -69,7 +69,7 @@ describe('Priceify guides content', () => {
     const rolloutCopy = rolloutQueue.paragraphs.join(' ');
     assert.match(rolloutCopy, /one row per product/i);
     assert.match(rolloutCopy, /rest of the test keeps running/i);
-    assert.match(rolloutCopy, /revenue guardrail stopped never gets Apply winner on its row/i);
+    assert.match(rolloutCopy, /tripped the revenue guardrail never gets Apply winner on its row/i);
     assert.match(rolloutCopy, /only ever mentioned once/i);
     assert.ok(DOCS_FAQ.length >= 3);
     const groupIds = new Set(DOCS_GROUPS.map((group) => group.id));
@@ -94,7 +94,7 @@ describe('Priceify guides content', () => {
     const aiCopy = ai.paragraphs.join(' ');
     assert.ok(/band is signed/i.test(aiCopy));
     assert.match(aiCopy, /cheaper/i);
-    assert.match(aiCopy, /minimum margin/i);
+    assert.doesNotMatch(aiCopy, /minimum margin/i);
     const aiInputs = DOCS_SECTIONS.find((section) => section.id === 'ai-price-inputs');
     const aiInputsCopy = [
       aiInputs.summary,
@@ -198,9 +198,12 @@ describe('Priceify guides content', () => {
     assert.match(copyOf('max-price-change'), /15%/);
     assert.match(copyOf('max-price-change'), /no longer a field in Settings/i);
     assert.match(copyOf('max-price-change'), /Products step/);
-    assert.match(copyOf('cost-floor'), /35%/);
-    assert.match(copyOf('cost-floor'), /55%/);
-    assert.match(copyOf('cost-floor'), /not a field|is a field you edit/i);
+    assert.match(copyOf('max-price-change'), /no margin floor/i);
+    assert.ok(!DOCS_SECTIONS.some(section => section.id === 'cost-floor'));
+    const allCopy = DOCS_SECTIONS.map(section =>
+      [section.summary || '', ...(section.paragraphs || [])].join(' ')
+    ).join(' ');
+    assert.doesNotMatch(allCopy, /minimum margin|margin floor (blocking|above)|cost floor/i);
     // Target lift and power lost their own section; the sample-size guide is
     // now the only place they are explained, so it has to name both values.
     assert.match(copyOf('min-sample'), /10% target lift/);

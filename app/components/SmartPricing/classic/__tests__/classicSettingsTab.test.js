@@ -149,13 +149,30 @@ describe('ClassicSettingsTab', () => {
     await render({ settings: SETTINGS, audience: AUDIENCE, metrics: METRICS, onEditMetrics });
     expect(visibleText()).toContain('Revenue guardrail');
     expect(visibleText()).toContain('10%');
-    expect(visibleText()).toMatch(/about 5,000 visitors and at least 10 conversions/i);
+    expect(visibleText()).toMatch(
+      /Pause this test if revenue per visitor for any variation drops more than\s*10%\s*below the control, after 5,000 visitors per variation/i
+    );
+    expect(visibleText()).not.toMatch(/other products keep running/i);
     const edit = buttonLabelled('Edit guardrail');
     expect(edit).toBeTruthy();
     await act(async () => {
       edit.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
     expect(onEditMetrics).toHaveBeenCalledTimes(1);
+  });
+
+  it('offers no edit links once the test is locked, and says why', async () => {
+    await render({
+      settings: SETTINGS,
+      audience: AUDIENCE,
+      metrics: METRICS,
+      lockedNote: 'After the minimum visitors per variation is reached, you can pause variations but not edit test settings.',
+    });
+    expect(visibleText()).toContain('but not edit test settings');
+    expect(buttonLabelled('Edit guardrail')).toBeFalsy();
+    expect(visibleText()).not.toContain('Adjust traffic');
+    expect(visibleText()).not.toContain('Edit targeting');
+    expect(visibleText()).not.toContain('Edit metrics');
   });
 
   it('describes offer tests as applying a checkout discount', async () => {
@@ -210,7 +227,7 @@ describe('ClassicSettingsTab', () => {
     expect(visibleText()).toContain('Add to cart');
     expect(visibleText()).toContain('Page view');
     expect(visibleText()).toContain('Change metric');
-    expect(visibleText()).not.toContain('Edit metrics');
+    expect(visibleText()).toContain('Edit metrics');
     expect(visibleText()).not.toContain('[object Object]');
   });
 

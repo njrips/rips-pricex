@@ -21,7 +21,10 @@ import {
   suggestSmartPricingPrices,
   batchPreviewSmartPricingLaunch,
   getSmartPricingExperimentTests,
+  applyPausedSmartPricingSettings,
 } from '../../../services/smartPricingApi';
+import { appendActivityToPlans, createActivityEntry } from './classicActivity';
+import LiveEditLockedStep from './LiveEditLockedStep';
 import {
   alreadyLaunchedPlanIds,
   useSmartPricingLaunch,
@@ -166,6 +169,8 @@ import {
 } from './classicExperimentHelpers';
 import {
   DEFAULT_MIN_SAMPLE_SIZE,
+  applyAudienceUiToPlans,
+  mergeInboxPlansById,
   resolveMinSampleSize,
   validateClassicAudienceUi,
 } from './classicAudienceEdit';
@@ -193,6 +198,8 @@ import {
   resolveBandEdge,
   lookupPriceOverride,
   priceOverrideKey,
+  removedArmIds,
+  dropArmEntries,
   reconcileSelectedVariantIds,
   resolvePricingRows,
   limitSelectionToProducts,
@@ -216,6 +223,9 @@ const FIRST_STEP_AFTER_TYPE_CHOSEN = 1;
 
 /** Test statuses that mean the experiment is past the wizard. */
 const LAUNCHED_TEST_STATUSES = new Set(['running', 'paused', 'scheduled', 'stopped', 'completed']);
+
+/** Plans an Edit test on a live experiment covers: the ones still running or paused. */
+const LIVE_EDIT_PLAN_STATUSES = new Set(['running', 'active', 'paused', 'scheduled']);
 
 /** A plan whose test exists and has left draft: its experiment has launched. */
 function isLaunchedPlan(plan) {
@@ -354,6 +364,10 @@ export default function ClassicCreateWizard({ onTitleChange }) {
   const shopDomain = useClassicShopDomain();
   const resumeId = String(searchParams.get('resume') || '').trim();
   const stepParam = String(searchParams.get('step') || '').trim();
+  // Edit test on a running or paused test: the same steps, with what shoppers
+  // are already assigned to (variations, products, prices) shown but locked.
+  const liveEditRequested = Boolean(resumeId) && searchParams.get('live') === '1';
+  const [liveEdit, setLiveEdit] = useState(false);
 
   // A ?step= deep link decides where the wizard opens. Moving between steps
   // rewrites it (see syncResumeUrl) so a refresh comes back to the same place;
@@ -556,6 +570,10 @@ export default function ClassicCreateWizard({ onTitleChange }) {
     EXPERIMENT_TYPES.find(type => type.id === experimentType)?.title || 'Price test';
 
   const backToList = () => navigate(ROUTES.appSmartPricing(shopDomain));
+  const backToTestDetails = () => {
+    const planId = (Array.isArray(plans) ? plans : []).find(plan => plan?.id)?.id;
+    navigate(planId ? ROUTES.appSmartPricingPlan(shopDomain, planId) : ROUTES.appSmartPricing(shopDomain));
+  };
   const openCheckoutSetup = () => {
     const path = ROUTES.appSetup(shopDomain);
     if (typeof navigate === 'function') {
@@ -663,7 +681,8 @@ export default function ClassicCreateWizard({ onTitleChange }) {
 
   const persistWizardDraft = useCallback(
     snapshot => {
-      if (autosaveSuspended.current) return false;
+      // A live edit never becomes a draft: the experiment already exists.
+      if (autosaveSuspended.current || liveEdit) return false;
       if (!shouldAutosaveWizardSnapshot(snapshot)) return false;
       try {
         writeClassicWizardDraft(shopDomain, snapshot);
@@ -674,7 +693,7 @@ export default function ClassicCreateWizard({ onTitleChange }) {
       }
       return true;
     },
-    [shopDomain]
+    [shopDomain, liveEdit]
   );
 
   /**
@@ -687,10 +706,12 @@ export default function ClassicCreateWizard({ onTitleChange }) {
    */
   const persistWizardDraftEverywhere = useCallback(
     snapshot => {
-      if (autosaveSuspended.current) return Promise.resolve({ local: false, server: false });
+      if (autosaveSuspended.current || liveEdit) {
+        return Promise.resolve({ local: false, server: false });
+      }
       return saveWizardDraftEverywhere(shopDomain, snapshot);
     },
-    [shopDomain]
+    [shopDomain, liveEdit]
   );
 
   // `fresh` carries state produced in the same tick as the move. wizardSnapshot
@@ -886,14 +907,27 @@ export default function ClassicCreateWizard({ onTitleChange }) {
       const launchedHere = (readInboxPlans(shopDomain) || []).some(
         plan => planMatchesResumeId(plan, resumeId) && isLaunchedPlan(plan)
       );
-      if (launchedHere) {
+      const livePlans = liveEditRequested
+        ? (readInboxPlans(shopDomain) || []).filter(
+            plan =>
+              planMatchesResumeId(plan, resumeId) &&
+              plan?.archived !== true &&
+              LIVE_EDIT_PLAN_STATUSES.has(String(plan?.status || '').trim().toLowerCase())
+          )
+        : [];
+      const editingLive = liveEditRequested && launchedHere && livePlans.length > 0;
+      if (editingLive) setLiveEdit(true);
+      // A live edit this browser cannot back with the live plans goes to the
+      // details page's editor. Opening it as a draft would let Launch build a
+      // second experiment.
+      if ((launchedHere || liveEditRequested) && !editingLive) {
         setLaunchedResumeId(resumeId);
-      } else if (resumedLocalDraft) {
+      } else if (resumedLocalDraft && !editingLive) {
         applyWizardSnapshot(resumedLocalDraft);
       } else {
-        const inboxPlans = (readInboxPlans(shopDomain) || []).filter(
-          plan => planMatchesResumeId(plan, resumeId)
-        );
+        const inboxPlans = editingLive
+          ? livePlans
+          : (readInboxPlans(shopDomain) || []).filter(plan => planMatchesResumeId(plan, resumeId));
         if (inboxPlans.length) {
           setAppliedSavedDraft(true);
           setResumedFromInbox(true);
@@ -922,14 +956,18 @@ export default function ClassicCreateWizard({ onTitleChange }) {
                 ...(first.audience || {}),
                 ...first.metadata.audience_ui,
               }),
-              primaryMetric: normalizeClassicCreatePrimaryMetric(
-                first.metadata.audience_ui.primaryMetric
-              ),
+              // A live test keeps the goal it launched with, even one the create
+              // flow no longer offers; re-goaling it would change what is measured.
+              primaryMetric: editingLive
+                ? first.metadata.audience_ui.primaryMetric || 'revenue_per_visitor'
+                : normalizeClassicCreatePrimaryMetric(first.metadata.audience_ui.primaryMetric),
               secondaryMetrics: normalizeSecondaryEvents(
                 first.metadata.audience_ui.secondaryMetrics
               ),
               customGoals: normalizeCustomGoals(first.metadata.audience_ui.customGoals),
-              primaryCustomGoal: null,
+              primaryCustomGoal: editingLive
+                ? first.metadata.audience_ui.primaryCustomGoal || null
+                : null,
               guardrails: ensureRevenueGuardrailRows(first.metadata.audience_ui.guardrails),
             };
             setAudience(nextAudience);
@@ -941,7 +979,7 @@ export default function ClassicCreateWizard({ onTitleChange }) {
             );
           }
           if (urlStep == null) {
-            setStep(inboxPlans.some(p => p.price_arms?.length) ? 4 : 2);
+            setStep(editingLive ? 0 : inboxPlans.some(p => p.price_arms?.length) ? 4 : 2);
           }
         }
         // Neither store knows this id — a link to an experiment that was
@@ -1211,10 +1249,11 @@ export default function ClassicCreateWizard({ onTitleChange }) {
 
   useEffect(() => {
     let cancelled = false;
-    apiGet('/shopify/store-resources?type=collection&first=40', { shop: shopDomain })
+    apiGet('/shopify/store-resources?type=collection&all=1', { shop: shopDomain })
       .then(res => {
         if (cancelled) return;
-        const list = res?.data?.resources || res?.resources || [];
+        const raw = res?.data?.resources || res?.resources || [];
+        const list = Array.isArray(raw) ? raw : raw?.list || [];
         const options = [{ label: 'All products', value: '' }];
         list.forEach(item => {
           if (item?.id) options.push({ label: item.title || item.id, value: item.id });
@@ -1228,7 +1267,9 @@ export default function ClassicCreateWizard({ onTitleChange }) {
   }, [shopDomain]);
 
   useEffect(() => {
-    if (step < 2) return undefined;
+    // A live test's products are held by that test, so the catalog would
+    // withhold them and drop them from the selection it is showing.
+    if (step < 2 || liveEdit) return undefined;
     const requestId = productsLoadRequestId.current + 1;
     productsLoadRequestId.current = requestId;
     let cancelled = false;
@@ -1238,7 +1279,7 @@ export default function ClassicCreateWizard({ onTitleChange }) {
     return () => {
       cancelled = true;
     };
-  }, [step, shopDomain, applyCatalog]);
+  }, [step, shopDomain, applyCatalog, liveEdit]);
 
   const buildBatch = useCallback(async () => {
     const ids =
@@ -1553,6 +1594,20 @@ export default function ClassicCreateWizard({ onTitleChange }) {
     setPriceOverrides(next);
   };
 
+  // Add variation refills a removed letter under the same id, so whatever the
+  // removed one was priced at has to go with it or the new one inherits it.
+  const handleVariationsChange = next => {
+    const removed = removedArmIds(variations, next);
+    setVariations(next);
+    if (!removed.length) return;
+    const lastIndex = Math.max(1, (next || []).length - 1);
+    if (activeArmIndex > lastIndex) setActiveArmIndex(lastIndex);
+    setPricingByArm(prev => dropArmEntries(prev, removed));
+    setOfferByArm(prev => dropArmEntries(prev, removed));
+    setPriceOverrides(prev => dropArmEntries(prev, removed, { byOverrideKey: true }));
+    setPriceSuggestionMeta(prev => dropArmEntries(prev, removed, { byOverrideKey: true }));
+  };
+
   const paintLocalAiBandPrices = useCallback(
     ({ unit = 'percent', rows, targetArms, spreadArms = targetArms, band }) => {
       if (!rows?.length || !targetArms?.length || !band) return false;
@@ -1572,8 +1627,6 @@ export default function ClassicCreateWizard({ onTitleChange }) {
         max,
         unit,
         maxChangePct,
-        minMarginPct: shopGuardrails.min_margin_percent,
-        defaultCogsPct: shopGuardrails.default_cogs_percent,
       };
       const keep = keepArmKeys(targetArms);
       const localPatch = keep(buildAiBandPriceOverrides(spreadOpts));
@@ -1598,9 +1651,7 @@ export default function ClassicCreateWizard({ onTitleChange }) {
     [
       aiMinPct,
       aiMaxPct,
-      shopGuardrails.default_cogs_percent,
       shopGuardrails.max_price_change_percent,
-      shopGuardrails.min_margin_percent,
       markArmsAiSuggested,
       priceSuggestionMeta,
     ]
@@ -2138,7 +2189,106 @@ export default function ClassicCreateWizard({ onTitleChange }) {
     }
   };
 
+  /**
+   * Save an edit to a running or paused test. The variations and prices were
+   * never editable here, so what is written is what the settings editor writes:
+   * name, hypothesis, audience, metrics, guardrail and traffic allocation.
+   */
+  const saveLiveEdit = async () => {
+    if (busy) return;
+    const trimmedName = String(name).trim();
+    if (!trimmedName) {
+      setMessageType('error');
+      setMessage('Test name is required.');
+      return;
+    }
+    const check = validateClassicAudienceUi(audience || createDefaultAudienceState());
+    if (!check.ok) {
+      setMessageType('error');
+      setMessage(check.message);
+      return;
+    }
+    const livePlans = (Array.isArray(plans) ? plans : []).filter(plan => plan?.id);
+    if (!livePlans.length) {
+      setMessageType('error');
+      setMessage('No products to update.');
+      return;
+    }
+    setBusy(true);
+    setMessage('');
+    try {
+      const nextPlans = appendActivityToPlans(
+        applyAudienceUiToPlans(livePlans, audience || createDefaultAudienceState(), {
+          experimentId,
+          experimentTitle: trimmedName,
+          hypothesis,
+          experimentType,
+          shopGuardrails,
+        }),
+        createActivityEntry({
+          kind: 'updated',
+          title: 'Settings changed',
+          detail: 'Test details, audience, metrics, guardrail or traffic allocation changed.',
+          actor: livePlans[0]?.owner_name || livePlans[0]?.created_by_name || 'You',
+        })
+      );
+      const merged = mergeInboxPlansById(readInboxPlans(shopDomain) || [], nextPlans);
+      writeInboxPlans(shopDomain, merged, { persist: false });
+      await persistInboxPlansNow(shopDomain, merged);
+      const draft = readClassicWizardDraft(shopDomain, experimentId);
+      if (draft) {
+        writeClassicWizardDraft(shopDomain, {
+          ...draft,
+          name: trimmedName,
+          hypothesis,
+          audience: audience || createDefaultAudienceState(),
+        });
+      }
+      const pausedTestIds = nextPlans
+        .filter(plan => String(plan?.status || '').trim().toLowerCase() === 'paused')
+        .map(plan => String(plan?.test_id || '').trim())
+        .filter(Boolean);
+      if (pausedTestIds.length) {
+        // Resume applies these too; doing it now keeps the paused tests in step
+        // with what the details page shows.
+        await applyPausedSmartPricingSettings(shopDomain, pausedTestIds).catch(() => null);
+      }
+      navigate(ROUTES.appSmartPricingPlan(shopDomain, nextPlans[0].id));
+    } catch (err) {
+      setMessageType('error');
+      setMessage(err?.message || 'Could not save your changes.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const goNextLiveEdit = async () => {
+    setMessage('');
+    if (step === 0 && !String(name).trim()) {
+      setMessageType('error');
+      setMessage('Test name is required.');
+      return;
+    }
+    if (step === 3) {
+      const audienceCheck = validateClassicAudienceUi(audience || createDefaultAudienceState());
+      if (!audienceCheck.ok) {
+        setMessageType('error');
+        setMessage(audienceCheck.message);
+        return;
+      }
+    }
+    if (step === 4) {
+      await saveLiveEdit();
+      return;
+    }
+    goToStep(step + 1);
+  };
+
   const goNext = async () => {
+    if (liveEdit) {
+      await goNextLiveEdit();
+      return;
+    }
     setMessage('');
     if (step === 0) {
       if (!String(name).trim()) {
@@ -2269,41 +2419,47 @@ export default function ClassicCreateWizard({ onTitleChange }) {
         );
         return;
       }
-      const built = enrichPlansForLaunch();
-      if (!built.length) {
-        setMessageType('error');
-        setMessage('No products to launch. Go back to Products and select at least one.');
-        return;
-      }
-      // After a launch that stopped part way, the saved copies of the plans that
-      // went live carry their test ids. Writing the freshly built plans over them
-      // dropped those ids, which hid running tests from the list.
-      const live = alreadyLaunchedPlanIds(shopDomain, built);
-      const savedById = new Map(
-        (readInboxPlans(shopDomain) || []).filter(plan => plan?.id).map(plan => [plan.id, plan])
-      );
-      const enriched = built.map(plan =>
-        live.has(plan.id) ? savedById.get(plan.id) || plan : plan
-      );
-      const merged = upsertExperimentPlansInInbox(
-        readInboxPlans(shopDomain),
-        enriched,
-        experimentId
-      );
-      writeInboxPlans(shopDomain, merged);
+      // The loader goes up before any of the work below. Building the plans and
+      // saving them used to run first, so the button sat unresponsive for
+      // seconds and invited a second click.
+      setBusy(true);
+      setLaunchPhase('launching');
+      setLaunchProgress(null);
+      setMessage('');
       try {
-        await persistInboxPlansNow(shopDomain, merged);
-      } catch (persistErr) {
-        setMessageType('warning');
-        setMessage(
-          persistErr?.message ||
-            'Could not save this test to your account. Launch will still try with this test.'
+        await new Promise(resolve => setTimeout(resolve, 0));
+        const built = enrichPlansForLaunch();
+        if (!built.length) {
+          setLaunchPhase('');
+          setMessageType('error');
+          setMessage('No products to launch. Go back to Products and select at least one.');
+          return;
+        }
+        // After a launch that stopped part way, the saved copies of the plans
+        // that went live carry their test ids. Writing the freshly built plans
+        // over them dropped those ids, which hid running tests from the list.
+        const live = alreadyLaunchedPlanIds(shopDomain, built);
+        const savedById = new Map(
+          (readInboxPlans(shopDomain) || []).filter(plan => plan?.id).map(plan => [plan.id, plan])
         );
-      }
-      try {
-        setBusy(true);
-        setLaunchPhase('launching');
-        setLaunchProgress(null);
+        const enriched = built.map(plan =>
+          live.has(plan.id) ? savedById.get(plan.id) || plan : plan
+        );
+        const merged = upsertExperimentPlansInInbox(
+          readInboxPlans(shopDomain),
+          enriched,
+          experimentId
+        );
+        writeInboxPlans(shopDomain, merged);
+        try {
+          await persistInboxPlansNow(shopDomain, merged);
+        } catch (persistErr) {
+          setMessageType('warning');
+          setMessage(
+            persistErr?.message ||
+              'Could not save this test to your account. Launch will still try with this test.'
+          );
+        }
         await launchMany(enriched, { onProgress: setLaunchProgress });
         // Stop autosave before clearing, or a debounced write still in flight
         // would put the draft straight back after the experiment went live.
@@ -2340,7 +2496,7 @@ export default function ClassicCreateWizard({ onTitleChange }) {
     }
   };
 
-  const continueLabel = step === 4 ? 'Launch test' : 'Continue';
+  const continueLabel = step === 4 ? (liveEdit ? 'Save changes' : 'Launch test') : 'Continue';
   // A reduce over at most five rows; the compiler memoizes it on its own.
   const variationsStepGate = getVariationsStepContinueState({ variations });
   const productsStepGate = useMemo(
@@ -2539,7 +2695,7 @@ export default function ClassicCreateWizard({ onTitleChange }) {
     <PageShell message={message} messageType={messageType} onCloseMessage={() => setMessage('')}>
       <ClassicWizardShell
         notice={
-          priceSurfacesMissing ? (
+          priceSurfacesMissing && !liveEdit ? (
             <Banner tone="warning">
               <span className={styles.noticeLine}>
                 No price selectors mapped.
@@ -2555,36 +2711,48 @@ export default function ClassicCreateWizard({ onTitleChange }) {
         }
         stepIndex={step}
         experimentType={experimentType}
-        onBackToList={backToList}
+        title={liveEdit && step === 0 ? 'Edit test' : undefined}
+        onBackToList={liveEdit ? backToTestDetails : backToList}
         onBack={() => goToStep(step - 1)}
         backLabel={step === 4 ? 'Back to edit' : 'Back'}
         onContinue={goNext}
         continueLabel={continueLabel}
         continueDisabled={
-          (step === 1 && variationsStepGate.disabled) ||
-          (step === 2 && productsStepGate.disabled) ||
-          (step === 4 && launchGate.disabled) ||
-          ((step === 0 || step === 3) && !shopGuardrailsReady)
+          liveEdit
+            ? (step === 0 && !String(name).trim()) || ((step === 3 || step === 4) && !shopGuardrailsReady)
+            : (step === 0 && !String(name).trim()) ||
+              (step === 1 && variationsStepGate.disabled) ||
+              (step === 2 && productsStepGate.disabled) ||
+              (step === 4 && launchGate.disabled) ||
+              ((step === 0 || step === 3) && !shopGuardrailsReady)
         }
         continueDisabledReason={
-          step === 1
-            ? variationsStepGate.hint
-            : step === 2
-              ? productsStepGate.hint
-              : step === 4
-                ? launchGate.reason
-                : (step === 0 || step === 3) && !shopGuardrailsReady
-                  ? 'Loading shop test defaults…'
-                  : ''
+          step === 0 && !String(name).trim()
+            ? 'Add a test name to continue.'
+            : liveEdit
+              ? (step === 3 || step === 4) && !shopGuardrailsReady
+                ? 'Loading shop test defaults…'
+                : ''
+              : step === 1
+                ? variationsStepGate.hint
+                : step === 2
+                  ? productsStepGate.hint
+                  : step === 4
+                    ? launchGate.reason
+                    : (step === 0 || step === 3) && !shopGuardrailsReady
+                      ? 'Loading shop test defaults…'
+                      : ''
         }
         continueDisabledPending={
-          (step === 4 && ['loading', 'checkout_loading'].includes(launchGate.code)) ||
-          ((step === 0 || step === 3) && !shopGuardrailsReady)
+          liveEdit
+            ? (step === 3 || step === 4) && !shopGuardrailsReady
+            : (step === 4 && ['loading', 'checkout_loading'].includes(launchGate.code)) ||
+              ((step === 0 || step === 3) && !shopGuardrailsReady)
         }
         continueBusy={busy || launching}
         showCancel={step === 0}
-        onCancel={backToList}
-        onSaveDraft={step === 4 ? undefined : saveDraft}
+        onCancel={liveEdit ? backToTestDetails : backToList}
+        onSaveDraft={step === 4 || liveEdit ? undefined : saveDraft}
         saveDraftLabel="Save draft"
         saveDraftBusy={savingDraft}
         saveDraftDisabled={!shopGuardrailsReady}
@@ -2608,6 +2776,7 @@ export default function ClassicCreateWizard({ onTitleChange }) {
             hypothesis={hypothesis}
             onHypothesisChange={setHypothesis}
             experimentType={experimentType}
+            typeLocked={liveEdit}
             onExperimentTypeChange={nextType => {
               const nextOffer = isOfferExperimentType(nextType);
               setExperimentType(nextType);
@@ -2638,10 +2807,19 @@ export default function ClassicCreateWizard({ onTitleChange }) {
           />
         ) : null}
 
-        {step === 1 ? (
+        {liveEdit && (step === 1 || step === 2) ? (
+          <LiveEditLockedStep
+            kind={step === 2 ? 'products' : 'variations'}
+            variations={variations}
+            plans={plans}
+            experimentType={experimentType}
+          />
+        ) : null}
+
+        {step === 1 && !liveEdit ? (
           <VariationsStepPanel
             variations={variations}
-            onChange={setVariations}
+            onChange={handleVariationsChange}
             experimentType={experimentType}
             trafficAllocation={audience?.trafficAllocation}
             onTrafficAllocationChange={next =>
@@ -2653,7 +2831,7 @@ export default function ClassicCreateWizard({ onTitleChange }) {
           />
         ) : null}
 
-        {step === 2 ? (
+        {step === 2 && !liveEdit ? (
           <ProductsPricingStepPanel
             opportunities={opportunities}
             withheldByOtherTests={withheldByOtherTests}
@@ -2768,9 +2946,20 @@ export default function ClassicCreateWizard({ onTitleChange }) {
             onChange={handleAudienceChange}
             significanceEstimate={significanceEstimate}
             disabled={!shopGuardrailsReady}
-            // Asked for on Variations, beside the split it feeds.
-            showTrafficAllocation={false}
+            // Asked for on Variations, beside the split it feeds. A live test's
+            // Variations step is locked, so its allocation is edited here.
+            showTrafficAllocation={liveEdit}
           />
+        ) : null}
+
+        {step === 4 && liveEdit ? (
+          <Banner tone="info" title="Saving does not restart the test">
+            <p>
+              {plans.some(plan => String(plan?.status || '').toLowerCase() === 'paused')
+                ? 'This test is paused, so it picks up these settings when you resume it.'
+                : 'This test is running, so it keeps its current settings for now. Changes take effect the next time you pause and resume it.'}
+            </p>
+          </Banner>
         ) : null}
 
         {step === 4 ? (
@@ -2787,9 +2976,9 @@ export default function ClassicCreateWizard({ onTitleChange }) {
             estimatedDays={estimatedDays}
             estimatedTimeDetail={significanceEstimate.detail}
             significanceEstimate={significanceEstimate}
-            checkoutReady={launchCheckoutReady}
-            checkoutLoading={checkoutLoading}
-            checkoutReadiness={checkoutReadiness}
+            checkoutReady={liveEdit || launchCheckoutReady}
+            checkoutLoading={!liveEdit && checkoutLoading}
+            checkoutReadiness={liveEdit ? null : checkoutReadiness}
             onFixSetup={openCheckoutSetup}
             onFixPriceSurfaces={openPriceSurfaceSettings}
             onRefreshCheckout={() => refreshCheckoutReadiness()}

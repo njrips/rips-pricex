@@ -22,14 +22,14 @@ export default function CreateExperiment() {
         titleBar="New test"
         meta="Plan required"
         title="Create is locked"
-        subtitle="An active Priceify plan is required to create a test."
+        subtitle="Finish setup to start a test."
         footerPrimary={{
-          label: 'View plans',
-          onClick: () => upgrade(),
-        }}
-        footerSecondary={{
           label: 'Open setup',
           onClick: () => navigate(preserveEmbeddedSearch('/app/setup')),
+        }}
+        footerSecondary={{
+          label: 'View plans',
+          onClick: () => upgrade(),
         }}
       >
         <div style={{ marginBottom: 16 }}>
@@ -44,7 +44,6 @@ export default function CreateExperiment() {
           <Button variant="plain" onClick={() => navigate(preserveEmbeddedSearch('/app'))}>
             Back to tests
           </Button>
-          <Button onClick={() => navigate(preserveEmbeddedSearch('/app/setup'))}>Open setup</Button>
         </div>
       </ClassicAdminShell>
     );

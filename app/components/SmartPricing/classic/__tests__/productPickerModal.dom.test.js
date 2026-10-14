@@ -149,7 +149,7 @@ describe('collections', () => {
     { ...CATALOG[2], collections: [], collection_ids: [] },
   ];
 
-  it('lists the collections the products are in, not the first 40 in the shop', () => {
+  it('lists every shop collection, and says why one has nothing to add', () => {
     renderPicker({
       opportunities: inCollections,
       collectionOptions: [
@@ -158,7 +158,13 @@ describe('collections', () => {
       ],
     });
     expect(document.body.textContent).toContain('Running');
-    expect(document.body.textContent).not.toContain('Empty sale');
+    const empty = Array.from(document.querySelectorAll('button')).find(node =>
+      node.textContent.trim().startsWith('Empty sale')
+    );
+    expect(empty.textContent).toContain('0/');
+    act(() => empty.click());
+    expect(rowCheckboxes()).toHaveLength(0);
+    expect(document.body.textContent).toContain('They are in other tests');
   });
 
   it('filters by real membership rather than by a name that looks alike', () => {
@@ -269,5 +275,58 @@ describe('keyboard', () => {
       );
     });
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('a catalog bigger than one page', () => {
+  const big = Array.from({ length: 120 }, (_, i) => ({
+    variant_id: `bv${i}`,
+    product_id: `bp${i}`,
+    product_title: `Board ${String(i).padStart(3, '0')}`,
+    title: `Board ${String(i).padStart(3, '0')}`,
+    sku: `B-${i}`,
+    product_type: 'Boards',
+    current_price: 100 + i,
+  }));
+  const button = label =>
+    Array.from(document.querySelectorAll('button')).find(
+      node =>
+        node.getAttribute('aria-label') === label || node.textContent.trim().startsWith(label)
+    );
+
+  it('lists every product, 50 to a page', () => {
+    renderPicker({ opportunities: big });
+    expect(rowCheckboxes()).toHaveLength(50);
+    expect(document.body.textContent).toContain('1–50 of 120');
+    act(() => button('Next page').click());
+    act(() => button('Next page').click());
+    expect(rowCheckboxes()).toHaveLength(20);
+    expect(document.body.textContent).toContain('101–120 of 120');
+    expect(document.body.textContent).not.toContain('Search above to reach');
+  });
+
+  it('selects every matching product, not just the page on screen', () => {
+    const onSelectedIdsChange = vi.fn();
+    renderPicker({ opportunities: big, onSelectedIdsChange });
+    act(() => button('Select all 120').click());
+    expect(onSelectedIdsChange.mock.calls[0][0]).toHaveLength(120);
+  });
+
+  it('says how many it will take when the matches pass the cap', () => {
+    renderPicker({ opportunities: big, maxSelection: 100 });
+    expect(button('Select first 100')).toBeTruthy();
+  });
+
+  it('offers to deselect once the cap is reached, rather than Select first again', () => {
+    const onSelectedIdsChange = vi.fn();
+    renderPicker({
+      opportunities: big,
+      maxSelection: 100,
+      selectedIds: big.slice(0, 100).map(row => row.variant_id),
+      onSelectedIdsChange,
+    });
+    expect(button('Select first 100')).toBeFalsy();
+    act(() => button('Deselect all 100').click());
+    expect(onSelectedIdsChange.mock.calls[0][0]).toEqual([]);
   });
 });

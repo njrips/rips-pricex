@@ -181,7 +181,7 @@ Valid example:
 7. sales_data "none_recorded" means demand was not measured; do not treat monthly_units 0 as proof of no demand.
 8. Low or unmeasured traffic needs a wider, more informative range. High traffic can support a narrower range. Impulse prices tolerate larger percentage moves than considered or premium prices.
 9. Respect allowed_band.direction_allowed. Weigh recommended_scenario, heuristic_direction and catalog_hint, but let measured product evidence decide.
-10. Do not use product cost or margin; those safety rules are applied by Priceify after the response.`;
+10. Do not use product cost or margin. Priceify applies the shop's max price change after the response.`;
 }
 
 module.exports = {

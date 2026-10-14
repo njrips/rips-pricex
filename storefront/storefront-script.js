@@ -2572,6 +2572,16 @@
   }
 
   function getDeviceType() {
+    const ua = String(navigator.userAgent || '').toLowerCase();
+    // iPadOS reports a desktop Mac user agent; touch support gives it away.
+    const ipadAsMac = /macintosh/.test(ua) && Number(navigator.maxTouchPoints) > 1;
+    if (
+      ipadAsMac ||
+      /ipad|tablet|playbook|silk|kindle/.test(ua) ||
+      (/android/.test(ua) && !/mobile/.test(ua))
+    ) {
+      return 'tablet';
+    }
     return window.innerWidth <= 768 ? 'mobile' : 'desktop';
   }
 

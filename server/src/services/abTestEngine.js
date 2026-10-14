@@ -961,10 +961,17 @@ class ABTestEngine {
       }
     }
 
+    // Tests launched before tablet became its own device counted tablets as
+    // mobile; they keep doing so rather than losing tablet traffic mid-test.
+    let visitorDevice = String(context.device || '').toLowerCase();
+    if (visitorDevice === 'tablet' && segments.tablet_separate !== true) {
+      visitorDevice = 'mobile';
+    }
+
     // Device rules: multiple include/exclude
     const deviceRules = segments.device_rules;
-    if (Array.isArray(deviceRules) && deviceRules.length > 0 && context.device) {
-      const dev = String(context.device).toLowerCase();
+    if (Array.isArray(deviceRules) && deviceRules.length > 0 && visitorDevice) {
+      const dev = visitorDevice;
       const excludes = deviceRules.filter(r => r.type === 'exclude' && r.value === dev);
       if (excludes.length > 0) {
         return false;
@@ -979,7 +986,7 @@ class ABTestEngine {
     } else {
       // Legacy: single device
       const device = (segments.device || 'all').toLowerCase();
-      if (device !== 'all' && context.device && context.device.toLowerCase() !== device) {
+      if (device !== 'all' && visitorDevice && visitorDevice !== device) {
         return false;
       }
     }
@@ -1593,11 +1600,11 @@ class ABTestEngine {
         url_pattern,
         min_sessions,
       } = testConfig.segments;
-      const validDevices = ['all', 'desktop', 'mobile'];
+      const validDevices = ['all', 'desktop', 'mobile', 'tablet'];
       const validCustomers = ['all', 'new', 'returning'];
 
       if (device && !validDevices.includes(String(device).toLowerCase())) {
-        errors.push('Segment device must be one of: all, desktop, mobile');
+        errors.push('Segment device must be one of: all, desktop, mobile, tablet');
       }
 
       if (customer && !validCustomers.includes(String(customer).toLowerCase())) {

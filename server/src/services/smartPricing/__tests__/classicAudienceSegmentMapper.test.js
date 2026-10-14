@@ -16,6 +16,29 @@ describe('classicAudienceSegmentMapper', () => {
     expect(segs.traffic_source_rules).toBeUndefined();
   });
 
+  it('keeps tablet as its own device and marks the segments tablet-aware', () => {
+    const tabletOnly = classicAudienceToSegments({ devices: ['Tablet'], deviceMode: 'include' });
+    expect(tabletOnly.device).toBe('tablet');
+    expect(tabletOnly.tablet_separate).toBe(true);
+
+    const phonesAndDesktops = classicAudienceToSegments({
+      devices: ['Desktop', 'Mobile'],
+      deviceMode: 'include',
+    });
+    expect(phonesAndDesktops.device).toBe('all');
+    expect(phonesAndDesktops.device_rules).toEqual([
+      { type: 'include', value: 'desktop' },
+      { type: 'include', value: 'mobile' },
+    ]);
+
+    const everything = classicAudienceToSegments({
+      devices: ['Desktop', 'Mobile', 'Tablet'],
+      deviceMode: 'include',
+    });
+    expect(everything.device).toBe('all');
+    expect(everything.device_rules).toBeUndefined();
+  });
+
   it('maps exclude sources and traffic ramp', () => {
     const segs = classicAudienceToSegments({
       segment: 'new_visitors',

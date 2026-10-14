@@ -2,7 +2,6 @@ import { formatSplitCountryAudienceLabel, resolveCountryLists } from './countryS
 import { parseMinSampleSize } from './classicAudienceEdit';
 import { formatVisitorCount } from './estimateSignificanceDuration';
 import { formatTrafficPercent } from './variationsStepHelpers';
-import { MIN_VISITORS_FOR_REVENUE_GUARDRAIL } from './revenueGuardrail';
 import {
   BUILTIN_SECONDARY_METRICS,
   classicSegmentLabel,
@@ -125,10 +124,8 @@ function guardrailOverviewText(audience) {
   }
   const thresholdRaw = String(revenueGuardrailRow?.threshold || '-10%').replace(/^-/, '');
   const thresholdPercent = thresholdRaw.replace(/%$/, '') || '10';
-  const startsAt = formatVisitorCount(
-    Math.max(MIN_VISITORS_FOR_REVENUE_GUARDRAIL, parseMinSampleSize(audience?.minSampleSize))
-  );
-  return `On · Stop testing a product if revenue per visitor for any variation drops more than ${thresholdPercent}% below the control, after ${startsAt} visitors per variation`;
+  const startsAt = formatVisitorCount(parseMinSampleSize(audience?.minSampleSize));
+  return `On · Pause this test if revenue per visitor for any variation drops more than ${thresholdPercent}% below the control, after ${startsAt} visitors per variation`;
 }
 
 /**

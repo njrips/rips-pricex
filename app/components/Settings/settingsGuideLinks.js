@@ -2,7 +2,6 @@
 export const ADMIN_DOCS_HASHES = [
   'how-settings-work',
   'max-price-change',
-  'cost-floor',
   'confidence',
   'min-sample',
   'min-conversions',

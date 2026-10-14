@@ -7,6 +7,9 @@ const { publicErrorMessage } = require('../utils/publicError');
 
 const router = express.Router();
 
+/** `all=1` stops here, at 1,000 collections, so one request cannot run away. */
+const MAX_COLLECTION_PAGES = 10;
+
 async function accessToken(req) {
   const { resolveShopifyAdminToken } = require('../utils/shopifyAdminToken');
   const session = await getShopSession(req.shopDomain).catch(() => null);
@@ -45,13 +48,32 @@ router.get(
         return res.json({ success: true, resources: products, products });
       }
       if (type === 'collection' && typeof shopifyService.listCollections === 'function') {
-        const collections = await shopifyService.listCollections(
-          req.shopDomain,
-          token,
-          search,
-          first,
-          null
-        );
+        // listCollections answers { list, pageInfo } too. Passing that object
+        // on as `resources` made the wizard's forEach throw, so the picker
+        // never saw the shop's collections at all.
+        const all = String(req.query.all || '') === '1';
+        const collections = [];
+        let after = null;
+        for (let page = 0; page < (all ? MAX_COLLECTION_PAGES : 1); page += 1) {
+          // eslint-disable-next-line no-await-in-loop -- each page needs the last cursor
+          const result = await shopifyService.listCollections(
+            req.shopDomain,
+            token,
+            search,
+            all ? 100 : first,
+            after
+          );
+          collections.push(...(Array.isArray(result) ? result : result?.list || []));
+          after = result?.pageInfo?.hasNextPage ? result.pageInfo.endCursor : null;
+          if (!after) break;
+        }
+        if (all && collections.length > 100) {
+          collections.sort((a, b) =>
+            String(a?.title || '').localeCompare(String(b?.title || ''), undefined, {
+              sensitivity: 'base',
+            })
+          );
+        }
         return res.json({ success: true, resources: collections, collections });
       }
     } catch (err) {

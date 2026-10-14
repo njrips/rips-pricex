@@ -36,6 +36,24 @@ describe('VariationsStepPanel naming', () => {
     expect(buildNextVariation(withB).name).toBe('Variation C');
   });
 
+  it('fills the gap B leaves rather than adding a second C', () => {
+    const [control, a] = createDefaultVariations();
+    const c = { id: 'var_c', letter: 'C', name: 'Variation C', role: 'Variation C', traffic: 33 };
+    const rows = [control, a, c];
+    expect(buildNextVariation(rows)).toMatchObject({ id: 'var_b', letter: 'B' });
+    expect(nextChallengerLetter([...rows, buildNextVariation(rows)])).toBe('D');
+  });
+
+  it('keeps a restored test’s own letters, so A and C stay A and C', () => {
+    const rows = variationsFromPlanArms([
+      { id: 'control', label: 'Control', allocation_percent: 34 },
+      { id: 'var_a', label: 'Variation A', allocation_percent: 33 },
+      { id: 'var_c', label: 'Variation C', allocation_percent: 33 },
+    ]);
+    expect(rows.map(row => row.letter)).toEqual([null, 'A', 'C']);
+    expect(buildNextVariation(rows).id).toBe('var_b');
+  });
+
   it('keeps letters exclusive to challenger variations when restoring a plan', () => {
     const rows = variationsFromPlanArms([
       { id: 'control', role: 'control', allocation_percent: 50 },
@@ -236,5 +254,21 @@ describe('getVariationsStepContinueState', () => {
       ],
     });
     expect(gate).toEqual({ disabled: false, reason: '', hint: '' });
+  });
+});
+
+describe('reading the letter a variation already carries', () => {
+  it('reads it from the letter, the var_x id, or a saved "Variation X" label', async () => {
+    const { variationLetterOf } = await import('../variationsStepHelpers');
+    expect(variationLetterOf({ letter: 'c' })).toBe('C');
+    expect(variationLetterOf({ id: 'var_c' })).toBe('C');
+    expect(variationLetterOf({ arm_id: 'var_d' })).toBe('D');
+    expect(variationLetterOf({ id: 'arm_2', label: 'Variation C' })).toBe('C');
+  });
+
+  it('carries none for a renamed or control arm, so callers fall back to position', async () => {
+    const { variationLetterOf } = await import('../variationsStepHelpers');
+    expect(variationLetterOf({ id: 'arm_2', label: 'Premium' })).toBe('');
+    expect(variationLetterOf({ id: 'control', label: 'Control' })).toBe('');
   });
 });

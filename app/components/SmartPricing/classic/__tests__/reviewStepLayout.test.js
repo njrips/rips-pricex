@@ -133,7 +133,7 @@ describe('section summary', () => {
           'Primary success metric: Revenue per visitor',
           'Confidence level: 90%',
           'Minimum visitors per variation: 5,000',
-          'Revenue guardrail: On · Stop testing a product if revenue per visitor for any variation drops more than 10% below the control, after 5,000 visitors per variation',
+          'Revenue guardrail: On · Pause this test if revenue per visitor for any variation drops more than 10% below the control, after 5,000 visitors per variation',
         ],
       },
     ]);

@@ -95,7 +95,7 @@ describe('buildReviewSections', () => {
       'Primary success metric: Revenue per visitor',
       'Confidence level: 90%',
       'Minimum visitors per variation: 5,000',
-      'Revenue guardrail: On · Stop testing a product if revenue per visitor for any variation drops more than 10% below the control, after 5,000 visitors per variation',
+      'Revenue guardrail: On · Pause this test if revenue per visitor for any variation drops more than 10% below the control, after 5,000 visitors per variation',
     ]);
   });
 
@@ -139,12 +139,12 @@ describe('buildReviewSections', () => {
     expect(metrics['Revenue guardrail']).toBe('Off');
   });
 
-  it('starts the guardrail at its own floor when the minimum is lower, and at the minimum when higher', () => {
+  it('starts the guardrail at the test minimum visitors, low or high', () => {
     const low = bySection({
       audience: { minSampleSize: '1000', guardrails: [{ id: 'revenue', on: true, threshold: '-15%' }] },
     });
     expect(low.metrics['Minimum visitors per variation']).toBe('1,000');
-    expect(low.metrics['Revenue guardrail']).toMatch(/more than 15% below the control, after 5,000 visitors per variation$/);
+    expect(low.metrics['Revenue guardrail']).toMatch(/more than 15% below the control, after 1,000 visitors per variation$/);
 
     const high = bySection({ audience: { minSampleSize: '8000' } });
     expect(high.metrics['Revenue guardrail']).toMatch(/after 8,000 visitors per variation$/);

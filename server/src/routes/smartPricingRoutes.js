@@ -1127,6 +1127,41 @@ router.post(
   })
 );
 
+/** Monthly visitor counts, per shop and month, so the list card stays cheap. */
+const MONTH_VISITORS_TTL_MS = 10 * 60 * 1000;
+const MONTH_VISITORS_MAX_ENTRIES = 500;
+const monthVisitorsCache = new Map();
+
+/**
+ * Visitors who entered any test since the start of the merchant's month.
+ *
+ * The shop's timezone is not stored, so the client sends its own local month
+ * start. Anything not within the last 32 days is refused rather than letting
+ * the card count an arbitrary window.
+ */
+router.get(
+  '/visitors/month',
+  asyncHandler(async (req, res) => {
+    const since = new Date(String(req.query.since || ''));
+    const ageMs = Date.now() - since.getTime();
+    if (Number.isNaN(since.getTime()) || ageMs < -24 * 3600 * 1000 || ageMs > 32 * 86400 * 1000) {
+      return sendValidationError(res, ['since must be the start of the current month.']);
+    }
+    const key = `${req.shopDomain}|${since.toISOString()}`;
+    const cached = monthVisitorsCache.get(key);
+    if (cached && Date.now() - cached.at < MONTH_VISITORS_TTL_MS) {
+      return sendSuccess(res, HTTP_STATUS.OK, { visitors: cached.visitors, since: since.toISOString() });
+    }
+    const { getShopVisitorsSince } = require('../models/analytics');
+    const visitors = await getShopVisitorsSince(req.shopDomain, since);
+    if (monthVisitorsCache.size >= MONTH_VISITORS_MAX_ENTRIES) {
+      monthVisitorsCache.delete(monthVisitorsCache.keys().next().value);
+    }
+    monthVisitorsCache.set(key, { visitors, at: Date.now() });
+    return sendSuccess(res, HTTP_STATUS.OK, { visitors, since: since.toISOString() });
+  })
+);
+
 router.get(
   '/tests/:testId/analytics',
   asyncHandler(async (req, res) => {

@@ -75,7 +75,8 @@ function mapSettingsStatusLabel(testStatus) {
     .toLowerCase();
   if (key === 'running') return 'Active';
   if (key === 'paused' || key === 'stopped') return key === 'paused' ? 'Paused' : 'Stopped';
-  if (key === 'draft' || key === 'queued') return titleCase(key);
+  // `queued` is only the stored default for a plan that has not launched.
+  if (key === 'draft' || key === 'queued') return 'Draft';
   return formatRunningTestStatusLabel({
     isRunning: key === 'running',
     isPaused: key === 'paused',
@@ -94,6 +95,7 @@ export default function ClassicSettingsTab({
   onAdjustTraffic = null,
   onViewHistory = null,
   onViewTestsList = null,
+  lockedNote = '',
 }) {
   const [technicalOpen, setTechnicalOpen] = useState(false);
 
@@ -116,7 +118,6 @@ export default function ClassicSettingsTab({
       ? formatAudienceFactValue([audience.trafficSource], 'All sources')
       : 'All sources';
   const minSample = audience?.minSampleSize || metrics?.minSampleSize || null;
-  const cogs = metrics?.cogs || null;
   const shopNotes = Array.isArray(settings.guardrailNotes) ? settings.guardrailNotes : [];
 
   const collectionPlan =
@@ -158,6 +159,7 @@ export default function ClassicSettingsTab({
 
   return (
     <div className={styles.detailStack}>
+      {lockedNote ? <p className={styles.help}>{lockedNote}</p> : null}
       <div className={styles.statCard}>
         <h3 className={styles.panelTitle}>Status & traffic</h3>
         <div className={styles.settingsRows}>
@@ -237,6 +239,9 @@ export default function ClassicSettingsTab({
           <SettingRow
             label="Secondary metrics"
             multilineValue
+            action={onChangeMetric ? 'Edit metrics' : null}
+            actionLabel="Edit secondary metrics"
+            onAction={onChangeMetric}
             value={
               secondaryItems.length ? (
                 <div className={styles.detailChipRow}>
@@ -292,17 +297,16 @@ export default function ClassicSettingsTab({
               {on ? (
                 <div className={styles.guardrailRule}>
                   <span>
-                    Stops testing a product if revenue per visitor for any of its variations
-                    drops more than
+                    Pause this test if revenue per visitor for any variation drops more than
                   </span>
                   <span className={styles.guardrailRuleValue}>
                     {String(row.threshold || '').replace(/^-/, '') || '—'}
                   </span>
                   <span>
-                    below that product&rsquo;s control, after each variation has about{' '}
-                    {MIN_VISITORS_FOR_REVENUE_GUARDRAIL.toLocaleString()} visitors and at least{' '}
-                    {MIN_CONVERSIONS_FOR_REVENUE_GUARDRAIL} conversions. The other products keep
-                    running.
+                    below the control, after{' '}
+                    {Number(minSample || MIN_VISITORS_FOR_REVENUE_GUARDRAIL).toLocaleString()}{' '}
+                    visitors per variation and at least {MIN_CONVERSIONS_FOR_REVENUE_GUARDRAIL}{' '}
+                    control conversions.
                   </span>
                 </div>
               ) : (
@@ -386,30 +390,6 @@ export default function ClassicSettingsTab({
                 {trafficEvidence ? (
                   <SettingRow label="Traffic evidence" value={trafficEvidence} />
                 ) : null}
-              </div>
-            </div>
-          ) : null}
-
-          {cogs ? (
-            <div className={styles.settingsDisclosureGroup}>
-              <div className={styles.sectionLabel}>Cost of goods</div>
-              <div className={styles.settingsRows}>
-                <SettingRow
-                  label="Margin estimates"
-                  value={cogs.enabled === false ? 'Off' : 'On'}
-                  // Cost of goods sets the margin floor a test price may not
-                  // cross. It does not affect the reported result, which is
-                  // revenue per visitor.
-                  note={
-                    cogs.enabled === false
-                      ? 'Margin floors are not applied to this test’s prices.'
-                      : cogs.value === null || cogs.value === undefined
-                        ? 'Costs read from Shopify where available. Used for margin floors, not for results.'
-                        : `Using ${
-                            cogs.type === 'percentage' ? `${cogs.value}% of price` : cogs.value
-                          } where Shopify has no cost. Used for margin floors, not for results.`
-                  }
-                />
               </div>
             </div>
           ) : null}

@@ -68,7 +68,7 @@ import {
   stopPausedTestsBeforeArchive,
   withUnlistedExperimentTests,
 } from './classicExperimentTestScope';
-import { archiveActivityDetail, buildClassicExperimentEditTarget, buildClassicWizardResumePath, canDeleteClassicExperimentNow, isClassicDraftExperiment, restoreActivityDetail, classicBatchOutcomeMessage, CLASSIC_STOPPED_PLAN_STATUS, getClassicExperimentResumeId, isClassicExperimentEnded, isSettledClassicPlan, resolveClassicDetailsTab, resolveClassicEditFocus } from './classicExperimentListActions';
+import { archiveActivityDetail, buildClassicExperimentEditTarget, buildClassicLiveEditPath, buildClassicWizardResumePath, canDeleteClassicExperimentNow, isClassicDraftExperiment, restoreActivityDetail, classicBatchOutcomeMessage, CLASSIC_STOPPED_PLAN_STATUS, getClassicExperimentResumeId, isClassicExperimentEnded, isSettledClassicPlan, resolveClassicDetailsTab, resolveClassicEditFocus } from './classicExperimentListActions';
 import { isOfferExperimentType } from './offerSelection';
 import {
   applyPausedSmartPricingSettings,
@@ -223,6 +223,7 @@ export default function ClassicExperimentOverview() {
 
   const canEditSetup =
     !isArchived && canEditClassicTestSetup(experimentForEditGating || {});
+  const settingsEditable = canEditSetup && (isRunning || isPaused);
 
   const selectTab = nextTab => {
     const resolved = resolveClassicDetailsTab(nextTab);
@@ -1075,7 +1076,11 @@ export default function ClassicExperimentOverview() {
               <>
                 {canEditSetup && (isRunning || isPaused) ? (
                   <Button
-                    onClick={() => openAudienceMetricsEditor('audience')}
+                    onClick={() =>
+                      linkedTestIds.length && resumeId
+                        ? navigate(buildClassicLiveEditPath(resumeId))
+                        : openAudienceMetricsEditor('audience')
+                    }
                     disabled={Boolean(busyAction)}
                   >
                     Edit test
@@ -1287,10 +1292,17 @@ export default function ClassicExperimentOverview() {
               settings={settings}
               audience={audience}
               metrics={metrics}
-              onEditMetrics={() => openAudienceMetricsEditor('guardrail')}
-              onEditAudience={() => openAudienceMetricsEditor('audience')}
-              onChangeMetric={() => openAudienceMetricsEditor('metrics')}
-              onAdjustTraffic={() => openAudienceMetricsEditor('traffic')}
+              // Settings lock once every variation has its minimum visitors,
+              // and for good once the test has ended.
+              onEditMetrics={settingsEditable ? () => openAudienceMetricsEditor('guardrail') : null}
+              onEditAudience={settingsEditable ? () => openAudienceMetricsEditor('audience') : null}
+              onChangeMetric={settingsEditable ? () => openAudienceMetricsEditor('metrics') : null}
+              onAdjustTraffic={settingsEditable ? () => openAudienceMetricsEditor('traffic') : null}
+              lockedNote={
+                (isRunning || isPaused) && !canEditSetup
+                  ? 'After the minimum visitors per variation is reached, you can pause variations but not edit test settings.'
+                  : ''
+              }
               onViewHistory={() => selectTab('History')}
               onViewTestsList={() => navigate(ROUTES.appSmartPricing(shopDomain))}
             />

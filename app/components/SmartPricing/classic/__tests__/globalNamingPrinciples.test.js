@@ -61,8 +61,10 @@ describe('global naming principles (PDF spot checks)', () => {
     const dashboard = read('../../../routes/app._index.tsx');
     const create = read('../../../routes/app.experiments.new.tsx');
     const overview = read('ClassicExperimentOverview.jsx');
-    expect(dashboard).toContain('An active Priceify plan is required to create a test.');
-    expect(create).toContain('An active Priceify plan is required to create a test.');
+    expect(dashboard).toContain('Finish setup to start your first test.');
+    expect(dashboard).toMatch(/action=\{\{ content: 'Open setup'[\s\S]*secondaryAction=\{\{ content: 'View plans'/);
+    expect(create).toContain('Finish setup to start a test.');
+    expect(create).toContain('Active plan required');
     expect(overview).toContain('?tab=archived');
     expect(overview).not.toContain('?tab=finished');
   });
@@ -147,7 +149,7 @@ describe('global naming principles (PDF spot checks)', () => {
     expect(wizard).toContain("backLabel={step === 4 ? 'Back to edit' : 'Back'}");
     expect(wizard).toContain("'Launch test'");
     const audience = read('AudienceSuccessStepPanel.jsx');
-    expect(audience).toContain('MIN_VISITORS_FOR_REVENUE_GUARDRAIL');
+    expect(audience).not.toContain('MIN_VISITORS_FOR_REVENUE_GUARDRAIL');
     expect(audience).toContain('after the minimum visitors per variation is reached.');
     expect(audience).toMatch(/This is a safety net/i);
     expect(audience).toMatch(/doesn(&rsquo;|’|')t declare a winner/i);
@@ -208,7 +210,7 @@ describe('global naming principles (PDF spot checks)', () => {
     expect(perf).toContain('formatApplyAllReadyLabel');
     expect(perf).toContain('Product performance by variation');
     expect(perf).toMatch(/overviewMode \? null : \(\s*<ClassicRolloutReadinessPanel/s);
-    expect(perf).toMatch(/\{showGuardrailStop \? \(\s*<Banner tone="warning" title="Stopped by guardrail">/);
+    expect(perf).toMatch(/\{showGuardrailStop \? \(\s*<Banner tone="warning" title="Guardrail paused test">/);
     const rolloutPanel = read('details/ClassicRolloutReadinessPanel.jsx');
     expect(rolloutPanel).toContain('Ready to apply winners');
     expect(rolloutPanel).not.toMatch(/Rollout readiness/);
@@ -243,6 +245,7 @@ describe('global naming principles (PDF spot checks)', () => {
     const events = read('productActionAvailability.js');
     expect(events).toContain('Winner applied to catalog');
     expect(events).toContain('Stopped by guardrail');
+    expect(events).toContain('Guardrail paused test');
   });
 
   it('uses Results settings field labels from the spec', () => {
@@ -251,7 +254,7 @@ describe('global naming principles (PDF spot checks)', () => {
     expect(panel).toContain('Minimum visitors per variation');
     expect(settingsPage).toContain('Save results settings');
     expect(settingsPage).toContain('These settings apply to every new test you launch.');
-    expect(panel).toContain('When Priceify can call a winner.');
+    expect(panel).toContain('Control how strict Priceify should be before calling a winner');
     expect(panel).toMatch(/80% \(faster, less strict\)/);
     expect(panel).toContain('Both apply to new tests from now on.');
     expect(panel.replace(/\s+/g, ' ')).toContain('when Priceify may call a winner');

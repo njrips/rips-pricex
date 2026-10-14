@@ -243,7 +243,11 @@ async function withholdEnrolledProducts(shopDomain, opportunities = []) {
   }
   let enrollment = null;
   try {
-    enrollment = await getPriceTestEnrollment(shopDomain);
+    // One retry: failing open lists products other tests hold, so a single
+    // busy-pool timeout should not be enough to do it.
+    enrollment = await getPriceTestEnrollment(shopDomain).catch(() =>
+      getPriceTestEnrollment(shopDomain)
+    );
   } catch (err) {
     // Failing open here shows a product that may already be under test, and
     // the launch guard will refuse it. Failing closed would empty the catalog
