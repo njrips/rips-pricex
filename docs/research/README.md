@@ -48,6 +48,8 @@ When starting a new investigation in this project:
 | 2026-08-18 | [2026-08-18_OFFER_TEST.md](./2026-08-18_OFFER_TEST.md) | Done | Classic Offer Test: 5-step wizard, checkout Discount Function, automatic discount, scope sync |
 | 2026-08-18 | [2026-08-18_REVENUE_GUARDRAIL.md](./2026-08-18_REVENUE_GUARDRAIL.md) | Done | Always-on max revenue drop %; runtime pause vs control RPV |
 | 2026-09-03 | [2026-09-03_CHECKOUT_PRICE_AUTHORITY.md](./2026-09-03_CHECKOUT_PRICE_AUTHORITY.md) | Plan | Move applied price off shopper-settable cart attributes onto function metafields |
+| 2026-10-15 | [2026-10-15_AI_PRICING_SIGNALS_AND_WEIGHTS.md](./2026-10-15_AI_PRICING_SIGNALS_AND_WEIGHTS.md) | Awaiting client | Shopify variable lists, weighted-signal scoring plan, ShopifyQL / Level 2 data needs |
+| 2026-10-15 | [2026-10-15_STEP3_CATALOG_LOADING.md](./2026-10-15_STEP3_CATALOG_LOADING.md) | Phase 1 done; 2–3 proposed | Where step 3's catalog wait goes, AI ranking off the critical path, progress and large-catalog options |
 
 ## Quick facts
 

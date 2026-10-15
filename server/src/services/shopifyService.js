@@ -694,6 +694,8 @@ class ShopifyService {
       variantsFirst = 100,
       productQuery = 'status:active',
       includeUnitCost = true,
+      // Called with the running product count after each page.
+      onPage = null,
     } = {}
   ) {
     const buildQuery = withUnitCost => `
@@ -826,6 +828,13 @@ class ShopifyService {
             })),
           });
         });
+        if (typeof onPage === 'function') {
+          try {
+            onPage(rows.length);
+          } catch {
+            // Progress is a courtesy; it must never stop the load.
+          }
+        }
         const hasNextPage = connection?.pageInfo?.hasNextPage === true;
         if (!hasNextPage) {
           break;
@@ -861,6 +870,32 @@ class ShopifyService {
         shopDomain,
       });
       return fetchPage(false);
+    }
+  }
+
+  /**
+   * How many products a catalog query matches, so a load can say how much is
+   * left. `null` when Shopify will not say; the load goes ahead regardless.
+   */
+  async countSmartPricingCatalogProducts(shopDomain, accessToken, { productQuery = 'status:active' } = {}) {
+    try {
+      const session = this.getSession(shopDomain, accessToken);
+      const client = new this.api.clients.Graphql({ session });
+      const response = await client.request(
+        `query smartPricingCatalogCount($productQuery: String) {
+          productsCount(query: $productQuery) {
+            count
+            precision
+          }
+        }`,
+        { variables: { productQuery: productQuery || 'status:active' } }
+      );
+      const count = Number(response.data?.productsCount?.count);
+      if (!Number.isFinite(count) || count < 0) return null;
+      return { count, exact: response.data?.productsCount?.precision === 'EXACT' };
+    } catch (error) {
+      logger.warn('Smart pricing catalog count unavailable', { error: error.message, shopDomain });
+      return null;
     }
   }
 

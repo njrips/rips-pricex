@@ -273,7 +273,8 @@ describe('ClassicCreateWizard AI suggest', () => {
     // Spread across both so A keeps its slot, returned for A only.
     expect(body.arms.map(a => a.id)).toEqual(['var_a', 'var_b']);
     expect(body.target_arm_ids).toEqual(['var_a']);
-    expect(body.regenerate).toBe(false);
+    expect(body).not.toHaveProperty('regenerate');
+    expect(body).not.toHaveProperty('attempt');
   });
 
   it('falls back locally when the draft saved numeric ids but the catalog uses GIDs', async () => {

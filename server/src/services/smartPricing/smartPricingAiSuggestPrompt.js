@@ -19,31 +19,35 @@ const PRICE_SUGGEST_RESPONSE_SCHEMA = {
   additionalProperties: false,
   required: ['summary', 'bands'],
   properties: {
-    summary: { type: 'string', maxLength: 200 },
+    summary: {
+      type: 'string',
+      maxLength: 200,
+      description: 'One-line overview for the merchant, under 200 characters, no URLs.',
+    },
     bands: {
       type: 'array',
       items: {
         type: 'object',
         additionalProperties: false,
         required: [
-          'v',
-          'direction',
-          'lo',
-          'hi',
-          'best',
-          'confidence',
+          'product_index',
           'market_benchmarks',
           'rationale',
+          'direction',
+          'min_change_percent',
+          'max_change_percent',
+          'best_change_percent',
+          'confidence',
         ],
         properties: {
-          v: { type: 'integer', minimum: 0 },
-          direction: { type: 'string', enum: ['rise', 'cut', 'either', 'hold'] },
-          lo: { type: 'number' },
-          hi: { type: 'number' },
-          best: { type: 'number' },
-          confidence: { type: 'string', enum: ['low', 'medium', 'high'] },
+          product_index: {
+            type: 'integer',
+            minimum: 0,
+            description: 'product_index of the input product this row is for.',
+          },
           market_benchmarks: {
             type: 'object',
+            description: 'Market read in the product currency; null where unknown.',
             additionalProperties: false,
             required: [
               'market_low_price',
@@ -83,7 +87,29 @@ const PRICE_SUGGEST_RESPONSE_SCHEMA = {
               },
             },
           },
-          rationale: { type: 'string', maxLength: 150 },
+          rationale: {
+            type: 'string',
+            maxLength: 150,
+            description: 'Evidence for the range, under 150 characters, no URLs.',
+          },
+          direction: {
+            type: 'string',
+            enum: ['rise', 'cut', 'either', 'hold'],
+            description: 'Side of the current price the range covers.',
+          },
+          min_change_percent: {
+            type: 'number',
+            description: 'Lower end of the test range, % change from the current price.',
+          },
+          max_change_percent: {
+            type: 'number',
+            description: 'Upper end of the test range, % change from the current price.',
+          },
+          best_change_percent: {
+            type: 'number',
+            description: 'Expected best % change from the current price, within the range.',
+          },
+          confidence: { type: 'string', enum: ['low', 'medium', 'high'] },
         },
       },
     },
@@ -103,10 +129,11 @@ function buildPriceSuggestionSystemPrompt({
 } = {}) {
   const spacingInstruction =
     Number(variationCount) > 1
-      ? `Ensure hi - lo is at least ${minBandWidth}%. Priceify spreads the ${variationCount} test prices across lo..hi, at least about ${minGapHint}% apart, and keeps every one at least ${minControlGap}% away from 0 (the current price). A band that crosses 0 loses the stretch within ${minControlGap}% of 0, so either keep it on one side or give it room on both.`
-      : `Ensure hi - lo is at least ${minBandWidth}%. There is one test price and it is placed at best, so keep best at least ${minControlGap}% away from 0 (the current price) on the side you chose; any closer and the test cannot distinguish it from the current price.`;
+      ? `Make max_change_percent at least ${minBandWidth} points above min_change_percent. Priceify spreads the ${variationCount} test prices across that range, at least about ${minGapHint}% apart, and keeps every one at least ${minControlGap}% away from 0 (the current price). A range that crosses 0 loses the stretch within ${minControlGap}% of 0, so either keep it on one side or give it room on both.`
+      : `Make max_change_percent at least ${minBandWidth} points above min_change_percent. There is one test price and it is placed at best_change_percent, so keep best_change_percent at least ${minControlGap}% away from 0 (the current price) on the side you chose; any closer and the test cannot distinguish it from the current price.`;
+  const percentStep = Number(max) - Number(min) >= 10 ? 2.5 : 1;
   const marketInstruction = withWebSearch
-    ? 'Search the live web for comparable products using the product title and core specifications. Ground the benchmark in current shopping results and relevant specialist or major retailers.'
+    ? 'Search the live web for comparable products using the product title and core specifications. Ground the benchmark in current shopping results and relevant specialist or major retailers. When shop_country is given, prefer retailers that sell in that country, and convert any price in another currency before comparing.'
     : 'Live web search is disabled. Use the supplied product data and cautious category knowledge. Lower confidence when the current market cannot be established, and do not claim that a benchmark is live.';
 
   return `You are a Lead Pricing Scientist and E-Commerce Strategist specializing in Shopify price elasticity testing.
@@ -119,13 +146,21 @@ Your goal is to propose one realistic A/B price-test range per product for the s
 - Sales history, live RPV, traffic and performance signals
 - Inventory level when tracked
 
+Field values:
+- An image is sent only when has_image is true, labelled with its product_index.
+- monthly_units counts the last 30 days. sales_data is "measured" or "none_recorded". revenue_signal is none_recorded, low, medium or high.
+- visitors_30d, daily_visitors, units_per_100_visitors and rpv_30d (revenue per visitor over 30 days) are null when not measured. traffic_tier is unmeasured, very_low, low, medium or high.
+- price_tier is impulse, standard, considered or premium: how large a move shoppers are used to.
+- Priceify's own reads, as hints only: opportunity_score (0 to 1), recommended_scenario (conservative, recommended or aggressive), heuristic_direction (rise_candidate, cut_candidate or explore) and catalog_hint.
+- variant_count appears when the product has several variants.
+
 ### REASONING PROCESS
 Perform the analysis internally in this order. Do not output private chain-of-thought.
 
 1. VISUAL & PERCEIVED VALUE ASSESSMENT
    - Evaluate aesthetic quality, packaging, photography, branding, build quality and finish from supplied evidence only.
    - Identify core USPs: materials, design, utility and target market.
-   - Classify perceived positioning as budget, mid-market or premium.
+   - Classify the perceived tier as budget, mid_market or premium.
 
 2. COMPETITOR LANDSCAPE & BENCHMARKING
    - ${marketInstruction}
@@ -141,8 +176,15 @@ Perform the analysis internally in this order. Do not output private chain-of-th
    - When measured sales and live RPV exist, weigh them more heavily than a market estimate.
 
 4. PRICE ELASTICITY & BAND CALCULATION
-   - Calculate lo, hi and the expected best percentage change.
-   - Keep lo, hi and best inside [${min}%, ${max}%].
+   - Calculate the test range (min_change_percent to max_change_percent) and best_change_percent, the change you expect to win. All three are percent changes from the current price.
+   - Keep all three inside [${min}%, ${max}%].
+   - Place the range from the evidence, so the same evidence always gives the same range:
+     - Demand: units_per_100_visitors below 1 is weak, 1 to 3 is typical, above 3 is strong. Without it, use sales_data, revenue_signal and traffic_tier.
+     - Strong demand at or below the market average: rise, in the upper part of the allowed range.
+     - Weak demand above the market average: cut, below 0, when the allowed range has room there.
+     - Weak demand at or below the market low: price is not the likely problem, so keep the move modest and lower confidence.
+     - Typical, mixed or missing evidence: a moderate range near the middle of what is allowed, and lower confidence.
+   - Use multiples of ${percentStep} for all three percentages.
    - ${spacingInstruction}
 
 ### OUTPUT CONTRACT
@@ -153,12 +195,7 @@ Valid example:
   "summary": "Test a measured rise where the product appears underpriced.",
   "bands": [
     {
-      "v": 0,
-      "direction": "rise",
-      "lo": 8,
-      "hi": 18,
-      "best": 14,
-      "confidence": "medium",
+      "product_index": 0,
       "market_benchmarks": {
         "market_low_price": 30,
         "market_avg_price": 45,
@@ -166,20 +203,25 @@ Valid example:
         "positioning": "underpriced_relative_to_market",
         "perceived_tier": "premium"
       },
-      "rationale": "Steady sales and a below-market price support testing a measured rise."
+      "rationale": "Steady sales and a below-market price support testing a measured rise.",
+      "direction": "rise",
+      "min_change_percent": 7.5,
+      "max_change_percent": 17.5,
+      "best_change_percent": 12.5,
+      "confidence": "medium"
     }
   ]
 }
 
 ### EXECUTION RULES
-1. "v" is the product index. Output every product exactly once.
-2. Positive numbers raise price; negative numbers lower price.
-3. direction must be rise, cut, either or hold. confidence must be low, medium or high.
-4. lo must be lower than hi, and best must be between lo and hi.
-5. Keep the rationale concise, evidence-based and merchant-friendly.
+1. Copy each product's product_index into its row. Output every product exactly once.
+2. Positive percentages raise the price; negative percentages lower it.
+3. direction describes the range: rise when it is all above 0, cut when it is all below 0, either when it spans 0, and hold when the evidence favours no move and the range only probes both sides of today's price. confidence must be low, medium or high.
+4. min_change_percent must be lower than max_change_percent, and best_change_percent must be between them.
+5. Keep the rationale to one or two short sentences, under 150 characters, evidence-based and merchant-friendly. Keep the summary under 200 characters. Never put URLs, links or citations in the summary or rationale.
 6. When sales data is absent or minimal, rely more on market evidence and perceived value, and lower confidence.
 7. sales_data "none_recorded" means demand was not measured; do not treat monthly_units 0 as proof of no demand.
-8. Low or unmeasured traffic needs a wider, more informative range. High traffic can support a narrower range. Impulse prices tolerate larger percentage moves than considered or premium prices.
+8. Low or unmeasured traffic needs a wider, more informative range. High traffic can support a narrower range. An impulse price_tier tolerates larger percentage moves than a considered or premium one.
 9. Respect allowed_band.direction_allowed. Weigh recommended_scenario, heuristic_direction and catalog_hint, but let measured product evidence decide.
 10. Do not use product cost or margin. Priceify applies the shop's max price change after the response.`;
 }

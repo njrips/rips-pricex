@@ -81,8 +81,8 @@ describe('the ranking request', () => {
   it('addresses candidates by position rather than by Shopify id', () => {
     const payload = buildCompactCandidatePayload(rows);
 
-    expect(payload[0].v).toBe(0);
-    expect(payload[7].v).toBe(7);
+    expect(payload[0].candidate_index).toBe(0);
+    expect(payload[7].candidate_index).toBe(7);
     expect(JSON.stringify(payload)).not.toContain('gid://shopify');
   });
 
@@ -180,6 +180,24 @@ describe('resolving a ranking reply onto real products', () => {
     expect(resolved.items[0].recommended).toBe(true);
     expect(resolved.items[0].priority_rank).toBe(1);
     expect(resolved.items[0].ai_reason).toContain('Steady traffic');
+  });
+
+  it('reads the spelled-out reply keys the same as the earlier short ones', () => {
+    const named = resolveRankingItems(
+      {
+        items: [
+          { candidate_index: 1, reason: 'Steady traffic.', rank: 1, recommended: true },
+        ],
+      },
+      rows
+    );
+    const short = resolveRankingItems(
+      { items: [{ v: 1, rank: 1, pick: true, why: 'Steady traffic.' }] },
+      rows
+    );
+
+    expect(named).toEqual(short);
+    expect(named.items[0].recommended).toBe(true);
   });
 
   it('discards a position that was never sent', () => {
@@ -346,6 +364,75 @@ describe('enriching an opportunity list', () => {
     expect(writes).toHaveLength(0);
   });
 
+  describe('in the background', () => {
+    // The call takes ~15s, which was most of step 3's load time.
+    it('answers without waiting, and ranks once for next time', async () => {
+      const service = load();
+      let finish;
+      chatJsonMock.mockReturnValue(
+        new Promise(resolve => {
+          finish = resolve;
+        })
+      );
+      const args = {
+        shopDomain: 'demo.myshopify.com',
+        opportunities,
+        forceRefresh: true,
+        background: true,
+      };
+
+      const first = await service.enrichOpportunitiesWithAiRanking(args);
+      const second = await service.enrichOpportunitiesWithAiRanking(args);
+
+      expect(first.ai_source).toBe('pending');
+      expect(first.opportunities).toEqual(opportunities);
+      expect(second.ai_source).toBe('pending');
+      expect(chatJsonMock).toHaveBeenCalledTimes(1);
+
+      finish({ summary: 'Start with the tee.', items: [{ v: 1, rank: 1, pick: true, why: 'Steady.' }] });
+      await new Promise(resolve => setImmediate(resolve));
+      expect(writes.length).toBe(1);
+    });
+
+    it('uses a cached ranking even when the catalog is being rebuilt', async () => {
+      const service = load();
+      cachedRow = {
+        value: JSON.stringify({
+          generated_at: new Date().toISOString(),
+          summary: 'Cached.',
+          items: [
+            { variant_id: 'gid://shopify/ProductVariant/2', recommended: true, priority_rank: 1, ai_reason: 'Cached why.' },
+          ],
+        }),
+        updated_at: new Date().toISOString(),
+      };
+
+      const result = await service.enrichOpportunitiesWithAiRanking({
+        shopDomain: 'demo.myshopify.com',
+        opportunities,
+        forceRefresh: true,
+        background: true,
+      });
+
+      expect(result.ai_source).toBe('cache');
+      expect(result.opportunities[0].ai_reason).toBe('Cached why.');
+      expect(chatJsonMock).not.toHaveBeenCalled();
+    });
+
+    it('swallows a failed background call', async () => {
+      const service = load();
+      chatJsonMock.mockRejectedValue(new Error('timeout'));
+      const result = await service.enrichOpportunitiesWithAiRanking({
+        shopDomain: 'demo.myshopify.com',
+        opportunities,
+        background: true,
+      });
+      await new Promise(resolve => setImmediate(resolve));
+      expect(result.ai_source).toBe('pending');
+      expect(writes).toHaveLength(0);
+    });
+  });
+
   describe('the system prompt', () => {
     async function promptFor(guardrails = {}) {
       const service = load();
@@ -386,10 +473,10 @@ describe('enriching an opportunity list', () => {
       expect(request.responseSchemaName).toBe('product_ranking');
       expect(request.responseSchema.additionalProperties).toBe(false);
       expect(request.responseSchema.properties.items.items.required).toEqual([
-        'v',
+        'candidate_index',
+        'reason',
         'rank',
-        'pick',
-        'why',
+        'recommended',
       ]);
     });
 

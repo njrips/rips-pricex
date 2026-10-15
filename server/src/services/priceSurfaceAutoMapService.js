@@ -423,7 +423,7 @@ function formatCentsForPrompt(cents) {
  * a candidate index (or -1 for "none of these is right"), and never writes CSS.
  * @returns {Promise<Record<string, { index: number, rationale: string }>>}
  */
-async function maybeRankAllSurfacesWithOpenAi({ themeName, surfaceBuckets }) {
+async function maybeRankAllSurfacesWithOpenAi({ themeName, surfaceBuckets, shopDomain = null }) {
   if (!hasOpenAiKey() || !Array.isArray(surfaceBuckets) || !surfaceBuckets.length) {
     return {};
   }
@@ -466,9 +466,12 @@ async function maybeRankAllSurfacesWithOpenAi({ themeName, surfaceBuckets }) {
     ].join(' '),
     userPrompt: JSON.stringify({ theme: themeName || null, slots: compactBuckets }),
     temperature: 0,
+    // An index pick under an 8 second limit: thinking would only cost time.
+    reasoningEffort: 'none',
     maxTokens: 900,
     timeoutMs: 8000,
     label: 'price_surface_auto_map',
+    shopDomain,
   });
   if (!parsed || typeof parsed !== 'object') {
     return {};
@@ -795,6 +798,7 @@ async function autoMapShopPriceSurfaces(shopDomain, options = {}) {
 
   const aiPicks = await maybeRankAllSurfacesWithOpenAi({
     themeName: suggestion.theme?.name,
+    shopDomain,
     // A price-verified top pick or a single candidate leaves the model nothing
     // to decide, so those slots skip the call (and its latency and cost).
     surfaceBuckets: surfaceBuckets

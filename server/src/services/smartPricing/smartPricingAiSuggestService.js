@@ -14,7 +14,11 @@ const {
 } = require('./smartPricingAiSuggestPrompt');
 const { buildGuardrailBand, roundPrice, clampPrice } = require('./priceBandService');
 const { resolveAiPriceLiftBand } = require('./aiPriceLiftBand');
-const { snapProductArmPrices, priceWindowForSnap } = require('./charmPriceRounding');
+const {
+  snapProductArmPrices,
+  snapToCharmPrice,
+  priceWindowForSnap,
+} = require('./charmPriceRounding');
 const {
   MIN_CONTROL_GAP_PERCENT,
   computeMinDetectableBandWidth,
@@ -26,6 +30,7 @@ const {
   resolveArmPositionWithSkuSignals,
   mergeModelBandWithHeuristics,
   sanitizeModelRationale,
+  cleanModelText,
   sanitizeModelDirection,
   sanitizeModelConfidence,
 } = require('./smartPricingAiSuggestFeatures');
@@ -101,6 +106,25 @@ async function loadContextWithinBudget(loadProductContext, groups) {
   }
 }
 
+/** The shop's country and timezone, or null when unknown or slower than the budget. */
+async function loadShopMarketWithinBudget(loadShopMarket) {
+  if (typeof loadShopMarket !== 'function') return null;
+  let timer;
+  try {
+    const result = await Promise.race([
+      Promise.resolve(loadShopMarket()),
+      new Promise(resolve => {
+        timer = setTimeout(() => resolve(null), PRODUCT_CONTEXT_TIMEOUT_MS);
+      }),
+    ]);
+    return result && typeof result === 'object' ? result : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /**
  * Room for the reply this request actually needs.
  *
@@ -108,11 +132,58 @@ async function loadContextWithinBudget(loadProductContext, groups) {
  * a reply cut off at the limit is truncated JSON, which parses to nothing and
  * falls back silently. One row is the band, the best change, direction,
  * confidence, the market read and a rationale of up to 150 characters --
- * around 100 tokens, and not growing with the number of variations -- plus
- * the summary and braces.
+ * around 115 tokens with the spelled-out key names, and not growing with the
+ * number of variations -- plus the summary and braces.
  */
 function estimateSuggestionTokens(variantCount) {
-  return Math.max(400, Math.round(variantCount * 100 * 1.4) + 160);
+  return Math.max(400, Math.round(variantCount * 115 * 1.4) + 160);
+}
+
+/**
+ * A reply row in the internal short shape. The schema asks for spelled-out
+ * names; replies written against the earlier schema used v, lo, hi and best.
+ */
+function readModelRow(row) {
+  if (!row || typeof row !== 'object') return row;
+  const pick = (name, legacy) => (row[name] !== undefined ? row[name] : row[legacy]);
+  return {
+    ...row,
+    v: pick('product_index', 'v'),
+    lo: pick('min_change_percent', 'lo'),
+    hi: pick('max_change_percent', 'hi'),
+    best: pick('best_change_percent', 'best'),
+  };
+}
+
+/**
+ * A reply row with its percentages on Priceify's step.
+ *
+ * Two calls about the same product rarely agree to the point: one says 4..14,
+ * the next 5..15, and each shifts every test price by a few cents. Snapping to
+ * 2.5-point steps (1 point in a range narrower than 10) makes those the same
+ * answer, so prices move between clicks only when the model's read moved.
+ */
+function snapModelRow(row, { min, max }) {
+  if (!row || typeof row !== 'object') return row;
+  const step = Number(max) - Number(min) >= 10 ? 2.5 : 1;
+  const snap = value => {
+    if (value === null || value === undefined || value === '') return value;
+    const n = Number(value);
+    return Number.isFinite(n) ? round2(Math.round(n / step) * step) : value;
+  };
+  return { ...row, lo: snap(row.lo), hi: snap(row.hi), best: snap(row.best) };
+}
+
+/**
+ * The direction the merchant is shown, read from the band actually tested.
+ *
+ * The band is widened and clamped after the reply, and a model will sometimes
+ * label a rise "hold"; showing its word beside prices that all go up reads as
+ * a contradiction. "hold" survives only on a band that straddles today's price.
+ */
+function directionForBand(modelDirection, band) {
+  const side = band.lo >= 0 ? 'rise' : band.hi <= 0 ? 'cut' : 'either';
+  return modelDirection === 'hold' && side === 'either' ? 'hold' : side;
 }
 
 /**
@@ -294,6 +365,17 @@ function revenueSignal(row) {
   return 'low';
 }
 
+/**
+ * Units sold per 100 visitors over 30 days, or null without both measured.
+ * Worked out here so the model compares demand on one scale instead of
+ * dividing two fields itself, differently on each call.
+ */
+function unitsPer100Visitors(row, units) {
+  const visitors = Number(row.visitors_30d);
+  if (!Number.isFinite(units) || !Number.isFinite(visitors) || visitors <= 0) return null;
+  return round2((Math.max(0, units) / visitors) * 100);
+}
+
 /** Live revenue per visitor over 30 days, or null when visits were not measured. */
 function revenuePerVisitor30d(row) {
   const visitors = Number(row.visitors_30d);
@@ -325,7 +407,7 @@ function describeProductForModel(
   const inventory = finiteOrNull(context?.inventory ?? row.inventory_quantity);
   const signals = enrichProductSignalsForPriceSuggest(row);
   return {
-    v: index,
+    product_index: index,
     title: row.title,
     description: context?.description || null,
     vendor: context?.vendor || null,
@@ -337,6 +419,7 @@ function describeProductForModel(
     sales_data: measured ? 'measured' : 'none_recorded',
     revenue_signal: revenueSignal(row),
     visitors_30d: Number(row.visitors_30d) > 0 ? Math.round(Number(row.visitors_30d)) : null,
+    units_per_100_visitors: unitsPer100Visitors(row, measured ? units : null),
     rpv_30d: revenuePerVisitor30d(row),
     inventory: inventory === null ? null : Math.round(inventory),
     opportunity_score: row.opportunity_score,
@@ -648,6 +731,8 @@ function priceArmsAcrossBand({
   targetAt,
   requestedLow,
   requestedHigh,
+  allowedLow = null,
+  allowedHigh = null,
   scoreBoost = 0,
   minArmGapPercent = null,
 }) {
@@ -698,10 +783,24 @@ function priceArmsAcrossBand({
         requestedLow,
         requestedHigh,
       });
+  // The merchant's own range, for an arm whose slice of the band has no good
+  // ending in it. Guardrails bound it exactly as they bound the band.
+  const outer =
+    window && Number.isFinite(Number(allowedLow)) && Number.isFinite(Number(allowedHigh))
+      ? priceWindowForSnap({
+          current: row.current_price,
+          floor: band.floor,
+          ceiling: band.ceiling,
+          requestedLow: allowedLow,
+          requestedHigh: allowedHigh,
+        })
+      : null;
   const prices = window
     ? snapProductArmPrices(raw, {
         low: window.low,
         high: window.high,
+        outerLow: outer?.low ?? null,
+        outerHigh: outer?.high ?? null,
         currency: row.currency,
         current: row.current_price,
         minControlGapPercent: MIN_CONTROL_GAP_PERCENT,
@@ -777,6 +876,8 @@ function deterministicPriceSuggestions({
       requestedHigh: amountBand
         ? row.current_price + productBand.max
         : row.current_price * (1 + productBand.max / 100),
+      allowedLow: amountBand ? null : row.current_price * (1 + min / 100),
+      allowedHigh: amountBand ? null : row.current_price * (1 + max / 100),
     });
 
     priced.forEach(entry => {
@@ -877,14 +978,152 @@ function narrowSuggestionsToArms(result = {}, { targetArmIds, minPct, maxPct, gu
   };
 }
 
-async function suggestPrices({ targetArmIds = null, ...args } = {}) {
+const MAX_SIBLING_VARIANTS = 1000;
+const MAX_SIBLING_PRICES_PER_VARIANT = 10;
+
+/**
+ * Prices the other variations already hold, by variant id.
+ *
+ * Suggest prices one variation per click, each from its own model call, so two
+ * calls that read the same product a little differently could put variation B
+ * on top of variation A. These are the prices B has to keep clear of.
+ */
+function readSiblingPrices(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const out = new Map();
+  Object.entries(raw)
+    .slice(0, MAX_SIBLING_VARIANTS)
+    .forEach(([variantId, prices]) => {
+      const list = (Array.isArray(prices) ? prices : [])
+        .map(Number)
+        .filter(price => Number.isFinite(price) && price > 0)
+        .slice(0, MAX_SIBLING_PRICES_PER_VARIANT);
+      if (variantId && list.length) out.set(String(variantId), list);
+    });
+  return out.size ? out : null;
+}
+
+/**
+ * Move any new price that sits on top of a sibling variation's price.
+ *
+ * A price already far enough from every sibling is left alone. One that is not
+ * goes to the nearest point inside its own band that is, then the allowed
+ * range, keeping clear of the current price; if neither has room, it stays.
+ * Charm rounding keeps 85% of the gap, as it does between arms of one call.
+ */
+function keepClearOfSiblingPrices(
+  suggestions,
+  { rows, siblingPrices, min, max, minGap, requestedMin, requestedMax, shopMax }
+) {
+  if (!siblingPrices || !Array.isArray(suggestions) || !suggestions.length) return suggestions;
+  const rowById = new Map(rows.map(row => [String(row.variant_id), row]));
+  const held = new Map();
+  const tolerance = minGap * 0.85;
+  return suggestions.map(item => {
+    const id = String(item?.variant_id || '');
+    const row = rowById.get(id);
+    const current = Number(row?.current_price);
+    const siblings = siblingPrices.get(id);
+    if (!row || !(current > 0) || !siblings) return item;
+    const toPct = price => ((price - current) / current) * 100;
+    const others = [...siblings, ...(held.get(id) || [])].map(toPct);
+    const clearOf = pct => others.every(other => Math.abs(pct - other) >= tolerance - 1e-9);
+    const keep = price => {
+      held.set(id, [...(held.get(id) || []), price]);
+      return price;
+    };
+    if (clearOf(Number(item.delta_percent))) {
+      keep(Number(item.price));
+      return item;
+    }
+
+    const guard = buildGuardrailBand(current, { maxChangePercent: shopMax });
+    const ranges = [
+      item.ai_band && Number.isFinite(item.ai_band.lo) && Number.isFinite(item.ai_band.hi)
+        ? [item.ai_band.lo, item.ai_band.hi]
+        : null,
+      [min, max],
+    ].filter(Boolean);
+    const target = Number(item.delta_percent);
+    for (const [lo, hi] of ranges) {
+      const candidates = [];
+      for (let pct = lo; pct <= hi + 1e-9; pct += 0.25) candidates.push(round2(pct));
+      candidates.sort((a, b) => Math.abs(a - target) - Math.abs(b - target));
+      for (const pct of candidates) {
+        if (Math.abs(pct) < MIN_CONTROL_GAP_PERCENT || !clearOf(pct)) continue;
+        const window = priceWindowForSnap({
+          current,
+          floor: guard.floor,
+          ceiling: guard.ceiling,
+          minPercent: lo,
+          maxPercent: hi,
+        });
+        const raw = clampPrice(
+          roundPrice(current * (1 + pct / 100), row.currency),
+          window.low,
+          window.high
+        );
+        // Rounded like every other suggested price, but never back across
+        // today's price, into its clearance, or onto a sibling.
+        const price = snapToCharmPrice(raw, {
+          low: window.low,
+          high: window.high,
+          currency: row.currency,
+          accept: candidate =>
+            Math.sign(toPct(candidate)) === Math.sign(pct) &&
+            Math.abs(toPct(candidate)) >= MIN_CONTROL_GAP_PERCENT - 1e-9 &&
+            clearOf(toPct(candidate)),
+        });
+        const landed = toPct(price);
+        if (Math.abs(price - current) < 0.005 || !clearOf(landed)) continue;
+        keep(price);
+        return {
+          ...item,
+          price,
+          delta_percent: round2(landed),
+          delta_amount: round2(price - current),
+          guardrail_limited: outsideRequestedRange(landed, requestedMin, requestedMax, 0.01),
+        };
+      }
+    }
+    keep(Number(item.price));
+    return item;
+  });
+}
+
+async function suggestPrices({ targetArmIds = null, siblingPrices = null, ...args } = {}) {
   const result = await suggestPricesForAllArms(args);
-  return narrowSuggestionsToArms(result, {
+  const narrowed = narrowSuggestionsToArms(result, {
     targetArmIds,
     minPct: args.minPct ?? 10,
     maxPct: args.maxPct ?? 20,
     guardrails: args.guardrails || {},
   });
+  if (!siblingPrices || resolveAmountBand(args.unit, args.minAmount, args.maxAmount)) {
+    return narrowed;
+  }
+  const { min, max, shopMax, requestedMin, requestedMax } = resolveAiPriceLiftBand(
+    args.minPct ?? 10,
+    args.maxPct ?? 20,
+    args.guardrails || {}
+  );
+  const armCount = (Array.isArray(args.arms) ? args.arms : []).filter(
+    arm => arm && arm.id && arm.id !== 'control' && arm.role !== 'control'
+  ).length;
+  const { minArmGap } = armSpacingFor(min, max, Math.max(2, armCount));
+  return {
+    ...narrowed,
+    suggestions: keepClearOfSiblingPrices(narrowed.suggestions, {
+      rows: normalizeVariantRows(args.variants),
+      siblingPrices,
+      min,
+      max,
+      minGap: minArmGap,
+      requestedMin,
+      requestedMax,
+      shopMax,
+    }),
+  };
 }
 
 async function suggestPricesForAllArms({
@@ -898,9 +1137,9 @@ async function suggestPricesForAllArms({
   maxAmount = null,
   objective = 'revenue_per_visitor',
   useAi = true,
-  regenerate = false,
-  attempt = 0,
+  shopDomain = null,
   loadProductContext = null,
+  loadShopMarket = null,
 } = {}) {
   const normalizedObjective = String(objective || '')
     .trim()
@@ -974,7 +1213,10 @@ async function suggestPricesForAllArms({
    * stays well clear of the ceiling that used to truncate it.
    */
   const deadline = Date.now() + AI_SUGGEST_BUDGET_MS;
-  const contextByProduct = await loadContextWithinBudget(loadProductContext, groups);
+  const [contextByProduct, shopMarket] = await Promise.all([
+    loadContextWithinBudget(loadProductContext, groups),
+    loadShopMarketWithinBudget(loadShopMarket),
+  ]);
   const contextFor = group => contextByProduct.get(group.product.product_id) || null;
   const sendImages = imagesEnabled();
   const searchWeb = webSearchEnabled();
@@ -1006,7 +1248,7 @@ async function suggestPricesForAllArms({
             index,
           }))
           .filter(image => image.url)
-          .map(image => ({ label: `Image for v=${image.index}`, url: image.url }))
+          .map(image => ({ label: `Image for product_index=${image.index}`, url: image.url }))
       : [];
     const request = {
       label: withWebSearch ? 'price_suggest_web_search' : 'price_suggest',
@@ -1023,6 +1265,7 @@ async function suggestPricesForAllArms({
           direction_allowed: direction,
         },
         variations_per_product: armCatalog.length,
+        shop_country: shopMarket?.country || null,
         guardrails: {
           max_price_change_percent: guardrails.max_price_change_percent ?? 15,
         },
@@ -1036,8 +1279,11 @@ async function suggestPricesForAllArms({
       images,
       responseSchema: PRICE_SUGGEST_RESPONSE_SCHEMA,
       responseSchemaName: 'price_suggestion',
-      temperature: regenerate ? 0.55 : 0.25,
+      temperature: 0.25,
+      reasoningEffort: 'low',
       maxTokens: estimateSuggestionTokens(batch.length),
+      userLocation: shopMarket,
+      shopDomain,
       timeoutMs,
       // Products a call misses are asked again below, in smaller calls, which
       // fits the time budget better than the SDK repeating the whole call.
@@ -1047,15 +1293,17 @@ async function suggestPricesForAllArms({
 
     const used = new Set();
     const parsed = [];
-    (Array.isArray(payload?.bands) ? payload.bands : []).forEach(item => {
-      const index = Number(item?.v);
-      const group = Number.isInteger(index) ? batch[index] : null;
-      if (!group || used.has(index)) return;
-      const normalized = normalizeModelBand(item, { min, max, minWidth: minBandWidth });
-      if (!normalized) return;
-      used.add(index);
-      parsed.push({ group, normalized, item });
-    });
+    (Array.isArray(payload?.bands) ? payload.bands : [])
+      .map(row => snapModelRow(readModelRow(row), { min, max }))
+      .forEach(item => {
+        const index = Number(item?.v);
+        const group = Number.isInteger(index) ? batch[index] : null;
+        if (!group || used.has(index)) return;
+        const normalized = normalizeModelBand(item, { min, max, minWidth: minBandWidth });
+        if (!normalized) return;
+        used.add(index);
+        parsed.push({ group, normalized, item });
+      });
     return { parsed, summary: String(payload?.summary || '').trim() };
   };
 
@@ -1133,7 +1381,6 @@ async function suggestPricesForAllArms({
     };
   }
 
-  const varietyAttempt = regenerate ? Math.max(1, Number(attempt) || 1) : 0;
   const suggestions = [];
   groups.forEach(group => {
     const answer = answered.get(group);
@@ -1141,7 +1388,6 @@ async function suggestPricesForAllArms({
     const { normalized, item, duplicateBand } = answer;
     const merged = mergeModelBandWithHeuristics(group.product, normalized, min, max, {
       duplicateBand,
-      varietyAttempt,
     });
     const widened = widenedProductSlice(
       { min: merged.lo, max: merged.hi },
@@ -1150,7 +1396,7 @@ async function suggestPricesForAllArms({
     const band = { lo: widened.min, hi: widened.max };
     const scoreBoost = computeOpportunityScoreBoost(group.product);
     const aiRationale = sanitizeModelRationale(item?.rationale);
-    const aiDirection = sanitizeModelDirection(item?.direction);
+    const aiDirection = directionForBand(sanitizeModelDirection(item?.direction), band);
     const aiConfidence = sanitizeModelConfidence(item?.confidence);
     const aiBest = normalizeModelBest(item, band);
     const aiMarket = sanitizeMarketBenchmarks(item?.market_benchmarks);
@@ -1173,6 +1419,8 @@ async function suggestPricesForAllArms({
         targetAt: offset => row.current_price * (1 + targetPercent(offset) / 100),
         requestedLow: row.current_price * (1 + band.lo / 100),
         requestedHigh: row.current_price * (1 + band.hi / 100),
+        allowedLow: row.current_price * (1 + min / 100),
+        allowedHigh: row.current_price * (1 + max / 100),
       });
 
       priced.forEach(entry => {
@@ -1214,7 +1462,7 @@ async function suggestPricesForAllArms({
   // A reply only describes the products it saw, so its sentence stands for
   // the whole request only when one reply covered all of them.
   const modelSummary =
-    aiCalls === 1 && replySummaries.length === 1 ? replySummaries[0].slice(0, 220) : '';
+    aiCalls === 1 && replySummaries.length === 1 ? cleanModelText(replySummaries[0], 220) : '';
   return {
     source: 'openai',
     suggestions,
@@ -1343,6 +1591,7 @@ async function suggestPricesForRerun({ shopDomain, plan = {}, test = null } = {}
 
   const variantId = String(plan.variant_id || '').trim();
   const suggestions = await suggestPrices({
+    shopDomain,
     variants: [
       {
         variant_id: variantId || 'sku',
@@ -1388,6 +1637,7 @@ async function suggestPricesForRerun({ shopDomain, plan = {}, test = null } = {}
 
 module.exports = {
   suggestPrices,
+  readSiblingPrices,
   suggestPricesForRerun,
   deterministicPriceSuggestions,
   describeProductForModel,

@@ -23,6 +23,7 @@ const {
 } = require('./smartPricingAiRankingService');
 const { getShopSmartPricingGuardrails } = require('./smartPricingGuardrailsService');
 const { getPriceTestEnrollment, findHold } = require('./priceTestEnrollmentService');
+const { createCatalogProgress } = require('./catalogLoadProgress');
 
 const CACHE_TTL_MS =
   Number.parseInt(process.env.SMART_PRICING_OPPORTUNITY_CACHE_TTL_MS || '', 10) ||
@@ -441,7 +442,7 @@ async function loadCatalogOpportunities(shopDomain, accessToken, options = {}) {
     });
   }
 
-  const { forceRefresh = false } = options;
+  const { forceRefresh = false, aiRanking = 'await', progress = null } = options;
 
   if (!forceRefresh) {
     const cached = getCacheEntry(normalizedShop, cacheScope);
@@ -476,22 +477,26 @@ async function loadCatalogOpportunities(shopDomain, accessToken, options = {}) {
       focusCollectionIds,
       productSearch,
       guardrails,
+      progress,
     });
     let scored = scoreSkuRows(snapshot.sku_rows).map(row => ({
       ...row,
       source: 'catalog',
     }));
 
-    const aiEnabled = guardrails?.ai_ranking_enabled !== false && isAiRankingEnabled();
+    const aiEnabled =
+      aiRanking !== 'off' && guardrails?.ai_ranking_enabled !== false && isAiRankingEnabled();
     let aiSummary = null;
     let aiSource = 'deterministic';
     if (aiEnabled && scored.length > 0) {
+      if (aiRanking !== 'background') progress?.setStage('ranking');
       const aiResult = await enrichOpportunitiesWithAiRanking({
         shopDomain: normalizedShop,
         opportunities: scored,
         guardrails: guardrails || {},
         scope: cacheScope,
         forceRefresh,
+        background: aiRanking === 'background',
       });
       scored = aiResult.opportunities;
       aiSummary = aiResult.ai_summary;
@@ -531,6 +536,11 @@ async function loadCatalogOpportunities(shopDomain, accessToken, options = {}) {
       );
     }
 
+    // Not kept while the ranking is still being worked out: a cached copy would
+    // keep serving the unranked order for twelve hours after it was ready.
+    if (aiSource === 'pending') {
+      return payload;
+    }
     setCacheEntry(normalizedShop, payload, cacheScope);
     await writeOpportunityCache(normalizedShop, payload, cacheScope).catch(err => {
       logger.warn('Smart pricing opportunity persist failed', {
@@ -561,17 +571,27 @@ async function listOpportunities({
   collectionId = '',
   productSearch = '',
   forceRefresh = false,
+  aiRanking = 'await',
+  progressId = '',
   useDemo = false,
 } = {}) {
   if (useDemo) {
     return listDemoOpportunities({ filter, search });
   }
 
-  const catalogPayload = await loadCatalogOpportunities(shopDomain, accessToken, {
-    forceRefresh,
-    collectionId,
-    productSearch,
-  });
+  const progress = createCatalogProgress(progressId, shopDomain);
+  let catalogPayload;
+  try {
+    catalogPayload = await loadCatalogOpportunities(shopDomain, accessToken, {
+      forceRefresh,
+      aiRanking,
+      collectionId,
+      productSearch,
+      progress,
+    });
+  } finally {
+    progress.finish();
+  }
   // Which products another test is holding has to be answered now, not when
   // this payload was built. The catalog snapshot is cached for twelve hours,
   // and it baked the answer in: launch a test and every product in it stayed

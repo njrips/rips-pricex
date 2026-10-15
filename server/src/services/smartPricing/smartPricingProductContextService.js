@@ -104,9 +104,59 @@ async function fetchProductContextForSuggest({ shopDomain, accessToken, productI
   return out;
 }
 
+const SHOP_MARKET_QUERY = `
+  query rpxPriceSuggestShopMarket {
+    shop {
+      ianaTimezone
+      shopAddress {
+        countryCodeV2
+      }
+    }
+  }
+`;
+
+/** A shop's country and timezone barely change; one lookup serves many clicks. */
+const SHOP_MARKET_TTL_MS = 12 * 60 * 60 * 1000;
+const shopMarketCache = new Map();
+
+/**
+ * Where the shop sells from, for localising competitor search: a UK shop
+ * benchmarked against US retailers gets a market read in the wrong currency
+ * and the wrong price norms. Null when Shopify does not say or the lookup
+ * fails; search then runs unlocalised, as before.
+ * @returns {Promise<{country: string|null, timezone: string|null}|null>}
+ */
+async function fetchShopMarketForSuggest({ shopDomain, accessToken } = {}) {
+  if (!shopDomain || !accessToken) return null;
+  const cached = shopMarketCache.get(shopDomain);
+  if (cached && cached.expiresAt > Date.now()) return cached.value;
+  try {
+    const shopify = require('../shopifyService');
+    const response = await shopify.requestAdminGraphql(shopDomain, accessToken, SHOP_MARKET_QUERY, {});
+    const shop = response?.data?.shop || {};
+    const country = String(shop.shopAddress?.countryCodeV2 || '')
+      .trim()
+      .toUpperCase();
+    const timezone = String(shop.ianaTimezone || '').trim();
+    const value = {
+      country: /^[A-Z]{2}$/.test(country) ? country : null,
+      timezone: /^[A-Za-z_]+(\/[A-Za-z0-9_+-]+)+$/.test(timezone) ? timezone : null,
+    };
+    const usable = value.country || value.timezone ? value : null;
+    shopMarketCache.set(shopDomain, { value: usable, expiresAt: Date.now() + SHOP_MARKET_TTL_MS });
+    return usable;
+  } catch (error) {
+    logger.warn('Price suggest shop market lookup failed', { shopDomain, error: error.message });
+    return null;
+  }
+}
+
 module.exports = {
   PRODUCT_CONTEXT_QUERY,
+  SHOP_MARKET_QUERY,
   DESCRIPTION_CHARS,
   fetchProductContextForSuggest,
+  fetchShopMarketForSuggest,
   toProductGid,
+  __shopMarketCache: shopMarketCache,
 };

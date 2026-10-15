@@ -48,6 +48,20 @@ export function normalizeVariantId(value) {
   return raw;
 }
 
+/**
+ * Identity for spotting the same variant twice: a GID and its bare number
+ * match, but other ids are compared as they are, since `normalizeVariantId`
+ * reads any digits in them and would fold "var-1b" into "var-1".
+ */
+export function variantIdentity(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  if (/^\d+$/.test(raw) || raw.startsWith('gid://shopify/ProductVariant/')) {
+    return normalizeVariantId(raw);
+  }
+  return raw;
+}
+
 export function priceOverrideKey(variantId, armId) {
   const arm = String(armId || 'control').trim() || 'control';
   const variant = normalizeVariantId(variantId);
@@ -248,12 +262,49 @@ export function spreadAiBandPriceEntries({
   return entries;
 }
 
+/** Largest test price a merchant can type, so a stray key-hold is not a price. */
+export const MAX_TEST_PRICE = 999999.99;
+
+/**
+ * A price field's text cut down to what can be a price: digits and one
+ * decimal point, two decimals at most, no sign and nothing above
+ * `MAX_TEST_PRICE`. An empty string stays empty so the field can be cleared.
+ */
+export function sanitizePriceInput(raw) {
+  const text = String(raw ?? '').replace(/[^\d.]/g, '');
+  const dot = text.indexOf('.');
+  let out = dot === -1 ? text : `${text.slice(0, dot + 1)}${text.slice(dot + 1).replace(/\./g, '')}`;
+  if (dot !== -1) {
+    const [whole, cents] = out.split('.');
+    out = `${whole}.${cents.slice(0, 2)}`;
+  }
+  if (out.startsWith('.')) out = `0${out}`;
+  const n = Number(out);
+  if (out && Number.isFinite(n) && n > MAX_TEST_PRICE) return String(MAX_TEST_PRICE);
+  return out;
+}
+
+/**
+ * The prices max price change allows for one product, rounded inward to the
+ * cent so a price at the edge never reads as over it ($4.99 at 20% allows up
+ * to $5.98; $5.99 would be a 20.04% change).
+ */
+export function guardrailPriceWindow(base, maxChangePercent) {
+  const price = Number(base);
+  const cap = Number(maxChangePercent);
+  if (!(price > 0) || !(cap > 0)) return null;
+  return {
+    low: Math.ceil(price * (1 - cap / 100) * 100 - 1e-6) / 100,
+    high: Math.floor(price * (1 + cap / 100) * 100 + 1e-6) / 100,
+  };
+}
+
 /** Tooltip copy: how shelf prices are derived from catalog data. */
 export function describeAiPriceCalculationTooltip({ unit = 'percent' } = {}) {
   if (unit === 'amount') {
     return 'Each suggested price starts in your min–max dollar band, is capped by max price change per product, then rounded to a normal price ending. Spacing follows traffic-aware rules so variations are far enough apart to learn.';
   }
-  return 'AI picks a test range per product from perceived value, market price position, sales, and revenue per visitor; variations are spaced for statistical power, then capped by your guardrails and rounded to realistic price endings. Hover ℹ on a price for the breakdown.';
+  return 'AI picks a test range per product from perceived value, market price position, sales, and revenue per visitor; variations are spaced for statistical power, then capped by your guardrails and rounded to realistic price endings such as .99, so the change column shows the exact result. Hover the ℹ beside a test price for its breakdown; for a product with several variants, expand it to see each one.';
 }
 
 export function describeAiBandDirectionTooltip(direction) {
@@ -530,6 +581,33 @@ export function resolveAiSuggestSpreadArms(variations = []) {
   return (variations || []).filter((row, i) => i > 0 && row?.id && row.id !== 'control');
 }
 
+/**
+ * Prices the other test variations already hold, by variant id.
+ *
+ * Each Suggest click prices one variation from its own AI call, so the server
+ * is told where the others sit and keeps the new price clear of them; two
+ * variations on one price would test nothing against each other.
+ */
+export function siblingArmPrices({
+  rows = [],
+  spreadArms = [],
+  targetArms = [],
+  priceOverrides = {},
+} = {}) {
+  const targets = new Set((targetArms || []).map(arm => String(arm?.id || '')));
+  const siblings = (spreadArms || []).filter(arm => arm?.id && !targets.has(String(arm.id)));
+  if (!siblings.length) return null;
+  const out = {};
+  (rows || []).forEach(row => {
+    if (!row?.variant_id) return;
+    const prices = siblings
+      .map(arm => Number(lookupPriceOverride(priceOverrides, row.variant_id, arm.id)))
+      .filter(price => Number.isFinite(price) && price > 0);
+    if (prices.length) out[row.variant_id] = prices;
+  });
+  return Object.keys(out).length ? out : null;
+}
+
 /** Filter a `variant::arm` keyed map down to the given arms. */
 export function keepArmKeys(arms = []) {
   const ids = new Set((arms || []).map(arm => String(arm?.id || '')).filter(Boolean));
@@ -741,7 +819,16 @@ export function resolvePricingRows({
   pickMode = 'manual',
   maxSelection = 100,
 } = {}) {
-  const allRows = opportunities || [];
+  // One row per variant, whatever shape of id each copy arrived with, so a
+  // variant is never priced, suggested or launched twice.
+  const seen = new Set();
+  const allRows = (opportunities || []).filter(row => {
+    const id = variantIdentity(row?.variant_id);
+    if (!id) return true;
+    if (seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
   if (pickMode === 'all') {
     const byProduct = new Map();
     allRows.forEach(row => {
@@ -912,7 +999,20 @@ export function normalizeAiPriceBand(minRaw, maxRaw) {
   const b = parse(maxRaw);
   if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
   if (a === 0 && b === 0) return null;
-  return a <= b ? { min: a, max: b } : { min: b, max: a };
+  // A min above the max is refused, not swapped: swapping suggested from a
+  // band the merchant never typed, with the fields still showing the reverse.
+  if (a > b) return null;
+  return { min: a, max: b };
+}
+
+/** Inline error for a band whose min is above its max, or '' when it is not. */
+export function aiBandOrderError(minRaw, maxRaw, { unit = 'percent' } = {}) {
+  const blank = raw => raw === null || raw === undefined || String(raw).trim() === '';
+  if (blank(minRaw) || blank(maxRaw)) return '';
+  const a = Number(minRaw);
+  const b = Number(maxRaw);
+  if (!Number.isFinite(a) || !Number.isFinite(b) || a <= b) return '';
+  return `Min (${formatBandValue(a, unit)}) can’t be more than max (${formatBandValue(b, unit)}).`;
 }
 
 /** Which way a band points, for the copy that reports it. */
@@ -1158,7 +1258,9 @@ export function describeAiBandClamp(
   const capText = formatBandValue(typed < 0 ? -cap.capValue : cap.capValue, unit);
   const scope =
     unit === 'amount' ? ` (${cap.capPct}% of these products' average price)` : '';
-  return `You entered ${formatBandValue(typed, unit)}, further from the current price than your ${cap.capPct}% max price change guardrail allows. The band is capped at ${capText}${scope}.`;
+  // Leads with the value now in the field: the merchant reads the field, and a
+  // tooltip opening on the number they typed read as the app having misread it.
+  return `The band is capped at ${capText}${scope}, your ${cap.capPct}% max price change guardrail. ${formatBandValue(typed, unit)} is further from the current price than that allows.`;
 }
 
 /**
@@ -1304,6 +1406,7 @@ export function aiSuggestBlockedReason({
   shopDefaultsReady = true,
   hasProducts = false,
   hasBand = false,
+  bandError = '',
 } = {}) {
   if (loadingProducts) return 'Loading your catalog — Suggest unlocks when products finish loading.';
   if (!shopDefaultsReady) {
@@ -1312,6 +1415,7 @@ export function aiSuggestBlockedReason({
   if (!hasProducts) {
     return 'Select at least one product above — Suggest stays locked until you do.';
   }
+  if (bandError) return bandError;
   if (!hasBand) return 'Enter a min and max (not both 0) — Suggest needs a valid band.';
   return '';
 }
@@ -1328,6 +1432,7 @@ export function getProductsStepContinueState({
   experimentType = 'price_test',
   offerByArm = {},
   priceMode = 'manual',
+  maxChangePercent = null,
 } = {}) {
   const hasCatalog = (opportunities || []).some(row => row?.variant_id);
   if (loadingProducts && !hasCatalog) {
@@ -1402,5 +1507,104 @@ export function getProductsStepContinueState({
       hint: describeUnpricedTestArms(unpricedArms, { priceMode }),
     };
   }
+  const priceArgs = { opportunities, selectedIds, pickMode, maxSelection, variations, priceOverrides };
+  const zero = findZeroTestPrices(priceArgs);
+  if (zero.length) {
+    return {
+      disabled: true,
+      reason: 'zero_test_price',
+      hint: `${zero.length} test ${zero.length === 1 ? 'price is' : 'prices are'} $0 (${nameProducts(
+        zero
+      )}). Enter a price above $0.`,
+    };
+  }
+  // Launch refuses these anyway; catching them here keeps the merchant on the
+  // step where the price can be fixed, not on Review with a server error.
+  const outOfRange = findOutOfRangeTestPrices({ ...priceArgs, maxChangePercent });
+  if (outOfRange.length > 0) {
+    const n = outOfRange.length;
+    return {
+      disabled: true,
+      reason: 'outside_max_price_change',
+      hint: `${n} test ${n === 1 ? 'price is' : 'prices are'} more than ${Number(
+        maxChangePercent
+      )}% from the current price, your max price change (${nameProducts(outOfRange)}). Bring ${
+        n === 1 ? 'it' : 'them'
+      } inside the limit, or raise max price change in Settings.`,
+    };
+  }
   return { disabled: false, reason: null, hint: '' };
+}
+
+/**
+ * How many test prices sit outside max price change, across every variation.
+ * Zero when the cap is unknown, so a shop still loading its defaults is never
+ * told its prices are out of range.
+ */
+export function countOutOfRangeTestPrices(args = {}) {
+  return findOutOfRangeTestPrices(args).length;
+}
+
+/** The test prices outside max price change, one entry per variant and variation. */
+export function findOutOfRangeTestPrices({
+  opportunities = [],
+  selectedIds = [],
+  pickMode = 'manual',
+  maxSelection = 100,
+  variations = [],
+  priceOverrides = {},
+  maxChangePercent = null,
+} = {}) {
+  if (!(Number(maxChangePercent) > 0)) return [];
+  return collectTestPrices({ opportunities, selectedIds, pickMode, maxSelection, variations, priceOverrides })
+    .filter(({ row, price }) => {
+      const window = guardrailPriceWindow(row.current_price ?? row.price, maxChangePercent);
+      return window && (price < window.low - 0.005 || price > window.high + 0.005);
+    });
+}
+
+/**
+ * Test prices of $0. The field cannot take a sign, but it can take "0", and a
+ * bulk decrease bigger than the price lands there; with max price change still
+ * loading nothing else would stop it.
+ */
+export function findZeroTestPrices(args = {}) {
+  return collectTestPrices(args).filter(({ price }) => price < 0.005);
+}
+
+function collectTestPrices({
+  opportunities = [],
+  selectedIds = [],
+  pickMode = 'manual',
+  maxSelection = 100,
+  variations = [],
+  priceOverrides = {},
+} = {}) {
+  const rows = resolvePricingRows({ opportunities, selectedIds, pickMode, maxSelection });
+  const armIds = (variations || [])
+    .map((variation, index) => (isTestVariation(variation, index) ? variation.id || `arm_${index + 1}` : null))
+    .filter(Boolean);
+  const out = [];
+  rows.forEach(row => {
+    armIds.forEach(armId => {
+      const raw = lookupPriceOverride(priceOverrides, row.variant_id, armId);
+      if (raw === undefined || raw === null || String(raw).trim() === '') return;
+      const price = Number(raw);
+      if (Number.isFinite(price)) out.push({ row, armId, price });
+    });
+  });
+  return out;
+}
+
+/** "Snowboard" / "Snowboard and Mug" / "Snowboard, Mug and 3 more", by product. */
+function nameProducts(entries) {
+  const titles = [];
+  entries.forEach(({ row }) => {
+    const title = splitTitleParts(row).productTitle;
+    if (title && !titles.includes(title)) titles.push(title);
+  });
+  if (!titles.length) return '';
+  if (titles.length === 1) return titles[0];
+  if (titles.length === 2) return `${titles[0]} and ${titles[1]}`;
+  return `${titles[0]}, ${titles[1]} and ${titles.length - 2} more`;
 }

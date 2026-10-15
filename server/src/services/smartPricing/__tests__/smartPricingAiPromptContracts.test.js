@@ -78,12 +78,12 @@ describe('Priceify AI prompt contracts', () => {
       minControlGap: 3,
     });
 
-    expect(several).toContain('hi - lo is at least 9%');
-    expect(several).toContain('3 test prices across lo..hi, at least about 4.5% apart');
+    expect(several).toContain('max_change_percent at least 9 points above min_change_percent');
+    expect(several).toContain('3 test prices across that range, at least about 4.5% apart');
     expect(several).toContain('at least 3% away from 0 (the current price)');
     expect(several).toMatch(/crosses 0 loses the stretch within 3% of 0/);
-    expect(one).toContain('hi - lo is at least 8%');
-    expect(one).toContain('keep best at least 3% away from 0');
+    expect(one).toContain('max_change_percent at least 8 points above min_change_percent');
+    expect(one).toContain('keep best_change_percent at least 3% away from 0');
     expect(one).not.toMatch(/apart/);
   });
 
@@ -113,9 +113,20 @@ describe('Priceify AI prompt contracts', () => {
     expect(band.properties.market_benchmarks.properties.positioning.anyOf).toContainEqual({
       type: 'null',
     });
-    expect(band.required).toEqual(
-      expect.arrayContaining(['v', 'lo', 'hi', 'best', 'market_benchmarks', 'rationale'])
-    );
+    expect(band.required).toEqual([
+      'product_index',
+      'market_benchmarks',
+      'rationale',
+      'direction',
+      'min_change_percent',
+      'max_change_percent',
+      'best_change_percent',
+      'confidence',
+    ]);
+    expect(Object.keys(band.properties)).toEqual(band.required);
+    ['min_change_percent', 'max_change_percent', 'best_change_percent'].forEach(key => {
+      expect(band.properties[key].description).toMatch(/% change from the current price/);
+    });
   });
 
   it('documents product ranking as a separate prompt with its own builder', () => {
@@ -134,10 +145,10 @@ describe('Priceify AI prompt contracts', () => {
     expect(prompt).not.toMatch(/margin/i);
     expect(PRODUCT_RANKING_RESPONSE_SCHEMA.additionalProperties).toBe(false);
     expect(PRODUCT_RANKING_RESPONSE_SCHEMA.properties.items.items.required).toEqual([
-      'v',
+      'candidate_index',
+      'reason',
       'rank',
-      'pick',
-      'why',
+      'recommended',
     ]);
   });
 });

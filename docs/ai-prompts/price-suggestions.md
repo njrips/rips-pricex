@@ -102,6 +102,32 @@ technical conflicts in the baseline:
 - It asks for internal reasoning without requesting private chain-of-thought.
 - It uses a valid JSON example with concrete enum values.
 - Both OpenAI paths receive the same strict JSON Schema.
+- Reply keys are spelled out with their unit (`product_index`,
+  `min_change_percent`, `max_change_percent`, `best_change_percent`) and carry
+  short schema descriptions, instead of the baseline's `v`, `lo`, `hi` and
+  `best`. The input products use the same `product_index`. Priceify still reads
+  the short keys if a reply uses them.
+- Under the client's input list, the prompt names each coded field's values
+  (sales_data, revenue_signal, traffic_tier, price_tier, heuristic_direction,
+  recommended_scenario), so the model is not left to guess what "explore" or
+  "very_low" means.
+- The heuristic_direction hint is worked out as if no cost were recorded, so
+  margin does not reach the model through it either.
+- direction is defined by the side of 0 the range covers. The direction shown
+  to the merchant is read from the band actually tested, so a "hold" label
+  never sits beside prices that all go up.
+- Each click asks the model again, so the answer is made steady rather than
+  cached. Percentages are asked for, and snapped to, 2.5-point steps (1 point
+  in a range narrower than 10); demand arrives as units_per_100_visitors
+  instead of two fields the model divides itself; and the prompt states which
+  evidence puts the range high, low or in the middle. Re-suggest no longer
+  shifts bands on purpose.
+- Each variation is priced by its own call, so the wizard sends the prices
+  the other variations hold, and a new price on top of one moves to the
+  nearest point in its band that keeps the gap.
+- Each row lists the evidence first (market benchmarks, then the rationale)
+  and the direction, range and confidence after it, so the numbers are written
+  after the reasons they rest on.
 - The schema validates direction, confidence, required fields, market low,
   average and high, perceived tier, market positioning, and maximum text
   lengths. Unknown benchmark prices use JSON `null`.
@@ -124,5 +150,12 @@ technical conflicts in the baseline:
   - Charm rounding keeps 85% of the gap between neighbouring prices, and never
     moves a price back towards the current price past the clearance, or across
     it. A dollar band asks for no gap, so rounding there keeps half of it.
+  - Endings are .99, .95, .00, .50 and .49, plus .79 and .29 under $10. A
+    price whose slice of the band holds none of them may round outward into
+    the merchant's min–max range (never towards the current price), so a
+    $18.54–$18.72 slice gives $18.99 rather than $18.70. Arms still without
+    an ending are retried against where their neighbours landed.
+  - The allowed range is rounded inward to the cent: 20% on $4.99 caps at
+    $5.98, because $5.99 would be a 20.04% change.
 
 Runtime source: `smartPricingAiSuggestPrompt.js`.

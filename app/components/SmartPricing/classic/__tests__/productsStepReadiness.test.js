@@ -31,6 +31,7 @@ import {
   filterPriceSuggestionsRespectingEdits,
   resolveAiSuggestTargetArms,
   resolveAiSuggestSpreadArms,
+  siblingArmPrices,
   keepArmKeys,
   removedArmIds,
   dropArmEntries,
@@ -39,6 +40,12 @@ import {
   limitSelectionToProducts,
   resolvePricingRows,
   variantIdsMatch,
+  aiBandOrderError,
+  aiSuggestBlockedReason,
+  countOutOfRangeTestPrices,
+  guardrailPriceWindow,
+  sanitizePriceInput,
+  variantIdentity,
 } from '../productsStepReadiness';
 
 describe('limitSelectionToProducts', () => {
@@ -257,12 +264,13 @@ describe('productsStepReadiness', () => {
 
   it('normalizes AI min/max bands and rejects empty ranges', () => {
     expect(normalizeAiPriceBand('10', '20')).toEqual({ min: 10, max: 20 });
-    expect(normalizeAiPriceBand('20', '8')).toEqual({ min: 8, max: 20 });
+    // A min above the max is refused rather than silently swapped.
+    expect(normalizeAiPriceBand('20', '8')).toBeNull();
     expect(normalizeAiPriceBand('0', '0')).toBeNull();
     // One edge on the current price is a band the merchant may well mean;
     // describeNarrowAiBand warns when it leaves too little room.
     expect(normalizeAiPriceBand('0', '5')).toEqual({ min: 0, max: 5 });
-    expect(normalizeAiPriceBand('5', '0')).toEqual({ min: 0, max: 5 });
+    expect(normalizeAiPriceBand('5', '0')).toBeNull();
     // A blank box is still not a zero, even though Number('') is.
     expect(normalizeAiPriceBand('', '20')).toBeNull();
     expect(normalizeAiPriceBand('abc', '5')).toBeNull();
@@ -321,7 +329,7 @@ describe('productsStepReadiness', () => {
   it('holds a band field at the cap instead of accepting a blocked value', () => {
     expect(clampAiBandValue('30', 16)).toEqual({ value: '16', attempted: 30 });
     expect(describeAiBandClamp(30, 16)).toMatch(
-      /You entered 30%, further from the current price than your 16% max price change guardrail allows\. The band is capped at 16%\./
+      /^The band is capped at 16%, your 16% max price change guardrail\. 30% is further from the current price than that allows\.$/
     );
   });
 
@@ -777,7 +785,7 @@ describe('a band that lowers the price', () => {
     const { normalizeAiPriceBand: normalize } = await import('../productsStepReadiness');
 
     expect(normalize('-20', '-10')).toEqual({ min: -20, max: -10 });
-    expect(normalize('-10', '-20')).toEqual({ min: -20, max: -10 });
+    expect(normalize('-10', '-20')).toBeNull();
     expect(normalize('-15', '20')).toEqual({ min: -15, max: 20 });
   });
 
@@ -1017,6 +1025,26 @@ describe('resolveAiSuggestTargetArms', () => {
     expect(arms.map(a => a.id)).toEqual(['var_b']);
   });
 
+  it('tells the server where the other variations are already priced', () => {
+    const spreadArms = [{ id: 'var_a' }, { id: 'var_b' }, { id: 'var_c' }];
+    const rows = [
+      { variant_id: 'gid://shopify/ProductVariant/1' },
+      { variant_id: 'gid://shopify/ProductVariant/2' },
+    ];
+    const priceOverrides = {
+      'gid://shopify/ProductVariant/1::var_a': '44.99',
+      'gid://shopify/ProductVariant/1::var_b': '46.99',
+      'gid://shopify/ProductVariant/1::var_c': '',
+    };
+
+    expect(
+      siblingArmPrices({ rows, spreadArms, targetArms: [{ id: 'var_b' }], priceOverrides })
+    ).toEqual({ 'gid://shopify/ProductVariant/1': [44.99] });
+    expect(
+      siblingArmPrices({ rows, spreadArms: [{ id: 'var_b' }], targetArms: [{ id: 'var_b' }] })
+    ).toBeNull();
+  });
+
   it('spreads across every test variation and keeps only the one being priced', () => {
     const variations = [{ id: 'control' }, { id: 'var_a' }, { id: 'var_b' }];
     expect(resolveAiSuggestSpreadArms(variations).map(a => a.id)).toEqual(['var_a', 'var_b']);
@@ -1090,5 +1118,97 @@ describe('removing a variation', () => {
     const map = { var_c: {} };
     expect(dropArmEntries(map, ['var_b'])).toBe(map);
     expect(dropArmEntries(map, [])).toBe(map);
+  });
+});
+
+describe('QA round: step 3 price inputs', () => {
+  it('refuses a band whose min is above its max, and says so', () => {
+    expect(aiBandOrderError('25', '10')).toBe('Min (25%) can’t be more than max (10%).');
+    expect(aiBandOrderError('-5', '-10', { unit: 'amount' })).toBe(
+      'Min (−$5) can’t be more than max (−$10).'
+    );
+    expect(aiBandOrderError('10', '25')).toBe('');
+    expect(aiBandOrderError('', '10')).toBe('');
+    const reason = aiSuggestBlockedReason({
+      hasProducts: true,
+      hasBand: false,
+      bandError: aiBandOrderError('25', '10'),
+    });
+    expect(reason).toMatch(/can’t be more than max/);
+  });
+
+  it('keeps only what can be a price in a price field', () => {
+    expect(sanitizePriceInput('12.345')).toBe('12.34');
+    expect(sanitizePriceInput('-15')).toBe('15');
+    expect(sanitizePriceInput('abc')).toBe('');
+    expect(sanitizePriceInput('1.2.3')).toBe('1.23');
+    expect(sanitizePriceInput('.5')).toBe('0.5');
+    expect(sanitizePriceInput('')).toBe('');
+    expect(sanitizePriceInput('99999999')).toBe('999999.99');
+  });
+
+  it('rounds the max price change window inward to the cent', () => {
+    expect(guardrailPriceWindow(4.99, 20)).toEqual({ low: 4, high: 5.98 });
+    expect(guardrailPriceWindow(100, 30)).toEqual({ low: 70, high: 130 });
+    expect(guardrailPriceWindow(0, 30)).toBeNull();
+    expect(guardrailPriceWindow(10, null)).toBeNull();
+  });
+
+  it('holds Continue while a test price is outside max price change', () => {
+    const opportunities = [
+      { variant_id: 'gid://shopify/ProductVariant/1', product_id: 'p1', title: 'Mug', current_price: 100 },
+    ];
+    const variations = [{ id: 'control' }, { id: 'arm_b', letter: 'A', name: 'Variation A' }];
+    const base = {
+      opportunities,
+      selectedIds: ['gid://shopify/ProductVariant/1'],
+      pickMode: 'manual',
+      variations,
+      maxChangePercent: 30,
+    };
+    const over = { 'gid://shopify/ProductVariant/1::arm_b': '500' };
+    expect(countOutOfRangeTestPrices({ ...base, priceOverrides: over })).toBe(1);
+    const gate = getProductsStepContinueState({ ...base, priceOverrides: over });
+    expect(gate.disabled).toBe(true);
+    expect(gate.reason).toBe('outside_max_price_change');
+    expect(gate.hint).toMatch(/\(Mug\)/);
+    const ok = getProductsStepContinueState({
+      ...base,
+      priceOverrides: { 'gid://shopify/ProductVariant/1::arm_b': '120' },
+    });
+    expect(ok.disabled).toBe(false);
+    // An unknown cap never reports a price as out of range.
+    expect(countOutOfRangeTestPrices({ ...base, maxChangePercent: null, priceOverrides: over })).toBe(0);
+  });
+
+  it('treats a GID and its number as one variant, but nothing looser', () => {
+    expect(variantIdentity('123')).toBe(variantIdentity('gid://shopify/ProductVariant/123'));
+    expect(variantIdentity('var-1')).not.toBe(variantIdentity('var-1b'));
+    const rows = resolvePricingRows({
+      pickMode: 'all',
+      maxSelection: 10,
+      opportunities: [
+        { variant_id: 'gid://shopify/ProductVariant/7', product_id: 'p', title: 'Tee — S' },
+        { variant_id: '7', product_id: 'p', title: 'Tee — S' },
+        { variant_id: 'gid://shopify/ProductVariant/8', product_id: 'p', title: 'Tee — M' },
+      ],
+    });
+    expect(rows).toHaveLength(2);
+  });
+
+  it('refuses a $0 test price even before max price change has loaded', () => {
+    const gate = getProductsStepContinueState({
+      opportunities: [
+        { variant_id: 'gid://shopify/ProductVariant/1', product_id: 'p1', title: 'Mug', current_price: 10 },
+      ],
+      selectedIds: ['gid://shopify/ProductVariant/1'],
+      pickMode: 'manual',
+      variations: [{ id: 'control' }, { id: 'arm_b', letter: 'A', name: 'Variation A' }],
+      priceOverrides: { 'gid://shopify/ProductVariant/1::arm_b': '0' },
+      maxChangePercent: null,
+    });
+    expect(gate.disabled).toBe(true);
+    expect(gate.reason).toBe('zero_test_price');
+    expect(gate.hint).toBe('1 test price is $0 (Mug). Enter a price above $0.');
   });
 });

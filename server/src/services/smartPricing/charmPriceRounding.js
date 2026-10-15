@@ -36,6 +36,20 @@ const ENDING_WEIGHTS = Object.freeze(
 const CHARM_ENDINGS = Object.freeze([...ENDING_WEIGHTS.keys()]);
 
 /**
+ * Extra endings for prices under $10. A 20% band on $4.99 is about a dollar
+ * wide and holds only one of the endings above, so two of three arms would
+ * otherwise go out at $5.15 and $5.37; low-ticket retail fills that gap
+ * with .29 and .79.
+ */
+const LOW_PRICE_LIMIT = 10;
+const LOW_PRICE_ENDING_WEIGHTS = Object.freeze(
+  new Map([
+    [0.79, 2.5],
+    [0.29, 2.5],
+  ])
+);
+
+/**
  * Currencies with no minor unit. Kept in step with `roundPrice` in
  * priceBandService, which special-cases exactly JPY -- listing a currency here
  * that it rounds to cents would hand back a price with fractional yen.
@@ -79,7 +93,11 @@ function charmCandidates(target, currency) {
   const out = new Set();
   [floorInt - 1, floorInt, floorInt + 1].forEach(whole => {
     if (whole < 0) return;
-    CHARM_ENDINGS.forEach(ending => {
+    const endings =
+      whole < LOW_PRICE_LIMIT
+        ? [...CHARM_ENDINGS, ...LOW_PRICE_ENDING_WEIGHTS.keys()]
+        : CHARM_ENDINGS;
+    endings.forEach(ending => {
       const candidate = round2(whole + ending);
       // Under a dollar there is no whole-number part to charm, and $0.00 is
       // not a price.
@@ -171,7 +189,9 @@ function endingWeight(price, currency) {
     return 1;
   }
   const ending = round2(value - Math.floor(value));
-  const weight = ENDING_WEIGHTS.get(ending);
+  const weight =
+    ENDING_WEIGHTS.get(ending) ??
+    (value < LOW_PRICE_LIMIT ? LOW_PRICE_ENDING_WEIGHTS.get(ending) : undefined);
   return weight === undefined ? ENDING_WEIGHTS.size : weight;
 }
 
@@ -208,6 +228,11 @@ const UNTARGETED_GAP_KEPT = 0.5;
  * the gap instead let two neighbours each spend their half, and $41.23 went
  * out as a test of $46.50 against $46.99.
  *
+ * A product's band can leave an arm a window with no good ending in it: a
+ * -10..4 band on $18 gives the rise arm only $18.54..$18.72, and it went out
+ * as $18.70. `outerLow`/`outerHigh`, the range the merchant allowed, are tried
+ * next, under the same distance limit, so that arm becomes $18.99.
+ *
  * @param {number[]} rawPrices Arm prices in arm order.
  * @returns {number[]} Same length and order.
  */
@@ -216,6 +241,8 @@ function snapProductArmPrices(
   {
     low,
     high,
+    outerLow = null,
+    outerHigh = null,
     currency = 'USD',
     current = null,
     minControlGapPercent = 0,
@@ -224,15 +251,33 @@ function snapProductArmPrices(
 ) {
   const prices = (Array.isArray(rawPrices) ? rawPrices : []).map(Number);
   const windowFor = price => clearOfCurrentWindow(price, { low, high, current, minControlGapPercent });
+  const hasOuter = Number.isFinite(Number(outerLow)) && Number.isFinite(Number(outerHigh));
+  // Only outward: a rise arm may go higher than its band, never nearer the
+  // current price than the band put it, and a cut arm the mirror of that.
+  const base = Number(current);
+  const outerFor = price => {
+    const inner = windowFor(price);
+    const above = Number.isFinite(base) && base > 0 ? price > base : null;
+    return clearOfCurrentWindow(price, {
+      low: above === true ? inner.low : outerLow,
+      high: above === false ? inner.high : outerHigh,
+      current,
+      minControlGapPercent,
+    });
+  };
+  const snapWithin = (price, options) => {
+    const inBand = snapToCharmPrice(price, { ...windowFor(price), ...options });
+    if (!hasOuter || inBand !== price || endingWeight(price, options.currency) === 0) return inBand;
+    return snapToCharmPrice(price, { ...outerFor(price), ...options });
+  };
   if (prices.length <= 1) {
-    return prices.map(price => snapToCharmPrice(price, { ...windowFor(price), currency }));
+    return prices.map(price => snapWithin(price, { currency }));
   }
 
-  const base = Number(current);
   const armGap =
     Number.isFinite(base) && base > 0 ? (base * Math.max(0, Number(minArmGapPercent) || 0)) / 100 : 0;
   const snapped = [...prices];
-  prices.forEach((price, index) => {
+  const snapArm = (price, index, taken) => {
     const accept = candidate =>
       prices.every((other, otherIndex) => {
         const apart = price - other;
@@ -243,13 +288,26 @@ function snapProductArmPrices(
             : Math.abs(apart) * UNTARGETED_GAP_KEPT;
         return (candidate - snapped[otherIndex]) * Math.sign(apart) >= needed - 0.005;
       });
-    snapped[index] = snapToCharmPrice(price, {
-      ...windowFor(price),
-      currency,
-      taken: snapped.filter((_, otherIndex) => otherIndex < index),
-      accept,
+    snapped[index] = snapWithin(price, { currency, taken, accept });
+  };
+  prices.forEach((price, index) =>
+    snapArm(price, index, snapped.filter((_, otherIndex) => otherIndex < index))
+  );
+
+  // An arm is measured against neighbours not yet snapped, so in a tight band
+  // ($5.14..$5.61 for three arms on $4.99) $5.37 is refused $5.49 while the
+  // arm above still sits at $5.61, though that arm then moves to $5.95. Arms
+  // left without an ending get another try against where the rest landed;
+  // arms that already have one are not moved again.
+  for (let pass = 1; pass < prices.length; pass += 1) {
+    let moved = false;
+    prices.forEach((price, index) => {
+      if (snapped[index] !== price || endingWeight(price, currency) === 0) return;
+      snapArm(price, index, snapped.filter((_, otherIndex) => otherIndex !== index));
+      if (snapped[index] !== price) moved = true;
     });
-  });
+    if (!moved) break;
+  }
   return snapped;
 }
 
@@ -321,11 +379,12 @@ function priceWindowForSnap({
   if (requestedLow > requestedHigh) {
     [requestedLow, requestedHigh] = [requestedHigh, requestedLow];
   }
-  // Rounded because the percent maths lands on values like 110.00000000000001,
-  // and a window boundary a hair above the price it is meant to admit would
-  // reject that price.
-  const low = round2(Math.max(guardFloor, requestedLow));
-  const high = round2(Math.min(guardCeiling, requestedHigh));
+  // Rounded inward to the cent: a 20% cap on $4.99 is $5.988, and rounding that
+  // to the nearest cent would admit $5.99, a 20.04% change the plan check
+  // rejects. The tolerance keeps float noise like 110.00000000000001 from
+  // costing a cent the other way.
+  const low = Math.ceil(Math.max(guardFloor, requestedLow) * 100 - 1e-6) / 100;
+  const high = Math.floor(Math.min(guardCeiling, requestedHigh) * 100 + 1e-6) / 100;
   if (low > high) return { low: guardFloor, high: guardCeiling };
   return { low, high };
 }

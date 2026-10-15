@@ -40,14 +40,18 @@ Strict JSON Schema is supplied to the shared chat provider:
   "summary": "one sentence about this shop",
   "items": [
     {
-      "v": 0,
+      "candidate_index": 0,
+      "reason": "plain-language reason for this rank",
       "rank": 1,
-      "pick": true,
-      "why": "plain-language reason for this rank"
+      "recommended": true
     }
   ]
 }
 ```
+
+Keys are spelled out and carry short schema descriptions; the reason comes
+before the rank it explains. Priceify still reads the earlier `v`, `pick` and
+`why` if a reply uses them.
 
 ## Ranking priorities
 

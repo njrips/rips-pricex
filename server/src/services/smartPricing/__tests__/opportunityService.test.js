@@ -445,3 +445,62 @@ describe('products another price test is holding', () => {
     expect(result.opportunities).toHaveLength(2);
   });
 });
+
+describe('the AI ranking while a merchant waits', () => {
+  const ranking = require('../smartPricingAiRankingService');
+  const store = require('../smartPricingOpportunityStore');
+  const snapshot = {
+    generated_at: '2026-07-01T00:00:00.000Z',
+    catalog_product_count: 1,
+    sku_count: 1,
+    sku_rows: [
+      {
+        product_id: 'gid://shopify/Product/1',
+        variant_id: 'gid://shopify/ProductVariant/11',
+        title: 'Hoodie — M',
+        current_price: 59,
+        currency: 'USD',
+      },
+    ],
+  };
+
+  beforeEach(() => {
+    clearOpportunityCache();
+    buildCatalogMetricsSnapshot.mockReset();
+    buildCatalogMetricsSnapshot.mockResolvedValue(snapshot);
+    ranking.isAiRankingEnabled.mockReturnValue(true);
+    ranking.enrichOpportunitiesWithAiRanking.mockClear();
+    store.writeOpportunityCache.mockClear();
+  });
+
+  afterEach(() => {
+    ranking.isAiRankingEnabled.mockReturnValue(false);
+  });
+
+  it('asks for the ranking in the background when told to', async () => {
+    await listOpportunities({ shopDomain: 'demo.myshopify.com', accessToken: 'token', aiRanking: 'background' });
+    expect(ranking.enrichOpportunitiesWithAiRanking).toHaveBeenCalledWith(
+      expect.objectContaining({ background: true })
+    );
+  });
+
+  it('skips the ranking entirely for a product search', async () => {
+    await listOpportunities({
+      shopDomain: 'demo.myshopify.com',
+      accessToken: 'token',
+      productSearch: 'hoodie',
+      aiRanking: 'off',
+    });
+    expect(ranking.enrichOpportunitiesWithAiRanking).not.toHaveBeenCalled();
+  });
+
+  it('does not cache a list whose ranking is still pending', async () => {
+    ranking.enrichOpportunitiesWithAiRanking.mockImplementationOnce(async ({ opportunities }) => ({
+      opportunities,
+      ai_summary: null,
+      ai_source: 'pending',
+    }));
+    await listOpportunities({ shopDomain: 'demo.myshopify.com', accessToken: 'token', aiRanking: 'background' });
+    expect(store.writeOpportunityCache).not.toHaveBeenCalled();
+  });
+});

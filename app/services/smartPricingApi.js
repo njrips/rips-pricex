@@ -26,6 +26,10 @@ export async function getSmartPricingOpportunities(
     collectionId = '',
     productSearch = '',
     refresh = false,
+    // 'background' answers without waiting for the AI ranking; 'off' skips it.
+    aiRanking = '',
+    // Lets `getSmartPricingOpportunitiesProgress` follow this load.
+    progressId = '',
     demo = false,
   } = {}
 ) {
@@ -36,9 +40,23 @@ export async function getSmartPricingOpportunities(
     ...(collectionId ? { collection_id: collectionId } : {}),
     ...(productSearch ? { product_search: productSearch } : {}),
     ...(refresh ? { refresh: '1' } : {}),
+    ...(aiRanking ? { ai_ranking: aiRanking } : {}),
+    ...(progressId ? { progress_id: progressId } : {}),
     ...(demo ? { demo: '1' } : {}),
   });
   return unwrapData(res);
+}
+
+/**
+ * How far the load started with `progressId` has got:
+ * `{ stage, loaded, total, done }`, or `null` when the server cannot say.
+ */
+export async function getSmartPricingOpportunitiesProgress(domain, progressId) {
+  const res = await apiGet('/smart-pricing/opportunities/progress', {
+    ...(domain ? { domain } : {}),
+    id: progressId,
+  });
+  return unwrapData(res)?.progress || null;
 }
 
 export async function createSmartPricingBatch(domain, body) {

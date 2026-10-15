@@ -1590,6 +1590,45 @@ button.stepItem {
   box-shadow: 0 0 0 2px rgba(48, 48, 48, 0.15) !important;
 }
 
+/* Wide enough for a signed value with cents ("-12.50") beside the number
+   stepper, which the 64px bulk field clipped. */
+.bandInput {
+  width: 96px !important;
+}
+
+.inputInvalid,
+.inputInvalid:focus {
+  border-color: var(--p-color-border-critical, #e51c00) !important;
+}
+
+.fieldError {
+  margin: -6px 0 12px;
+  color: var(--p-color-text-critical, #8e1f0b);
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.priceFieldInvalid {
+  border-color: var(--p-color-border-critical, #e51c00) !important;
+}
+
+.priceSummary {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  color: var(--classic-ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.priceSummaryMuted {
+  color: var(--classic-muted, #616161);
+}
+
+.priceSummaryInvalid {
+  color: var(--p-color-text-critical, #8e1f0b);
+  font-weight: 550;
+}
+
 .segmentInline {
   margin-bottom: 0;
 }
@@ -5788,4 +5827,12 @@ button.stepItem {
   .ticketSubjectCell {
     max-width: 200px;
   }
+}
+
+.catalogProgress {
+  max-width: 360px;
+}
+
+.catalogProgressBar {
+  margin-top: 6px;
 }

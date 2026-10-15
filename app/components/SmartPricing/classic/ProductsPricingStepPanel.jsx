@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Banner, Button, Select, TextField } from '@shopify/polaris';
+import { Banner, Button, ProgressBar, Select, TextField } from '@shopify/polaris';
 import { useKeyedState } from '../../../hooks/useKeyedState';
 import ClassicProductPickerModal from './ClassicProductPickerModal';
 import OfferArmsEditor from './OfferArmsEditor';
@@ -7,9 +7,14 @@ import { isOfferExperimentType } from './offerSelection';
 import LabelWithInfo from '../../Settings/primitives/LabelWithInfo';
 import SettingsInfoLink from '../../Settings/SettingsInfoLink';
 import TooltipWrapper from '../../shared/TooltipWrapper';
+import { describeCatalogProgress } from './catalogLoadProgress';
 import {
   aiBandDirection,
+  aiBandOrderError,
   aiSuggestBlockedReason,
+  guardrailPriceWindow,
+  variantIdentity,
+  sanitizePriceInput,
   armHasAiPrices,
   capAiBandToShopMax,
   describeAiBandCap,
@@ -98,7 +103,10 @@ function deltaPct(base, test) {
 
 function formatDeltaLabel(delta) {
   if (delta === null || !Number.isFinite(delta) || Math.abs(delta) < 0.05) return null;
-  const rounded = Math.abs(delta) < 1 ? delta.toFixed(1) : String(Math.round(delta));
+  // One decimal unless it is whole: a .99 ending turns +14% into +14.18%, and
+  // a column reading "+14%" next to $152.99 looked like a wrong sum.
+  const tenths = Math.round(delta * 10) / 10;
+  const rounded = Number.isInteger(tenths) ? String(tenths) : tenths.toFixed(1);
   return `${delta >= 0 ? '+' : ''}${rounded}%`;
 }
 
@@ -114,7 +122,16 @@ function formatAmountDeltaLabel(base, test, currency = 'USD') {
 
 function groupPricingRows(rows) {
   const map = new Map();
+  // One row per Shopify variant. The same variant can reach the catalog twice,
+  // once from the load and once from a search, under differently shaped ids,
+  // and was then listed as an extra variant with its own price field.
+  const seenVariants = new Set();
   (rows || []).forEach(row => {
+    const variantKey = variantIdentity(row?.variant_id);
+    if (variantKey) {
+      if (seenVariants.has(variantKey)) return;
+      seenVariants.add(variantKey);
+    }
     const key = productGroupKey(row);
     const { productTitle, variantTitle } = splitTitleParts(row);
     if (!map.has(key)) {
@@ -194,7 +211,6 @@ export default function ProductsPricingStepPanel({
   priceOverrides = {},
   priceSuggestionMeta = {},
   onPriceOverrideChange,
-  onPriceOverridesPatch,
   bulkPercent = '10',
   onBulkPercentChange,
   bulkDirection = 'increase',
@@ -217,6 +233,7 @@ export default function ProductsPricingStepPanel({
   onAiMinPctChange,
   onAiMaxPctChange,
   loading = false,
+  catalogProgress = null,
   loadError = '',
   onRetryLoad,
   shopDefaultsReady = true,
@@ -232,7 +249,7 @@ export default function ProductsPricingStepPanel({
   const [tableCategory, setTableCategory] = useState('');
   const [pricingPageSize, setPricingPageSize] = useState(PRICING_TABLE_PAGE_SIZES[0]);
   const [bulkUnit, setBulkUnit] = useState('percent');
-  const [localBulkNotice, setLocalBulkNotice] = useState('');
+  const [localBulkNotice, setLocalBulkNotice] = useState(null);
   const [localSuggestBusy, setLocalSuggestBusy] = useState(false);
 
   const isSelectedId = useCallback(
@@ -446,20 +463,51 @@ export default function ProductsPricingStepPanel({
     });
   };
 
+  const bulkAmount = Number(bulkPercent);
+  const bulkAmountValid = String(bulkPercent ?? '').trim() !== '' && bulkAmount > 0;
+  const shopCap = Number(shopMaxChangePercent);
+
+  const handleBulkAmountChange = raw => {
+    let next = sanitizePriceInput(raw);
+    // A percent above max price change could only ever be capped, so the
+    // field stops there instead of accepting it and failing at launch.
+    if (bulkUnit === 'percent' && shopCap > 0 && Number(next) > shopCap) next = String(shopCap);
+    onBulkPercentChange(next);
+  };
+
   const handleApplyBulk = () => {
-    onApplyBulk?.({ unit: bulkUnit });
+    if (!bulkAmountValid) return;
+    const result = onApplyBulk?.({ unit: bulkUnit });
     const sign = bulkDirection === 'decrease' ? '−' : '+';
     const label = bulkUnit === 'amount' ? `$${bulkPercent}` : `${bulkPercent}%`;
     const targetArm = isControlArm
       ? variations.find((row, i) => i > 0 && row.id !== 'control')
       : activeArm;
-    const armLabel = targetArm?.name || targetArm?.letter || 'Variation A';
-    setLocalBulkNotice(`Applied ${sign}${label} to all prices for ${armLabel}.`);
+    const armLabel =
+      result?.armLabel ||
+      targetArm?.name ||
+      (targetArm?.letter ? `Variation ${targetArm.letter}` : 'this variation');
+    const cappedNote =
+      result?.capped > 0
+        ? ` ${result.capped} of ${result.total} ${
+            result.total === 1 ? 'price was' : 'prices were'
+          } held at your ${result.maxChange}% max price change.`
+        : '';
+    setLocalBulkNotice({
+      armId: result?.armId || targetArm?.id || null,
+      text: `Applied ${sign}${label} to all prices for ${armLabel}.${cappedNote}`,
+    });
   };
 
-  const bulkNotice = bulkAppliedMessage || localBulkNotice;
+  // Shown only on the variation it was applied to; one shared message carried
+  // Variation B's confirmation over onto Variation A's tab.
+  const bulkNotice =
+    bulkAppliedMessage ||
+    (localBulkNotice && (!localBulkNotice.armId || localBulkNotice.armId === activeArm?.id)
+      ? localBulkNotice.text
+      : '');
   const dismissBulkNotice = () => {
-    setLocalBulkNotice('');
+    setLocalBulkNotice(null);
     onDismissBulkMessage?.();
   };
 
@@ -483,11 +531,13 @@ export default function ProductsPricingStepPanel({
   });
   const effectiveAiSuggested = aiSuggested || activeArmHasAiPrices;
   const suggestBusy = aiSuggestBusy || localSuggestBusy;
+  const aiBandError = aiBandOrderError(aiMinPct, aiMaxPct, { unit: aiUnit });
   const aiBlockedReason = aiSuggestBlockedReason({
     loadingProducts: loading,
     shopDefaultsReady,
     hasProducts: Boolean(pricingRows.length),
     hasBand: Boolean(aiBand),
+    bandError: aiBandError,
   });
   const aiSuggestCopy = getAiSuggestCopy({
     hasProducts: Boolean(pricingRows.length),
@@ -564,9 +614,15 @@ export default function ProductsPricingStepPanel({
     .join(' ');
   const aiSuggestTooltip = [aiSuggestDetail, aiBandCapNotice].filter(Boolean).join('\n\n');
 
+  // A key held at '' is a field the merchant emptied. Read as "no override",
+  // it fell back to the current price, so backspace could never clear it.
+  const isClearedCell = (variantId, armId) =>
+    priceOverrides?.[priceOverrideKey(variantId, armId)] === '';
+
   const getTestPrice = (row, armId) => {
     const id = row.variant_id;
     const base = Number(row.current_price ?? row.price) || 0;
+    if (isClearedCell(id, armId || 'control')) return null;
     const override = lookupPriceOverride(priceOverrides, id, armId || 'control');
     if (override !== null && override !== undefined && String(override).trim() !== '') {
       const n = Number(override);
@@ -575,15 +631,6 @@ export default function ProductsPricingStepPanel({
     // AI mode waits for Suggest — do not prefill the store price as a test price.
     if (priceMode === 'ai' && !effectiveAiSuggested) return null;
     return base;
-  };
-
-  const writeOverrides = patch => {
-    if (!patch || !Object.keys(patch).length) return;
-    if (typeof onPriceOverridesPatch === 'function') {
-      onPriceOverridesPatch(patch);
-      return;
-    }
-    Object.entries(patch).forEach(([key, value]) => onPriceOverrideChange?.(key, value));
   };
 
   const renderDeltaCell = (base, test, rowCurrency = currency) => {
@@ -643,6 +690,7 @@ export default function ProductsPricingStepPanel({
         : formatPriceInputValue(Number.isFinite(test) ? test : '');
     const pendingAiPrice =
       priceMode === 'ai' && !effectiveAiSuggested && !String(override || '').trim();
+    const rangeError = isControlArm ? '' : priceRangeError(base, test);
     return (
       <tr key={`${id}-${armId}-v`} className={styles.variantRow}>
         <td>
@@ -653,42 +701,120 @@ export default function ProductsPricingStepPanel({
         </td>
         <td>{formatMoney(base, row.currency || currency)}</td>
         <td className={styles.priceCell}>
-          <div className={styles.priceFieldRow}>
-            <label className={styles.priceField}>
-              <span className={styles.pricePrefix} aria-hidden>
-                $
-              </span>
-              <input
-                className={styles.priceInput}
-                type="text"
-                inputMode="decimal"
-                value={isControlArm ? formatPriceInputValue(base) : inputValue}
-                placeholder={pendingAiPrice ? 'Suggest' : undefined}
-                onChange={e => {
-                  if (isControlArm) return;
-                  onPriceOverrideChange?.(key, e.target.value);
-                }}
-                disabled={isControlArm}
-                aria-label={`${label || variantLabel(row)} test price`}
-              />
-            </label>
-            {!isControlArm && priceMode === 'ai' ? renderPriceCalcHint(key, base) : null}
-          </div>
+          {renderPriceInput({
+            key,
+            base,
+            value: isControlArm ? formatPriceInputValue(base) : isClearedCell(id, armId) ? '' : inputValue,
+            placeholder: pendingAiPrice ? 'Suggest' : undefined,
+            label: `${label || variantLabel(row)} test price`,
+            rangeError,
+          })}
         </td>
         <td>{renderDeltaCell(base, isControlArm ? base : test, row.currency || currency)}</td>
       </tr>
     );
   };
 
-  const applyParentPriceToGroup = (group, value) => {
-    if (isControlArm) return;
-    const armId = activeArm?.id || 'control';
-    const patch = {};
-    (group.variants || []).forEach(v => {
-      if (!v?.variant_id) return;
-      patch[priceOverrideKey(v.variant_id, armId)] = value;
-    });
-    writeOverrides(patch);
+  /** Why a price cannot launch under max price change, or '' when it can. */
+  const priceRangeError = (base, price) => {
+    if (price === null || price === undefined || !Number.isFinite(Number(price))) return '';
+    const n = Number(price);
+    if (n < 0.005) return 'Enter a price above $0.';
+    const window = guardrailPriceWindow(base, shopMaxChangePercent);
+    if (!window) return '';
+    if (n >= window.low - 0.005 && n <= window.high + 0.005) return '';
+    return `Outside your ${Number(shopMaxChangePercent)}% max price change. Use $${window.low.toFixed(
+      2
+    )} to $${window.high.toFixed(2)}.`;
+  };
+
+  const renderPriceInput = ({ key, base, value, placeholder, label, rangeError = '' }) => (
+    <div className={styles.priceFieldRow}>
+      {/* No tooltip wrapper: adding one only while invalid would remount the
+          input mid-keystroke and drop focus. */}
+      <label
+        className={`${styles.priceField} ${rangeError ? styles.priceFieldInvalid : ''}`}
+        title={rangeError || undefined}
+      >
+        <span className={styles.pricePrefix} aria-hidden>
+          $
+        </span>
+        <input
+          className={styles.priceInput}
+          type="text"
+          inputMode="decimal"
+          value={value}
+          placeholder={placeholder}
+          onChange={e => {
+            if (isControlArm) return;
+            onPriceOverrideChange?.(key, sanitizePriceInput(e.target.value));
+          }}
+          disabled={isControlArm}
+          aria-label={label}
+          aria-invalid={rangeError ? true : undefined}
+        />
+      </label>
+      {!isControlArm && priceMode === 'ai' ? renderPriceCalcHint(key, base) : null}
+    </div>
+  );
+
+  /**
+   * The product row's price for a product with several variants: a summary,
+   * not a field. As a field it wrote one price over every variant, so variants
+   * could not differ, and an AI suggestion that priced them differently could
+   * only show as a blank "Mixed" box. Each variant is priced on its own row.
+   */
+  const renderGroupPriceSummary = (group, testValues, armId) => {
+    const prices = testValues
+      .filter(value => String(value).trim() !== '')
+      .map(Number)
+      .filter(Number.isFinite);
+    const rowCurrency = group.currency || currency;
+    const isOpen = expanded.has(group.key);
+    let text;
+    if (isControlArm) {
+      const bases = group.variants.map(v => Number(v.current_price ?? v.price) || 0);
+      const lo = Math.min(...bases);
+      const hi = Math.max(...bases);
+      text = lo === hi ? formatMoney(lo, rowCurrency) : `${formatMoney(lo, rowCurrency)}–${formatMoney(hi, rowCurrency)}`;
+    } else if (!prices.length) {
+      text = priceMode === 'ai' && !effectiveAiSuggested ? 'Suggest' : '—';
+    } else {
+      const lo = Math.min(...prices);
+      const hi = Math.max(...prices);
+      text = lo === hi ? formatMoney(lo, rowCurrency) : `${formatMoney(lo, rowCurrency)}–${formatMoney(hi, rowCurrency)}`;
+    }
+    const missing = isControlArm || !prices.length ? 0 : group.variants.length - prices.length;
+    // Collapsed, a variant priced outside the limit is otherwise invisible, and
+    // Continue would refuse without showing where.
+    const invalid = isControlArm
+      ? 0
+      : group.variants.filter(v => priceRangeError(Number(v.current_price ?? v.price) || 0, getTestPrice(v, armId)))
+          .length;
+    return (
+      <div className={styles.priceSummary} key={`${group.key}-${armId}-summary`}>
+        <span className={prices.length || isControlArm ? undefined : styles.priceSummaryMuted}>
+          {text}
+          {missing > 0 ? ` · ${missing} unpriced` : ''}
+        </span>
+        {invalid > 0 ? (
+          <span className={styles.priceSummaryInvalid}>
+            {` · ${invalid} ${invalid === 1 ? 'needs' : 'need'} fixing`}
+          </span>
+        ) : null}
+        {!isControlArm && !isOpen ? (
+          <span style={{ marginLeft: 8 }}>
+            <Button
+              variant="plain"
+              onClick={() => toggleExpand(group.key)}
+              accessibilityLabel={`Set prices for each variant of ${group.title}`}
+            >
+              Edit variants
+            </Button>
+          </span>
+        ) : null}
+      </div>
+    );
   };
 
   const renderProductPriceGroup = group => {
@@ -698,27 +824,32 @@ export default function ProductsPricingStepPanel({
     const avgBase = bases.reduce((a, b) => a + b, 0) / (bases.length || 1);
     const armId = activeArm?.id || 'control';
     const testValues = group.variants.map(v => {
-      const override = lookupPriceOverride(priceOverrides, v.variant_id, armId);
-      if (override !== null && override !== undefined && String(override).trim() !== '') {
-        return String(override);
-      }
       const next = getTestPrice(v, armId);
       return Number.isFinite(next) ? String(next) : '';
     });
-    const numericTests = testValues
-      .filter(v => String(v).trim() !== '')
-      .map(v => Number(v))
-      .filter(n => Number.isFinite(n));
-    const avgTest = numericTests.length
-      ? numericTests.reduce((a, b) => a + b, 0) / numericTests.length
+    // Compared only across priced variants; set against every variant's base,
+    // one priced $10 variant beside three blank $40 ones read as -70%.
+    const pricedPairs = group.variants
+      .map((v, i) => ({ base: bases[i], test: Number(testValues[i]) }))
+      .filter((pair, i) => String(testValues[i]).trim() !== '' && Number.isFinite(pair.test));
+    const avgTest = pricedPairs.length
+      ? pricedPairs.reduce((a, pair) => a + pair.test, 0) / pricedPairs.length
       : null;
-    const allSame = testValues.length > 0 && testValues.every(v => v === testValues[0]);
-    const mixed = multi && !allSame && !isControlArm;
-    const parentDisplay = isControlArm
-      ? formatPriceInputValue(Number.isFinite(avgBase) ? avgBase : '')
-      : mixed
+    const avgPricedBase = pricedPairs.length
+      ? pricedPairs.reduce((a, pair) => a + pair.base, 0) / pricedPairs.length
+      : avgBase;
+    const only = group.variants[0];
+    const onlyKey = only ? priceOverrideKey(only.variant_id, armId) : '';
+    const onlyBase = Number(only?.current_price ?? only?.price) || 0;
+    const onlyTest = only ? getTestPrice(only, armId) : null;
+    const onlyOverride = only ? lookupPriceOverride(priceOverrides, only.variant_id, armId) : undefined;
+    const singleDisplay = isControlArm
+      ? formatPriceInputValue(onlyBase)
+      : only && isClearedCell(only.variant_id, armId)
         ? ''
-        : formatPriceInputValue(testValues[0] ?? '');
+        : onlyOverride !== null && onlyOverride !== undefined && String(onlyOverride).trim() !== ''
+          ? formatPriceInputValue(onlyOverride)
+          : formatPriceInputValue(Number.isFinite(onlyTest) ? onlyTest : '');
 
     return (
       <React.Fragment key={`${group.key}-${armId}`}>
@@ -762,36 +893,21 @@ export default function ProductsPricingStepPanel({
           </td>
           <td>{formatMoney(avgBase, group.currency || currency)}</td>
           <td className={styles.priceCell}>
-            <label className={styles.priceField}>
-              <span className={styles.pricePrefix} aria-hidden>
-                $
-              </span>
-              <input
-                className={styles.priceInput}
-                type="text"
-                inputMode="decimal"
-                value={parentDisplay}
-                placeholder={
-                  mixed
-                    ? 'Mixed'
-                    : priceMode === 'ai' && !effectiveAiSuggested && !parentDisplay
-                      ? 'Suggest'
-                      : undefined
-                }
-                onChange={e => {
-                  if (isControlArm) return;
-                  const next = e.target.value;
-                  if (next.trim() === '') return;
-                  applyParentPriceToGroup(group, next);
-                }}
-                disabled={isControlArm}
-                aria-label={`${group.title} test price`}
-              />
-            </label>
+            {multi
+              ? renderGroupPriceSummary(group, testValues, armId)
+              : renderPriceInput({
+                  key: onlyKey,
+                  base: onlyBase,
+                  value: singleDisplay,
+                  placeholder:
+                    priceMode === 'ai' && !effectiveAiSuggested && !singleDisplay ? 'Suggest' : undefined,
+                  label: `${group.title} test price`,
+                  rangeError: isControlArm ? '' : priceRangeError(onlyBase, onlyTest),
+                })}
           </td>
           <td>
             {renderDeltaCell(
-              avgBase,
+              isControlArm ? avgBase : avgPricedBase,
               isControlArm ? avgBase : avgTest,
               group.variants[0]?.currency || currency
             )}
@@ -832,6 +948,9 @@ export default function ProductsPricingStepPanel({
     loading,
     loadError,
   });
+  const showCatalogProgress =
+    !loadError && loading && !availableProductCount && !loadedCatalogProductCount;
+  const catalogProgressView = describeCatalogProgress(catalogProgress);
   const storeCatalogProductCount = resolveStoreCatalogProductCount({
     catalogLoadedProductCount,
     availableProductCount,
@@ -945,10 +1064,27 @@ export default function ProductsPricingStepPanel({
             <div className={styles.selectionCardCount} aria-live="polite">
               {loadError
                 ? 'Catalog unavailable'
-                : loading && !availableProductCount && !loadedCatalogProductCount
+                : showCatalogProgress
                   ? 'Loading catalog…'
                   : selectionCountLabel}
             </div>
+            {showCatalogProgress ? (
+              <div className={styles.catalogProgress}>
+                <p className={styles.help} style={{ margin: '4px 0 0' }}>
+                  {catalogProgressView.label}
+                  {catalogProgressView.detail ? ` · ${catalogProgressView.detail}` : ''}
+                </p>
+                {catalogProgressView.percent !== null ? (
+                  <div className={styles.catalogProgressBar}>
+                    <ProgressBar
+                      progress={catalogProgressView.percent}
+                      size="small"
+                      ariaLabel="Catalog loading progress"
+                    />
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
             {!loading && !loadError && storeCatalogStatusText ? (
               <p className={styles.help} style={{ margin: '4px 0 0' }}>
                 {storeCatalogStatusText}
@@ -1159,11 +1295,14 @@ export default function ProductsPricingStepPanel({
             <label className={styles.bulkField}>
               <span>{aiUnit === 'amount' ? 'min $' : 'min %'}</span>
               <input
-                className={`${styles.input} ${styles.bulkInput}`}
+                className={`${styles.input} ${styles.bulkInput} ${styles.bandInput} ${
+                  aiBandError ? styles.inputInvalid : ''
+                }`}
                 {...aiBandNumberProps}
                 value={aiMinPct}
                 onChange={e => onAiMinPctChange(e.target.value)}
                 disabled={suggestBusy}
+                aria-invalid={aiBandError ? true : undefined}
                 aria-label={
                   aiUnit === 'amount'
                     ? 'AI suggestion minimum dollars'
@@ -1175,11 +1314,14 @@ export default function ProductsPricingStepPanel({
             <label className={styles.bulkField}>
               <span>{aiUnit === 'amount' ? 'max $' : 'max %'}</span>
               <input
-                className={`${styles.input} ${styles.bulkInput}`}
+                className={`${styles.input} ${styles.bulkInput} ${styles.bandInput} ${
+                  aiBandError ? styles.inputInvalid : ''
+                }`}
                 {...aiBandNumberProps}
                 value={aiMaxPct}
                 onChange={e => onAiMaxPctChange(e.target.value)}
                 disabled={suggestBusy}
+                aria-invalid={aiBandError ? true : undefined}
                 aria-label={
                   aiUnit === 'amount'
                     ? 'AI suggestion maximum dollars'
@@ -1229,6 +1371,11 @@ export default function ProductsPricingStepPanel({
               {aiSuggestCopy.button}
             </Button>
           </div>
+          {aiBandError ? (
+            <p className={styles.fieldError} role="alert">
+              {aiBandError}
+            </p>
+          ) : null}
           {aiBandCapNotice && !aiSuggestTooltip ? (
             <p className={styles.help} style={{ marginTop: -6, marginBottom: 14 }}>
               {aiBandCapNotice}
@@ -1293,10 +1440,15 @@ export default function ProductsPricingStepPanel({
               </button>
             </div>
             <input
-              className={`${styles.input} ${styles.bulkInput}`}
+              className={`${styles.input} ${styles.bulkInput} ${styles.bandInput} ${
+                bulkAmountValid ? '' : styles.inputInvalid
+              }`}
+              type="text"
+              inputMode="decimal"
               value={bulkPercent}
-              onChange={e => onBulkPercentChange(e.target.value)}
+              onChange={e => handleBulkAmountChange(e.target.value)}
               aria-label="Bulk adjust amount"
+              aria-invalid={bulkAmountValid ? undefined : true}
             />
             <div
               className={`${styles.segment} ${styles.segmentInline} ${styles.bulkSegment}`}
@@ -1308,7 +1460,10 @@ export default function ProductsPricingStepPanel({
                 className={`${styles.segmentBtn} ${
                   bulkUnit === 'percent' ? styles.segmentBtnActive : ''
                 }`}
-                onClick={() => setBulkUnit('percent')}
+                onClick={() => {
+                  setBulkUnit('percent');
+                  if (shopCap > 0 && bulkAmount > shopCap) onBulkPercentChange(String(shopCap));
+                }}
               >
                 %
               </button>
@@ -1327,6 +1482,7 @@ export default function ProductsPricingStepPanel({
               onClick={handleApplyBulk}
               disabled={
                 loading ||
+                !bulkAmountValid ||
                 !pricingSource.length ||
                 !variations.some((row, i) => i > 0 && row.id !== 'control')
               }
@@ -1334,6 +1490,15 @@ export default function ProductsPricingStepPanel({
               Apply
             </Button>
           </div>
+          {!bulkAmountValid ? (
+            <p className={styles.fieldError} role="alert">
+              Enter an amount above 0.
+            </p>
+          ) : bulkUnit === 'percent' && shopCap > 0 ? (
+            <p className={styles.help} style={{ marginTop: -6, marginBottom: 12 }}>
+              Up to {shopCap}%, your max price change.
+            </p>
+          ) : null}
           {bulkNotice ? (
             <div
               className={`${styles.infoBanner} ${styles.successBanner} ${styles.dismissibleBanner}`}

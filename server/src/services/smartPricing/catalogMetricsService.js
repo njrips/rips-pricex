@@ -314,6 +314,23 @@ async function fetchCatalogProducts(shopDomain, accessToken, options = {}) {
   const productMap = new Map();
   let currency = 'USD';
   let truncated = false;
+  const progress = options.progress || null;
+
+  if (progress) {
+    progress.update({ stage: 'catalog', loaded: 0, total: null });
+    // One query has one count. Several (focus collections) overlap, so a
+    // summed total would overstate what is left; those stay indeterminate.
+    if (queries.length === 1 && typeof shopifyService.countSmartPricingCatalogProducts === 'function') {
+      shopifyService
+        .countSmartPricingCatalogProducts(shopDomain, accessToken, { productQuery: queries[0] })
+        .then(result => {
+          if (result && result.count >= 0) {
+            progress.update({ total: Math.min(result.count, maxProducts) });
+          }
+        })
+        .catch(() => null);
+    }
+  }
 
   for (const productQuery of queries) {
     const remaining = Math.max(0, maxProducts - productMap.size);
@@ -321,9 +338,11 @@ async function fetchCatalogProducts(shopDomain, accessToken, options = {}) {
       truncated = true;
       break;
     }
+    const before = productMap.size;
     const catalog = await shopifyService.fetchSmartPricingCatalog(shopDomain, accessToken, {
       maxProducts: remaining,
       productQuery,
+      onPage: progress ? loaded => progress.update({ loaded: before + loaded }) : null,
     });
     currency = catalog.currency || currency;
     if (catalog.truncated === true) truncated = true;
@@ -360,6 +379,11 @@ async function buildCatalogMetricsSnapshot(shopDomain, accessToken, options = {}
       maxProducts,
       focusCollectionIds,
       productSearch: options.productSearch,
+      progress: options.progress,
+    }).then(result => {
+      // Orders run alongside; once the products are in, they are what is left.
+      options.progress?.update({ stage: 'orders', loaded: result.products.length });
+      return result;
     }),
     shopifyService
       .aggregateRecentOrderLineMetrics(shopDomain, accessToken, {
@@ -371,6 +395,7 @@ async function buildCatalogMetricsSnapshot(shopDomain, accessToken, options = {}
     getSkuCogsOverrides(shopDomain).catch(() => ({ overrides: {} })),
   ]);
 
+  options.progress?.setStage('scoring');
   const shopConversionRate = calibrateShopConversionRate(orderMetrics);
   const productsWithCurrency = (catalog.products || []).map(product => ({
     ...product,

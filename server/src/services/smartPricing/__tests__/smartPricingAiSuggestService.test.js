@@ -7,6 +7,7 @@ jest.mock('../smartPricingAiProvider', () => ({
 const { hasOpenAiKey, chatJson, webSearchJson } = require('../smartPricingAiProvider');
 const {
   suggestPrices,
+  readSiblingPrices,
   deterministicPriceSuggestions,
   sanitizeMarketBenchmarks,
 } = require('../smartPricingAiSuggestService');
@@ -236,10 +237,10 @@ describe('smartPricingAiSuggestService', () => {
     beforeEach(() => hasOpenAiKey.mockReturnValue(true));
 
     it('puts a single variation at the price the model expects to earn most', async () => {
-      chatJson.mockResolvedValue({ bands: [{ v: 0, lo: 10, hi: 20, best: 18 }] });
+      chatJson.mockResolvedValue({ bands: [{ v: 0, lo: 10, hi: 20, best: 17.5 }] });
       const result = await suggestPrices({ ...tee, arms: [{ id: 'var_a' }] });
 
-      expect(result.suggestions[0].ai_best_delta_percent).toBe(18);
+      expect(result.suggestions[0].ai_best_delta_percent).toBe(17.5);
       // The middle of the band would be +15%.
       expect(result.suggestions[0].delta_percent).toBeGreaterThan(16);
       expect(result.suggestions[0].delta_percent).toBeLessThanOrEqual(20);
@@ -255,7 +256,8 @@ describe('smartPricingAiSuggestService', () => {
         arms: [{ id: 'var_a' }],
       });
 
-      expect(result.suggestions[0].ai_best_delta_percent).toBe(0.5);
+      // +0.5% snaps to the 2.5-point step, which is 0: still no test at all.
+      expect(result.suggestions[0].ai_best_delta_percent).toBe(0);
       expect(result.suggestions[0].delta_percent).toBeGreaterThanOrEqual(2.5);
       expect(result.suggestions[0].delta_percent).toBeLessThanOrEqual(6);
     });
@@ -268,9 +270,9 @@ describe('smartPricingAiSuggestService', () => {
       await suggestPrices({ ...tee, arms: [{ id: 'var_a' }, { id: 'var_b' }, { id: 'var_c' }] });
       const several = chatJson.mock.calls[0][0].systemPrompt;
 
-      expect(single).toContain('keep best at least 3% away from 0');
+      expect(single).toContain('keep best_change_percent at least 3% away from 0');
       expect(single).not.toMatch(/apart/);
-      expect(several).toMatch(/3 test prices across lo\.\.hi, at least about [\d.]+% apart/);
+      expect(several).toMatch(/3 test prices across that range, at least about [\d.]+% apart/);
     });
 
     it('keeps the best price inside the band', async () => {
@@ -282,12 +284,32 @@ describe('smartPricingAiSuggestService', () => {
     });
 
     it('still spreads several variations across the band', async () => {
-      chatJson.mockResolvedValue({ bands: [{ v: 0, lo: 10, hi: 20, best: 18 }] });
+      chatJson.mockResolvedValue({ bands: [{ v: 0, lo: 10, hi: 20, best: 17.5 }] });
       const result = await suggestPrices({ ...tee, arms: [{ id: 'var_a' }, { id: 'var_b' }] });
 
       const [a, b] = result.suggestions;
       expect(a.price).not.toBe(b.price);
-      expect(a.ai_best_delta_percent).toBe(18);
+      expect(a.ai_best_delta_percent).toBe(17.5);
+    });
+
+    it('reads the spelled-out reply keys the same as the earlier short ones', async () => {
+      chatJson.mockResolvedValueOnce({
+        bands: [
+          {
+            product_index: 0,
+            min_change_percent: 10,
+            max_change_percent: 20,
+            best_change_percent: 17.5,
+          },
+        ],
+      });
+      const named = await suggestPrices({ ...tee, arms: [{ id: 'var_a' }] });
+      chatJson.mockResolvedValueOnce({ bands: [{ v: 0, lo: 10, hi: 20, best: 17.5 }] });
+      const short = await suggestPrices({ ...tee, arms: [{ id: 'var_a' }] });
+
+      expect(named.source).toBe('openai');
+      expect(named.suggestions).toEqual(short.suggestions);
+      expect(named.suggestions[0].ai_best_delta_percent).toBe(17.5);
     });
 
     it('works as before when the model gives no best price', async () => {
@@ -303,7 +325,7 @@ describe('smartPricingAiSuggestService', () => {
       await suggestPrices({ ...tee, arms: [{ id: 'var_a' }] });
       const { systemPrompt } = chatJson.mock.calls[0][0];
 
-      expect(systemPrompt).toContain('"best"');
+      expect(systemPrompt).toContain('"best_change_percent"');
       expect(systemPrompt).toContain('"market_benchmarks"');
       expect(systemPrompt.indexOf('COMPETITOR LANDSCAPE & BENCHMARKING')).toBeLessThan(
         systemPrompt.indexOf('PRICE ELASTICITY & BAND CALCULATION')
@@ -373,7 +395,12 @@ describe('smartPricingAiSuggestService', () => {
   describe('a large selection', () => {
     const answerEveryProduct = ({ userPrompt }) =>
       Promise.resolve({
-        bands: JSON.parse(userPrompt).products.map(p => ({ v: p.v, lo: 10, hi: 16, best: 12 })),
+        bands: JSON.parse(userPrompt).products.map(p => ({
+          product_index: p.product_index,
+          min_change_percent: 10,
+          max_change_percent: 16,
+          best_change_percent: 12,
+        })),
       });
     const products = count =>
       Array.from({ length: count }, (_, i) => ({
@@ -628,8 +655,8 @@ describe('what the price suggestion prompt asks for', () => {
     const { systemPrompt } = chatJson.mock.calls[0][0];
 
     expect(systemPrompt).toContain('"bands"');
-    expect(systemPrompt).toContain('"lo"');
-    expect(systemPrompt).toContain('"hi"');
+    expect(systemPrompt).toContain('"min_change_percent"');
+    expect(systemPrompt).toContain('"max_change_percent"');
     expect(systemPrompt).not.toContain('"deltas"');
   });
 
@@ -645,7 +672,7 @@ describe('what the price suggestion prompt asks for', () => {
     await suggestPrices(oneProduct);
     const { systemPrompt, userPrompt } = chatJson.mock.calls[0][0];
 
-    expect(systemPrompt).toMatch(/hi - lo is at least 9%/);
+    expect(systemPrompt).toMatch(/max_change_percent at least 9 points above min_change_percent/);
     expect(JSON.parse(userPrompt).allowed_band.min_width).toBe(9);
   });
 
@@ -886,9 +913,23 @@ describe('a band the model returned badly', () => {
   });
 
   it('records the band the model chose alongside the prices', async () => {
-    const result = await bandFor({ lo: 12, hi: 18 });
+    const result = await bandFor({ lo: 12.5, hi: 17.5 });
 
-    expect(result.suggestions[0].ai_band).toEqual({ lo: 12, hi: 18 });
+    expect(result.suggestions[0].ai_band).toEqual({ lo: 12.5, hi: 17.5 });
+  });
+
+  it('gives the same prices for replies a point or two apart', async () => {
+    // Two calls about the same product rarely agree to the point; the step
+    // keeps 4..14 and 5..15 from moving every price by a few cents.
+    const wide = { ...product, minPct: -10, maxPct: 20 };
+    chatJson.mockResolvedValueOnce({ bands: [{ v: 0, lo: 4, hi: 14 }] });
+    const a = await suggestPrices(wide);
+    chatJson.mockResolvedValueOnce({ bands: [{ v: 0, lo: 5, hi: 15 }] });
+    const b = await suggestPrices(wide);
+
+    expect(a.source).toBe('openai');
+    expect(a.suggestions[0].ai_band).toEqual({ lo: 5, hi: 15 });
+    expect(a.suggestions.map(item => item.price)).toEqual(b.suggestions.map(item => item.price));
   });
 
   it('stores per-product AI rationale when the model returns it', async () => {
@@ -913,6 +954,16 @@ describe('a band the model returned badly', () => {
     expect(result.suggestions[0].ai_rationale).toMatch(/Healthy sales/i);
     expect(result.suggestions[0].ai_direction).toBe('rise');
     expect(result.suggestions[0].ai_confidence).toBe('high');
+  });
+
+  it('shows the direction of the prices tested, not a label that contradicts them', async () => {
+    jest.clearAllMocks();
+    hasOpenAiKey.mockReturnValue(true);
+    chatJson.mockResolvedValue({ bands: [{ v: 0, lo: 10, hi: 18, direction: 'hold' }] });
+
+    const result = await suggestPrices(product);
+
+    expect(result.suggestions[0].ai_direction).toBe('rise');
   });
 });
 
@@ -994,7 +1045,7 @@ describe('a band that may lower the price', () => {
     await suggestPrices(eitherWayProduct);
     const { systemPrompt, userPrompt } = chatJson.mock.calls[0][0];
 
-    expect(systemPrompt).toMatch(/negative numbers lower price/i);
+    expect(systemPrompt).toMatch(/negative percentages lower it/i);
     expect(JSON.parse(userPrompt).allowed_band.direction_allowed).toBe('both');
   });
 
@@ -1181,7 +1232,7 @@ describe('what the model sees of each product', () => {
     expect(product.vendor).toBe('Atelier');
     expect(product.inventory).toBe(12);
     expect(product.has_image).toBe(true);
-    expect(images).toEqual([{ label: 'Image for v=0', url: 'https://cdn.shopify.com/resized.jpg' }]);
+    expect(images).toEqual([{ label: 'Image for product_index=0', url: 'https://cdn.shopify.com/resized.jpg' }]);
   });
 
   it('still asks the model when the context lookup fails', async () => {
@@ -1226,6 +1277,33 @@ describe('what the model sees of each product', () => {
     await suggestPrices(wallet);
     expect(webSearchJson).not.toHaveBeenCalled();
     expect(chatJson).toHaveBeenCalledTimes(1);
+  });
+
+  it('localises the competitor search to the shop market', async () => {
+    process.env.OPENAI_PRICE_SUGGEST_WEB_SEARCH = 'true';
+    webSearchJson.mockResolvedValue({ bands: [{ v: 0, lo: 6, hi: 16 }] });
+    await suggestPrices({
+      ...wallet,
+      loadShopMarket: async () => ({ country: 'GB', timezone: 'Europe/London' }),
+    });
+    const request = webSearchJson.mock.calls[0][0];
+    expect(request.userLocation).toEqual({ country: 'GB', timezone: 'Europe/London' });
+    expect(JSON.parse(request.userPrompt).shop_country).toBe('GB');
+    expect(request.systemPrompt).toMatch(/prefer retailers that sell in that country/);
+  });
+
+  it('still searches when the shop market lookup fails', async () => {
+    process.env.OPENAI_PRICE_SUGGEST_WEB_SEARCH = 'true';
+    webSearchJson.mockResolvedValue({ bands: [{ v: 0, lo: 6, hi: 16 }] });
+    await suggestPrices({
+      ...wallet,
+      loadShopMarket: async () => {
+        throw new Error('401');
+      },
+    });
+    const request = webSearchJson.mock.calls[0][0];
+    expect(request.userLocation).toBeNull();
+    expect(JSON.parse(request.userPrompt).shop_country).toBeNull();
   });
 
   it('retries with search instead of silently substituting model memory', async () => {
@@ -1322,5 +1400,84 @@ describe('sanitizeMarketBenchmarks', () => {
       positioning: null,
       perceived_tier: 'premium',
     });
+  });
+});
+
+/**
+ * Suggest prices one variation per click, each from its own model call. Two
+ * calls that read the product a little differently must not leave variation B
+ * on the same price as variation A, which would test nothing between them.
+ */
+describe('a variation priced after another one', () => {
+  const product = {
+    variants: [{ variant_id: 'v1', title: 'Tee', current_price: 100, margin_percent: 60 }],
+    arms: [{ id: 'a' }, { id: 'b' }],
+    targetArmIds: ['b'],
+    minPct: 0,
+    maxPct: 20,
+    guardrails: { max_price_change_percent: 30 },
+  };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    hasOpenAiKey.mockReturnValue(true);
+    chatJson.mockResolvedValue({ bands: [{ v: 0, lo: 10, hi: 20 }] });
+  });
+
+  it('moves a new price off the one a sibling variation already holds', async () => {
+    const alone = await suggestPrices(product);
+    const taken = alone.suggestions[0].price;
+    const result = await suggestPrices({
+      ...product,
+      siblingPrices: readSiblingPrices({ v1: [taken] }),
+    });
+    const [b] = result.suggestions;
+
+    expect(b.arm_id).toBe('b');
+    expect(b.price).not.toBe(taken);
+    expect(Math.abs(b.price - taken)).toBeGreaterThanOrEqual(3);
+    expect(b.delta_percent).toBeGreaterThanOrEqual(3);
+    expect(b.delta_percent).toBeLessThanOrEqual(20);
+    // Moved prices are rounded like every other suggestion, not left at $114.25.
+    const ending = Math.round((b.price % 1) * 100) / 100;
+    expect([0.99, 0.95, 0, 0.5, 0.49]).toContain(ending);
+  });
+
+  it('leaves a price that is already clear of its siblings alone', async () => {
+    const alone = await suggestPrices(product);
+    const result = await suggestPrices({
+      ...product,
+      siblingPrices: readSiblingPrices({ v1: [alone.suggestions[0].price - 9] }),
+    });
+
+    expect(result.suggestions).toEqual(alone.suggestions);
+  });
+
+  it('reads only usable sibling prices', () => {
+    expect(readSiblingPrices(null)).toBeNull();
+    expect(readSiblingPrices(['v1'])).toBeNull();
+    expect(readSiblingPrices({ v1: ['x', -2, 0] })).toBeNull();
+    expect(readSiblingPrices({ v1: ['44.5', 50] }).get('v1')).toEqual([44.5, 50]);
+  });
+});
+
+describe('demand on one scale', () => {
+  it('sends units per 100 visitors only when both were measured', async () => {
+    jest.clearAllMocks();
+    hasOpenAiKey.mockReturnValue(true);
+    chatJson.mockResolvedValue({ bands: [] });
+    await suggestPrices({
+      variants: [
+        { variant_id: 'v1', title: 'Mug', current_price: 20, units_sold_30d: 6, visitors_30d: 400 },
+        { variant_id: 'v2', title: 'Cap', current_price: 25, units_sold_30d: 3 },
+      ],
+      arms: [{ id: 'a' }],
+      minPct: 0,
+      maxPct: 20,
+    });
+    const { products } = JSON.parse(chatJson.mock.calls[0][0].userPrompt);
+
+    expect(products[0].units_per_100_visitors).toBe(1.5);
+    expect(products[1].units_per_100_visitors).toBeNull();
   });
 });

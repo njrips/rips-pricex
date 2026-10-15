@@ -440,7 +440,7 @@ function mergeModelBandWithHeuristics(
   modelBand,
   merchantLo,
   merchantHi,
-  { duplicateBand = false, varietyAttempt = 0 } = {}
+  { duplicateBand = false } = {}
 ) {
   const slice = resolveProductBandSlice(row, merchantLo, merchantHi);
   if (!modelBand || !Number.isFinite(modelBand.lo) || !Number.isFinite(modelBand.hi)) {
@@ -457,11 +457,8 @@ function mergeModelBandWithHeuristics(
   }
   const modelWidth = Math.max(0.8, modelBand.hi - modelBand.lo);
   const sig = productPricingSignature(row);
-  const attempt = Math.max(0, Number(varietyAttempt) || 0);
-  const varietyShift =
-    attempt > 0 ? (stableHash01(`${row.variant_id || ''}:attempt:${attempt}`) - 0.5) * 0.32 : 0;
   const room = Math.max(0, hi - lo - modelWidth);
-  let start = lo + room * clamp01(sig + varietyShift);
+  let start = lo + room * clamp01(sig);
   const heurMid = (slice.min + slice.max) / 2;
   const heurStart = heurMid - modelWidth / 2;
   start = start * 0.62 + heurStart * 0.38;
@@ -500,14 +497,16 @@ function inferHeuristicTestDirection(row = {}) {
 
 /**
  * Structured, privacy-safe signals for the price-suggest model prompt.
+ *
+ * Cost and margin stay out of the prompt, so the direction hint is read as if
+ * no cost were recorded: a thin margin would otherwise reach the model as
+ * hold_near or rise_cautious.
  */
 function enrichProductSignalsForPriceSuggest(row = {}) {
-  const margin = Number(row.margin_percent);
   return {
     price_tier: classifyPriceTier(row.current_price, row.currency),
     traffic_tier: classifyTrafficTier(row),
-    margin_tier: classifyMarginTier(margin),
-    heuristic_direction: inferHeuristicTestDirection(row),
+    heuristic_direction: inferHeuristicTestDirection({ ...row, margin_percent: null }),
     daily_visitors: Number.isFinite(Number(row.daily_visitors))
       ? Math.round(Number(row.daily_visitors))
       : null,
@@ -515,12 +514,41 @@ function enrichProductSignalsForPriceSuggest(row = {}) {
   };
 }
 
-function sanitizeModelRationale(raw) {
+/**
+ * Model prose made fit for a merchant-facing line.
+ *
+ * Web search replies cite inline as `([site](url?utm_source=openai))`, and the
+ * schema's length cap is advisory, so the model overruns it. Cutting at the cap
+ * left lines ending "…while monitoring RPV," or on a dangling "$28–". A reply
+ * ends at its last full sentence that fits, or at a word with an ellipsis.
+ */
+function cleanModelText(raw, maxLength) {
   const text = String(raw || '')
+    .replace(/\(\s*\[[^\]]*\]\([^)]*\)\s*\)/g, '')
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replace(/https?:\/\/\S+/gi, '')
+    .replace(/\(\s*\)/g, '')
     .replace(/\s+/g, ' ')
+    .replace(/\s+([,.;:!?])/g, '$1')
     .trim();
+  if (text.length <= maxLength) return text;
+  const head = text.slice(0, maxLength + 1);
+  let sentenceEnd = -1;
+  for (const match of head.matchAll(/[.!?](?=\s|$)/g)) {
+    if (match.index < maxLength) sentenceEnd = match.index;
+  }
+  if (sentenceEnd >= maxLength * 0.4) return text.slice(0, sentenceEnd + 1);
+  const words = text.slice(0, maxLength - 1);
+  const lastSpace = words.lastIndexOf(' ');
+  return `${(lastSpace > 0 ? words.slice(0, lastSpace) : words).replace(/[\s,;:–—-]+$/, '')}…`;
+}
+
+const MAX_RATIONALE_LENGTH = 160;
+
+function sanitizeModelRationale(raw) {
+  const text = cleanModelText(raw, MAX_RATIONALE_LENGTH);
   if (text.length < 8) return null;
-  return text.slice(0, 160);
+  return text;
 }
 
 function sanitizeModelDirection(raw) {
@@ -536,6 +564,7 @@ function sanitizeModelConfidence(raw) {
 }
 
 module.exports = {
+  cleanModelText,
   MIN_BAND_WIDTH_SHARE,
   MIN_CONTROL_GAP_PERCENT,
   keepClearOfControl,

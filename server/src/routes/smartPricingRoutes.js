@@ -9,6 +9,7 @@ const {
   listOpportunities,
   clearOpportunityCache,
 } = require('../services/smartPricing/opportunityService');
+const { readCatalogProgress } = require('../services/smartPricing/catalogLoadProgress');
 const { createBatchFromSelection } = require('../services/smartPricing/batchService');
 const { quickStartBatch } = require('../services/smartPricing/quickStartService');
 const {
@@ -109,10 +110,12 @@ const {
 } = require('../services/smartPricing/smartPricingAudienceGoalService');
 const {
   suggestPrices,
+  readSiblingPrices,
 } = require('../services/smartPricing/smartPricingAiSuggestService');
 const { hasOpenAiKey } = require('../services/smartPricing/smartPricingAiProvider');
 const {
   fetchProductContextForSuggest,
+  fetchShopMarketForSuggest,
 } = require('../services/smartPricing/smartPricingProductContextService');
 
 const router = express.Router();
@@ -271,6 +274,9 @@ router.get(
     const productSearch = String(req.query.product_search || req.query.productSearch || '').trim();
     const forceRefresh = req.query.refresh === '1' || req.query.refresh === 'true';
     const useDemo = req.query.demo === '1' || req.query.demo === 'true';
+    const aiRanking = ['background', 'off'].includes(req.query.ai_ranking)
+      ? req.query.ai_ranking
+      : 'await';
     const accessToken = await resolveShopifyAccessToken(req);
     const payload = await listOpportunities({
       shopDomain: req.shopDomain,
@@ -280,9 +286,20 @@ router.get(
       collectionId,
       productSearch,
       forceRefresh,
+      aiRanking,
+      progressId: String(req.query.progress_id || '').trim(),
       useDemo,
     });
     return sendSuccess(res, HTTP_STATUS.OK, payload);
+  })
+);
+
+// Polled by the wizard while `GET /opportunities?progress_id=` runs.
+router.get(
+  '/opportunities/progress',
+  asyncHandler(async (req, res) => {
+    const progress = readCatalogProgress(String(req.query.id || '').trim(), req.shopDomain);
+    return sendSuccess(res, HTTP_STATUS.OK, { progress });
   })
 );
 
@@ -1072,14 +1089,19 @@ router.post(
           maxAmount: body.max_amount ?? body.maxAmount ?? null,
           objective: body.objective || guardrails.objective || 'revenue_per_visitor',
           useAi: body.use_ai !== false && body.useAi !== false,
-          regenerate: body.regenerate === true || body.regenerate === 1,
-          attempt: Number(body.attempt) || 0,
+          siblingPrices: readSiblingPrices(body.sibling_prices),
+          shopDomain: req.shopDomain,
           targetArmIds: Array.isArray(body.target_arm_ids) ? body.target_arm_ids : null,
           loadProductContext: async productIds =>
             fetchProductContextForSuggest({
               shopDomain: req.shopDomain,
               accessToken: await resolveShopifyAccessToken(req),
               productIds,
+            }),
+          loadShopMarket: async () =>
+            fetchShopMarketForSuggest({
+              shopDomain: req.shopDomain,
+              accessToken: await resolveShopifyAccessToken(req),
             }),
         })
       );

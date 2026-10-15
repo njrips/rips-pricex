@@ -205,3 +205,63 @@ describe('rounding keeps several test prices apart', () => {
     assert.deepEqual(snapProductArmPrices([105, 110], { low: 105, high: 110, current: 100 }), [105.99, 109.99]);
   });
 });
+
+describe("an arm whose slice of the band holds no good ending", () => {
+  const candle = { low: 16.2, high: 18.72, current: 18, minControlGapPercent: 3, minArmGapPercent: 4.5 };
+
+  it('reaches into the range the merchant allowed rather than going out at $18.72', () => {
+    assert.deepEqual(snapProductArmPrices([16.2, 18.72], candle), [16.5, 18.72]);
+    assert.deepEqual(
+      snapProductArmPrices([16.2, 18.72], { ...candle, outerLow: 16.2, outerHigh: 21.6 }),
+      [16.5, 18.99]
+    );
+  });
+
+  it('keeps an arm that already rounded inside its band where it is', () => {
+    const prices = snapProductArmPrices([36.4, 39.6], {
+      low: 36.4,
+      high: 39.6,
+      outerLow: 31.5,
+      outerHigh: 42,
+      current: 35,
+      minControlGapPercent: 3,
+      minArmGapPercent: 4.5,
+    });
+    assert.deepEqual(prices, snapProductArmPrices([36.4, 39.6], { low: 36.4, high: 39.6, current: 35, minControlGapPercent: 3, minArmGapPercent: 4.5 }));
+  });
+
+  it('never uses the outer range to cross the current price', () => {
+    const [only] = snapProductArmPrices([18.6], { ...candle, outerLow: 16.2, outerHigh: 21.6 });
+    assert.ok(only >= 18 * 1.03 - 0.005, `expected at least 3% above $18, got ${only}`);
+  });
+});
+
+describe('a cheap product with three arms in a narrow band', () => {
+  const pin = { low: 5.14, high: 5.61, outerLow: 4.5, outerHigh: 5.98, current: 4.99, minControlGapPercent: 3, minArmGapPercent: 4.5 };
+
+  it('gives every arm a familiar ending rather than $5.15 and $5.37', () => {
+    assert.deepEqual(snapProductArmPrices([5.15, 5.37, 5.61], pin), [5.29, 5.5, 5.95]);
+  });
+
+  it('does not offer the low-price endings above $10', () => {
+    assert.ok(!charmCandidates(43.3, 'USD').includes(43.29));
+    assert.ok(charmCandidates(5.3, 'USD').includes(5.29));
+  });
+});
+
+describe('the window a percentage cap allows', () => {
+  it('rounds inward so a capped price never reads as over the cap', () => {
+    // 20% on $4.99 is $5.988; rounding it to $5.99 would be a 20.04% change.
+    assert.deepEqual(priceWindowForSnap({ current: 4.99, minPercent: -10, maxPercent: 20 }), {
+      low: 4.5,
+      high: 5.98,
+    });
+  });
+
+  it('does not lose a cent to float noise at an exact boundary', () => {
+    assert.deepEqual(priceWindowForSnap({ current: 100, minPercent: -10, maxPercent: 10 }), {
+      low: 90,
+      high: 110,
+    });
+  });
+});

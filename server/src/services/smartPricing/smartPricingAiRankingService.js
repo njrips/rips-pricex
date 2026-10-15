@@ -7,7 +7,11 @@ const logger = require('../../utils/logger');
 const { query } = require('../../utils/database');
 const { normalizeShopDomain } = require('./smartPricingCatalogUtils');
 const { chatJson } = require('./smartPricingAiProvider');
-const { classifyPriceTier, classifyTrafficTier } = require('./smartPricingAiSuggestFeatures');
+const {
+  classifyPriceTier,
+  classifyTrafficTier,
+  cleanModelText,
+} = require('./smartPricingAiSuggestFeatures');
 const {
   PRODUCT_RANKING_RESPONSE_SCHEMA,
   buildProductRankingSystemPrompt,
@@ -82,7 +86,7 @@ function buildCompactCandidatePayload(rows = []) {
           Number(row.daily_visitors) > 0 ||
           (Number.isFinite(units) && units > 0)));
     return {
-      v: index,
+      candidate_index: index,
       title: row.title,
       product_type: row.product_type ? String(row.product_type).slice(0, 48) : null,
       current_price: row.current_price,
@@ -103,11 +107,12 @@ function buildCompactCandidatePayload(rows = []) {
 /**
  * Room for the reply this request needs, rather than one figure for every size.
  *
- * A row is `{"v":3,"rank":1,"pick":true,"why":"..."}` -- about ten tokens plus
- * the reason, which the prompt caps at 120 characters, so roughly forty in all.
+ * A row is `{"candidate_index":3,"reason":"...","rank":1,"recommended":true}`
+ * -- about fifteen tokens plus the reason, which the prompt caps at 120
+ * characters, so roughly forty-five in all.
  */
 function estimateRankingTokens(candidateCount) {
-  return Math.max(400, Math.round(Math.max(1, candidateCount) * 40 * 1.4) + 180);
+  return Math.max(400, Math.round(Math.max(1, candidateCount) * 45 * 1.4) + 180);
 }
 
 /**
@@ -122,8 +127,10 @@ function resolveRankingItems(payload, rows = []) {
   if (!payload || !Array.isArray(payload.items)) return null;
   const seen = new Set();
   const items = [];
+  // Replies written against the earlier schema used v, pick and why.
+  const read = (item, name, legacy) => (item?.[name] !== undefined ? item[name] : item?.[legacy]);
   payload.items.forEach(item => {
-    const index = Number(item?.v);
+    const index = Number(read(item, 'candidate_index', 'v'));
     if (!Number.isInteger(index) || index < 0 || index >= rows.length) return;
     if (seen.has(index)) return;
     const variantId = rows[index]?.variant_id;
@@ -132,10 +139,8 @@ function resolveRankingItems(payload, rows = []) {
     const rank = Number(item?.rank);
     items.push({
       variant_id: variantId,
-      recommended: item?.pick === true,
-      ai_reason: String(item?.why || '')
-        .trim()
-        .slice(0, 160),
+      recommended: read(item, 'recommended', 'pick') === true,
+      ai_reason: cleanModelText(read(item, 'reason', 'why'), 160),
       priority_rank: Number.isFinite(rank) ? rank : null,
     });
   });
@@ -151,9 +156,7 @@ function resolveRankingItems(payload, rows = []) {
     item.recommended = item.recommended && recommended.has(item.variant_id);
   });
   return {
-    summary: String(payload.summary || '')
-      .trim()
-      .slice(0, 220),
+    summary: cleanModelText(payload.summary, 220),
     items,
   };
 }
@@ -188,7 +191,7 @@ async function writeAiCache(shopDomain, scope, payload) {
   );
 }
 
-async function callOpenAiRanking(candidates, guardrails = {}) {
+async function callOpenAiRanking(candidates, guardrails = {}, shopDomain = null) {
   const objective = guardrails.objective || 'revenue_per_visitor';
   const systemPrompt = buildProductRankingSystemPrompt({
     objective,
@@ -206,7 +209,9 @@ async function callOpenAiRanking(candidates, guardrails = {}) {
     responseSchema: PRODUCT_RANKING_RESPONSE_SCHEMA,
     responseSchemaName: 'product_ranking',
     temperature: 0.2,
+    reasoningEffort: 'low',
     maxTokens: estimateRankingTokens(candidates.length),
+    shopDomain,
   });
 }
 
@@ -252,12 +257,54 @@ function mergeAiRanking(opportunities = [], aiPayload = null) {
   return merged;
 }
 
+/** Ranking requests already running, so repeated page loads share one call. */
+const inFlightRankings = new Map();
+
+async function rankAndCache({ shopDomain, opportunities, guardrails, scope }) {
+  const rows = opportunities.slice(0, MAX_RANKING_CANDIDATES);
+  const candidates = buildCompactCandidatePayload(rows);
+  // Resolved to variant ids before anything is stored: an index is only
+  // meaningful for the request that produced it, so a cached index would
+  // land on a different product as soon as the catalog changed.
+  const aiPayload = resolveRankingItems(
+    await callOpenAiRanking(candidates, guardrails, shopDomain),
+    rows
+  );
+  if (!aiPayload) return null;
+  await writeAiCache(shopDomain, scope, {
+    ...aiPayload,
+    generated_at: new Date().toISOString(),
+  });
+  return aiPayload;
+}
+
+function rankInBackground({ shopDomain, opportunities, guardrails, scope }) {
+  const key = aiCacheKey(shopDomain, scope);
+  if (inFlightRankings.has(key)) return;
+  const job = rankAndCache({ shopDomain, opportunities, guardrails, scope })
+    .catch(error => {
+      logger.warn('Smart pricing background AI ranking failed', {
+        shopDomain,
+        error: error.message,
+      });
+    })
+    .finally(() => inFlightRankings.delete(key));
+  inFlightRankings.set(key, job);
+}
+
+/**
+ * @param {boolean} [background] Answer from the cached ranking, or with the
+ *   deterministic order, and rank for next time without waiting. The call
+ *   takes ~15s and only reorders and annotates the top candidates, so a
+ *   merchant picking products should not sit through it.
+ */
 async function enrichOpportunitiesWithAiRanking({
   shopDomain,
   opportunities = [],
   guardrails = {},
   scope = 'all',
   forceRefresh = false,
+  background = false,
 } = {}) {
   if (!isAiRankingEnabled() || !hasOpenAiKey() || opportunities.length === 0) {
     return {
@@ -267,7 +314,7 @@ async function enrichOpportunitiesWithAiRanking({
     };
   }
 
-  if (!forceRefresh) {
+  if (!forceRefresh || background) {
     const cached = await readAiCache(shopDomain, scope);
     if (cached?.items?.length) {
       return {
@@ -278,25 +325,16 @@ async function enrichOpportunitiesWithAiRanking({
     }
   }
 
+  if (background) {
+    rankInBackground({ shopDomain, opportunities, guardrails, scope });
+    return { opportunities, ai_summary: null, ai_source: 'pending' };
+  }
+
   try {
-    const rows = opportunities.slice(0, MAX_RANKING_CANDIDATES);
-    const candidates = buildCompactCandidatePayload(rows);
-    // Resolved to variant ids before anything is stored: an index is only
-    // meaningful for the request that produced it, so a cached index would
-    // land on a different product as soon as the catalog changed.
-    const aiPayload = resolveRankingItems(
-      await callOpenAiRanking(candidates, guardrails),
-      rows
-    );
+    const aiPayload = await rankAndCache({ shopDomain, opportunities, guardrails, scope });
     if (!aiPayload) {
       return { opportunities, ai_summary: null, ai_source: 'deterministic' };
     }
-
-    await writeAiCache(shopDomain, scope, {
-      ...aiPayload,
-      generated_at: new Date().toISOString(),
-    });
-
     return {
       opportunities: mergeAiRanking(opportunities, aiPayload),
       ai_summary: aiPayload.summary || null,

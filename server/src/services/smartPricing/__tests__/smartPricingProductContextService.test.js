@@ -13,6 +13,8 @@ jest.mock('../../../utils/logger', () => ({
 
 const {
   fetchProductContextForSuggest,
+  fetchShopMarketForSuggest,
+  __shopMarketCache,
   toProductGid,
   PRODUCT_CONTEXT_QUERY,
 } = require('../smartPricingProductContextService');
@@ -106,5 +108,42 @@ describe('fetchProductContextForSuggest', () => {
     expect(toProductGid('42')).toBe('gid://shopify/Product/42');
     expect(toProductGid('gid://shopify/Product/42')).toBe('gid://shopify/Product/42');
     expect(toProductGid('gid://shopify/ProductVariant/42')).toBeNull();
+  });
+});
+
+describe('fetchShopMarketForSuggest', () => {
+  beforeEach(() => {
+    mockRequestAdminGraphql.mockReset();
+    __shopMarketCache.clear();
+  });
+
+  it('returns the shop country and timezone, and reuses the answer', async () => {
+    mockRequestAdminGraphql.mockResolvedValue({
+      data: { shop: { ianaTimezone: 'Europe/London', shopAddress: { countryCodeV2: 'GB' } } },
+    });
+    const args = { shopDomain: 'uk.myshopify.com', accessToken: 'tok' };
+    await expect(fetchShopMarketForSuggest(args)).resolves.toEqual({
+      country: 'GB',
+      timezone: 'Europe/London',
+    });
+    await fetchShopMarketForSuggest(args);
+    expect(mockRequestAdminGraphql).toHaveBeenCalledTimes(1);
+  });
+
+  it('drops values that are not a country code or a zone name', async () => {
+    mockRequestAdminGraphql.mockResolvedValue({
+      data: { shop: { ianaTimezone: 'UTC', shopAddress: { countryCodeV2: 'Great Britain' } } },
+    });
+    await expect(
+      fetchShopMarketForSuggest({ shopDomain: 'odd.myshopify.com', accessToken: 'tok' })
+    ).resolves.toBeNull();
+  });
+
+  it('resolves to null when the lookup fails or there is no token', async () => {
+    mockRequestAdminGraphql.mockRejectedValue(new Error('401'));
+    await expect(
+      fetchShopMarketForSuggest({ shopDomain: 'gone.myshopify.com', accessToken: 'tok' })
+    ).resolves.toBeNull();
+    await expect(fetchShopMarketForSuggest({ shopDomain: 'x.myshopify.com' })).resolves.toBeNull();
   });
 });

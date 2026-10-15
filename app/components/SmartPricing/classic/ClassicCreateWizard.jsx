@@ -17,6 +17,7 @@ import {
   getSmartPricingGuardrails,
   saveSmartPricingGuardrails,
   getSmartPricingOpportunities,
+  getSmartPricingOpportunitiesProgress,
   suggestSmartPricingGoals,
   suggestSmartPricingPrices,
   batchPreviewSmartPricingLaunch,
@@ -186,14 +187,15 @@ import {
   describeGuardrailLimitedSuggestions,
   normalizeAiPriceBand,
   applyPriceSuggestionsToOverrides,
-  armHasAiPrices,
   buildAiBandPriceOverrides,
   buildLocalPriceSuggestionMeta,
-  filterPriceOverridePatch,
-  filterPriceSuggestionsRespectingEdits,
   keepArmKeys,
   metaFromPriceSuggestions,
   resolveAiSuggestSpreadArms,
+  siblingArmPrices,
+  guardrailPriceWindow,
+  aiBandOrderError,
+  variantIdentity,
   resolveAiSuggestTargetArms,
   resolveBandEdge,
   lookupPriceOverride,
@@ -204,6 +206,7 @@ import {
   resolvePricingRows,
   limitSelectionToProducts,
 } from './productsStepReadiness';
+import { newCatalogProgressId, startCatalogProgressPoll } from './catalogLoadProgress';
 import {
   isActionableOfferConfig,
   getOfferCheckoutBlockReason,
@@ -298,14 +301,22 @@ async function fetchShopGuardrails(shopDomain) {
   }
 }
 
-async function fetchCatalog(shopDomain) {
+async function fetchCatalog(shopDomain, { onProgress } = {}) {
+  const progressId = onProgress ? newCatalogProgressId() : '';
+  const stopPolling = onProgress
+    ? startCatalogProgressPoll(() => getSmartPricingOpportunitiesProgress(shopDomain, progressId), onProgress)
+    : () => {};
   try {
     // Classic wizard product picker needs the full catalog.
     // `ai_pick` only returns recommended rows — empty when AI ranking fails or none are tagged.
     const data = await getSmartPricingOpportunities(shopDomain, {
       filter: 'all',
-      // Rebuild the snapshot so enrollment withholding and catalog paging stay current.
+      // Rebuild the snapshot so prices, stock and new products are current.
       refresh: true,
+      // The AI ranking only orders and annotates the top few products, and
+      // waiting for it was most of this step's load time.
+      aiRanking: 'background',
+      progressId,
     });
     const rows = Array.isArray(data?.opportunities) ? data.opportunities : [];
     if (data?.error && !rows.length) {
@@ -335,6 +346,8 @@ async function fetchCatalog(shopDomain) {
       catalogLoadedProductCount: null,
       error: formatCatalogLoadError(err),
     };
+  } finally {
+    stopPolling();
   }
 }
 
@@ -433,6 +446,8 @@ export default function ClassicCreateWizard({ onTitleChange }) {
   const [withheldByOtherTests, setWithheldByOtherTests] = useState(null);
   /** True when the shop has more products than one catalog snapshot loads. */
   const [catalogTruncated, setCatalogTruncated] = useState(false);
+  // How far the running catalog load has got; null when none is running.
+  const [catalogProgress, setCatalogProgress] = useState(null);
   const [catalogLoadedProductCount, setCatalogLoadedProductCount] = useState(null);
   const [catalogSearching, setCatalogSearching] = useState(false);
   /** Last whole-catalog search from the product picker (`empty` | `found` | `error`). */
@@ -466,7 +481,6 @@ export default function ClassicCreateWizard({ onTitleChange }) {
   // The variation the Suggest status line was written for.
   const [aiPriceMetaArmId, setAiPriceMetaArmId] = useState(null);
   const aiSuggestRequestId = useRef(0);
-  const [aiSuggestAttempt, setAiSuggestAttempt] = useState(0);
   const productsLoadRequestId = useRef(0);
 
   const activeArmId = variations[activeArmIndex]?.id || 'control';
@@ -612,7 +626,6 @@ export default function ClassicCreateWizard({ onTitleChange }) {
       plans,
       autoRound2,
       priceSuggestionMeta,
-      aiSuggestAttempt,
     }),
     [
       experimentId,
@@ -634,7 +647,6 @@ export default function ClassicCreateWizard({ onTitleChange }) {
       plans,
       autoRound2,
       priceSuggestionMeta,
-      aiSuggestAttempt,
     ]
   );
 
@@ -857,9 +869,6 @@ export default function ClassicCreateWizard({ onTitleChange }) {
       }
       if (snapshot.priceSuggestionMeta && typeof snapshot.priceSuggestionMeta === 'object') {
         setPriceSuggestionMeta(snapshot.priceSuggestionMeta);
-      }
-      if (Number.isFinite(Number(snapshot.aiSuggestAttempt))) {
-        setAiSuggestAttempt(Number(snapshot.aiSuggestAttempt));
       }
       if (snapshot.offerByArm && typeof snapshot.offerByArm === 'object') {
         setOfferByArm(snapshot.offerByArm);
@@ -1144,6 +1153,7 @@ export default function ClassicCreateWizard({ onTitleChange }) {
       error,
     }) => {
       if (productsLoadRequestId.current !== requestId) return;
+      setCatalogProgress(null);
       if (error) {
         setProductsLoadError(error);
       } else {
@@ -1176,7 +1186,13 @@ export default function ClassicCreateWizard({ onTitleChange }) {
     const requestId = productsLoadRequestId.current + 1;
     productsLoadRequestId.current = requestId;
     setLoadingProducts(true);
-    applyCatalog({ requestId, ...(await fetchCatalog(shopDomain)) });
+    setCatalogProgress(null);
+    const result = await fetchCatalog(shopDomain, {
+      onProgress: next => {
+        if (productsLoadRequestId.current === requestId) setCatalogProgress(next);
+      },
+    });
+    applyCatalog({ requestId, ...result });
   }, [shopDomain, applyCatalog, setLoadingProducts]);
 
   /**
@@ -1198,6 +1214,9 @@ export default function ClassicCreateWizard({ onTitleChange }) {
         const data = await getSmartPricingOpportunities(shopDomain, {
           filter: 'all',
           productSearch: q,
+          // Results are folded into the loaded catalog, where a ranking of
+          // just the matches has nothing to order.
+          aiRanking: 'off',
         });
         const found = Array.isArray(data?.opportunities) ? data.opportunities : [];
         const summary = data?.summary && typeof data.summary === 'object' ? data.summary : {};
@@ -1218,8 +1237,10 @@ export default function ClassicCreateWizard({ onTitleChange }) {
         }
         let addedCount = 0;
         setOpportunities(prev => {
-          const seen = new Set(prev.map(row => String(row.variant_id || '')));
-          const added = found.filter(row => row.variant_id && !seen.has(String(row.variant_id)));
+          const seen = new Set(prev.map(row => variantIdentity(row.variant_id)));
+          const added = found.filter(
+            row => row.variant_id && !seen.has(variantIdentity(row.variant_id))
+          );
           addedCount = added.length;
           return added.length ? [...prev, ...added] : prev;
         });
@@ -1266,20 +1287,28 @@ export default function ClassicCreateWizard({ onTitleChange }) {
     };
   }, [shopDomain]);
 
+  // Loaded once on reaching the products step, not on every step change:
+  // keyed on `step` it rebuilt the whole catalog from Shopify each time the
+  // merchant moved between Products, Audience and Review. Try again reloads.
+  const reachedProductsStep = step >= 2;
   useEffect(() => {
     // A live test's products are held by that test, so the catalog would
     // withhold them and drop them from the selection it is showing.
-    if (step < 2 || liveEdit) return undefined;
+    if (!reachedProductsStep || liveEdit) return undefined;
     const requestId = productsLoadRequestId.current + 1;
     productsLoadRequestId.current = requestId;
     let cancelled = false;
-    fetchCatalog(shopDomain).then(result => {
+    fetchCatalog(shopDomain, {
+      onProgress: next => {
+        if (!cancelled && productsLoadRequestId.current === requestId) setCatalogProgress(next);
+      },
+    }).then(result => {
       if (!cancelled) applyCatalog({ requestId, ...result });
     });
     return () => {
       cancelled = true;
     };
-  }, [step, shopDomain, applyCatalog, liveEdit]);
+  }, [reachedProductsStep, shopDomain, applyCatalog, liveEdit]);
 
   const buildBatch = useCallback(async () => {
     const ids =
@@ -1583,15 +1612,32 @@ export default function ClassicCreateWizard({ onTitleChange }) {
       pickMode,
       maxSelection,
     });
-    if (!rows.length) return;
+    if (!rows.length || !(amount > 0)) return null;
+    const maxChange = shopGuardrailsReady ? Number(shopGuardrails.max_price_change_percent) : NaN;
     const next = { ...priceOverrides };
+    let capped = 0;
     rows.forEach(row => {
       const base = Number(row.current_price ?? row.price) || 0;
       const key = priceOverrideKey(row.variant_id, arm.id);
       const delta = unit === 'amount' ? amount : base * (amount / 100);
-      next[key] = Math.max(0, base + sign * delta).toFixed(2);
+      let price = Math.max(0, base + sign * delta);
+      // Held to max price change here rather than refused at launch, where the
+      // merchant would have to come back to this step to find out why.
+      const window = guardrailPriceWindow(base, maxChange);
+      if (window && (price > window.high || price < window.low)) {
+        price = Math.min(window.high, Math.max(window.low, price));
+        capped += 1;
+      }
+      next[key] = price.toFixed(2);
     });
     setPriceOverrides(next);
+    return {
+      armId: arm.id,
+      armLabel: arm.name || (arm.letter ? `Variation ${arm.letter}` : 'Variation'),
+      total: rows.length,
+      capped,
+      maxChange: Number.isFinite(maxChange) ? maxChange : null,
+    };
   };
 
   // Add variation refills a removed letter under the same id, so whatever the
@@ -1632,29 +1678,12 @@ export default function ClassicCreateWizard({ onTitleChange }) {
       const localPatch = keep(buildAiBandPriceOverrides(spreadOpts));
       if (!Object.keys(localPatch).length) return false;
       const fullMeta = keep(buildLocalPriceSuggestionMeta(spreadOpts, 'local'));
-      let applied = false;
-      setPriceOverrides(prev => {
-        const filtered = filterPriceOverridePatch(localPatch, prev, priceSuggestionMeta);
-        if (!Object.keys(filtered).length) return prev;
-        applied = true;
-        const metaPatch = {};
-        Object.keys(filtered).forEach(key => {
-          if (fullMeta[key]) metaPatch[key] = fullMeta[key];
-        });
-        setPriceSuggestionMeta(metaPrev => ({ ...metaPrev, ...metaPatch }));
-        return { ...prev, ...filtered };
-      });
-      if (!applied) return false;
+      setPriceOverrides(prev => ({ ...prev, ...localPatch }));
+      setPriceSuggestionMeta(metaPrev => ({ ...metaPrev, ...fullMeta }));
       markArmsAiSuggested(targetArms.map(arm => arm.id));
       return true;
     },
-    [
-      aiMinPct,
-      aiMaxPct,
-      shopGuardrails.max_price_change_percent,
-      markArmsAiSuggested,
-      priceSuggestionMeta,
-    ]
+    [aiMinPct, aiMaxPct, shopGuardrails.max_price_change_percent, markArmsAiSuggested]
   );
 
   const applyLocalAiBandFallback = useCallback(
@@ -1783,6 +1812,7 @@ export default function ClassicCreateWizard({ onTitleChange }) {
         setAiPriceMeta({
           source: null,
           summary:
+            aiBandOrderError(aiMinPct, aiMaxPct, { unit }) ||
             'Enter a min and max, then click Suggest. Use a negative to test a lower price.',
           detail: null,
           busy: false,
@@ -1811,15 +1841,7 @@ export default function ClassicCreateWizard({ onTitleChange }) {
       const fallbackMax = unit === 'amount' ? 5 : 20;
       const min = band.min ?? resolveBandEdge(aiMinPct, fallbackMin);
       const max = band.max ?? resolveBandEdge(aiMaxPct, fallbackMax);
-      const hadAiPrices = targetArms.some(arm =>
-        armHasAiPrices({ rows, armId: arm.id, priceOverrides }),
-      );
-      const regenerate = hadAiPrices;
-      let attempt = aiSuggestAttempt;
-      if (regenerate) {
-        attempt = aiSuggestAttempt + 1;
-        setAiSuggestAttempt(attempt);
-      }
+      const spreadArms = resolveAiSuggestSpreadArms(variations);
       setAiPriceMeta({
         source: null,
         summary: 'Suggesting prices…',
@@ -1827,7 +1849,6 @@ export default function ClassicCreateWizard({ onTitleChange }) {
         busy: true,
       });
       let settled = false;
-      const metaForFilter = priceSuggestionMeta;
       try {
         const result = await suggestSmartPricingPrices(shopDomain, {
           variants: rows.map(row => ({
@@ -1850,7 +1871,7 @@ export default function ClassicCreateWizard({ onTitleChange }) {
           })),
           // Every variation, so the one on screen keeps its own slot in the
           // spread; only its prices are applied below.
-          arms: resolveAiSuggestSpreadArms(variations).map(arm => ({
+          arms: spreadArms.map(arm => ({
             id: arm.id,
             label: arm.name || arm.role || arm.id,
           })),
@@ -1863,8 +1884,7 @@ export default function ClassicCreateWizard({ onTitleChange }) {
           objective: primaryMetric || shopGuardrails.objective || 'revenue_per_visitor',
           guardrails: shopGuardrails,
           use_ai: true,
-          regenerate,
-          attempt,
+          sibling_prices: siblingArmPrices({ rows, spreadArms, targetArms, priceOverrides }),
         });
         if (requestId !== aiSuggestRequestId.current) return;
         const rawSuggestions = Array.isArray(result?.suggestions)
@@ -1873,10 +1893,11 @@ export default function ClassicCreateWizard({ onTitleChange }) {
             ? result.data.suggestions
             : [];
         const targetIds = new Set(targetArms.map(arm => String(arm.id)));
-        const suggestions = filterPriceSuggestionsRespectingEdits(
-          rawSuggestions.filter(item => targetIds.has(String(item?.arm_id || ''))),
-          priceOverrides,
-          metaForFilter,
+        // Suggest is a click, so it reprices the variation on screen whatever
+        // set its prices before. Skipping hand-set and bulk prices left a
+        // Re-suggest that changed nothing and said "Prices applied".
+        const suggestions = rawSuggestions.filter(item =>
+          targetIds.has(String(item?.arm_id || ''))
         );
         if (!suggestions.length) {
           if (applyLocalAiBandFallback({ unit, targetArmsOverride: targetArms })) {
@@ -1994,8 +2015,6 @@ export default function ClassicCreateWizard({ onTitleChange }) {
       pricingByArm,
       priceMode,
       priceOverrides,
-      priceSuggestionMeta,
-      aiSuggestAttempt,
       markArmsAiSuggested,
     ]
   );
@@ -2335,6 +2354,8 @@ export default function ClassicCreateWizard({ onTitleChange }) {
         experimentType,
         offerByArm,
         priceMode,
+        maxChangePercent:
+          shopGuardrailsReady && !liveEdit ? shopGuardrails.max_price_change_percent : null,
       });
       if (gate.disabled) {
         setMessageType('error');
@@ -2513,6 +2534,8 @@ export default function ClassicCreateWizard({ onTitleChange }) {
         experimentType,
         offerByArm,
         priceMode,
+        maxChangePercent:
+          shopGuardrailsReady && !liveEdit ? shopGuardrails.max_price_change_percent : null,
       }),
     [
       loadingProducts,
@@ -2526,6 +2549,9 @@ export default function ClassicCreateWizard({ onTitleChange }) {
       experimentType,
       offerByArm,
       priceMode,
+      shopGuardrailsReady,
+      liveEdit,
+      shopGuardrails.max_price_change_percent,
     ]
   );
 
@@ -2884,7 +2910,11 @@ export default function ClassicCreateWizard({ onTitleChange }) {
                 priceMode: mode,
                 ...(mode === 'ai' ? { aiSuggested: false } : {}),
               });
-              if (mode !== 'ai') setPriceSuggestionMeta({});
+              // Only this variation's breakdowns: clearing every arm's left the
+              // other tabs' AI prices with no ℹ to explain them.
+              if (mode !== 'ai') {
+                setPriceSuggestionMeta(prev => dropArmEntries(prev, [activeArmId], { byOverrideKey: true }));
+              }
             }}
             priceOverrides={priceOverrides}
             priceSuggestionMeta={priceSuggestionMeta}
@@ -2896,18 +2926,6 @@ export default function ClassicCreateWizard({ onTitleChange }) {
                 delete next[key];
                 return next;
               });
-            }}
-            onPriceOverridesPatch={patch => {
-              setPriceOverrides(prev => ({ ...prev, ...(patch || {}) }));
-              if (patch && typeof patch === 'object') {
-                setPriceSuggestionMeta(prev => {
-                  const next = { ...prev };
-                  Object.keys(patch).forEach(k => {
-                    delete next[k];
-                  });
-                  return next;
-                });
-              }
             }}
             bulkPercent={bulkPercent}
             onBulkPercentChange={setBulkPercent}
@@ -2927,6 +2945,7 @@ export default function ClassicCreateWizard({ onTitleChange }) {
             onAiMinPctChange={setAiMinPct}
             onAiMaxPctChange={setAiMaxPct}
             loading={loadingProducts}
+            catalogProgress={catalogProgress}
             loadError={productsLoadError}
             onRetryLoad={loadOpportunities}
             shopDefaultsReady={shopGuardrailsReady}

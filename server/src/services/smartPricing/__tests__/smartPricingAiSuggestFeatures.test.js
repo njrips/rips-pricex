@@ -8,6 +8,7 @@ const {
   resolveProductBandSlice,
   mergeModelBandWithHeuristics,
   sanitizeModelRationale,
+  cleanModelText,
   inferHeuristicTestDirection,
   keepClearOfControl,
   spaceTestPricePercents,
@@ -53,6 +54,16 @@ describe('smartPricingAiSuggestFeatures', () => {
     assert.equal(signals.price_tier, 'standard');
     assert.equal(signals.product_type, 'T-Shirt');
     assert.ok(['low', 'very_low', 'unmeasured'].includes(signals.traffic_tier));
+    assert.equal('margin_tier' in signals, false);
+  });
+
+  it('gives the model a direction hint that does not depend on margin', () => {
+    const busy = { units_sold_30d: 60, daily_visitors: 400, visitors_30d: 12000 };
+    const thin = enrichProductSignalsForPriceSuggest({ ...busy, margin_percent: 8 });
+    const unknown = enrichProductSignalsForPriceSuggest({ ...busy, margin_percent: null });
+
+    assert.equal(thin.heuristic_direction, 'rise_candidate');
+    assert.equal(thin.heuristic_direction, unknown.heuristic_direction);
   });
 
   it('assigns different target bands when the model returns the same band', () => {
@@ -89,7 +100,9 @@ describe('smartPricingAiSuggestFeatures', () => {
     assert.notDeepEqual(a, b);
   });
 
-  it('shifts duplicate model bands on regenerate attempts', () => {
+  it('places a repeated model band the same way on every click', () => {
+    // Clicking again used to slide the band by a per-attempt hash, so the same
+    // reply produced new prices with nothing about the product changed.
     const model = { lo: 12, hi: 18 };
     const row = {
       variant_id: 'gid://shopify/ProductVariant/1',
@@ -97,15 +110,9 @@ describe('smartPricingAiSuggestFeatures', () => {
       units_sold_30d: 2,
       margin_percent: 55,
     };
-    const first = mergeModelBandWithHeuristics(row, model, 10, 25, {
-      duplicateBand: true,
-      varietyAttempt: 1,
-    });
-    const second = mergeModelBandWithHeuristics(row, model, 10, 25, {
-      duplicateBand: true,
-      varietyAttempt: 2,
-    });
-    assert.notDeepEqual(first, second);
+    const first = mergeModelBandWithHeuristics(row, model, 10, 25, { duplicateBand: true });
+    const second = mergeModelBandWithHeuristics(row, model, 10, 25, { duplicateBand: true });
+    assert.deepEqual(first, second);
   });
 
   it('spreads deterministic prices across two SKUs', () => {
@@ -167,7 +174,39 @@ describe('smartPricingAiSuggestFeatures', () => {
   it('sanitizes model rationale length', () => {
     assert.equal(sanitizeModelRationale('  ok  '), null);
     const long = 'x'.repeat(200);
-    assert.equal(sanitizeModelRationale(`${long} enough text here`).length, 160);
+    assert.ok(sanitizeModelRationale(`${long} enough text here`).length <= 160);
+  });
+
+  it('ends an overlong rationale on its last full sentence', () => {
+    const text =
+      'The product has 20 monthly sales from 900 recent visitors, and comparable listings range from $45 to $55. Test a modest increase while monitoring RPV, since demand looks steady.';
+    assert.equal(
+      sanitizeModelRationale(text),
+      'The product has 20 monthly sales from 900 recent visitors, and comparable listings range from $45 to $55.'
+    );
+  });
+
+  it('cuts at a word with an ellipsis when no sentence fits', () => {
+    const text =
+      'Measured sales of 20 units a month support testing a measured increase and the proposed range stays within observed retailer prices though discounted $28–$30 listings exist elsewhere';
+    const out = sanitizeModelRationale(text);
+    assert.ok(out.length <= 160);
+    assert.ok(out.endsWith('…'));
+    assert.ok(!/[–,]\s*…$/.test(out));
+  });
+
+  it('strips web search citations and links', () => {
+    assert.equal(
+      cleanModelText(
+        'A 40-oz tumbler retails for about $45 ([jmgolfbrands.com](https://jmgolfbrands.com/a.pdf?utm_source=openai)).',
+        160
+      ),
+      'A 40-oz tumbler retails for about $45.'
+    );
+    assert.equal(
+      cleanModelText('Priced like [REI](https://rei.com/x) and https://example.com/y listings.', 160),
+      'Priced like REI and listings.'
+    );
   });
 
   it('moves a lone test price that sits on top of the current price out to 3%', () => {
