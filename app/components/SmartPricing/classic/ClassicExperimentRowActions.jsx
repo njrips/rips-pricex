@@ -29,9 +29,11 @@ import {
 } from './classicExperimentDelete';
 import {
   ARCHIVE_STOP_BODY,
+  NOTHING_LEFT_TO_PAUSE_MESSAGE,
   lifecycleFailureError,
   postToEachExperimentTest,
   runningExperimentTestIds,
+  separateAlreadyStopped,
   stopPausedTestsBeforeArchive,
   withUnlistedExperimentTests,
 } from './classicExperimentTestScope';
@@ -191,8 +193,8 @@ export default function ClassicExperimentRowActions({
     onBusy?.(action);
     setOpen(false);
     try {
-      await fn();
-      onActionDone?.(action, experiment);
+      // `false` means nothing changed, so the list stays on the tab it is on.
+      if ((await fn()) !== false) onActionDone?.(action, experiment);
     } catch (err) {
       notify('error', err?.message || `Could not ${action} test.`);
       onBusy?.('');
@@ -216,10 +218,19 @@ export default function ClassicExperimentRowActions({
         { statuses: ['running'], dropListedOutsideStatuses: true }
       );
       if (!testIds.length) {
-        throw new Error('No linked test to pause.');
+        notify('warning', NOTHING_LEFT_TO_PAUSE_MESSAGE);
+        await refreshList({ quiet: true });
+        return false;
       }
-      const { succeeded, failed } = await postToEachTest(testIds, 'pause');
+      const result = await postToEachTest(testIds, 'pause');
+      const { succeeded } = result;
+      const { alreadyStopped, failed } = separateAlreadyStopped(result.failed);
       if (!succeeded.length) {
+        if (alreadyStopped.length && !failed.length) {
+          notify('warning', NOTHING_LEFT_TO_PAUSE_MESSAGE);
+          await refreshList({ quiet: true });
+          return false;
+        }
         throw lifecycleFailureError(failed[0]?.reason, 'pause');
       }
       const pauseEntry = createActivityEntry({

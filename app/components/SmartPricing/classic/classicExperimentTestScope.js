@@ -69,6 +69,28 @@ export async function postToEachExperimentTest(
 }
 
 /**
+ * Pause refusals for tests that had already stopped, apart from real failures.
+ *
+ * Those products are off the storefront already, which is what Pause was for;
+ * reported as "Could not pause" they read as a broken button over a list that
+ * was merely out of date.
+ */
+export function separateAlreadyStopped(failed = []) {
+  const alreadyStopped = [];
+  const rest = [];
+  (Array.isArray(failed) ? failed : []).forEach(entry => {
+    const code = entry?.reason?.response?.data?.code;
+    if (code === 'TEST_NOT_RUNNING') alreadyStopped.push(entry);
+    else rest.push(entry);
+  });
+  return { alreadyStopped, failed: rest };
+}
+
+/** Said when Pause found nothing still running to pause. */
+export const NOTHING_LEFT_TO_PAUSE_MESSAGE =
+  'Nothing to pause: this test is no longer running. The list has been refreshed to show its current status.';
+
+/**
  * The error to show when no product accepted the action.
  *
  * The server's own words for a refusal; for an outage, something the merchant

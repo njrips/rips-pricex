@@ -130,6 +130,21 @@ describe('fetchShopMarketForSuggest', () => {
     expect(mockRequestAdminGraphql).toHaveBeenCalledTimes(1);
   });
 
+  // Production pins Admin API 2025-10, where `shopAddress` does not exist yet;
+  // every lookup failed and search ran unlocalised.
+  it('falls back to billingAddress on an API version without shopAddress', async () => {
+    mockRequestAdminGraphql
+      .mockRejectedValueOnce(new Error("Field 'shopAddress' doesn't exist on type 'Shop'"))
+      .mockResolvedValueOnce({
+        data: { shop: { ianaTimezone: 'Europe/Berlin', billingAddress: { countryCodeV2: 'DE' } } },
+      });
+
+    await expect(
+      fetchShopMarketForSuggest({ shopDomain: 'de.myshopify.com', accessToken: 'tok' })
+    ).resolves.toEqual({ country: 'DE', timezone: 'Europe/Berlin' });
+    expect(mockRequestAdminGraphql.mock.calls[1][2]).toContain('billingAddress');
+  });
+
   it('drops values that are not a country code or a zone name', async () => {
     mockRequestAdminGraphql.mockResolvedValue({
       data: { shop: { ianaTimezone: 'UTC', shopAddress: { countryCodeV2: 'Great Britain' } } },

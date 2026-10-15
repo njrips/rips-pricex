@@ -104,16 +104,41 @@ async function fetchProductContextForSuggest({ shopDomain, accessToken, productI
   return out;
 }
 
-const SHOP_MARKET_QUERY = `
+// `shopAddress` exists from Admin API 2026-01; earlier versions (production is
+// pinned to 2025-10) only have the now-deprecated `billingAddress`.
+const shopMarketQuery = addressField => `
   query rpxPriceSuggestShopMarket {
     shop {
       ianaTimezone
-      shopAddress {
+      ${addressField} {
         countryCodeV2
       }
     }
   }
 `;
+
+async function requestShopMarket(shopify, shopDomain, accessToken) {
+  try {
+    const response = await shopify.requestAdminGraphql(
+      shopDomain,
+      accessToken,
+      shopMarketQuery('shopAddress'),
+      {}
+    );
+    const shop = response?.data?.shop || {};
+    return { ...shop, address: shop.shopAddress };
+  } catch (error) {
+    if (!/shopAddress/.test(String(error?.message || ''))) throw error;
+    const response = await shopify.requestAdminGraphql(
+      shopDomain,
+      accessToken,
+      shopMarketQuery('billingAddress'),
+      {}
+    );
+    const shop = response?.data?.shop || {};
+    return { ...shop, address: shop.billingAddress };
+  }
+}
 
 /** A shop's country and timezone barely change; one lookup serves many clicks. */
 const SHOP_MARKET_TTL_MS = 12 * 60 * 60 * 1000;
@@ -132,9 +157,8 @@ async function fetchShopMarketForSuggest({ shopDomain, accessToken } = {}) {
   if (cached && cached.expiresAt > Date.now()) return cached.value;
   try {
     const shopify = require('../shopifyService');
-    const response = await shopify.requestAdminGraphql(shopDomain, accessToken, SHOP_MARKET_QUERY, {});
-    const shop = response?.data?.shop || {};
-    const country = String(shop.shopAddress?.countryCodeV2 || '')
+    const shop = await requestShopMarket(shopify, shopDomain, accessToken);
+    const country = String(shop.address?.countryCodeV2 || '')
       .trim()
       .toUpperCase();
     const timezone = String(shop.ianaTimezone || '').trim();
@@ -153,7 +177,7 @@ async function fetchShopMarketForSuggest({ shopDomain, accessToken } = {}) {
 
 module.exports = {
   PRODUCT_CONTEXT_QUERY,
-  SHOP_MARKET_QUERY,
+  shopMarketQuery,
   DESCRIPTION_CHARS,
   fetchProductContextForSuggest,
   fetchShopMarketForSuggest,

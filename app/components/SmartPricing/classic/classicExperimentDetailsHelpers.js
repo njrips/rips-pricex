@@ -1165,7 +1165,9 @@ export function collectExperimentTestIds(plans = [], primaryTestId = null) {
     ids.push(id);
   };
   push(primaryTestId);
-  (Array.isArray(plans) ? plans : []).forEach(plan => push(plan?.test_id));
+  (Array.isArray(plans) ? plans : []).forEach(plan =>
+    push(plan?.test_id || plan?.metadata?.test_id)
+  );
   return ids;
 }
 

@@ -10,6 +10,7 @@ import {
   lifecycleFailureError,
   postToEachExperimentTest,
   runningExperimentTestIds,
+  separateAlreadyStopped,
   stopPausedTestsBeforeArchive,
   withUnlistedExperimentTests,
 } from '../classicExperimentTestScope';
@@ -220,5 +221,26 @@ describe('stopPausedTestsBeforeArchive', () => {
 
     expect(stopEach).not.toHaveBeenCalled();
     expect(stopped).toEqual([]);
+  });
+});
+
+describe('separateAlreadyStopped', () => {
+  const notRunning = id => ({
+    id,
+    reason: Object.assign(new Error('Only a running test can be paused.'), {
+      response: { status: 409, data: { code: 'TEST_NOT_RUNNING' } },
+    }),
+  });
+
+  it('sets aside tests the server says had already stopped', () => {
+    const outage = { id: 'b', reason: httpError(500, 'boom') };
+    const { alreadyStopped, failed } = separateAlreadyStopped([notRunning('a'), outage]);
+
+    expect(alreadyStopped.map(entry => entry.id)).toEqual(['a']);
+    expect(failed).toEqual([outage]);
+  });
+
+  it('reports nothing when there were no failures', () => {
+    expect(separateAlreadyStopped()).toEqual({ alreadyStopped: [], failed: [] });
   });
 });

@@ -302,9 +302,18 @@ describe('pausing an experiment', () => {
       assert.equal(status, 409);
       assert.equal(payload.code, 'TEST_NOT_RUNNING');
       assert.deepEqual(statusUpdates, []);
-      assert.deepEqual(syncCalls, []);
     });
   }
+
+  // The merchant only sees Pause on a stopped test when their list says it is
+  // running, so the refusal is the moment to correct the list, not five
+  // minutes later.
+  it('re-reads the plan it refused, so a stale Running row corrects itself', async () => {
+    currentStatus = 'stopped';
+    await post('/:id/pause');
+
+    assert.deepEqual(syncCalls, [{ id: 'test-1', reason: 'pause_refused' }]);
+  });
 });
 
 describe('stopping an experiment', () => {

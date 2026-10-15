@@ -354,6 +354,33 @@ describe('smartPricingAiProvider', () => {
     expect(request.include).toEqual(['web_search_call.action.sources']);
   });
 
+  // Production runs gpt-4o-mini, which answers every filtered search with a
+  // 400, so the merchant got no market read at all.
+  it('searches without the domain filter on a model that refuses it, and remembers', async () => {
+    process.env.OPENAI_CHAT_MODEL = 'gpt-4o-mini';
+    const refusal = Object.assign(
+      new Error("400 Parameter 'filters' not supported with model 'gpt-4o-mini'"),
+      { status: 400 }
+    );
+    mockResponsesCreate.mockRejectedValueOnce(refusal).mockResolvedValue(reply('{"bands":[]}'));
+
+    await expect(webSearchJson({ systemPrompt: 's', userPrompt: 'u' })).resolves.toEqual({
+      bands: [],
+    });
+    expect(mockResponsesCreate).toHaveBeenCalledTimes(2);
+    expect(mockResponsesCreate.mock.calls[1][0].tools[0]).not.toHaveProperty('filters');
+
+    await webSearchJson({ systemPrompt: 's', userPrompt: 'u' });
+    expect(mockResponsesCreate).toHaveBeenCalledTimes(3);
+    expect(mockResponsesCreate.mock.calls[2][0].tools[0]).not.toHaveProperty('filters');
+  });
+
+  it('does not retry a search refused for any other reason', async () => {
+    mockResponsesCreate.mockRejectedValue(Object.assign(new Error('400 bad input'), { status: 400 }));
+    await expect(webSearchJson({ systemPrompt: 's', userPrompt: 'u' })).resolves.toBeNull();
+    expect(mockResponsesCreate).toHaveBeenCalledTimes(1);
+  });
+
   it('identifies each shop to OpenAI by a hash, never by its domain', async () => {
     mockResponsesCreate.mockResolvedValue(reply('{}'));
     await chatJson({ systemPrompt: 's', userPrompt: 'u', shopDomain: 'Demo.myshopify.com' });

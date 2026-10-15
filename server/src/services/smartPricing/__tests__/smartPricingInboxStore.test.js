@@ -181,6 +181,44 @@ describe('smartPricingInboxStore', () => {
     expect(JSON.parse(update[1][2]).status).toBe('paused');
   });
 
+  // Two dev-store plans read Running for two weeks over tests stopped on
+  // Oct 1: the list kept offering Pause and the server kept refusing it.
+  it('moves a running plan whose test stopped without a decision to paused', async () => {
+    const client = lockingClient({
+      'SP-1': {
+        plan_id: 'SP-1',
+        plan_json: { id: 'SP-1', status: 'running', test_id: 't-1' },
+      },
+    });
+    getClient.mockResolvedValueOnce(client);
+    query.mockResolvedValueOnce({ rows: [] });
+
+    await patchInboxPlansFromSync('demo.myshopify.com', [
+      { plan_id: 'SP-1', synced: true, inbox_status: 'stopped', test_status: 'stopped' },
+    ]);
+
+    const update = findCall(client, 'UPDATE smart_pricing_inbox_plans');
+    expect(JSON.parse(update[1][2]).status).toBe('paused');
+  });
+
+  it('leaves a completed plan completed when its test reads stopped', async () => {
+    const client = lockingClient({
+      'SP-1': {
+        plan_id: 'SP-1',
+        plan_json: { id: 'SP-1', status: 'completed', test_id: 't-1' },
+      },
+    });
+    getClient.mockResolvedValueOnce(client);
+    query.mockResolvedValueOnce({ rows: [] });
+
+    await patchInboxPlansFromSync('demo.myshopify.com', [
+      { plan_id: 'SP-1', synced: true, inbox_status: 'stopped', test_status: 'stopped' },
+    ]);
+
+    const update = findCall(client, 'UPDATE smart_pricing_inbox_plans');
+    expect(JSON.parse(update[1][2]).status).toBe('completed');
+  });
+
   it('keeps an archived plan at the status it was shelved with', async () => {
     const client = lockingClient({
       'SP-1': {

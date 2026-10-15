@@ -799,6 +799,13 @@ async function patchInboxPlansFromSync(shopDomain, syncRows = []) {
       patch.status = merchantSettled ? plan.status : 'winner_ready';
     } else if (sync.inbox_status === 'running') {
       patch.status = 'running';
+    } else if (sync.inbox_status === 'stopped' && plan.status === 'running') {
+      // Stopped without a decision, outside the routes that relabel the plan
+      // themselves (another tab, an older build, a restore). Left alone the
+      // plan read Running for good: the list offered Pause, and the server
+      // could only refuse it, because nothing was running. Paused is what it
+      // now is -- off the storefront, undecided, and Resume or Stop still work.
+      patch.status = 'paused';
     }
     return { ...plan, ...patch };
   });

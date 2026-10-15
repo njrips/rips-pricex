@@ -366,6 +366,18 @@ const BLOCKED_SEARCH_DOMAINS = [
 ];
 
 /**
+ * Models OpenAI has refused domain filters for (gpt-4o-mini does, with a 400),
+ * so later searches go straight to the unfiltered request instead of failing
+ * once each first.
+ */
+const MODELS_WITHOUT_SEARCH_FILTERS = new Set();
+
+function isSearchFilterUnsupported(error) {
+  const status = Number(error?.status ?? error?.response?.status);
+  return status === 400 && /'filters'.*not supported/i.test(String(error?.message || ''));
+}
+
+/**
  * The tool's approximate location, from the shop's country and timezone.
  * Results otherwise default to wherever the search runs, which prices a UK
  * shop against US retailers.
@@ -407,8 +419,9 @@ async function webSearchJson({
     return null;
   }
   const location = searchLocation(userLocation);
-  try {
-    const response = await sendWithImageRetry({
+  const model = getChatModel();
+  const send = withDomainFilter =>
+    sendWithImageRetry({
       images,
       timeoutMs,
       maxRetries,
@@ -431,7 +444,9 @@ async function webSearchJson({
               {
                 type: 'web_search',
                 search_context_size: 'medium',
-                filters: { blocked_domains: BLOCKED_SEARCH_DOMAINS },
+                ...(withDomainFilter
+                  ? { filters: { blocked_domains: BLOCKED_SEARCH_DOMAINS } }
+                  : {}),
                 ...(location ? { user_location: location } : {}),
               },
             ],
@@ -449,11 +464,20 @@ async function webSearchJson({
         return request;
       },
     });
+  try {
+    let response;
+    try {
+      response = await send(!MODELS_WITHOUT_SEARCH_FILTERS.has(model));
+    } catch (error) {
+      if (!isSearchFilterUnsupported(error) || MODELS_WITHOUT_SEARCH_FILTERS.has(model)) throw error;
+      MODELS_WITHOUT_SEARCH_FILTERS.add(model);
+      response = await send(false);
+    }
     return readResponse(response, label);
   } catch (error) {
     logger.warn('Smart pricing OpenAI web search failed', {
       label,
-      model: getChatModel(),
+      model,
       error: error.message,
     });
     return null;

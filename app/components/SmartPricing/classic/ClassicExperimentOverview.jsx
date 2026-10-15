@@ -62,9 +62,11 @@ import {
 } from './classicExperimentDelete';
 import {
   ARCHIVE_STOP_BODY,
+  NOTHING_LEFT_TO_PAUSE_MESSAGE,
   lifecycleFailureError,
   postToEachExperimentTest,
   runningExperimentTestIds,
+  separateAlreadyStopped,
   stopPausedTestsBeforeArchive,
   withUnlistedExperimentTests,
 } from './classicExperimentTestScope';
@@ -312,6 +314,11 @@ export default function ClassicExperimentOverview() {
     setMessage(text);
   };
 
+  const showWarning = text => {
+    setMessageType('warning');
+    setMessage(text);
+  };
+
   const activityActor = plan?.owner_name || plan?.created_by_name || 'You';
   /**
    * @param {object} [options]
@@ -478,7 +485,15 @@ export default function ClassicExperimentOverview() {
   };
 
   const handlePause = async () => {
-    if (!actionableTestIds.length || busyAction) return;
+    if (busyAction) return;
+    // The Active / Paused toggle is offered on status alone, so this can be
+    // reached with no product left to act on; a silent return read as a dead
+    // button.
+    if (!actionableTestIds.length) {
+      showWarning(NOTHING_LEFT_TO_PAUSE_MESSAGE);
+      refresh({ quiet: true });
+      return;
+    }
     setBusyAction('pause');
     try {
       const testIds = await withUnlistedExperimentTests(
@@ -488,11 +503,19 @@ export default function ClassicExperimentOverview() {
         { statuses: ['running'], dropListedOutsideStatuses: true }
       );
       if (!testIds.length) {
-        showError(null, 'No running product to pause.');
+        showWarning(NOTHING_LEFT_TO_PAUSE_MESSAGE);
+        refresh({ quiet: true });
         return;
       }
-      const { succeeded, failed } = await postToEachTest(testIds, 'pause');
+      const result = await postToEachTest(testIds, 'pause');
+      const { succeeded } = result;
+      const { alreadyStopped, failed } = separateAlreadyStopped(result.failed);
       if (!succeeded.length) {
+        if (alreadyStopped.length && !failed.length) {
+          showWarning(NOTHING_LEFT_TO_PAUSE_MESSAGE);
+          refresh({ quiet: true });
+          return;
+        }
         showError(lifecycleFailureError(failed[0]?.reason, 'pause'), 'Could not pause test.');
         return;
       }

@@ -155,6 +155,11 @@ router.post(
     // finished test it put that product back on hold and turned a decided
     // product (winner ready, completed) into one waiting to resume.
     if (!PAUSABLE_STATUSES.has(status)) {
+      // A refusal here usually means the merchant's list is out of date, so it
+      // is corrected now rather than on the next five-minute sync.
+      await syncSmartPricingInboxForTest(req.shopDomain, req.params.id, {
+        reason: 'pause_refused',
+      }).catch(() => null);
       return res.status(409).json({
         error: 'Only a running test can be paused.',
         code: 'TEST_NOT_RUNNING',
