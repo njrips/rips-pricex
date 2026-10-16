@@ -1082,6 +1082,7 @@ router.post(
           // Shop guardrails are price safety limits, so they must win over anything
           // the client sends; body values only fill keys the shop does not define.
           guardrails: { ...(body.guardrails || {}), ...guardrails },
+          bandAsTyped: true,
           minPct: body.min_pct ?? body.minPct ?? 10,
           maxPct: body.max_pct ?? body.maxPct ?? 20,
           unit: body.unit === 'amount' ? 'amount' : 'percent',

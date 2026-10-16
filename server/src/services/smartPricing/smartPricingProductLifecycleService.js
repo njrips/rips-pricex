@@ -682,6 +682,7 @@ async function buildFollowUpPlan({
   catalogPrice = null,
   note = null,
   autoQueued = false,
+  aiPriced = false,
 } = {}) {
   const guardrails = await getShopSmartPricingGuardrails(shopDomain).catch(() => ({}));
   const currentRound = resolveLearningRound(plan);
@@ -759,6 +760,17 @@ async function buildFollowUpPlan({
   });
 
   if (armPrices && typeof armPrices === 'object' && Object.keys(armPrices).length) {
+    if (aiPriced) {
+      // Launch holds every other price to max price change; AI prices are not.
+      rebuilt = {
+        ...rebuilt,
+        price_arms: (rebuilt.price_arms || []).map(arm =>
+          arm.role !== 'control' && armPrices[arm.id] !== undefined
+            ? { ...arm, price_source: 'ai' }
+            : arm
+        ),
+      };
+    }
     rebuilt = applyPriceArmOverrides(rebuilt, armPrices, guardrails);
   }
 
@@ -870,6 +882,7 @@ async function rerunSmartPricingProduct({
   }
 
   let resolvedArmPrices = armPrices;
+  let aiPriced = false;
   if (useAiSuggestion && !resolvedArmPrices) {
     const { suggestPricesForRerun } = require('./smartPricingAiSuggestService');
     const suggestion = await suggestPricesForRerun({
@@ -879,6 +892,7 @@ async function rerunSmartPricingProduct({
     }).catch(() => null);
     if (suggestion?.arm_prices) {
       resolvedArmPrices = suggestion.arm_prices;
+      aiPriced = true;
     }
   }
 
@@ -890,6 +904,7 @@ async function rerunSmartPricingProduct({
     catalogPrice,
     note,
     autoQueued: false,
+    aiPriced,
   });
 }
 
@@ -1026,10 +1041,54 @@ async function resolveCatalogPrice(shopDomain, plan, analytics, accessToken) {
   return { price: null, source: null };
 }
 
+/**
+ * Whether the product has a store page right now, and the handle it lives at.
+ *
+ * A draft, archived, or unpublished product has none, so a link built from the
+ * saved handle lands on Page not found. The handle is read live as well, since
+ * a renamed product moves to a new URL.
+ */
+async function resolveStorefrontStatus(shopDomain, plan, accessToken) {
+  const savedHandle =
+    String(plan?.handle || plan?.product_handle || plan?.metadata?.handle || '').trim() || null;
+  if (!accessToken || !plan?.product_id) return { status: 'unknown', handle: savedHandle };
+  let product;
+  try {
+    product = await getShopifyService().getProduct(shopDomain, accessToken, plan.product_id);
+  } catch (err) {
+    logger.warn('Product report could not check the store page', {
+      shopDomain,
+      productId: plan.product_id,
+      message: err?.message,
+    });
+    return { status: 'unknown', handle: savedHandle };
+  }
+  if (!product) return { status: 'missing', handle: null };
+  const handle = String(product.handle || '').trim() || savedHandle;
+  const productStatus = String(product.status || '').toUpperCase();
+  let status = 'published';
+  if (productStatus === 'DRAFT') status = 'draft';
+  else if (productStatus === 'ARCHIVED') status = 'archived';
+  else if (!product.publishedAt) status = 'unpublished';
+  return { status, handle };
+}
+
 async function buildSmartPricingProductReport(shopDomain, planId, { accessToken = null } = {}) {
-  const plan = await getInboxPlanById(shopDomain, planId);
+  let plan = await getInboxPlanById(shopDomain, planId);
   if (!plan) {
     throw new Error('Plan not found');
+  }
+
+  // Settled before anything is read, so this report already shows the test as
+  // ended. This catches products deleted while the products/delete webhook was
+  // not subscribed or not delivered.
+  const storefront = await resolveStorefrontStatus(shopDomain, plan, accessToken);
+  if (storefront.status === 'missing' && plan.product_id) {
+    const { handleShopifyProductDeleted } = require('./smartPricingProductDeletionService');
+    const settled = await handleShopifyProductDeleted(shopDomain, plan.product_id).catch(() => null);
+    if (settled && (settled.ended.length || settled.excluded.length || settled.released.length || settled.marked.length)) {
+      plan = (await getInboxPlanById(shopDomain, planId).catch(() => null)) || plan;
+    }
   }
 
   const lineage = await resolvePlanLineage(shopDomain, plan.id);
@@ -1085,6 +1144,7 @@ async function buildSmartPricingProductReport(shopDomain, planId, { accessToken 
     plan,
     catalog_price: catalog.price,
     catalog_price_source: catalog.source,
+    storefront,
     product_decision: currentAnalytics?.product_decision || null,
     analytics: currentAnalytics,
     lineage: rounds,
@@ -1107,6 +1167,7 @@ module.exports = {
   shouldAutoQueueFollowUp,
   resolvePlanLineage,
   buildSmartPricingProductReport,
+  resolveStorefrontStatus,
   inferFollowUpBasePrice,
   resolveCatalogPrice,
   resolveLearningRound,

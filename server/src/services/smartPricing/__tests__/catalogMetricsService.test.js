@@ -135,6 +135,29 @@ describe('catalogMetricsService', () => {
     ]);
   });
 
+  it('excludes active products that are not published to the Online Store', () => {
+    const products = [
+      {
+        id: 'gid://shopify/Product/1',
+        status: 'ACTIVE',
+        publishedAt: null,
+        onlineStoreUrl: null,
+        variants: [{ id: 'gid://shopify/ProductVariant/11', price: '20.00' }],
+      },
+      {
+        id: 'gid://shopify/Product/2',
+        status: 'ACTIVE',
+        publishedAt: '2026-10-01T00:00:00Z',
+        onlineStoreUrl: null,
+        variants: [{ id: 'gid://shopify/ProductVariant/21', price: '20.00' }],
+      },
+    ];
+
+    expect(flattenCatalogRows(products).map(row => row.product_id)).toEqual([
+      'gid://shopify/Product/2',
+    ]);
+  });
+
   it('uses Shopify availability and inventory tracking instead of raw quantity alone', () => {
     const rows = flattenCatalogRows([
       {

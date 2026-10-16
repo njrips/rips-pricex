@@ -330,6 +330,23 @@ async function listInboxPlansUnfiltered(domain) {
 }
 
 const UNLAUNCHED_STATUSES = new Set(['queued', 'draft']);
+const LIVE_PLAN_STATUSES = new Set(['running', 'paused']);
+
+/**
+ * Only a launch puts a plan on Running or Paused, and a launch links its test.
+ * The browser stamps experiment-wide Pause/Resume onto every sibling plan and
+ * falls back to Running when a launch reply carries no test, so without this
+ * a plan with no test was saved as live: the list offered Pause and Stop, and
+ * neither had a test to act on.
+ */
+function keepTestlessPlanOffLive(plan, storedStatus) {
+  if (String(plan?.test_id || '').trim()) return plan;
+  const incoming = String(plan?.status || '').trim().toLowerCase();
+  if (!LIVE_PLAN_STATUSES.has(incoming)) return plan;
+  const stored = String(storedStatus || '').trim().toLowerCase();
+  if (LIVE_PLAN_STATUSES.has(stored)) return plan;
+  return { ...plan, status: stored || 'queued' };
+}
 
 /**
  * A save is the browser's copy of a plan, and that copy can predate its
@@ -426,6 +443,7 @@ async function saveInboxPlans(
     // whichever screen did it, so the flip is what gets logged.
     const wasArchived = new Map();
     const launchedState = new Map();
+    const storedStatus = new Map();
     if (accepted.length) {
       const previous = await client.query(
         `SELECT plan_id, COALESCE(plan_json->>'archived', '') = 'true' AS archived,
@@ -438,10 +456,16 @@ async function saveInboxPlans(
       );
       for (const row of previous.rows || []) {
         wasArchived.set(String(row.plan_id), row.archived === true);
+        storedStatus.set(String(row.plan_id), row.status);
         if (row.test_id) launchedState.set(String(row.plan_id), row);
       }
     }
-    accepted = accepted.map(plan => keepLaunchedState(plan, launchedState.get(plan.id)));
+    accepted = accepted.map(plan =>
+      keepTestlessPlanOffLive(
+        keepLaunchedState(plan, launchedState.get(plan.id)),
+        storedStatus.get(plan.id)
+      )
+    );
     lifecycleEvents = accepted
       .filter(plan => wasArchived.has(plan.id) && wasArchived.get(plan.id) !== plan.archived)
       .map(plan =>
@@ -721,7 +745,7 @@ async function patchInboxPlan(shopDomain, planId, patch = {}) {
   }
 
   const patched = await patchInboxPlanRows(domain, [id], existing => {
-    const next = { ...existing, ...patch, id };
+    const next = keepTestlessPlanOffLive({ ...existing, ...patch, id }, existing?.status);
     if (patch.archived === true) {
       next.archived = true;
       next.archived_at = patch.archived_at || new Date().toISOString();
@@ -1037,25 +1061,32 @@ function planFromOrphanedTest(test) {
  * a plan that exists is never touched.
  */
 /**
- * Live tests whose own plan is still there but lost its link: a launch whose
- * link write failed, or a save of a pre-launch copy. The plan reads as a
- * draft while its test runs on the storefront.
+ * Plans that lost the link to their own test: a launch whose link write
+ * failed, or a save of a pre-launch copy. While the test is live the plan
+ * reads as a draft. A plan still claiming Running or Paused after its test
+ * stopped is relinked too: every sync finds plans by test_id, so it read
+ * Running for good while Pause and Stop had no test to act on.
  */
 async function relinkUnlinkedLivePlans(domain) {
   const result = await query(
-    `SELECT t.id, t.status, t.started_at, p.plan_id
+    `SELECT DISTINCT ON (p.plan_id) t.id, t.status, t.started_at, p.plan_id
        FROM tests t
        JOIN smart_pricing_inbox_plans p
          ON p.shop_domain = $1
         AND p.plan_id = t.metadata->>'smart_pricing_plan_id'
       WHERE LOWER(TRIM(t.shop_domain)) = $1
-        AND t.status IN ('running', 'paused')
+        AND t.deleted_at IS NULL
+        AND (
+          t.status IN ('running', 'paused')
+          OR (t.status = 'stopped' AND COALESCE(p.plan_json->>'status', p.status) IN ('running', 'paused'))
+        )
         AND p.test_id IS NULL
         AND COALESCE(p.plan_json->>'test_id', '') = ''
         AND NOT EXISTS (
           SELECT 1 FROM smart_pricing_inbox_plans other
            WHERE other.shop_domain = $1 AND other.test_id = t.id
         )
+      ORDER BY p.plan_id, (t.status IN ('running', 'paused')) DESC, t.created_at DESC
       LIMIT $2`,
     [domain, MAX_PLANS_PER_SHOP]
   );
@@ -1068,7 +1099,9 @@ async function relinkUnlinkedLivePlans(domain) {
     return {
       ...plan,
       test_id: String(test.id),
-      status: test.status === 'paused' ? 'paused' : 'running',
+      // A stopped test is off the storefront and undecided, the same reading
+      // the test sync gives it: Paused, so Resume and Stop both work.
+      status: test.status === 'running' ? 'running' : 'paused',
       launched_at:
         plan.launched_at ||
         (test.started_at ? new Date(test.started_at).toISOString() : new Date().toISOString()),
@@ -1079,6 +1112,48 @@ async function relinkUnlinkedLivePlans(domain) {
     test_ids: rows.map(row => row.id).slice(0, 50),
   });
   return rows.map(row => String(row.id));
+}
+
+/**
+ * Plans still reading Running or Paused with no test of their own after the
+ * relink: saved live by a browser before saves were guarded, or left behind
+ * when a restore gave their test a plan of its own. Nothing is on the
+ * storefront for them, and Pause and Stop had no test to act on. In an
+ * experiment that launched they are finished with it; otherwise they go back
+ * to the queue to be launched.
+ */
+async function settleTestlessLivePlans(domain) {
+  const result = await query(
+    `SELECT p.plan_id,
+            EXISTS (
+              SELECT 1 FROM smart_pricing_inbox_plans s
+               WHERE s.shop_domain = $1
+                 AND s.plan_id <> p.plan_id
+                 AND s.test_id IS NOT NULL
+                 AND s.plan_json->'metadata'->>'experiment_id' = p.plan_json->'metadata'->>'experiment_id'
+            ) AS experiment_launched
+       FROM smart_pricing_inbox_plans p
+      WHERE p.shop_domain = $1
+        AND COALESCE(p.plan_json->>'status', p.status) IN ('running', 'paused')
+        AND p.test_id IS NULL
+        AND COALESCE(p.plan_json->>'test_id', '') = ''
+        AND COALESCE(p.plan_json->>'archived', 'false') <> 'true'
+      LIMIT $2`,
+    [domain, MAX_PLANS_PER_SHOP]
+  );
+  const rows = result.rows || [];
+  if (!rows.length) return [];
+  const byPlan = new Map(rows.map(row => [String(row.plan_id), row]));
+  await patchInboxPlanRows(domain, [...byPlan.keys()], plan => {
+    const row = byPlan.get(plan.id);
+    if (!row || String(plan.test_id || '').trim()) return plan;
+    return { ...plan, status: row.experiment_launched ? 'completed' : 'queued' };
+  });
+  logger.warn('settled inbox plans that read live with no test', {
+    shop: domain,
+    plan_ids: [...byPlan.keys()].slice(0, 50),
+  });
+  return [...byPlan.keys()];
 }
 
 async function restoreOrphanedLivePlans(shopDomain) {
@@ -1116,7 +1191,13 @@ async function restoreOrphanedLivePlans(shopDomain) {
       test_ids: plans.map(plan => plan.test_id).slice(0, 50),
     });
   }
-  return { restored, relinked: relinked.length, test_ids: plans.map(plan => plan.test_id) };
+  const settled = await settleTestlessLivePlans(domain);
+  return {
+    restored,
+    relinked: relinked.length,
+    settled: settled.length,
+    test_ids: plans.map(plan => plan.test_id),
+  };
 }
 
 const EMPTY_ARMS_SQL = `COALESCE(jsonb_array_length(CASE WHEN jsonb_typeof(plan_json->'price_arms') = 'array'

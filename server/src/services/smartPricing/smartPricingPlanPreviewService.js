@@ -15,6 +15,7 @@ const {
   upsertInboxPlan,
 } = require('../../models/smartPricingInboxStore');
 const { getShopSession } = require('../../models/shopSession');
+const logger = require('../../utils/logger');
 const shopifyService = require('../shopifyService');
 const { getShopSmartPricingGuardrails } = require('./smartPricingGuardrailsService');
 const { buildPriceTestPayloadFromPlan, formatArmVariantName } = require('./planToPriceTestService');
@@ -551,17 +552,26 @@ async function ensureSmartPricingPlanPreviewTest(shopDomain, planId, options = {
   let handle = await resolveProductHandleForPlan(domain, plan);
   let publishedAt = null;
   let onlineStoreUrl = null;
+  // 'unknown' when Shopify could not be asked; previews then proceed unchecked.
+  let storefrontStatus = 'unknown';
   try {
     const session = await getShopSession(domain);
     const token = session?.access_token || '';
     if (token && plan.product_id) {
       const product = await shopifyService.getProduct(domain, token, plan.product_id);
-      handle = String(product?.handle || handle || '').trim();
-      publishedAt = product?.publishedAt || null;
-      onlineStoreUrl = product?.onlineStoreUrl || null;
+      if (product) {
+        handle = String(product.handle || handle || '').trim();
+        publishedAt = product.publishedAt || null;
+        onlineStoreUrl = product.onlineStoreUrl || null;
+        storefrontStatus = publishedAt ? 'published' : 'unpublished';
+      }
     }
-  } catch (_pubErr) {
-    // optional
+  } catch (pubErr) {
+    logger.warn('Preview could not check Online Store publication', {
+      shopDomain: domain,
+      productId: plan.product_id,
+      message: pubErr?.message,
+    });
   }
 
   if (handle && handle !== String(plan.handle || plan.product_handle || '').trim()) {
@@ -610,6 +620,7 @@ async function ensureSmartPricingPlanPreviewTest(shopDomain, planId, options = {
     publishedAt,
     onlineStoreUrl,
     storefrontReady: Boolean(handle && (publishedAt || onlineStoreUrl)),
+    storefrontStatus,
     experimentProductCount: experimentPlans.length,
     variants: mapArmPreviewVariants(
       {

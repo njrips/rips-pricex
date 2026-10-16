@@ -20,6 +20,40 @@ const { getShopSession } = require('../../models/shopSession');
 const { linkInboxPlanToTest } = require('../../models/smartPricingInboxStore');
 const logger = require('../../utils/logger');
 const { findDeletions, planExperimentId } = require('../../models/smartPricingDeletionStore');
+const { normalizeProductGid } = require('./smartPricingCatalogUtils');
+
+/**
+ * A draft can outlive its product: a test launched on a product deleted in
+ * Shopify since has no store page, so it would run with no visitors for ever.
+ * Only a definite "no such product" refuses; when Shopify cannot be asked the
+ * launch goes ahead, as it did before this check.
+ */
+async function assertProductStillExists(plan, shopDomain, accessToken) {
+  const productId = normalizeProductGid(plan?.product_id ?? plan?.productId);
+  if (!productId || !accessToken) return;
+  let product;
+  try {
+    product = await require('../shopifyService').getProduct(shopDomain, accessToken, productId);
+  } catch (err) {
+    logger.warn('Launch could not confirm the product still exists', {
+      shop: shopDomain,
+      product_id: productId,
+      message: err?.message,
+    });
+    return;
+  }
+  if (product) return;
+  const title = String(
+    plan?.metadata?.product_title || plan?.product_title || plan?.title || ''
+  ).trim();
+  const err = new Error(
+    `${title ? `"${title}"` : 'This product'} was deleted from your Shopify store, so it cannot be tested. Remove it from this test and launch again.`
+  );
+  err.isValidation = true;
+  err.code = 'PRODUCT_DELETED';
+  err.errors = [err.message];
+  throw err;
+}
 
 async function launchSmartPricingPlanAsTest(
   plan,
@@ -105,6 +139,7 @@ async function launchSmartPricingPlanAsTest(
 
     const session = await getShopSession(shopDomain).catch(() => null);
     const accessToken = session?.access_token || '';
+    await assertProductStillExists(plan, shopDomain, accessToken);
     if (offerPlan) {
       // Offer launch only needs the checkout discount binding. Skip the price-path
       // readiness waterfall (cart transform + theme surfaces) — that extra Shopify

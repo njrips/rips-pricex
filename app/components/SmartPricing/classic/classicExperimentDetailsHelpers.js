@@ -333,12 +333,36 @@ function formatProductFinishedStatusLabel(isOffer) {
 }
 
 /** Merchant status column on Product performance by variation (Global naming doc). */
+export const PRODUCT_DELETED_STATUS_LABEL = 'Deleted in Shopify';
+
+/**
+ * Products in these plans were deleted in Shopify, so their tests were ended.
+ * One sentence for the test page; empty when none were.
+ */
+export function describeDeletedProducts(plans = []) {
+  const titles = (Array.isArray(plans) ? plans : [])
+    .filter(plan => plan?.product_deleted_at)
+    .map(plan => splitProductVariantTitle(getPlanProductTitle(plan)).productTitle);
+  const unique = [...new Set(titles.filter(Boolean))];
+  const count = (Array.isArray(plans) ? plans : []).filter(plan => plan?.product_deleted_at).length;
+  if (!count) return '';
+  const named =
+    unique.length && unique.length <= 3
+      ? unique.map(title => `"${title}"`).join(', ')
+      : `${unique.length || count} products`;
+  const plural = unique.length > 1 || (!unique.length && count > 1);
+  return `${named} ${plural ? 'were' : 'was'} deleted from your Shopify store, so Priceify ended ${plural ? 'their tests' : 'its test'}. A deleted product has no store page and can get no visitors. Results collected before the deletion are kept below.`;
+}
+
 export function formatProductStatusLabel({
   planStatus = '',
   rolloutState = null,
   rolloutDetail = '',
   isOffer = false,
+  productDeleted = false,
 } = {}) {
+  // Outranks every other state: whatever the test reached, it is over.
+  if (productDeleted) return PRODUCT_DELETED_STATUS_LABEL;
   const detail = String(rolloutDetail || '').toLowerCase();
   if (detail.includes('guardrail') || detail.includes('revenue drop')) {
     return 'Excluded by guardrail';
@@ -369,6 +393,7 @@ export function productPerformanceStatusBadgeVariant(statusLabel) {
   switch (String(statusLabel || '').trim()) {
     case 'Excluded by guardrail':
     case 'Needs attention':
+    case PRODUCT_DELETED_STATUS_LABEL:
       return 'attention';
     case 'Ready':
       return 'ready';
@@ -1354,6 +1379,7 @@ export function buildProductPerformanceGrid({
       testId: testId || null,
       currency: row.currency || null,
       sharedTest,
+      productDeletedAt: row?.product_deleted_at || null,
       status: String(row?.status || '').trim().toLowerCase() || null,
       decisionLabel: formatProductDecisionLabel(row, {
         isOffer: isOfferExperimentType(
@@ -2223,7 +2249,14 @@ export function buildSettingsSummary(
     notes.push(`Max parallel tests: ${maxParallel}`);
   }
   if (!isOffer && Number.isFinite(Number(guardrails.max_price_change_percent))) {
-    notes.push(`Max price change: ±${guardrails.max_price_change_percent}%`);
+    const hasAiPrices = (Array.isArray(plan?.price_arms) ? plan.price_arms : []).some(
+      arm => arm?.price_source === 'ai'
+    );
+    notes.push(
+      `Max price change: ±${guardrails.max_price_change_percent}%${
+        hasAiPrices ? ' (manual and bulk prices; AI prices follow the band you set)' : ''
+      }`
+    );
   }
   const revenueDrop =
     Number(

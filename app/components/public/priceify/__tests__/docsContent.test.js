@@ -87,7 +87,7 @@ describe('Priceify guides content', () => {
     const ids = DOCS_SECTIONS.map((section) => section.id);
     assert.equal(new Set(ids).size, ids.length, 'duplicate section ids');
     const ai = DOCS_SECTIONS.find((section) => section.id === 'ai-price');
-    assert.ok(/hard cap/i.test(ai.paragraphs.join(' ')));
+    assert.ok(/max price change does not limit the band/i.test(ai.paragraphs.join(' ')));
     // The band is signed, so the guide has to say so: a merchant who believes
     // Suggest only raises prices will never try the test their slow sellers
     // most need. The minimum margin is the limit on a cut, so it is named too.

@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const {
   inferFollowUpBasePrice,
   resolveCatalogPrice,
+  resolveStorefrontStatus,
   resolveLearningRound,
   resolveMaxLearningRounds,
   extractBaselineFromPublish,
@@ -164,5 +165,33 @@ describe('smartPricingProductLifecycleService helpers', () => {
     assert.equal(RERUN_ELIGIBLE_STATUSES.has('stopped'), true);
     assert.equal(RERUN_ELIGIBLE_STATUSES.has('completed'), true);
     assert.equal(RERUN_ELIGIBLE_STATUSES.has('running'), false);
+  });
+
+  it('reads whether the product has a store page right now', async () => {
+    const shopifyService = require('../../shopifyService');
+    const original = shopifyService.getProduct;
+    let reply = null;
+    shopifyService.getProduct = async () => {
+      if (reply instanceof Error) throw reply;
+      return reply;
+    };
+    const plan = { product_id: 'gid://shopify/Product/9', handle: 'saved' };
+    try {
+      reply = { handle: 'live', status: 'ACTIVE', publishedAt: '2026-10-01T00:00:00Z' };
+      assert.deepEqual(await resolveStorefrontStatus('s', plan, 'tok'), { status: 'published', handle: 'live' });
+      reply = { handle: 'live', status: 'ACTIVE', publishedAt: null };
+      assert.equal((await resolveStorefrontStatus('s', plan, 'tok')).status, 'unpublished');
+      reply = { handle: 'live', status: 'DRAFT', publishedAt: null };
+      assert.equal((await resolveStorefrontStatus('s', plan, 'tok')).status, 'draft');
+      reply = { handle: 'live', status: 'ARCHIVED', publishedAt: '2026-10-01T00:00:00Z' };
+      assert.equal((await resolveStorefrontStatus('s', plan, 'tok')).status, 'archived');
+      reply = null;
+      assert.deepEqual(await resolveStorefrontStatus('s', plan, 'tok'), { status: 'missing', handle: null });
+      reply = new Error('401');
+      assert.deepEqual(await resolveStorefrontStatus('s', plan, 'tok'), { status: 'unknown', handle: 'saved' });
+      assert.deepEqual(await resolveStorefrontStatus('s', plan, null), { status: 'unknown', handle: 'saved' });
+    } finally {
+      shopifyService.getProduct = original;
+    }
   });
 });

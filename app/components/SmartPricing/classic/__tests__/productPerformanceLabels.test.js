@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  describeDeletedProducts,
   formatProductDecisionOutcome,
   formatProductStatusLabel,
   productPerformanceStatusBadgeVariant,
@@ -88,5 +89,33 @@ describe('product performance labels (naming doc)', () => {
     expect(
       resolveProductWinningArmId({ state: 'applied' }, arms, { winnerArmId: 'a' })
     ).toBe('a');
+  });
+});
+
+describe('a product deleted in Shopify', () => {
+  it('says so in the Status column, whatever the test reached', () => {
+    const label = formatProductStatusLabel({
+      planStatus: 'completed',
+      rolloutState: 'ready_challenger',
+      productDeleted: true,
+    });
+    expect(label).toBe('Deleted in Shopify');
+    expect(productPerformanceStatusBadgeVariant(label)).toBe('attention');
+  });
+
+  it('names the deleted products for the test page', () => {
+    expect(describeDeletedProducts([{ title: 'Beanie' }])).toBe('');
+    expect(
+      describeDeletedProducts([
+        { title: 'Beanie', product_deleted_at: '2026-10-16T00:00:00Z' },
+        { title: 'Socks' },
+      ])
+    ).toMatch(/^"Beanie" was deleted from your Shopify store, so Priceify ended its test\./);
+    expect(
+      describeDeletedProducts([
+        { title: 'Beanie', product_deleted_at: 'x' },
+        { title: 'Socks', product_deleted_at: 'x' },
+      ])
+    ).toMatch(/^"Beanie", "Socks" were deleted .* ended their tests\./);
   });
 });

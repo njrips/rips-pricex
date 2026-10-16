@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useParams, useSearchParams } from 'react-router';
-import { Badge, Button, Modal } from '@shopify/polaris';
+import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
+import { Badge, Banner, Button, Modal } from '@shopify/polaris';
 import PageShell from '../../shared/PageShell';
 import ClassicPageLoader from '../../shared/ClassicPageLoader';
 import { ROUTES } from '../../../constants';
@@ -45,7 +45,7 @@ import {
   resolveAudienceHistoryActivityTitle,
 } from './classicAudienceEdit';
 import { enrichExperimentsWithListAnalytics } from './classicExperimentListAnalytics';
-import { formatDetailDate } from './classicExperimentDetailsHelpers';
+import { describeDeletedProducts, formatDetailDate } from './classicExperimentDetailsHelpers';
 import { appendActivityToPlans, createActivityEntry } from './classicActivity';
 import {
   formatClassicStatusLabel,
@@ -93,6 +93,7 @@ const TABS = [
 export default function ClassicExperimentOverview() {
   const { planId } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const shopDomain = useClassicShopDomain();
   // The URL is the single source of truth for the active tab, so back/forward
@@ -254,16 +255,33 @@ export default function ClassicExperimentOverview() {
         params.delete('tab');
       }
       params.set('product', id);
-      setSearchParams(params, { replace: true });
+      // Opening a product from the test is a step in, so Back (the browser's
+      // or the admin's) returns to the test rather than to the tests list.
+      // Moving between products inside the drill-down replaces that step.
+      if (searchParams.get('product')) {
+        setSearchParams(params, { replace: true, state: location.state });
+      } else {
+        setSearchParams(params, { state: { productOpenedFromTest: true } });
+      }
     },
-    [searchParams, setSearchParams]
+    [searchParams, setSearchParams, location.state]
   );
 
   const closeProduct = useCallback(() => {
+    // Undo the step `openProduct` added, so Back from the test then leaves it.
+    if (location.state?.productOpenedFromTest) {
+      navigate(-1);
+      return;
+    }
     const params = new URLSearchParams(searchParams);
     params.delete('product');
     setSearchParams(params, { replace: true });
-  }, [searchParams, setSearchParams]);
+  }, [searchParams, setSearchParams, location.state, navigate]);
+
+  const deletedProductsNotice = useMemo(
+    () => describeDeletedProducts(experimentPlans),
+    [experimentPlans]
+  );
 
   const productNavList = useMemo(
     () =>
@@ -1047,9 +1065,13 @@ export default function ClassicExperimentOverview() {
               variant="plain"
               textAlign="start"
               icon={ButtonIconArrowLeft}
-              onClick={() => navigate(ROUTES.appSmartPricing(shopDomain))}
+              onClick={
+                selectedProductId
+                  ? closeProduct
+                  : () => navigate(ROUTES.appSmartPricing(shopDomain))
+              }
             >
-              Tests
+              {selectedProductId ? 'Back to test' : 'Tests'}
             </Button>
           </div>
 
@@ -1211,6 +1233,12 @@ export default function ClassicExperimentOverview() {
           </div>
         </div>
         </div>
+
+        {deletedProductsNotice ? (
+          <Banner tone="warning" title="Product deleted in Shopify">
+            <p>{deletedProductsNotice}</p>
+          </Banner>
+        ) : null}
 
         <div className={styles.overviewTabs} role="tablist" aria-label="Test sections">
           {TABS.map(item => {

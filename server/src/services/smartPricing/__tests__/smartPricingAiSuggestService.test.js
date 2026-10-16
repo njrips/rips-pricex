@@ -7,6 +7,7 @@ jest.mock('../smartPricingAiProvider', () => ({
 const { hasOpenAiKey, chatJson, webSearchJson } = require('../smartPricingAiProvider');
 const {
   suggestPrices,
+  widenGuardrailsToBand,
   readSiblingPrices,
   deterministicPriceSuggestions,
   sanitizeMarketBenchmarks,
@@ -98,6 +99,60 @@ describe('smartPricingAiSuggestService', () => {
     it('leaves a request without target arms as it was', async () => {
       const result = await suggestPrices(request);
       expect(result.suggestions).toHaveLength(2);
+    });
+  });
+
+  describe('band used as typed', () => {
+    const request = {
+      variants: [{ variant_id: 'v1', title: 'Tee', current_price: 40, margin_percent: 55 }],
+      arms: [{ id: 'var_a' }, { id: 'var_b' }],
+      guardrails: { min_margin_percent: 35, max_price_change_percent: 15 },
+      minPct: 30,
+      maxPct: 50,
+    };
+
+    it('prices inside a band beyond max price change', async () => {
+      const result = await suggestPrices({ ...request, bandAsTyped: true });
+      expect(result.suggestions).toHaveLength(2);
+      result.suggestions.forEach(row => {
+        expect(row.delta_percent).toBeGreaterThanOrEqual(30);
+        expect(row.delta_percent).toBeLessThanOrEqual(50);
+      });
+    });
+
+    it('still caps a band at max price change without the option', async () => {
+      const result = await suggestPrices(request);
+      result.suggestions.forEach(row => {
+        expect(row.delta_percent).toBeLessThanOrEqual(15);
+      });
+    });
+
+    it('widens max price change to the band, never below the shop setting', () => {
+      expect(widenGuardrailsToBand(request).guardrails.max_price_change_percent).toBe(50);
+      expect(
+        widenGuardrailsToBand({ ...request, minPct: 2, maxPct: 5 }).guardrails
+          .max_price_change_percent
+      ).toBe(15);
+    });
+
+    it('keeps a cut above a free product', () => {
+      const widened = widenGuardrailsToBand({ ...request, minPct: -150, maxPct: -120 });
+      expect(widened.minPct).toBe(-99);
+      expect(widened.maxPct).toBe(-99);
+    });
+
+    it('widens to reach a dollar band on the cheapest product', () => {
+      const widened = widenGuardrailsToBand({
+        ...request,
+        variants: [
+          { variant_id: 'v1', current_price: 40 },
+          { variant_id: 'v2', current_price: 10 },
+        ],
+        unit: 'amount',
+        minAmount: 5,
+        maxAmount: 8,
+      });
+      expect(widened.guardrails.max_price_change_percent).toBe(80);
     });
   });
 
@@ -691,12 +746,14 @@ describe('what the price suggestion prompt asks for', () => {
       variants: [{ ...oneProduct.variants[0], margin_percent: 60 }],
     });
     const { systemPrompt, userPrompt } = chatJson.mock.calls[0][0];
-    const { products, guardrails } = JSON.parse(userPrompt);
+    const payload = JSON.parse(userPrompt);
 
     expect(systemPrompt).toMatch(/perceived value/i);
-    expect(products[0]).not.toHaveProperty('margin_percent');
-    expect(products[0]).not.toHaveProperty('margin_tier');
-    expect(guardrails).not.toHaveProperty('min_margin_percent');
+    expect(payload.products[0]).not.toHaveProperty('margin_percent');
+    expect(payload.products[0]).not.toHaveProperty('margin_tier');
+    // allowed_band is the only limit the model is given; max price change does not apply to AI prices.
+    expect(payload).not.toHaveProperty('guardrails');
+    expect(systemPrompt).not.toMatch(/max price change/i);
   });
 
   it('tells the model not to cut a slow seller already priced below the market', async () => {

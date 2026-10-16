@@ -95,11 +95,69 @@ describe('smartPricingPlanPreviewService', () => {
     expect(result.testType).toBe('price');
     expect(result.handle).toBe('the-collection-snowboard-liquid');
     expect(result.storefrontReady).toBe(true);
+    expect(result.storefrontStatus).toBe('published');
     expect(result.variants.map(v => v.variantName)).toEqual([
       '$749.95 Control',
       '$884.94 Variation A',
       '$824.95 Variation C',
     ]);
+  });
+
+  describe('Online Store publication', () => {
+    beforeEach(() => {
+      listInboxPlans.mockResolvedValue({
+        plans: [
+          {
+            id: 'SP-pub',
+            status: 'queued',
+            test_id: null,
+            handle: 'bulk-product',
+            product_id: 'gid://shopify/Product/42',
+            variant_id: 'gid://shopify/ProductVariant/4201',
+            currency: 'USD',
+            current_price: 20,
+            price_arms: [
+              { id: 'control', role: 'control', label: 'Control', price: 20 },
+              { id: 'var_b', role: 'challenger', label: 'Variation A', price: 22 },
+            ],
+          },
+        ],
+      });
+      getTestById.mockResolvedValue(null);
+      launchSmartPricingPlanAsTest.mockResolvedValue({
+        test: {
+          id: '22222222-2222-4222-8222-222222222222',
+          variants: [
+            { id: 'v0', name: '$20.00 Control' },
+            { id: 'v1', name: '$22.00 Variation A' },
+          ],
+        },
+      });
+      patchInboxPlan.mockResolvedValue({ plan: { id: 'SP-pub' } });
+      getShopSession.mockResolvedValue({ access_token: 'tok' });
+    });
+
+    it('reports an active product missing from the Online Store as unpublished', async () => {
+      shopifyService.getProduct.mockResolvedValue({
+        handle: 'bulk-product',
+        publishedAt: null,
+        onlineStoreUrl: null,
+      });
+
+      const result = await ensureSmartPricingPlanPreviewTest('shop.myshopify.com', 'SP-pub');
+
+      expect(result.storefrontStatus).toBe('unpublished');
+      expect(result.storefrontReady).toBe(false);
+    });
+
+    it('reports unknown rather than unpublished when Shopify cannot be asked', async () => {
+      shopifyService.getProduct.mockRejectedValue(new Error('401 Unauthorized'));
+
+      const result = await ensureSmartPricingPlanPreviewTest('shop.myshopify.com', 'SP-pub');
+
+      expect(result.storefrontStatus).toBe('unknown');
+      expect(result.handle).toBe('bulk-product');
+    });
   });
 
   it('builds one shared experiment preview test covering every sibling SKU', async () => {

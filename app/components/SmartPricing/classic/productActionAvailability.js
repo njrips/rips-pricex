@@ -269,6 +269,9 @@ function formatEventDetail(event) {
     if (reason === 'merchant_finish' || reason === 'merchant_stop_product') {
       return 'Traffic assignment stopped.';
     }
+    if (reason === 'product_deleted') {
+      return 'The product was deleted from your Shopify store, so Priceify ended this test.';
+    }
     if (reason === 'guardrail_breach') {
       const product = productTitleFromEventPayload(payload);
       if (product) {

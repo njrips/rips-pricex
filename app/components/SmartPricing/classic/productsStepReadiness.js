@@ -12,6 +12,12 @@ import {
   widenedProductSlice,
 } from './testPriceSpacing';
 
+/**
+ * The deepest cut an AI band may ask for. The band is not held to max price
+ * change, but a 100% cut is a free product, not a test price.
+ */
+export const AI_BAND_MIN_PERCENT = -99;
+
 /** Same SKU grouping the Products step pricing table uses. */
 export function productGroupKey(row) {
   const explicitProduct = String(row?.product_title || '').trim();
@@ -189,6 +195,7 @@ export function spreadAiBandPriceEntries({
   max = 20,
   unit = 'percent',
   maxChangePct = 15,
+  uncapped = false,
 } = {}) {
   const entries = [];
   const arms = Array.isArray(targetArms) ? targetArms.filter(arm => arm?.id) : [];
@@ -203,8 +210,11 @@ export function spreadAiBandPriceEntries({
 
   rows.forEach(row => {
     const base = Number(row.current_price ?? row.price) || 0;
-    const ceiling = base * (1 + maxChange / 100);
-    const floor = Math.max(0, base * (1 - maxChange / 100));
+    // An AI band is not held to max price change; it only has to stay a price.
+    const ceiling = uncapped ? Infinity : base * (1 + maxChange / 100);
+    const floor = uncapped
+      ? base * (1 + AI_BAND_MIN_PERCENT / 100)
+      : Math.max(0, base * (1 - maxChange / 100));
     const productBand =
       unit === 'amount'
         ? { min: safeMin, max: safeMax }
@@ -302,9 +312,9 @@ export function guardrailPriceWindow(base, maxChangePercent) {
 /** Tooltip copy: how shelf prices are derived from catalog data. */
 export function describeAiPriceCalculationTooltip({ unit = 'percent' } = {}) {
   if (unit === 'amount') {
-    return 'Each suggested price starts in your min–max dollar band, is capped by max price change per product, then rounded to a normal price ending. Spacing follows traffic-aware rules so variations are far enough apart to learn.';
+    return 'Each suggested price starts in your min–max dollar band, then is rounded to a normal price ending. Spacing follows traffic-aware rules so variations are far enough apart to learn.';
   }
-  return 'AI picks a test range per product from perceived value, market price position, sales, and revenue per visitor; variations are spaced for statistical power, then capped by your guardrails and rounded to realistic price endings such as .99, so the change column shows the exact result. Hover the ℹ beside a test price for its breakdown; for a product with several variants, expand it to see each one.';
+  return 'AI picks a test range per product from perceived value, market price position, sales, and revenue per visitor; variations are spaced for statistical power inside your band, then rounded to realistic price endings such as .99, so the change column shows the exact result. Hover the ℹ beside a test price for its breakdown; for a product with several variants, expand it to see each one.';
 }
 
 export function describeAiBandDirectionTooltip(direction) {
@@ -455,10 +465,10 @@ export function describePriceSuggestionTooltip(meta, { base: baseFallback = 0 } 
   );
 
   if (meta.shopMaxClamped) {
-    parts.push('Adjusted to stay within your max price change.');
+    parts.push(`Held at a ${Math.abs(AI_BAND_MIN_PERCENT)}% cut so the price stays above $0.`);
   }
   if (meta.guardrailLimited) {
-    parts.push('Tightened by margin or max price change guardrails.');
+    parts.push('Moved outside your band to stay clear of another variation’s price or above $0.');
   }
   if (source === 'openai' || source === 'deterministic') {
     parts.push('Final cents may use a normal price ending (.99, .95) inside the allowed range.');
@@ -577,6 +587,21 @@ export function resolveAiSuggestTargetArms({
  * same place every time, so two variations given the same band came back with
  * the same price and tested nothing against each other.
  */
+/**
+ * Whether a test price is still the one Suggest produced. Only those skip max
+ * price change: a price typed or bulk-adjusted afterwards is held to it, which
+ * tab the variation sits on says nothing about where its prices came from.
+ */
+export function isAiSuggestedPrice(priceSuggestionMeta = {}, priceOverrides = {}, variantId, armId) {
+  const suggested = Number(priceSuggestionMeta?.[priceOverrideKey(variantId, armId)]?.price);
+  if (!Number.isFinite(suggested)) return false;
+  const raw = lookupPriceOverride(priceOverrides, variantId, armId);
+  if (raw === undefined || raw === null || String(raw).trim() === '') return false;
+  const price = Number(raw);
+  // Overrides hold the suggestion rounded to the cent.
+  return Number.isFinite(price) && Math.abs(price - suggested) < 0.006;
+}
+
 export function resolveAiSuggestSpreadArms(variations = []) {
   return (variations || []).filter((row, i) => i > 0 && row?.id && row.id !== 'control');
 }
@@ -1011,8 +1036,14 @@ export function aiBandOrderError(minRaw, maxRaw, { unit = 'percent' } = {}) {
   if (blank(minRaw) || blank(maxRaw)) return '';
   const a = Number(minRaw);
   const b = Number(maxRaw);
-  if (!Number.isFinite(a) || !Number.isFinite(b) || a <= b) return '';
-  return `Min (${formatBandValue(a, unit)}) can’t be more than max (${formatBandValue(b, unit)}).`;
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return '';
+  if (a > b) {
+    return `Min (${formatBandValue(a, unit)}) can’t be more than max (${formatBandValue(b, unit)}).`;
+  }
+  if (unit !== 'amount' && Math.min(a, b) < AI_BAND_MIN_PERCENT) {
+    return `A price cut can’t be more than ${Math.abs(AI_BAND_MIN_PERCENT)}%.`;
+  }
+  return '';
 }
 
 /** Which way a band points, for the copy that reports it. */
@@ -1023,68 +1054,6 @@ export function aiBandDirection(band) {
   if (min >= 0) return 'up';
   if (max <= 0) return 'down';
   return 'both';
-}
-
-/**
- * Shop max price change is a hard cap. Suggest cannot widen past Settings.
- *
- * The cap is a distance, not a ceiling, so it bounds the band on both sides:
- * a 15% limit allows anything from -15% to +15%. Only the upper edge was
- * checked before, which let a -40% request through untouched while a +40% one
- * was trimmed to +15%.
- */
-export function capAiBandToShopMax(
-  band,
-  shopMaxChangePercent,
-  { unit = 'percent', averagePrice = 0 } = {}
-) {
-  if (!band) return null;
-  const shop = Number(shopMaxChangePercent);
-  const capPct = Number.isFinite(shop) && shop > 0 ? shop : 15;
-  const cap =
-    unit === 'amount' && Number(averagePrice) > 0 ? (Number(averagePrice) * capPct) / 100 : capPct;
-  const limit = value => Math.min(cap, Math.max(-cap, value));
-  let min = limit(band.min);
-  let max = limit(band.max);
-  // Infeasible means nothing the merchant asked for survives the cap, which is
-  // only true when the band lies wholly beyond it on one side. A wide band
-  // straddling the current price is merely trimmed.
-  const feasible = band.min <= cap && band.max >= -cap;
-  const reach = Math.max(Math.abs(band.min), Math.abs(band.max));
-
-  // The whole band sits beyond the cap on one side, so clamping flattened it to
-  // a point. Scale it back inside instead, keeping its shape rather than
-  // shifting it by the requested width: shifting drags the near edge far past
-  // what the merchant asked for (a 20–30% band under a 16% cap would start at
-  // 6%), while scaling keeps it as close to the cap as allowed. Collapsing to a
-  // single point is avoided so the variations still differ. describeAiBandCap
-  // explains the substitution.
-  if (min === max && reach > cap) {
-    const scale = cap / reach;
-    const signedRound = value => {
-      const magnitude =
-        unit === 'amount'
-          ? Math.round(Math.abs(value) * 100) / 100
-          : Math.round(Math.abs(value) * 10) / 10;
-      return value < 0 ? -magnitude : magnitude;
-    };
-    // Cents for a dollar band, one decimal for a percent: "10.67%" reads like a
-    // glitch to a merchant, and the extra precision buys nothing. Rounded on
-    // magnitude so a cut and the rise mirroring it come out the same width.
-    min = signedRound(band.min * scale);
-    max = signedRound(band.max * scale);
-  }
-
-  return {
-    min,
-    max,
-    capPct,
-    capValue: cap,
-    requestedMin: band.min,
-    requestedMax: band.max,
-    maxClamped: reach > cap,
-    feasible,
-  };
 }
 
 function formatBandValue(value, unit) {
@@ -1119,72 +1088,8 @@ export function describeAiBandRange(min, max, unit = 'percent') {
 }
 
 /**
- * Explains what the shop guardrail did to the requested band. Suggestions must
- * never silently land outside the min/max the merchant typed.
- */
-export function describeAiBandCap(cap, { unit = 'percent' } = {}) {
-  if (!cap) return '';
-  const requested = describeAiBandRange(cap.requestedMin, cap.requestedMax, unit);
-  const using = describeAiBandRange(cap.min, cap.max, unit);
-  if (cap.feasible === false) {
-    // "Beyond", not "above": the band can now sit entirely below the guardrail
-    // too, and a merchant told a discount band was "above" their limit would
-    // reasonably think the app had misread them.
-    return `Your ${requested} band is entirely beyond your ${cap.capPct}% max price change guardrail${
-      unit === 'amount' ? ` (about ${formatBandValue(cap.capValue, unit)} here)` : ''
-    }, so suggestions use ${using} instead. Raise the max price change to test ${requested}.`;
-  }
-  if (cap.maxClamped) {
-    return `Capped by your ${cap.capPct}% max price change guardrail: suggestions use ${using} instead of ${requested}.`;
-  }
-  return '';
-}
-
-/** Settings clamps max price change to this range, so an offer to raise it must too. */
-export const MAX_PRICE_CHANGE_CEILING = 30;
-
-function resolveCapValue(shopMaxChangePercent, unit, averagePrice) {
-  const capPct = Number(shopMaxChangePercent);
-  if (!Number.isFinite(capPct) || capPct <= 0) return null;
-  if (unit !== 'amount') return { capPct, capValue: capPct };
-  const avg = Number(averagePrice);
-  // Without product prices there is no dollar equivalent of a percent cap yet.
-  if (!(avg > 0)) return null;
-  return { capPct, capValue: (avg * capPct) / 100 };
-}
-
-/**
- * Max price change is enforceable, so a band field must not hold more than it.
- * Returns the value to store plus what the merchant actually typed when it had
- * to be reduced, so the UI can offer to raise the guardrail instead of hiding
- * the conflict.
- */
-export function clampAiBandValue(
-  value,
-  shopMaxChangePercent,
-  { unit = 'percent', averagePrice = 0 } = {}
-) {
-  const raw = String(value ?? '');
-  const typed = Number(raw);
-  const cap = resolveCapValue(shopMaxChangePercent, unit, averagePrice);
-  // Only the distance from the current price is capped, so the sign survives
-  // and a merchant typing -20 keeps a cut. Taking the absolute value here
-  // turned every negative they entered into a rise as they typed it.
-  const distance = Math.abs(typed);
-  if (!cap || !Number.isFinite(typed) || distance === 0 || distance <= cap.capValue) {
-    return { value: raw, attempted: null };
-  }
-  const magnitude =
-    unit === 'amount'
-      ? Math.round(cap.capValue * 100) / 100
-      : Math.round(cap.capValue * 10) / 10;
-  const clamped = typed < 0 ? -magnitude : magnitude;
-  return { value: String(clamped), attempted: typed };
-}
-
-/**
- * Clamping both ends to the same cap leaves a band with no width, which prices
- * every variation identically. That is not a test, so it has to be said out
+ * A band whose ends are equal has no width, which prices every variation
+ * identically. That is not a test, so it has to be said out
  * loud rather than discovered after launch.
  */
 export function describeCollapsedAiBand(band, { unit = 'percent' } = {}) {
@@ -1212,7 +1117,7 @@ export function describeCollapsedAiBand(band, { unit = 'percent' } = {}) {
  */
 export function describeNarrowAiBand(
   band,
-  { unit = 'percent', armCount = 1, shopMaxChangePercent = null } = {}
+  { unit = 'percent', armCount = 1 } = {}
 ) {
   if (unit === 'amount') return '';
   const min = Number(band?.min);
@@ -1220,10 +1125,7 @@ export function describeNarrowAiBand(
   if (!Number.isFinite(min) || !Number.isFinite(max) || min === max) return '';
   const arms = Math.max(0, Math.floor(Number(armCount) || 0));
   if (arms < 1) return '';
-  const cap = Number(shopMaxChangePercent);
-  const need = bandNeededForArms({ min, max }, arms, {
-    cap: Number.isFinite(cap) && cap > 0 ? cap : Infinity,
-  });
+  const need = bandNeededForArms({ min, max }, arms);
   if (!need) return '';
   const clear = formatBandValue(MIN_CONTROL_GAP_PERCENT, unit);
   const problem =
@@ -1234,103 +1136,34 @@ export function describeNarrowAiBand(
           unit
         )} apart and at least ${clear} from your current price, so some would sit too close to tell apart.`;
   const widened = describeAiBandRange(need.min, need.max, unit);
-  if (!need.reachable) {
-    return `${problem} That needs ${widened}, more than your ${cap}% max price change allows${
-      arms > 1 ? ', so test fewer variations or raise the max price change' : ''
-    }.`;
-  }
   return `${problem} Widen it to ${widened}${arms > 1 ? ' or test fewer variations' : ''}.`;
 }
 
-/** Copy for a band field that the shop guardrail had to reduce. */
-export function describeAiBandClamp(
-  attempted,
-  shopMaxChangePercent,
-  { unit = 'percent', averagePrice = 0 } = {}
-) {
-  const typed = Number(attempted);
-  const cap = resolveCapValue(shopMaxChangePercent, unit, averagePrice);
-  const distance = Math.abs(typed);
-  if (!cap || !Number.isFinite(typed) || distance === 0 || distance <= cap.capValue) return '';
-  // The guardrail limits the distance moved, so a cut is reported against the
-  // same number as the rise mirroring it, and the copy says "further from"
-  // rather than "above".
-  const capText = formatBandValue(typed < 0 ? -cap.capValue : cap.capValue, unit);
-  const scope =
-    unit === 'amount' ? ` (${cap.capPct}% of these products' average price)` : '';
-  // Leads with the value now in the field: the merchant reads the field, and a
-  // tooltip opening on the number they typed read as the app having misread it.
-  return `The band is capped at ${capText}${scope}, your ${cap.capPct}% max price change guardrail. ${formatBandValue(typed, unit)} is further from the current price than that allows.`;
-}
-
 /**
- * The merchant's real goal is usually to test what they typed. When their own
- * shop cap is the only thing in the way and Settings still has room, offer the
- * raise instead of sending them away. Returns null when raising cannot help.
- */
-export function resolveRaiseForAttempt(
-  attempted,
-  shopMaxChangePercent,
-  { unit = 'percent', averagePrice = 0 } = {}
-) {
-  // The distance from the current price is what the guardrail governs, so a
-  // merchant asking to test 20% cheaper needs the same raise as one asking to
-  // test 20% dearer. Reading the signed value here meant a cut never triggered
-  // the offer at all.
-  const typed = Math.abs(Number(attempted));
-  const capPct = Number(shopMaxChangePercent);
-  if (!Number.isFinite(typed) || typed <= 0 || !Number.isFinite(capPct) || capPct <= 0) {
-    return null;
-  }
-  const avg = Number(averagePrice);
-  const requestedPct = unit === 'amount' ? (avg > 0 ? (typed / avg) * 100 : NaN) : typed;
-  if (!Number.isFinite(requestedPct) || requestedPct <= capPct) return null;
-  const target = Math.min(MAX_PRICE_CHANGE_CEILING, Math.ceil(requestedPct));
-  if (target <= capPct) return null;
-  return {
-    target,
-    currentPct: capPct,
-    // Above the Settings ceiling the raise helps but still will not reach the
-    // requested top, so the copy must not promise full coverage.
-    coversRequest: target + 0.001 >= requestedPct,
-  };
-}
-
-/** Same offer, resolved from an already-capped band rather than a typed value. */
-export function resolveMaxPriceChangeRaise(cap, options = {}) {
-  if (!cap || cap.maxClamped !== true) return null;
-  // Whichever edge reaches furthest from the current price is the one the
-  // guardrail trimmed, and so the one the raise has to cover. On a cut band
-  // that is the minimum, not the maximum.
-  const furthest =
-    Math.abs(Number(cap.requestedMin)) > Math.abs(Number(cap.requestedMax))
-      ? cap.requestedMin
-      : cap.requestedMax;
-  return resolveRaiseForAttempt(furthest, cap.capPct, options);
-}
-
-/**
- * A per-product margin or max-change guardrail can pull an individual price
- * under the requested minimum even when the band itself is allowed. Say so,
- * otherwise the suggestion just looks like the band was ignored.
+ * A price can still land outside the band: kept clear of a price another
+ * variation holds, or above $0 on a cut deeper than the product's price. Say
+ * so, otherwise the suggestion just looks like the band was ignored.
  */
 export function describeGuardrailLimitedSuggestions(
   limitedCount,
   totalCount,
-  cap,
+  band,
   { unit = 'percent' } = {}
 ) {
   const limited = Number(limitedCount) || 0;
   const total = Number(totalCount) || 0;
   if (limited <= 0 || total <= 0) return '';
-  const floor = formatBandValue(cap?.requestedMin, unit);
+  const min = Number(band?.min ?? band?.requestedMin);
+  const max = Number(band?.max ?? band?.requestedMax);
+  const range =
+    Number.isFinite(min) && Number.isFinite(max) ? ` ${describeAiBandRange(min, max, unit)}` : '';
   const scope =
     limited === total
       ? 'Every suggested price is'
       : limited === 1
         ? `1 of ${total} suggested prices is`
         : `${limited} of ${total} suggested prices are`;
-  return `${scope} below your ${floor} minimum because that product's margin or max price change guardrail capped it first.`;
+  return `${scope} outside your${range} band, moved to stay clear of another variation’s price or above $0.`;
 }
 
 /**
@@ -1433,6 +1266,7 @@ export function getProductsStepContinueState({
   offerByArm = {},
   priceMode = 'manual',
   maxChangePercent = null,
+  priceSuggestionMeta = {},
 } = {}) {
   const hasCatalog = (opportunities || []).some(row => row?.variant_id);
   if (loadingProducts && !hasCatalog) {
@@ -1520,7 +1354,7 @@ export function getProductsStepContinueState({
   }
   // Launch refuses these anyway; catching them here keeps the merchant on the
   // step where the price can be fixed, not on Review with a server error.
-  const outOfRange = findOutOfRangeTestPrices({ ...priceArgs, maxChangePercent });
+  const outOfRange = findOutOfRangeTestPrices({ ...priceArgs, maxChangePercent, priceSuggestionMeta });
   if (outOfRange.length > 0) {
     const n = outOfRange.length;
     return {
@@ -1554,10 +1388,12 @@ export function findOutOfRangeTestPrices({
   variations = [],
   priceOverrides = {},
   maxChangePercent = null,
+  priceSuggestionMeta = {},
 } = {}) {
   if (!(Number(maxChangePercent) > 0)) return [];
   return collectTestPrices({ opportunities, selectedIds, pickMode, maxSelection, variations, priceOverrides })
-    .filter(({ row, price }) => {
+    .filter(({ row, armId, price }) => {
+      if (isAiSuggestedPrice(priceSuggestionMeta, priceOverrides, row.variant_id, armId)) return false;
       const window = guardrailPriceWindow(row.current_price ?? row.price, maxChangePercent);
       return window && (price < window.low - 0.005 || price > window.high + 0.005);
     });

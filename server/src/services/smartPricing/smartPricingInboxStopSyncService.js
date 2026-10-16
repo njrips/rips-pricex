@@ -78,8 +78,11 @@ async function syncSmartPricingInboxForTest(shopDomain, testId, { reason = 'test
   // different answer from pausing it. Left as `paused` the plan came back
   // resumable on the next list load, undoing the stop they had just been told
   // had happened.
+  // A product deleted in Shopify can never resume either.
   const merchantFinished =
-    normalizedReason === 'merchant_finish' && result.synced && !result.winner_applied;
+    (normalizedReason === 'merchant_finish' || normalizedReason === 'product_deleted') &&
+    result.synced &&
+    !result.winner_applied;
   // Keep a merchant or guardrail pause so interval syncs do not turn it into a
   // generic stopped state or advertise a rollout without reviewed evidence.
   const keepExistingPause =

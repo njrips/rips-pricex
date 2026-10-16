@@ -190,7 +190,8 @@ function findPriceChangeViolations(currentPrice, priceArms = [], guardrails = {}
       violations.push(`${label} does not have a valid price.`);
       return;
     }
-    if (price < floor || price > ceiling) {
+    // An AI price comes from the merchant's band, which max price change does not limit.
+    if (arm?.price_source !== 'ai' && (price < floor || price > ceiling)) {
       violations.push(
         `${label} at $${roundPrice(price)} is outside your ${maxChangePercent}% max price change ` +
           `(allowed $${floor}–$${ceiling}).`

@@ -569,6 +569,7 @@ export default function ClassicPerformanceTab({
                     rolloutState: rollout?.state,
                     rolloutDetail: rolloutDecision?.detail,
                     isOffer: isOfferTest,
+                    productDeleted: Boolean(row.productDeletedAt),
                   });
                   const decisionLabel = formatProductDecisionOutcome({
                     rolloutDecision,

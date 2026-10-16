@@ -15,7 +15,6 @@ import { useKeyedState } from '../../../hooks/useKeyedState';
 import {
   createSmartPricingBatch,
   getSmartPricingGuardrails,
-  saveSmartPricingGuardrails,
   getSmartPricingOpportunities,
   getSmartPricingOpportunitiesProgress,
   suggestSmartPricingGoals,
@@ -178,9 +177,7 @@ import {
 import {
   formatCatalogLoadError,
   getProductsStepContinueState,
-  capAiBandToShopMax,
-  clampAiBandValue,
-  describeAiBandCap,
+  isAiSuggestedPrice,
   describeAiBandRange,
   composeAiSuggestBanner,
   describeAiSuggestionSource,
@@ -207,6 +204,7 @@ import {
   limitSelectionToProducts,
 } from './productsStepReadiness';
 import { newCatalogProgressId, startCatalogProgressPoll } from './catalogLoadProgress';
+import { buildUnavailableSelectionNotice } from './productsStepCatalogCopy';
 import {
   isActionableOfferConfig,
   getOfferCheckoutBlockReason,
@@ -260,7 +258,8 @@ function rebuildPlanArmsFromVariations(
   plan,
   variations = [],
   priceOverrides = {},
-  offerByArm = {}
+  offerByArm = {},
+  priceSuggestionMeta = {}
 ) {
   const base = Number(plan?.current_price) || 0;
   const variantId = plan?.variant_id;
@@ -285,6 +284,10 @@ function rebuildPlanArmsFromVariations(
       traffic_percent: Number(variation.traffic) || 0,
       allocation_percent: Number(variation.traffic) || 0,
       offer: isControl || !isActionableOfferConfig(offer) ? null : offer,
+      // Launch holds every other price to max price change; an AI band is used as typed.
+      ...(!isControl && hasOverride && isAiSuggestedPrice(priceSuggestionMeta, priceOverrides, variantId, armId)
+        ? { price_source: 'ai' }
+        : {}),
     };
   });
 }
@@ -545,9 +548,6 @@ export default function ClassicCreateWizard({ onTitleChange }) {
     [patchActivePricing]
   );
   const [shopGuardrails, setShopGuardrails] = useState({});
-  const [raisingMaxPriceChange, setRaisingMaxPriceChange] = useState(false);
-  /** What the merchant typed when the shop cap forced a lower band value. */
-  const [aiBandAttempt, setAiBandAttempt] = useState({ min: null, max: null });
   const [scenarioPreset, setScenarioPreset] = useState('recommended');
 
   const [audience, setAudience] = useState(createDefaultAudienceState);
@@ -1132,10 +1132,6 @@ export default function ClassicCreateWizard({ onTitleChange }) {
     setShopGuardrailsReady(true);
   }, [appliedSavedDraft]);
 
-  const loadGuardrails = useCallback(async () => {
-    applyShopGuardrails(await fetchShopGuardrails(shopDomain));
-  }, [shopDomain, applyShopGuardrails]);
-
   // Read by the catalog load below, which must not restart when the mode flips.
   const pickModeRef = useRef(pickMode);
   useEffect(() => {
@@ -1214,6 +1210,9 @@ export default function ClassicCreateWizard({ onTitleChange }) {
         const data = await getSmartPricingOpportunities(shopDomain, {
           filter: 'all',
           productSearch: q,
+          // Folded into a catalog that was just loaded fresh. A cached answer
+          // could be hours old and bring back products deleted since.
+          refresh: true,
           // Results are folded into the loaded catalog, where a ranking of
           // just the matches has nothing to order.
           aiRanking: 'off',
@@ -1331,6 +1330,16 @@ export default function ClassicCreateWizard({ onTitleChange }) {
         title_prefix: name || undefined,
       });
       let nextPlans = batch?.plans || [];
+      const missingIds = Array.isArray(batch?.missing_variant_ids) ? batch.missing_variant_ids : [];
+      const unavailableNotice = buildUnavailableSelectionNotice(missingIds, [
+        ...(opportunities || []),
+        ...(plans || []),
+      ]);
+      if (!nextPlans.length && unavailableNotice) {
+        throw new Error(`${unavailableNotice} Pick other products to continue.`);
+      }
+      const missingKeys = new Set(missingIds.map(variantIdentity));
+      const keptIds = ids.filter(id => !missingKeys.has(variantIdentity(id)));
 
       // Rebuild arms Control-first from wizard variations (do not index-patch scenario Lower→Control→Higher).
       const opportunityByVariant = new Map(
@@ -1343,7 +1352,8 @@ export default function ClassicCreateWizard({ onTitleChange }) {
           plan,
           variations,
           priceOverrides,
-          offerByArm
+          offerByArm,
+          priceSuggestionMeta
         );
         const opp = opportunityByVariant.get(String(plan.variant_id || '')) || null;
         const productHandle = String(
@@ -1382,7 +1392,11 @@ export default function ClassicCreateWizard({ onTitleChange }) {
       });
 
       setPlans(nextPlans);
-      setSelectedIds(ids);
+      setSelectedIds(keptIds);
+      if (unavailableNotice) {
+        setMessageType('warning');
+        setMessage(unavailableNotice);
+      }
 
       const goalsRes = await suggestSmartPricingGoals(shopDomain, nextPlans).catch(() => null);
       const goalMap = {};
@@ -1421,9 +1435,11 @@ export default function ClassicCreateWizard({ onTitleChange }) {
     hypothesis,
     priceOverrides,
     offerByArm,
+    priceSuggestionMeta,
     audience,
     experimentId,
     experimentType,
+    plans,
   ]);
 
   const enrichPlansForLaunch = useCallback(
@@ -1661,8 +1677,6 @@ export default function ClassicCreateWizard({ onTitleChange }) {
       const fallbackMax = unit === 'amount' ? 5 : 20;
       const min = band.min ?? resolveBandEdge(aiMinPct, fallbackMin);
       const max = band.max ?? resolveBandEdge(aiMaxPct, fallbackMax);
-      const shopMaxChange = Number(shopGuardrails.max_price_change_percent);
-      const maxChangePct = Number.isFinite(shopMaxChange) && shopMaxChange > 0 ? shopMaxChange : 15;
       // Spread across every variation so each keeps its own slot in the band,
       // then keep only the ones being priced: spread alone, two variations
       // given the same band would land on the same price.
@@ -1672,7 +1686,7 @@ export default function ClassicCreateWizard({ onTitleChange }) {
         min,
         max,
         unit,
-        maxChangePct,
+        uncapped: true,
       };
       const keep = keepArmKeys(targetArms);
       const localPatch = keep(buildAiBandPriceOverrides(spreadOpts));
@@ -1683,7 +1697,7 @@ export default function ClassicCreateWizard({ onTitleChange }) {
       markArmsAiSuggested(targetArms.map(arm => arm.id));
       return true;
     },
-    [aiMinPct, aiMaxPct, shopGuardrails.max_price_change_percent, markArmsAiSuggested]
+    [aiMinPct, aiMaxPct, markArmsAiSuggested]
   );
 
   const applyLocalAiBandFallback = useCallback(
@@ -1714,16 +1728,7 @@ export default function ClassicCreateWizard({ onTitleChange }) {
         }));
         return false;
       }
-      const rawBand = normalizeAiPriceBand(aiMinPct, aiMaxPct);
-      const bases = rows
-        .map(row => Number(row.current_price ?? row.price) || 0)
-        .filter(n => n > 0);
-      const avg = bases.length ? bases.reduce((sum, n) => sum + n, 0) / bases.length : 0;
-      const band =
-        capAiBandToShopMax(rawBand, shopGuardrails.max_price_change_percent, {
-          unit,
-          averagePrice: avg,
-        }) || rawBand;
+      const band = normalizeAiPriceBand(aiMinPct, aiMaxPct);
       const fallbackMin = unit === 'amount' ? 1 : 10;
       const fallbackMax = unit === 'amount' ? 5 : 20;
       const min = band?.min ?? resolveBandEdge(aiMinPct, fallbackMin);
@@ -1740,7 +1745,6 @@ export default function ClassicCreateWizard({ onTitleChange }) {
         : 'Could not build local prices — check product prices and try again.';
       const { status, detail } = composeAiSuggestBanner({
         source: 'deterministic',
-        bandNotice: describeAiBandCap(band, { unit }),
         fallbackLine,
         unit,
       });
@@ -1763,7 +1767,6 @@ export default function ClassicCreateWizard({ onTitleChange }) {
       selectedIds,
       pickMode,
       maxSelection,
-      shopGuardrails.max_price_change_percent,
       paintLocalAiBandPrices,
     ]
   );
@@ -1807,8 +1810,8 @@ export default function ClassicCreateWizard({ onTitleChange }) {
         setActiveArmIndex(1);
       }
 
-      const rawBand = normalizeAiPriceBand(aiMinPct, aiMaxPct);
-      if (!rawBand) {
+      const band = normalizeAiPriceBand(aiMinPct, aiMaxPct);
+      if (!band || aiBandOrderError(aiMinPct, aiMaxPct, { unit })) {
         setAiPriceMeta({
           source: null,
           summary:
@@ -1819,16 +1822,6 @@ export default function ClassicCreateWizard({ onTitleChange }) {
         });
         return;
       }
-      const bases = rows
-        .map(row => Number(row.current_price ?? row.price) || 0)
-        .filter(n => n > 0);
-      const avg = bases.length ? bases.reduce((sum, n) => sum + n, 0) / bases.length : 0;
-      const band =
-        capAiBandToShopMax(rawBand, shopGuardrails.max_price_change_percent, {
-          unit,
-          averagePrice: avg,
-        }) || rawBand;
-      const bandNotice = describeAiBandCap(band, { unit });
       const amountMode = unit === 'amount';
       // Dollar bands are sent as dollars; the server applies the flat uplift to
       // each product and clamps it per SKU. Converting to a catalog-average
@@ -1903,7 +1896,6 @@ export default function ClassicCreateWizard({ onTitleChange }) {
           if (applyLocalAiBandFallback({ unit, targetArmsOverride: targetArms })) {
             const { status, detail } = composeAiSuggestBanner({
               source: 'deterministic',
-              bandNotice: describeAiBandCap(band, { unit }),
               fallbackLine: `Even spread across your ${describeAiBandRange(min, max, unit)} band (AI unavailable).`,
               unit,
             });
@@ -1941,7 +1933,6 @@ export default function ClassicCreateWizard({ onTitleChange }) {
         const { status, detail } = composeAiSuggestBanner({
           source,
           skippedReason: result?.ai_skipped_reason || result?.data?.ai_skipped_reason,
-          bandNotice,
           baseSummary,
           sourceNotice,
           limitedNotice,
@@ -1967,7 +1958,6 @@ export default function ClassicCreateWizard({ onTitleChange }) {
         if (applyLocalAiBandFallback({ unit, targetArmsOverride: targetArms })) {
           const { status, detail } = composeAiSuggestBanner({
             source: 'deterministic',
-            bandNotice: describeAiBandCap(band, { unit }),
             fallbackLine: `Even spread across your ${describeAiBandRange(min, max, unit)} band (AI unavailable).`,
             errorMessage: apiMessage,
             unit,
@@ -2019,53 +2009,6 @@ export default function ClassicCreateWizard({ onTitleChange }) {
     ]
   );
 
-  const raiseMaxPriceChange = useCallback(
-    async target => {
-      const next = Number(target);
-      if (!Number.isFinite(next) || next <= 0) return;
-      setRaisingMaxPriceChange(true);
-      try {
-        // Send the whole current object: the endpoint normalizes and persists a
-        // full guardrail record, so a partial body would reset the other limits.
-        await saveSmartPricingGuardrails(shopDomain, {
-          ...shopGuardrails,
-          max_price_change_percent: next,
-        });
-        await loadGuardrails();
-        // Put back what the merchant originally typed, now that it is allowed.
-        const restore = {};
-        const attemptedMin = Number(aiBandAttempt.min);
-        const attemptedMax = Number(aiBandAttempt.max);
-        // Non-zero rather than positive: a blocked edge can now be a price cut,
-        // and requiring a positive value meant raising the guardrail put back
-        // only the half of the band that happened to be a rise.
-        if (Number.isFinite(attemptedMin) && attemptedMin !== 0) {
-          restore.aiMinPct = String(attemptedMin);
-        }
-        if (Number.isFinite(attemptedMax) && attemptedMax !== 0) {
-          restore.aiMaxPct = String(attemptedMax);
-        }
-        if (Object.keys(restore).length) {
-          patchAiBand({ ...restore, aiSuggested: false });
-        }
-        setAiBandAttempt({ min: null, max: null });
-        setAiPriceMetaArmId(activeArmId);
-        setAiPriceMeta(prev => ({
-          ...prev,
-          summary: `Max price change is now ${next}%. Click Suggest to use your full band.`,
-        }));
-      } catch {
-        setAiPriceMeta(prev => ({
-          ...prev,
-          summary: 'Could not raise the max price change. Try again, or narrow the band.',
-        }));
-      } finally {
-        setRaisingMaxPriceChange(false);
-      }
-    },
-    [shopDomain, shopGuardrails, loadGuardrails, aiBandAttempt, patchAiBand, activeArmId]
-  );
-
   /** Average selected-product price: the dollar equivalent of a percent cap. */
   const aiBandAveragePrice = useCallback(() => {
     const bases = resolvePricingRows({ opportunities, selectedIds, pickMode, maxSelection })
@@ -2076,23 +2019,9 @@ export default function ClassicCreateWizard({ onTitleChange }) {
 
   const applyBandField = useCallback(
     (field, value) => {
-      // Until the shop's real cap has loaded, clamping would reduce the field
-      // against a placeholder the merchant never set.
-      const { value: next, attempted } = clampAiBandValue(
-        value,
-        shopGuardrailsReady ? shopGuardrails.max_price_change_percent : null,
-        { unit: aiUnit, averagePrice: aiBandAveragePrice() }
-      );
-      setAiBandAttempt(prev => ({ ...prev, [field]: attempted }));
-      patchAiBand({ [field === 'max' ? 'aiMaxPct' : 'aiMinPct']: next, aiSuggested: false });
+      patchAiBand({ [field === 'max' ? 'aiMaxPct' : 'aiMinPct']: value, aiSuggested: false });
     },
-    [
-      shopGuardrailsReady,
-      shopGuardrails.max_price_change_percent,
-      aiUnit,
-      aiBandAveragePrice,
-      patchAiBand,
-    ]
+    [patchAiBand]
   );
 
   const setAiMinPct = useCallback(value => applyBandField('min', value), [applyBandField]);
@@ -2103,9 +2032,6 @@ export default function ClassicCreateWizard({ onTitleChange }) {
       const nextUnit = value === 'amount' ? 'amount' : 'percent';
       if (nextUnit === aiUnit) return;
       const avg = aiBandAveragePrice();
-      // The remembered over-cap attempt was in the old unit, so it no longer
-      // describes anything once the unit changes.
-      setAiBandAttempt({ min: null, max: null });
       // Carry the merchant's intent across units instead of reusing the raw
       // number: on a $50 catalog, 10% means $5, not $10.
       const convert = value2 => {
@@ -2356,6 +2282,7 @@ export default function ClassicCreateWizard({ onTitleChange }) {
         priceMode,
         maxChangePercent:
           shopGuardrailsReady && !liveEdit ? shopGuardrails.max_price_change_percent : null,
+        priceSuggestionMeta,
       });
       if (gate.disabled) {
         setMessageType('error');
@@ -2536,6 +2463,7 @@ export default function ClassicCreateWizard({ onTitleChange }) {
         priceMode,
         maxChangePercent:
           shopGuardrailsReady && !liveEdit ? shopGuardrails.max_price_change_percent : null,
+        priceSuggestionMeta,
       }),
     [
       loadingProducts,
@@ -2552,6 +2480,7 @@ export default function ClassicCreateWizard({ onTitleChange }) {
       shopGuardrailsReady,
       liveEdit,
       shopGuardrails.max_price_change_percent,
+      priceSuggestionMeta,
     ]
   );
 
@@ -2950,9 +2879,6 @@ export default function ClassicCreateWizard({ onTitleChange }) {
             onRetryLoad={loadOpportunities}
             shopDefaultsReady={shopGuardrailsReady}
             shopMaxChangePercent={shopGuardrails.max_price_change_percent}
-            onRaiseMaxPriceChange={raiseMaxPriceChange}
-            raisingMaxPriceChange={raisingMaxPriceChange}
-            aiBandAttempt={aiBandAttempt}
             experimentType={experimentType}
             offerByArm={offerByArm}
             onOfferByArmChange={setOfferByArm}

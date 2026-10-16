@@ -11,6 +11,7 @@ import {
   resolveStoreCatalogProductCount,
   buildStoreCatalogStatusText,
   shouldShowCatalogTruncatedHelp,
+  buildUnavailableSelectionNotice,
 } from '../productsStepCatalogCopy';
 
 describe('productsStepCatalogCopy', () => {
@@ -219,5 +220,32 @@ describe('productsStepCatalogCopy', () => {
       '242 products in other tests: Offer Test Example (180 products, running); AAAAA (50 products, running); Spring (7 products, paused); and 1 more. End those tests on the Tests page to reuse them here.'
     );
     expect(detail).not.toContain('DZR Minna');
+  });
+});
+
+describe('buildUnavailableSelectionNotice', () => {
+  const rows = [
+    { variant_id: 'gid://shopify/ProductVariant/1', product_id: 'p1', product_title: 'Merino Beanie' },
+    { variant_id: 'gid://shopify/ProductVariant/2', product_id: 'p1', product_title: 'Merino Beanie' },
+    { variant_id: 'gid://shopify/ProductVariant/3', product_id: 'p2', title: 'Wool Socks — Large' },
+  ];
+
+  it('is empty when nothing went missing', () => {
+    expect(buildUnavailableSelectionNotice([], rows)).toBe('');
+  });
+
+  it('names a product once however many of its variants went', () => {
+    expect(
+      buildUnavailableSelectionNotice(['gid://shopify/ProductVariant/1', '2'], rows)
+    ).toBe(
+      '"Merino Beanie" is no longer available in your Shopify store (deleted, set to draft, unpublished or sold out), so it was left out of this test.'
+    );
+  });
+
+  it('names a few products and counts the rest', () => {
+    expect(buildUnavailableSelectionNotice(['1', '3'], rows)).toMatch(
+      /^"Merino Beanie", "Wool Socks" are no longer available .* so they were left out/
+    );
+    expect(buildUnavailableSelectionNotice(['1', '99'], rows)).toMatch(/^2 products are no longer/);
   });
 });

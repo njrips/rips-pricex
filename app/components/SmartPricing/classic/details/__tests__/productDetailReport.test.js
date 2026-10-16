@@ -14,6 +14,7 @@ import {
   resolveAdminProductHref,
   resolveArmMetric,
   resolveNeighbourProducts,
+  resolveStorefrontLink,
   resolveStorefrontProductHref,
   summarizeProductAnalytics,
   summarizeRounds,
@@ -260,6 +261,29 @@ describe('product links', () => {
       resolveStorefrontProductHref('demo.myshopify.com', { handle: 'merino-beanie', variantId: 'gid://shopify/ProductVariant/77' })
     ).toBe('https://demo.myshopify.com/products/merino-beanie?variant=77');
     expect(resolveStorefrontProductHref('demo.myshopify.com', { handle: '' })).toBeNull();
+  });
+
+  it('links View on store only to a product Shopify serves on the Online Store', () => {
+    const args = { handle: 'old-handle', variantId: 'gid://shopify/ProductVariant/77' };
+    // The live handle wins: a renamed product has moved.
+    expect(
+      resolveStorefrontLink('demo.myshopify.com', {
+        ...args,
+        storefront: { status: 'published', handle: 'new-handle' },
+      })
+    ).toEqual({ href: 'https://demo.myshopify.com/products/new-handle?variant=77', reason: '' });
+    // Shopify could not be asked: the saved handle, as before.
+    expect(
+      resolveStorefrontLink('demo.myshopify.com', { ...args, storefront: { status: 'unknown' } }).href
+    ).toBe('https://demo.myshopify.com/products/old-handle?variant=77');
+    for (const status of ['draft', 'archived', 'unpublished', 'missing']) {
+      const link = resolveStorefrontLink('demo.myshopify.com', { ...args, storefront: { status } });
+      expect(link.href).toBeNull();
+      expect(link.reason).toMatch(/no test visitors/);
+    }
+    expect(
+      resolveStorefrontLink('demo.myshopify.com', { ...args, storefront: { status: 'draft' } }).reason
+    ).toMatch(/draft in Shopify.*Set it to Active/);
   });
 });
 

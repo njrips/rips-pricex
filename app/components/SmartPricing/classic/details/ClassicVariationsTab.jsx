@@ -97,6 +97,14 @@ function withShopifyVariantQuery(path, product) {
   return `${base}${base.includes('?') ? '&' : '?'}variant=${variantNumeric}`;
 }
 
+function unpublishedProductMessage(title) {
+  return (
+    `"${title || 'This product'}" is not published to the Online Store, so its page shows ` +
+    '“Page not found” and the test cannot show a price or count visitors there. In Shopify ' +
+    'admin, open the product, add Online Store under Sales channels, save, then retry Preview.'
+  );
+}
+
 async function resolvePreviewProductPath(product) {
   const existing = resolvePlanProductPath(product || null);
   if (existing.startsWith('/products/')) {
@@ -119,13 +127,8 @@ async function resolvePreviewProductPath(product) {
         error: 'Could not load this product from Shopify. It may have been deleted.',
       };
     }
-    if (!data.product.publishedAt && !data.product.onlineStoreUrl) {
-      return {
-        path: null,
-        error:
-          `"${data.product.title || 'Product'}" is not published to the Online Store. ` +
-          'Publish it in Shopify Admin → Products, then retry Preview.',
-      };
+    if (!data.product.publishedAt) {
+      return { path: null, error: unpublishedProductMessage(data.product.title) };
     }
     return {
       path: withShopifyVariantQuery(`/products/${encodeURIComponent(handle)}`, product),
@@ -197,6 +200,10 @@ async function prepareArmPreviewUrl(
       });
       if (!ensured?.testId) {
         window.alert('Could not prepare a preview test for this product.');
+        return null;
+      }
+      if (ensured.storefrontStatus === 'unpublished') {
+        window.alert(unpublishedProductMessage(nextProduct.title));
         return null;
       }
       if (!ensured.storefrontReady && !ensured.handle) {
@@ -584,6 +591,7 @@ function VariationCard({
           Scan to open {arm.label}
           {primaryProduct?.title ? ` on ${primaryProduct.title}` : ''}.
           {multiSku ? ' Per-SKU previews are also in the products table below.' : ''}
+          {' '}Preview visits are not counted as test visitors.
         </p>
         <div className={styles.variationPreviewRow}>
           <Button disabled={previewBtn.disabled} loading={previewBtn.loading} onClick={runPreview}>

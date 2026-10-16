@@ -1,4 +1,4 @@
-import { productGroupKey } from './productsStepReadiness';
+import { productGroupKey, variantIdentity } from './productsStepReadiness';
 
 /** Unique Shopify products represented in opportunity variant rows. */
 export function countCatalogProducts(opportunities = []) {
@@ -140,15 +140,15 @@ export function buildProductsStepEmptyMessage({
 } = {}) {
   if (loading || loadError) return '';
   if (availableProductCount > 0) return '';
-  // Active products that never became rows: sold out with "continue selling"
-  // off, unavailable for sale, gift cards, or no price. On a store where that
+  // Active products that never became rows: not on the Online Store, sold out
+  // with "continue selling" off, unavailable for sale, gift cards, or no price. On a store where that
   // is every product, "no active products" was simply untrue.
   const untestable = Math.max(0, (Number(storeProductCount) || 0) - (Number(withheldCount) || 0));
   const untestableText =
     untestable > 0
       ? `${untestable} active product${untestable === 1 ? '' : 's'} can’t be tested because ${
           untestable === 1 ? 'it is' : 'they are'
-        } sold out, not available for sale, gift cards, or have no price. Restock a product or turn on “Continue selling when out of stock” to test it.`
+        } not published to the Online Store, sold out, not available for sale, gift cards, or have no price. Add a product to the Online Store sales channel in Shopify admin, restock it, or turn on “Continue selling when out of stock” to test it.`
       : '';
   if (withheldCount > 0) {
     return [
@@ -214,7 +214,7 @@ export function buildProductPickerEmptyMessage({
     return 'No products match that search in the loaded list. Try a shorter name or clear the filter on the left.';
   }
   if (activeGroupValue) {
-    return 'No products here can be added. They are in other tests, or sold out, not available for sale, gift cards, or have no price.';
+    return 'No products here can be added. They are in other tests, not published to the Online Store, sold out, not available for sale, gift cards, or have no price.';
   }
   return 'No products to show. Try All products or search above.';
 }
@@ -254,4 +254,45 @@ export function shouldShowCatalogTruncatedHelp({
   if (!catalogTruncatedHelp || loading || loadError) return false;
   // Nothing pickable — the empty / withheld copy already explains why.
   return Number(availableProductCount) > 0;
+}
+
+/**
+ * Why some picked products did not make it into the test.
+ *
+ * The server leaves out a variant it can no longer find in the store's
+ * catalog: deleted in Shopify, set to draft or archived, taken off the Online
+ * Store, or sold out. A draft saved before that happened still lists it, and
+ * dropping it without a word read as the app losing part of the selection.
+ * `lookupRows` (catalog rows and saved plans) name the products; a variant
+ * neither names is counted on its own.
+ */
+export function buildUnavailableSelectionNotice(missingIds = [], lookupRows = []) {
+  const missing = new Set((missingIds || []).map(variantIdentity).filter(Boolean));
+  if (!missing.size) return '';
+  const byVariant = new Map();
+  (lookupRows || []).forEach(row => {
+    const key = variantIdentity(row?.variant_id);
+    if (key && missing.has(key) && !byVariant.has(key)) byVariant.set(key, row);
+  });
+  const products = new Map();
+  missing.forEach(key => {
+    const row = byVariant.get(key);
+    const productKey = row ? productGroupKey(row) || key : key;
+    if (!products.has(productKey)) {
+      const title = String(
+        row?.product_title || row?.metadata?.product_title || row?.title || ''
+      )
+        .split(' — ')[0]
+        .trim();
+      products.set(productKey, title);
+    }
+  });
+  const titles = [...products.values()].filter(Boolean);
+  const count = products.size;
+  const named =
+    titles.length === count && count <= 3
+      ? titles.map(title => `"${title}"`).join(', ')
+      : `${count} product${count === 1 ? '' : 's'}`;
+  const verb = count === 1 ? 'is' : 'are';
+  return `${named} ${verb} no longer available in your Shopify store (deleted, set to draft, unpublished or sold out), so ${count === 1 ? 'it was' : 'they were'} left out of this test.`;
 }

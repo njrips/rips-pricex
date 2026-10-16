@@ -198,6 +198,31 @@ describe('smartPricingInboxStopSyncService', () => {
     expect(result.inbox_status).toBe('completed');
   });
 
+  it('finishes a paused product deleted in Shopify, since it can never resume', async () => {
+    getTestById.mockResolvedValueOnce({
+      id: 'test-deleted',
+      status: 'stopped',
+      metadata: { smart_pricing_plan_id: 'SP-del', smart_pricing_source: 'smart_pricing' },
+    });
+    syncInboxPlanEntry.mockResolvedValueOnce({
+      plan_id: 'SP-del',
+      test_id: 'test-deleted',
+      synced: true,
+      inbox_status: 'paused',
+      winner_ready: false,
+      winner_applied: false,
+      test_status: 'stopped',
+      status: 'paused',
+    });
+    patchInboxPlansFromSync.mockResolvedValueOnce({ plans: [] });
+
+    const result = await syncSmartPricingInboxForTest('demo.myshopify.com', 'test-deleted', {
+      reason: 'product_deleted',
+    });
+
+    expect(result.inbox_status).toBe('completed');
+  });
+
   it('resolves plan by test_id when metadata plan id missing', async () => {
     getTestById.mockResolvedValueOnce({
       id: 'test-2',

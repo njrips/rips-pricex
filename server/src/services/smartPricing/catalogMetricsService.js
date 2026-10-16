@@ -123,7 +123,15 @@ function isLiveStoreProduct(product) {
   // metadata, not an eligibility signal; using it here emptied entire valid
   // catalogs. The product query already asks for active products, and this
   // check protects callers and fixtures that supply a broader list.
-  return !status || status === 'ACTIVE';
+  if (status && status !== 'ACTIVE') return false;
+  // `publishedAt` is null only when the product is not published to the Online
+  // Store (it stays set on password-protected stores). Such a product's page is
+  // a 404, so its test can never paint a price or count a visitor. Fixtures
+  // that predate the field are allowed through.
+  if (Object.prototype.hasOwnProperty.call(product || {}, 'publishedAt') && !product.publishedAt) {
+    return false;
+  }
+  return true;
 }
 
 function isSellableVariant(variant) {

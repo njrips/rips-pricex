@@ -5,7 +5,6 @@ import ClassicProductPickerModal from './ClassicProductPickerModal';
 import OfferArmsEditor from './OfferArmsEditor';
 import { isOfferExperimentType } from './offerSelection';
 import LabelWithInfo from '../../Settings/primitives/LabelWithInfo';
-import SettingsInfoLink from '../../Settings/SettingsInfoLink';
 import TooltipWrapper from '../../shared/TooltipWrapper';
 import { describeCatalogProgress } from './catalogLoadProgress';
 import {
@@ -16,9 +15,7 @@ import {
   variantIdentity,
   sanitizePriceInput,
   armHasAiPrices,
-  capAiBandToShopMax,
-  describeAiBandCap,
-  describeAiBandClamp,
+  isAiSuggestedPrice,
   describeCollapsedAiBand,
   describeNarrowAiBand,
   resolveAiSuggestSpreadArms,
@@ -34,8 +31,6 @@ import {
   resolvePricingRows,
   limitSelectionToProducts,
   variantIdsMatch,
-  resolveMaxPriceChangeRaise,
-  resolveRaiseForAttempt,
   splitTitleParts,
 } from './productsStepReadiness';
 import {
@@ -225,9 +220,6 @@ export default function ProductsPricingStepPanel({
   aiUnit = 'percent',
   onAiUnitChange,
   shopMaxChangePercent,
-  onRaiseMaxPriceChange,
-  raisingMaxPriceChange = false,
-  aiBandAttempt = null,
   aiMinPct = '10',
   aiMaxPct = '20',
   onAiMinPctChange,
@@ -466,13 +458,28 @@ export default function ProductsPricingStepPanel({
   const bulkAmount = Number(bulkPercent);
   const bulkAmountValid = String(bulkPercent ?? '').trim() !== '' && bulkAmount > 0;
   const shopCap = Number(shopMaxChangePercent);
+  // In dollars the cap differs per product; past what the priciest one allows,
+  // every product would be held back, so that is where the field stops.
+  const bulkDollarCap = (() => {
+    if (!(shopCap > 0)) return null;
+    const top = Math.max(0, ...pricingSource.map(row => Number(row.current_price ?? row.price) || 0));
+    return top > 0 ? Math.floor(top * shopCap) / 100 : null;
+  })();
+  const bulkCapFor = unit => (unit === 'amount' ? bulkDollarCap : shopCap > 0 ? shopCap : null);
 
   const handleBulkAmountChange = raw => {
     let next = sanitizePriceInput(raw);
-    // A percent above max price change could only ever be capped, so the
+    // An amount above max price change could only ever be capped, so the
     // field stops there instead of accepting it and failing at launch.
-    if (bulkUnit === 'percent' && shopCap > 0 && Number(next) > shopCap) next = String(shopCap);
+    const cap = bulkCapFor(bulkUnit);
+    if (cap && Number(next) > cap) next = String(cap);
     onBulkPercentChange(next);
+  };
+
+  const switchBulkUnit = unit => {
+    setBulkUnit(unit);
+    const cap = bulkCapFor(unit);
+    if (cap && bulkAmount > cap) onBulkPercentChange(String(cap));
   };
 
   const handleApplyBulk = () => {
@@ -545,7 +552,8 @@ export default function ProductsPricingStepPanel({
     hasArmPrices: activeArmHasAiPrices,
     summary: aiSuggestSummary,
     busy: suggestBusy,
-    blockedReason: aiBlockedReason,
+    // A band error already shows under the band fields it is about.
+    blockedReason: aiBlockedReason === aiBandError ? '' : aiBlockedReason,
   });
 
   const handleAiSuggestClick = useCallback(async () => {
@@ -557,55 +565,17 @@ export default function ProductsPricingStepPanel({
       setLocalSuggestBusy(false);
     }
   }, [suggestBusy, aiBlockedReason, onAiSuggest, aiUnit]);
-  // Warn while the band is being typed rather than after Suggest runs, so the
-  // shop guardrail never silently rewrites what the merchant asked for.
-  const aiBandAveragePrice = (() => {
-    const bases = pricingSource
-      .map(row => Number(row.current_price ?? row.price) || 0)
-      .filter(n => n > 0);
-    return bases.length ? bases.reduce((sum, n) => sum + n, 0) / bases.length : 0;
-  })();
-  const aiBandCap = capAiBandToShopMax(aiBand, shopMaxChangePercent, {
-    unit: aiUnit,
-    averagePrice: aiBandAveragePrice,
-  });
-  // The band fields are clamped to the shop cap as they are typed, so the usual
-  // case is an attempt we blocked. capAiBandToShopMax still covers a band that
-  // predates the current cap, such as a restored draft.
-  // Whichever edge reached furthest from the current price, sign intact. Taking
-  // the larger of the two signed numbers meant a blocked cut of -30 resolved to
-  // 0, so the merchant was told nothing about the edge that had been refused.
-  const attemptedBandValue = (() => {
-    const low = Number(aiBandAttempt?.min) || 0;
-    const high = Number(aiBandAttempt?.max) || 0;
-    return Math.abs(low) > Math.abs(high) ? low : high;
-  })();
-  const bandOptions = { unit: aiUnit, averagePrice: aiBandAveragePrice };
-  const aiBandClampNotice = describeAiBandClamp(
-    attemptedBandValue,
-    shopMaxChangePercent,
-    bandOptions
-  );
-  const aiBandCollapsedNotice = describeCollapsedAiBand(aiBandCap, { unit: aiUnit });
+  // The AI band is used as typed: max price change limits manual and bulk
+  // prices only, so there is no cap to report or raise here.
+  const aiBandCollapsedNotice = describeCollapsedAiBand(aiBand, { unit: aiUnit });
   const aiBandNarrowNotice = aiBandCollapsedNotice
     ? ''
-    : describeNarrowAiBand(aiBandCap, {
+    : describeNarrowAiBand(aiBand, {
         unit: aiUnit,
         armCount: resolveAiSuggestSpreadArms(variations).length,
-        shopMaxChangePercent,
       });
-  const aiBandCapNotice =
-    [
-      aiBandClampNotice || describeAiBandCap(aiBandCap, { unit: aiUnit }),
-      aiBandCollapsedNotice,
-      aiBandNarrowNotice,
-    ]
-      .filter(Boolean)
-      .join(' ') || '';
-  const aiBandRaise = aiBandClampNotice
-    ? resolveRaiseForAttempt(attemptedBandValue, shopMaxChangePercent, bandOptions)
-    : resolveMaxPriceChangeRaise(aiBandCap, bandOptions);
-  const bandDirection = aiBandDirection(aiBandCap);
+  const aiBandCapNotice = [aiBandCollapsedNotice, aiBandNarrowNotice].filter(Boolean).join(' ');
+  const bandDirection = aiBandDirection(aiBand);
   const aiBarTooltip = [
     describeAiBandDirectionTooltip(bandDirection),
     describeAiPriceCalculationTooltip({ unit: aiUnit }),
@@ -690,7 +660,7 @@ export default function ProductsPricingStepPanel({
         : formatPriceInputValue(Number.isFinite(test) ? test : '');
     const pendingAiPrice =
       priceMode === 'ai' && !effectiveAiSuggested && !String(override || '').trim();
-    const rangeError = isControlArm ? '' : priceRangeError(base, test);
+    const rangeError = isControlArm ? '' : priceRangeError(base, test, id, armId);
     return (
       <tr key={`${id}-${armId}-v`} className={styles.variantRow}>
         <td>
@@ -716,10 +686,11 @@ export default function ProductsPricingStepPanel({
   };
 
   /** Why a price cannot launch under max price change, or '' when it can. */
-  const priceRangeError = (base, price) => {
+  const priceRangeError = (base, price, variantId, armId) => {
     if (price === null || price === undefined || !Number.isFinite(Number(price))) return '';
     const n = Number(price);
     if (n < 0.005) return 'Enter a price above $0.';
+    if (isAiSuggestedPrice(priceSuggestionMeta, priceOverrides, variantId, armId)) return '';
     const window = guardrailPriceWindow(base, shopMaxChangePercent);
     if (!window) return '';
     if (n >= window.low - 0.005 && n <= window.high + 0.005) return '';
@@ -789,7 +760,7 @@ export default function ProductsPricingStepPanel({
     // Continue would refuse without showing where.
     const invalid = isControlArm
       ? 0
-      : group.variants.filter(v => priceRangeError(Number(v.current_price ?? v.price) || 0, getTestPrice(v, armId)))
+      : group.variants.filter(v => priceRangeError(Number(v.current_price ?? v.price) || 0, getTestPrice(v, armId), v.variant_id, armId))
           .length;
     return (
       <div className={styles.priceSummary} key={`${group.key}-${armId}-summary`}>
@@ -891,7 +862,10 @@ export default function ProductsPricingStepPanel({
               </div>
             </div>
           </td>
-          <td>{formatMoney(avgBase, group.currency || currency)}</td>
+          {/* Variants can each have their own base price, so one figure here
+              (it used to be their average) was a price no variant has. Each
+              variant row below carries its own base and change. */}
+          <td>{multi ? <span aria-label="Varies by variant">—</span> : formatMoney(avgBase, group.currency || currency)}</td>
           <td className={styles.priceCell}>
             {multi
               ? renderGroupPriceSummary(group, testValues, armId)
@@ -902,14 +876,18 @@ export default function ProductsPricingStepPanel({
                   placeholder:
                     priceMode === 'ai' && !effectiveAiSuggested && !singleDisplay ? 'Suggest' : undefined,
                   label: `${group.title} test price`,
-                  rangeError: isControlArm ? '' : priceRangeError(onlyBase, onlyTest),
+                  rangeError: isControlArm ? '' : priceRangeError(onlyBase, onlyTest, only?.variant_id, armId),
                 })}
           </td>
           <td>
-            {renderDeltaCell(
-              isControlArm ? avgBase : avgPricedBase,
-              isControlArm ? avgBase : avgTest,
-              group.variants[0]?.currency || currency
+            {multi ? (
+              <span aria-label="Varies by variant">—</span>
+            ) : (
+              renderDeltaCell(
+                isControlArm ? avgBase : avgPricedBase,
+                isControlArm ? avgBase : avgTest,
+                group.variants[0]?.currency || currency
+              )
             )}
           </td>
         </tr>
@@ -1379,34 +1357,7 @@ export default function ProductsPricingStepPanel({
           {aiBandCapNotice && !aiSuggestTooltip ? (
             <p className={styles.help} style={{ marginTop: -6, marginBottom: 14 }}>
               {aiBandCapNotice}
-              <SettingsInfoLink hash="max-price-change" label="Max price change" />
-              {aiBandRaise && onRaiseMaxPriceChange ? (
-                <Button
-                  variant="plain"
-                  onClick={() => onRaiseMaxPriceChange(aiBandRaise.target)}
-                  disabled={suggestBusy || raisingMaxPriceChange}
-                  loading={raisingMaxPriceChange}
-                >
-                  {aiBandRaise.coversRequest
-                    ? `Raise max price change to ${aiBandRaise.target}%`
-                    : `Raise max price change to ${aiBandRaise.target}% (the highest allowed)`}
-                </Button>
-              ) : null}
             </p>
-          ) : null}
-          {aiBandRaise && onRaiseMaxPriceChange && aiBandCapNotice && aiSuggestTooltip ? (
-            <div className={styles.aiSuggestRaise}>
-              <Button
-                variant="plain"
-                onClick={() => onRaiseMaxPriceChange(aiBandRaise.target)}
-                disabled={suggestBusy || raisingMaxPriceChange}
-                loading={raisingMaxPriceChange}
-              >
-                {aiBandRaise.coversRequest
-                  ? `Raise max price change to ${aiBandRaise.target}%`
-                  : `Raise max price change to ${aiBandRaise.target}% (highest allowed)`}
-              </Button>
-            </div>
           ) : null}
         </>
       ) : null}
@@ -1460,10 +1411,7 @@ export default function ProductsPricingStepPanel({
                 className={`${styles.segmentBtn} ${
                   bulkUnit === 'percent' ? styles.segmentBtnActive : ''
                 }`}
-                onClick={() => {
-                  setBulkUnit('percent');
-                  if (shopCap > 0 && bulkAmount > shopCap) onBulkPercentChange(String(shopCap));
-                }}
+                onClick={() => switchBulkUnit('percent')}
               >
                 %
               </button>
@@ -1472,7 +1420,7 @@ export default function ProductsPricingStepPanel({
                 className={`${styles.segmentBtn} ${
                   bulkUnit === 'amount' ? styles.segmentBtnActive : ''
                 }`}
-                onClick={() => setBulkUnit('amount')}
+                onClick={() => switchBulkUnit('amount')}
               >
                 $
               </button>
@@ -1497,6 +1445,11 @@ export default function ProductsPricingStepPanel({
           ) : bulkUnit === 'percent' && shopCap > 0 ? (
             <p className={styles.help} style={{ marginTop: -6, marginBottom: 12 }}>
               Up to {shopCap}%, your max price change.
+            </p>
+          ) : bulkUnit === 'amount' && bulkDollarCap ? (
+            <p className={styles.help} style={{ marginTop: -6, marginBottom: 12 }}>
+              Up to ${bulkDollarCap.toFixed(2)}, your {shopCap}% max price change on your
+              highest-priced product. Cheaper products are held at their own {shopCap}%.
             </p>
           ) : null}
           {bulkNotice ? (

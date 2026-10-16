@@ -375,6 +375,26 @@ describe('smartPricingAiProvider', () => {
     expect(mockResponsesCreate.mock.calls[2][0].tools[0]).not.toHaveProperty('filters');
   });
 
+  it('retries every parallel search that was refused the filter, not only the first', async () => {
+    process.env.OPENAI_CHAT_MODEL = 'gpt-4o-mini-parallel';
+    const refusal = () =>
+      Object.assign(
+        new Error("400 Parameter 'filters' not supported with model 'gpt-4o-mini'"),
+        { status: 400 }
+      );
+    mockResponsesCreate.mockImplementation(async request =>
+      request.tools[0].filters ? Promise.reject(refusal()) : reply('{"bands":[]}')
+    );
+
+    const results = await Promise.all([
+      webSearchJson({ systemPrompt: 's', userPrompt: 'a' }),
+      webSearchJson({ systemPrompt: 's', userPrompt: 'b' }),
+      webSearchJson({ systemPrompt: 's', userPrompt: 'c' }),
+    ]);
+
+    expect(results).toEqual([{ bands: [] }, { bands: [] }, { bands: [] }]);
+  });
+
   it('does not retry a search refused for any other reason', async () => {
     mockResponsesCreate.mockRejectedValue(Object.assign(new Error('400 bad input'), { status: 400 }));
     await expect(webSearchJson({ systemPrompt: 's', userPrompt: 'u' })).resolves.toBeNull();

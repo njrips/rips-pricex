@@ -56,6 +56,10 @@ jest.mock('../../../models/smartPricingInboxStore', () => ({
   linkInboxPlanToTest: jest.fn(),
 }));
 
+jest.mock('../../shopifyService', () => ({
+  getProduct: jest.fn(),
+}));
+
 jest.mock('../../../models/smartPricingDeletionStore', () => ({
   ...jest.requireActual('../../../models/smartPricingDeletionStore'),
   findDeletions: jest.fn(),
@@ -84,6 +88,7 @@ const { ensureOfferCheckoutDiscount } = require('../offerCheckoutDiscountService
 const { getShopSession } = require('../../../models/shopSession');
 const { linkInboxPlanToTest } = require('../../../models/smartPricingInboxStore');
 const { findDeletions } = require('../../../models/smartPricingDeletionStore');
+const shopifyService = require('../../shopifyService');
 const { launchSmartPricingPlanAsTest } = require('../smartPricingLaunchService');
 
 describe('smartPricingLaunchService', () => {
@@ -102,6 +107,47 @@ describe('smartPricingLaunchService', () => {
     mockStartQaRun.mockResolvedValue({});
     ensureOfferCheckoutDiscount.mockResolvedValue({ created: false });
     findDeletions.mockResolvedValue({ experiments: new Set(), tests: new Set() });
+    shopifyService.getProduct.mockResolvedValue({ id: 'gid://shopify/Product/7', status: 'ACTIVE' });
+  });
+
+  it('refuses a product that was deleted from the Shopify store', async () => {
+    shopifyService.getProduct.mockResolvedValue(null);
+
+    await expect(
+      launchSmartPricingPlanAsTest(
+        { id: 'plan-1', product_id: '7', metadata: { product_title: 'Merino Beanie' } },
+        'demo.myshopify.com',
+        { autoStart: true }
+      )
+    ).rejects.toMatchObject({
+      isValidation: true,
+      code: 'PRODUCT_DELETED',
+      message: expect.stringContaining('"Merino Beanie" was deleted from your Shopify store'),
+    });
+    expect(shopifyService.getProduct).toHaveBeenCalledWith(
+      'demo.myshopify.com',
+      'token',
+      'gid://shopify/Product/7'
+    );
+    expect(createTest).not.toHaveBeenCalled();
+  });
+
+  it('still launches when Shopify cannot say whether the product exists', async () => {
+    shopifyService.getProduct.mockRejectedValue(new Error('401 Unauthorized'));
+
+    await launchSmartPricingPlanAsTest({ id: 'plan-1', product_id: '7' }, 'demo.myshopify.com', {
+      autoStart: true,
+    });
+
+    expect(createTest).toHaveBeenCalled();
+  });
+
+  it('does not ask Shopify about a plan only saved as a draft', async () => {
+    await launchSmartPricingPlanAsTest({ id: 'plan-1', product_id: '7' }, 'demo.myshopify.com', {
+      status: 'draft',
+    });
+
+    expect(shopifyService.getProduct).not.toHaveBeenCalled();
   });
 
   it('refuses a plan from an experiment that was deleted', async () => {

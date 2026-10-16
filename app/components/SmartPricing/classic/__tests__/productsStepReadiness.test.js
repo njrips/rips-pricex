@@ -4,16 +4,9 @@ import {
   getProductsStepContinueState,
   productSuggestionReason,
   normalizeAiPriceBand,
-  capAiBandToShopMax,
-  describeAiBandCap,
   describeAiSuggestionSource,
   describeGuardrailLimitedSuggestions,
-  resolveMaxPriceChangeRaise,
-  resolveRaiseForAttempt,
-  clampAiBandValue,
-  describeAiBandClamp,
   describeCollapsedAiBand,
-  MAX_PRICE_CHANGE_CEILING,
   armHasAiPrices,
   buildAiBandPriceOverrides,
   variationPositionInBand,
@@ -41,6 +34,9 @@ import {
   resolvePricingRows,
   variantIdsMatch,
   aiBandOrderError,
+  isAiSuggestedPrice,
+  AI_BAND_MIN_PERCENT,
+  spreadAiBandPriceEntries,
   aiSuggestBlockedReason,
   countOutOfRangeTestPrices,
   guardrailPriceWindow,
@@ -276,158 +272,26 @@ describe('productsStepReadiness', () => {
     expect(normalizeAiPriceBand('abc', '5')).toBeNull();
   });
 
-  it('caps the AI band at shop max price change', () => {
-    expect(capAiBandToShopMax({ min: 10, max: 25 }, 15)).toMatchObject({
-      min: 10,
-      max: 15,
-      capPct: 15,
-      maxClamped: true,
-      feasible: true,
-    });
-    expect(
-      capAiBandToShopMax({ min: 4, max: 8 }, 15, { unit: 'amount', averagePrice: 40 })
-    ).toMatchObject({
-      min: 4,
-      max: 6,
-      capPct: 15,
-    });
-  });
-
-  it('scales a wholly-blocked band down instead of shifting it', () => {
-    const cap = capAiBandToShopMax({ min: 20, max: 30 }, 15);
-    expect(cap.feasible).toBe(false);
-    expect(cap.requestedMin).toBe(20);
-    // Scaling keeps the minimum as high as the cap allows (20/30 of 15%).
-    // Shifting by the requested 10-point width would have started at 5%.
-    expect(cap.min).toBe(10);
-    expect(cap.max).toBe(15);
-    // "Beyond", not "above": a band can now sit entirely below the guardrail.
-    expect(describeAiBandCap(cap)).toMatch(/entirely beyond your 15% max price change guardrail/i);
-    expect(describeAiBandCap(cap)).toMatch(/suggestions use 10%–15% higher instead/i);
-    // Settings no longer carries this field, so the copy must point at the
-    // one-click raise beside it rather than sending the merchant nowhere.
-    expect(describeAiBandCap(cap)).toMatch(/Raise the max price change to test 20%–30%/i);
-    expect(describeAiBandCap(cap)).not.toMatch(/in Settings/i);
-    // The infeasible case has to offer that button, or the advice is empty.
-    expect(resolveMaxPriceChangeRaise(cap)).toMatchObject({ target: 30, currentPct: 15 });
-  });
-
-  it('keeps the scaled band above a usable floor for an extreme request', () => {
-    const cap = capAiBandToShopMax({ min: 40, max: 90 }, 16);
-    expect(cap.min).toBe(7.1);
-    expect(cap.max).toBe(16);
-  });
-
-  it('rounds the scaled minimum to something a merchant can read', () => {
-    // 16 x 20/30 is 10.666…, which must not surface as "10.67%".
-    expect(capAiBandToShopMax({ min: 20, max: 30 }, 16).min).toBe(10.7);
-    expect(describeAiBandCap(capAiBandToShopMax({ min: 20, max: 30 }, 16))).toMatch(
-      /suggestions use 10\.7%–16% higher instead/i
-    );
-  });
-
-  it('holds a band field at the cap instead of accepting a blocked value', () => {
-    expect(clampAiBandValue('30', 16)).toEqual({ value: '16', attempted: 30 });
-    expect(describeAiBandClamp(30, 16)).toMatch(
-      /^The band is capped at 16%, your 16% max price change guardrail\. 30% is further from the current price than that allows\.$/
-    );
-  });
-
-  it('leaves a band field alone when it is within the cap', () => {
-    expect(clampAiBandValue('12', 16)).toEqual({ value: '12', attempted: null });
-    expect(describeAiBandClamp(12, 16)).toBe('');
-  });
-
-  it('keeps a half-typed or empty band field editable', () => {
-    // Clamping mid-entry would make the field impossible to clear or retype.
-    expect(clampAiBandValue('', 16)).toEqual({ value: '', attempted: null });
-    expect(clampAiBandValue('1', 16)).toEqual({ value: '1', attempted: null });
-  });
-
-  it('clamps a dollar field against the cap converted at catalog prices', () => {
-    // A 16% cap on a $50 average is $8, so $20 cannot be entered.
-    expect(clampAiBandValue('20', 16, { unit: 'amount', averagePrice: 50 })).toEqual({
-      value: '8',
-      attempted: 20,
-    });
-    expect(describeAiBandClamp(20, 16, { unit: 'amount', averagePrice: 50 })).toMatch(
-      /capped at \$8 \(16% of these products' average price\)/
-    );
-  });
-
-  it('does not clamp a dollar field before product prices are known', () => {
-    expect(clampAiBandValue('20', 16, { unit: 'amount', averagePrice: 0 })).toEqual({
-      value: '20',
-      attempted: null,
-    });
-  });
-
-  it('says when clamping both ends leaves the variations identical', () => {
-    // Typing 20–30 under a 16% cap holds both fields at 16, which is no test.
-    const cap = capAiBandToShopMax({ min: 16, max: 16 }, 16);
-    expect(describeCollapsedAiBand(cap)).toMatch(
+  it('says when both ends of the band are the same', () => {
+    expect(describeCollapsedAiBand({ min: 16, max: 16 })).toMatch(
       /Both ends of the band are 16%, so every test variation would carry the same price/
     );
-    expect(describeCollapsedAiBand(capAiBandToShopMax({ min: 10, max: 16 }, 16))).toBe('');
+    expect(describeCollapsedAiBand({ min: 10, max: 16 })).toBe('');
   });
 
-  it('offers to raise the cap to cover a blocked entry', () => {
-    expect(resolveRaiseForAttempt(30, 16)).toMatchObject({
-      target: 30,
-      currentPct: 16,
-      coversRequest: true,
-    });
-    expect(resolveRaiseForAttempt(12, 16)).toBeNull();
-  });
-
-  it('offers a cap raise that covers the requested band', () => {
-    const raise = resolveMaxPriceChangeRaise(capAiBandToShopMax({ min: 20, max: 30 }, 16));
-    expect(raise).toMatchObject({ target: 30, currentPct: 16, coversRequest: true });
-  });
-
-  it('caps the offered raise at the Settings ceiling and says it falls short', () => {
-    const raise = resolveMaxPriceChangeRaise(capAiBandToShopMax({ min: 35, max: 45 }, 16));
-    expect(raise).toMatchObject({ target: MAX_PRICE_CHANGE_CEILING, coversRequest: false });
-  });
-
-  it('offers no raise when the guardrail is not what is limiting the band', () => {
-    expect(resolveMaxPriceChangeRaise(capAiBandToShopMax({ min: 5, max: 12 }, 16))).toBeNull();
-    expect(resolveMaxPriceChangeRaise(null)).toBeNull();
-  });
-
-  it('converts a dollar band to percent before offering a raise', () => {
-    // $10 max on a $50 catalog is a 20% lift, so a 16% cap must offer 20%.
-    const cap = capAiBandToShopMax({ min: 6, max: 10 }, 16, { unit: 'amount', averagePrice: 50 });
-    expect(resolveMaxPriceChangeRaise(cap, { unit: 'amount', averagePrice: 50 })).toMatchObject({
-      target: 20,
-      coversRequest: true,
-    });
-  });
-
-  it('explains a trimmed band and stays silent when nothing was trimmed', () => {
-    expect(describeAiBandCap(capAiBandToShopMax({ min: 10, max: 25 }, 15))).toMatch(
-      /suggestions use 10%–15% higher instead of 10%–25% higher/i
+  it('explains individual prices moved outside the band', () => {
+    const band = { min: 20, max: 30 };
+    expect(describeGuardrailLimitedSuggestions(1, 4, band)).toBe(
+      '1 of 4 suggested prices is outside your 20%–30% higher band, moved to stay clear of another variation’s price or above $0.'
     );
-    expect(describeAiBandCap(capAiBandToShopMax({ min: 5, max: 12 }, 15))).toBe('');
+    expect(describeGuardrailLimitedSuggestions(3, 4, band)).toMatch(/^3 of 4 suggested prices are outside/);
+    expect(describeGuardrailLimitedSuggestions(4, 4, band)).toMatch(/^Every suggested price is outside/);
+    expect(describeGuardrailLimitedSuggestions(1, 4, band)).not.toMatch(/max price change|margin/);
   });
 
-  it('explains individual prices a product guardrail pushed under the requested minimum', () => {
-    const cap = capAiBandToShopMax({ min: 20, max: 30 }, 30);
-    expect(describeGuardrailLimitedSuggestions(1, 4, cap)).toMatch(
-      /1 of 4 suggested prices is below your 20% minimum/i
-    );
-    expect(describeGuardrailLimitedSuggestions(3, 4, cap)).toMatch(
-      /3 of 4 suggested prices are below your 20% minimum/i
-    );
-    expect(describeGuardrailLimitedSuggestions(4, 4, cap)).toMatch(
-      /Every suggested price is below your 20% minimum/i
-    );
-  });
-
-  it('stays silent when every suggestion respected the requested minimum', () => {
-    const cap = capAiBandToShopMax({ min: 20, max: 30 }, 30);
-    expect(describeGuardrailLimitedSuggestions(0, 4, cap)).toBe('');
-    expect(describeGuardrailLimitedSuggestions(2, 0, cap)).toBe('');
+  it('stays silent when every suggestion stayed in the band', () => {
+    expect(describeGuardrailLimitedSuggestions(0, 4, { min: 20, max: 30 })).toBe('');
+    expect(describeGuardrailLimitedSuggestions(2, 0, { min: 20, max: 30 })).toBe('');
   });
 
   it('finds overrides even when variant ids use different shapes', () => {
@@ -547,7 +411,7 @@ describe('productsStepReadiness', () => {
     expect(cutPrice).toBeLessThan(90);
   });
 
-  it('lets the local fallback cut a thin-margin product, limited only by max price change', () => {
+  it('lets the local fallback cut a thin-margin product', () => {
     const patch = buildAiBandPriceOverrides({
       rows: [
         {
@@ -621,7 +485,8 @@ describe('productsStepReadiness', () => {
     expect(tip).toMatch(/high confidence · cut direction/i);
     expect(tip).toMatch(/expected-best change: -9\.0%/i);
     expect(tip).toMatch(/market research range: 80\.00 \/ 95\.00 \/ 120\.00/i);
-    expect(tip).toMatch(/guardrail/i);
+    expect(tip).toMatch(/Moved outside your band to stay clear of another variation’s price/);
+    expect(tip).not.toMatch(/max price change/i);
   });
 
   it('keeps signed zero and negative band edges when resolving', () => {
@@ -800,52 +665,6 @@ describe('a band that lowers the price', () => {
     expect(aiBandDirection({ min: 10, max: 20 })).toBe('up');
   });
 
-  it('caps a cut at the same distance it caps a rise', async () => {
-    const { capAiBandToShopMax: cap } = await import('../productsStepReadiness');
-
-    // The guardrail limits distance from the current price, so it bounds both
-    // sides. Only the upper edge was checked, which let -40% straight through.
-    //
-    // The partly-allowed band is the case that matters most, and the one an
-    // absolute value silently broke: a 10-20% cut under a 15% guardrail came
-    // back as { min: 15, max: 10 } -- inverted, and pointing the wrong way.
-    expect(cap({ min: -20, max: -10 }, 15)).toMatchObject({ min: -15, max: -10 });
-    expect(cap({ min: -40, max: -30 }, 15)).toMatchObject({ min: -15, max: -11.3 });
-    expect(cap({ min: -40, max: 40 }, 15)).toMatchObject({ min: -15, max: 15 });
-    // Trimmed, not blocked: most of a wide band is still testable.
-    expect(cap({ min: -40, max: 40 }, 15).feasible).toBe(true);
-    expect(cap({ min: -40, max: -30 }, 15).feasible).toBe(false);
-  });
-
-  it('reports a cut beyond the cap as beyond it, not above it', async () => {
-    const { capAiBandToShopMax: cap, describeAiBandCap } = await import(
-      '../productsStepReadiness'
-    );
-
-    const notice = describeAiBandCap(cap({ min: -30, max: -20 }, 15));
-    expect(notice).toMatch(/entirely beyond your 15% max price change guardrail/i);
-    expect(notice).toMatch(/20%–30% lower/);
-  });
-
-  it('holds a typed cut at the cap without losing its sign', async () => {
-    const { clampAiBandValue: clamp } = await import('../productsStepReadiness');
-
-    expect(clamp('-30', 16)).toEqual({ value: '-16', attempted: -30 });
-    // Inside the cap it is left exactly as typed.
-    expect(clamp('-12', 16)).toEqual({ value: '-12', attempted: null });
-  });
-
-  it('offers the guardrail raise for a blocked cut too', async () => {
-    const { resolveRaiseForAttempt, resolveMaxPriceChangeRaise, capAiBandToShopMax: cap } =
-      await import('../productsStepReadiness');
-
-    // Reading the signed value meant a cut never triggered the offer at all.
-    expect(resolveRaiseForAttempt(-22, 15)).toMatchObject({ target: 22, currentPct: 15 });
-    expect(resolveMaxPriceChangeRaise(cap({ min: -25, max: -10 }, 15))).toMatchObject({
-      target: 25,
-    });
-  });
-
   it('warns when the band is too narrow for its variations', async () => {
     const { describeNarrowAiBand } = await import('../productsStepReadiness');
 
@@ -869,10 +688,11 @@ describe('a band that lowers the price', () => {
       /Widen it to 2%–12% higher/
     );
 
-    // Past the shop's max price change, widening alone cannot fix it.
-    expect(
-      describeNarrowAiBand({ min: 5, max: 10 }, { armCount: 4, shopMaxChangePercent: 15 })
-    ).toMatch(/more than your 15% max price change allows, so test fewer variations/);
+    // Max price change does not limit an AI band, so widening always fixes it.
+    expect(describeNarrowAiBand({ min: 5, max: 10 }, { armCount: 4 })).toMatch(
+      /Widen it to .* or test fewer variations\.$/
+    );
+    expect(describeNarrowAiBand({ min: 5, max: 10 }, { armCount: 4 })).not.toMatch(/max price change/);
 
     // A dollar band asks for no spacing, so there is nothing to warn about.
     expect(describeNarrowAiBand({ min: 1, max: 2 }, { unit: 'amount', armCount: 3 })).toBe('');
@@ -1179,6 +999,54 @@ describe('QA round: step 3 price inputs', () => {
     expect(ok.disabled).toBe(false);
     // An unknown cap never reports a price as out of range.
     expect(countOutOfRangeTestPrices({ ...base, maxChangePercent: null, priceOverrides: over })).toBe(0);
+  });
+
+  it('does not hold a price Suggest produced to max price change, but does once it is edited', () => {
+    const variant = 'gid://shopify/ProductVariant/1';
+    const opportunities = [{ variant_id: variant, product_id: 'p1', title: 'Mug', current_price: 100 }];
+    const variations = [{ id: 'control' }, { id: 'arm_b', letter: 'A', name: 'Variation A' }];
+    const priceSuggestionMeta = { [priceOverrideKey(variant, 'arm_b')]: { price: 149.994 } };
+    const base = {
+      opportunities,
+      selectedIds: [variant],
+      pickMode: 'manual',
+      variations,
+      maxChangePercent: 15,
+      priceSuggestionMeta,
+    };
+    const suggested = { [`${variant}::arm_b`]: '149.99' };
+    expect(isAiSuggestedPrice(priceSuggestionMeta, suggested, variant, 'arm_b')).toBe(true);
+    expect(getProductsStepContinueState({ ...base, priceOverrides: suggested }).disabled).toBe(false);
+    // Typed or bulk-adjusted over the suggestion: an ordinary price again.
+    const edited = { [`${variant}::arm_b`]: '150.00' };
+    expect(isAiSuggestedPrice(priceSuggestionMeta, edited, variant, 'arm_b')).toBe(false);
+    expect(getProductsStepContinueState({ ...base, priceOverrides: edited }).reason).toBe(
+      'outside_max_price_change'
+    );
+    // No suggestion behind it, whichever tab the variation is on.
+    expect(
+      getProductsStepContinueState({ ...base, priceSuggestionMeta: {}, priceOverrides: suggested }).reason
+    ).toBe('outside_max_price_change');
+  });
+
+  it('spreads an uncapped AI band past max price change, above $0', () => {
+    const rows = [{ variant_id: 'v1', current_price: 100 }];
+    const targetArms = [{ id: 'arm_b' }, { id: 'arm_c' }];
+    const capped = spreadAiBandPriceEntries({ rows, targetArms, min: 30, max: 50, maxChangePct: 15 });
+    capped.forEach(entry => expect(entry.price).toBeLessThanOrEqual(115));
+    const uncapped = spreadAiBandPriceEntries({ rows, targetArms, min: 30, max: 50, uncapped: true });
+    uncapped.forEach(entry => {
+      expect(entry.price).toBeGreaterThanOrEqual(130);
+      expect(entry.price).toBeLessThanOrEqual(150);
+    });
+    const deepCut = spreadAiBandPriceEntries({ rows, targetArms, min: -99, max: -90, uncapped: true });
+    deepCut.forEach(entry => expect(entry.price).toBeGreaterThan(0));
+  });
+
+  it('refuses a band cut of 100% or more', () => {
+    expect(aiBandOrderError('-100', '-20')).toMatch(/can’t be more than 99%/);
+    expect(aiBandOrderError(String(AI_BAND_MIN_PERCENT), '-20')).toBe('');
+    expect(aiBandOrderError('-150', '-20', { unit: 'amount' })).toBe('');
   });
 
   it('treats a GID and its number as one variant, but nothing looser', () => {

@@ -150,11 +150,14 @@ export default function ClassicCountryMultiSelect({
     };
   }, [open, setOpen]);
 
+  // Follows the highlight only when it moves. Re-run on every option-list
+  // rebuild (a selection rebuilds it), it pulled the list back to the row the
+  // keyboard last reached -- the top, for a mouse user -- after each click.
   useEffect(() => {
     if (!open || !menuRef.current) return;
     const el = menuRef.current.querySelector('[data-country-highlight="true"]');
     el?.scrollIntoView({ block: 'nearest' });
-  }, [highlight, open, optionCodes]);
+  }, [highlight, open]);
 
   const emit = useCallback(
     next => {
@@ -315,7 +318,10 @@ export default function ClassicCountryMultiSelect({
                           ? styles.countryOptionHighlight
                           : ''
                       }`}
-                      onClick={selectAllCountries}
+                      onClick={() => {
+                        setHighlight(0);
+                        selectAllCountries();
+                      }}
                     >
                       <span className={styles.countryOptionCheck} aria-hidden>
                         {allSelected ? '✓' : ''}
@@ -328,7 +334,7 @@ export default function ClassicCountryMultiSelect({
                 {showAllOption && filtered.length ? (
                   <li className={styles.countryOptionDivider} role="presentation" />
                 ) : null}
-                {filtered.map(row => {
+                {filtered.map((row, index) => {
                   const code = String(row.code).toUpperCase();
                   const isOn = !allSelected && selectedSet.has(code);
                   const isHi = optionCodes[highlight] === code;
@@ -343,7 +349,10 @@ export default function ClassicCountryMultiSelect({
                         className={`${styles.countryOption} ${
                           isOn ? styles.countryOptionSelected : ''
                         } ${isHi ? styles.countryOptionHighlight : ''}`}
-                        onClick={() => toggle(code)}
+                        onClick={() => {
+                          setHighlight(index + (showAllOption ? 1 : 0));
+                          toggle(code);
+                        }}
                       >
                         <span className={styles.countryOptionCheck} aria-hidden>
                           {isOn ? '✓' : ''}

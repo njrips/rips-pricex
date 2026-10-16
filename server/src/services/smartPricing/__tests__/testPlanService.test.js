@@ -118,4 +118,21 @@ describe('testPlanService', () => {
     expect(updated.guardrail_checks.length).toBeGreaterThan(0);
     expect(updated.arm_projections).toHaveLength(updated.price_arms.length);
   });
+
+  it('passes the price checks for an AI price past max price change', () => {
+    const plan = {
+      current_price: 40,
+      price_arms: [
+        { id: 'control', role: 'control', label: 'Control', price: 40, allocation_percent: 50 },
+        { id: 'var_a', role: 'challenger', price: 60, allocation_percent: 50 },
+      ],
+    };
+    const guardrails = { max_price_change_percent: 15 };
+    const passed = id =>
+      applyPriceArmOverrides(plan, {}, guardrails).guardrail_checks.find(c => c.id === id).passed;
+    expect(passed('max_change')).toBe(false);
+
+    plan.price_arms[1].price_source = 'ai';
+    ['price_floor', 'price_ceiling', 'max_change'].forEach(id => expect(passed(id)).toBe(true));
+  });
 });

@@ -465,11 +465,14 @@ async function webSearchJson({
       },
     });
   try {
+    // Decided per request: searches start in parallel, so the model can be
+    // marked by a sibling while this one is still waiting on its refusal.
+    const withDomainFilter = !MODELS_WITHOUT_SEARCH_FILTERS.has(model);
     let response;
     try {
-      response = await send(!MODELS_WITHOUT_SEARCH_FILTERS.has(model));
+      response = await send(withDomainFilter);
     } catch (error) {
-      if (!isSearchFilterUnsupported(error) || MODELS_WITHOUT_SEARCH_FILTERS.has(model)) throw error;
+      if (!withDomainFilter || !isSearchFilterUnsupported(error)) throw error;
       MODELS_WITHOUT_SEARCH_FILTERS.add(model);
       response = await send(false);
     }

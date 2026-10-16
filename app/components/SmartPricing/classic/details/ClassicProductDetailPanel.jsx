@@ -28,7 +28,7 @@ import {
   productVariantLine,
   resolveAdminProductHref,
   resolveNeighbourProducts,
-  resolveStorefrontProductHref,
+  resolveStorefrontLink,
   summarizeProductAnalytics,
   summarizeRounds,
 } from './productDetailReport';
@@ -314,7 +314,8 @@ export default function ClassicProductDetailPanel({
   const handle =
     plan?.handle || plan?.product_handle || plan?.metadata?.handle || row?.handle || '';
   const adminHref = resolveAdminProductHref(plan?.product_id || row?.productId);
-  const storeHref = resolveStorefrontProductHref(shopDomain, {
+  const storeLink = resolveStorefrontLink(shopDomain, {
+    storefront: report?.storefront,
     handle,
     variantId: plan?.variant_id || row?.variantId,
   });
@@ -400,10 +401,16 @@ export default function ClassicProductDetailPanel({
           <div className={styles.productDetailHeadSide}>
             <Badge tone={stateBadge.tone}>{badgeLabel}</Badge>
             <div className={styles.productDetailLinks}>
-              {storeHref ? (
-                <Button variant="plain" url={storeHref} target="_blank">
+              {storeLink.href ? (
+                <Button variant="plain" url={storeLink.href} target="_blank">
                   View on store
                 </Button>
+              ) : storeLink.reason ? (
+                <TooltipWrapper content={storeLink.reason}>
+                  <span className={styles.productSub} aria-label={storeLink.reason}>
+                    Not on your store
+                  </span>
+                </TooltipWrapper>
               ) : null}
               {adminHref ? (
                 <Button variant="plain" url={adminHref} target="_top">
@@ -554,6 +561,15 @@ export default function ClassicProductDetailPanel({
         </div>
       </div>
 
+      {report?.plan?.product_deleted_at || report?.storefront?.status === 'missing' ? (
+        <Banner tone="warning" title="Product deleted in Shopify">
+          <p>
+            This product no longer exists in your Shopify store, so it has no store page and can
+            get no visitors. Priceify ended its test; the results collected before the deletion
+            are kept below.
+          </p>
+        </Banner>
+      ) : null}
       {actions.sharedBlock ? (
         <Banner tone="warning" title="Shared test">
           <p>{actions.sharedBlock} The numbers below cover every product in it.</p>

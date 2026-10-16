@@ -1091,7 +1091,49 @@ function keepClearOfSiblingPrices(
   });
 }
 
-async function suggestPrices({ targetArmIds = null, siblingPrices = null, ...args } = {}) {
+/** The deepest cut an AI band may ask for: a 100% cut is a free product. */
+const AI_BAND_MIN_PERCENT = -99;
+
+/**
+ * Args with max price change widened to the band's own reach, so the band is
+ * used as typed. The guardrail limits manual and bulk prices, not an AI band.
+ */
+function widenGuardrailsToBand(args = {}) {
+  const edge = (raw, fallback) => {
+    if (raw === null || raw === undefined || raw === '') return fallback;
+    const n = Number(raw);
+    return Number.isFinite(n) ? Math.max(AI_BAND_MIN_PERCENT, n) : fallback;
+  };
+  const minPct = edge(args.minPct, 10);
+  const maxPct = edge(args.maxPct, 20);
+  let reach = Math.max(Math.abs(minPct), Math.abs(maxPct));
+  const amount = resolveAmountBand(args.unit, args.minAmount, args.maxAmount);
+  if (amount) {
+    const dollars = Math.max(Math.abs(amount.min), Math.abs(amount.max));
+    normalizeVariantRows(args.variants).forEach(row => {
+      reach = Math.max(reach, (dollars / row.current_price) * 100);
+    });
+  }
+  const guardrails = args.guardrails || {};
+  // Never below the shop's own setting: spacing may still widen a narrow band
+  // as far as it always could.
+  const shopMax = Number(guardrails.max_price_change_percent);
+  const widened = Math.max(reach, Number.isFinite(shopMax) && shopMax > 0 ? shopMax : 0, 1);
+  return {
+    ...args,
+    minPct,
+    maxPct,
+    guardrails: { ...guardrails, max_price_change_percent: Math.ceil(widened * 100) / 100 },
+  };
+}
+
+async function suggestPrices({
+  targetArmIds = null,
+  siblingPrices = null,
+  bandAsTyped = false,
+  ...rest
+} = {}) {
+  const args = bandAsTyped ? widenGuardrailsToBand(rest) : rest;
   const result = await suggestPricesForAllArms(args);
   const narrowed = narrowSuggestionsToArms(result, {
     targetArmIds,
@@ -1266,9 +1308,6 @@ async function suggestPricesForAllArms({
         },
         variations_per_product: armCatalog.length,
         shop_country: shopMarket?.country || null,
-        guardrails: {
-          max_price_change_percent: guardrails.max_price_change_percent ?? 15,
-        },
         products: batch.map((group, index) =>
           describeProductForModel(group.product, index, contextFor(group), {
             withImage: sendImages,
@@ -1583,15 +1622,11 @@ async function suggestPricesForRerun({ shopDomain, plan = {}, test = null } = {}
     maxPct = 8;
   }
 
-  const shopMax = Number(guardrails.max_price_change_percent);
-  if (Number.isFinite(shopMax) && shopMax > 0) {
-    maxPct = Math.min(maxPct, shopMax);
-    minPct = Math.min(minPct, maxPct);
-  }
-
   const variantId = String(plan.variant_id || '').trim();
   const suggestions = await suggestPrices({
     shopDomain,
+    // Follows the winner however far it moved; max price change does not limit AI prices.
+    bandAsTyped: true,
     variants: [
       {
         variant_id: variantId || 'sku',
@@ -1637,6 +1672,7 @@ async function suggestPricesForRerun({ shopDomain, plan = {}, test = null } = {}
 
 module.exports = {
   suggestPrices,
+  widenGuardrailsToBand,
   readSiblingPrices,
   suggestPricesForRerun,
   deterministicPriceSuggestions,

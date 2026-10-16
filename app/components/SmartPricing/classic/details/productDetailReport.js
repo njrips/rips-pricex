@@ -394,6 +394,39 @@ export function resolveStorefrontProductHref(shopDomain, { handle, variantId } =
   return `https://${domain}/products/${encodeURIComponent(slug)}${variant ? `?variant=${variant}` : ''}`;
 }
 
+const NO_STORE_PAGE = Object.freeze({
+  draft:
+    'This product is a draft in Shopify, so it has no store page and opens Page not found. Set it to Active and publish it to the Online Store to view it.',
+  archived:
+    'This product is archived in Shopify, so it has no store page and opens Page not found. Unarchive it and publish it to the Online Store to view it.',
+  unpublished:
+    'This product is not published to the Online Store, so its store page opens Page not found. Publish it to the Online Store sales channel in Shopify to view it.',
+  missing: 'This product no longer exists in Shopify, so it has no store page.',
+});
+
+/**
+ * Where View on store should go, or why it cannot go anywhere.
+ *
+ * The report says whether Shopify serves the product on the Online Store right
+ * now. When it could not ask, the saved handle is used as before.
+ */
+export function resolveStorefrontLink(shopDomain, { storefront, handle, variantId } = {}) {
+  const reason = NO_STORE_PAGE[storefront?.status] || '';
+  if (reason) {
+    return {
+      href: null,
+      reason: `${reason} Shoppers cannot reach it either, so it gets no test visitors.`,
+    };
+  }
+  return {
+    href: resolveStorefrontProductHref(shopDomain, {
+      handle: storefront?.handle || handle,
+      variantId,
+    }),
+    reason: '',
+  };
+}
+
 export const DAILY_METRICS = Object.freeze({
   revenue_per_visitor: { label: 'Revenue per visitor', kind: 'money' },
   conversion_rate: { label: 'Conversion rate', kind: 'rate' },

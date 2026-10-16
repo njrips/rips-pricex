@@ -9,6 +9,8 @@ function buildGuardrailChecks(currentPrice, priceArms = [], guardrails = {}, opt
   const maxChange = guardrails.maxChangePercent ?? guardrails.max_price_change_percent ?? 15;
   const { checkoutPriceFunctionActive = null } = options;
   const band = buildGuardrailBand(currentPrice, guardrails);
+  // AI prices come from the merchant's band, which max price change does not limit.
+  const capped = priceArms.filter(a => a.price_source !== 'ai');
 
   const checkoutActive = checkoutPriceFunctionActive;
   const checkoutActual =
@@ -24,21 +26,21 @@ function buildGuardrailChecks(currentPrice, priceArms = [], guardrails = {}, opt
       label: 'Price floor',
       threshold: `≥ $${band.floor}`,
       actual: `$${Math.min(...priceArms.map(a => a.price))}`,
-      passed: priceArms.every(a => a.price >= band.floor),
+      passed: capped.every(a => a.price >= band.floor),
     },
     {
       id: 'price_ceiling',
       label: 'Price ceiling',
       threshold: `≤ $${band.ceiling}`,
       actual: `$${Math.max(...priceArms.map(a => a.price))}`,
-      passed: priceArms.every(a => a.price <= band.ceiling),
+      passed: capped.every(a => a.price <= band.ceiling),
     },
     {
       id: 'max_change',
       label: 'Max price change',
       threshold: `±${maxChange}%`,
       actual: `${Math.max(...priceArms.map(a => Math.abs(a.delta_percent)))}%`,
-      passed: priceArms.every(a => Math.abs(a.delta_percent) <= maxChange),
+      passed: capped.every(a => Math.abs(a.delta_percent) <= maxChange),
     },
     {
       id: 'allocation_total',

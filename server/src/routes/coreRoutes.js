@@ -157,6 +157,14 @@ router.post('/shops/products-updated', requireInternalService, asyncHandler(asyn
   res.json({ ok: true });
 }));
 
+// A failure answers 500 so Shopify redelivers; settling a test is idempotent.
+router.post('/shops/products-deleted', requireInternalService, asyncHandler(async (req, res) => {
+  const { handleShopifyProductDeleted } = require('../services/smartPricing/smartPricingProductDeletionService');
+  const productId = req.body?.admin_graphql_api_id || req.body?.id;
+  const result = await handleShopifyProductDeleted(req.shopDomain, productId);
+  res.json({ ok: true, ...result });
+}));
+
 // Order webhooks, relayed by the app after it has verified the HMAC. A failure
 // answers 500 so Shopify redelivers; recording is idempotent per order.
 router.post('/orders/created', requireInternalService, asyncHandler(async (req, res) => {

@@ -615,6 +615,13 @@ export default function ClassicExperimentsList() {
                         </td>
                         <td>
                           <Badge tone={status.tone}>{status.text}</Badge>
+                          {experiment.plans.some(plan => plan?.product_deleted_at) ? (
+                            <div className={styles.productSub}>
+                              {experiment.plans.length > 1
+                                ? 'A product was deleted in Shopify'
+                                : 'Product deleted in Shopify'}
+                            </div>
+                          ) : null}
                         </td>
                         <td>{formatMetricLabel(experiment.primaryMetric)}</td>
                         <td>
@@ -687,6 +694,7 @@ export default function ClassicExperimentsList() {
                                     <div className={styles.expChildMeta}>
                                       <div className={styles.productName}>
                                         {getPlanProductTitle(plan)}
+                                        {plan.product_deleted_at ? ' · Deleted in Shopify' : ''}
                                       </div>
                                       <div className={styles.productSub}>
                                         {plan.product_type || 'Catalog'}

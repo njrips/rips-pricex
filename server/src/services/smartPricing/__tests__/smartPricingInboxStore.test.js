@@ -300,6 +300,32 @@ describe('smartPricingInboxStore', () => {
     expect(client.release).toHaveBeenCalled();
   });
 
+  it('does not put a plan with no test on Running or Paused', async () => {
+    const client = lockingClient({
+      'SP-1': { plan_id: 'SP-1', plan_json: { id: 'SP-1', status: 'queued' }, status: 'queued' },
+    });
+    getClient.mockResolvedValueOnce(client);
+    query.mockResolvedValueOnce({ rows: [] });
+
+    await patchInboxPlan('demo.myshopify.com', 'SP-1', { status: 'running' });
+
+    const update = findCall(client, 'UPDATE smart_pricing_inbox_plans');
+    expect(JSON.parse(update[1][2]).status).toBe('queued');
+  });
+
+  it('still lets a patch that links a test put the plan on Running', async () => {
+    const client = lockingClient({
+      'SP-1': { plan_id: 'SP-1', plan_json: { id: 'SP-1', status: 'queued' }, status: 'queued' },
+    });
+    getClient.mockResolvedValueOnce(client);
+    query.mockResolvedValueOnce({ rows: [] });
+
+    await patchInboxPlan('demo.myshopify.com', 'SP-1', { status: 'running', test_id: 'test-1' });
+
+    const update = findCall(client, 'UPDATE smart_pricing_inbox_plans');
+    expect(JSON.parse(update[1][2])).toMatchObject({ status: 'running', test_id: 'test-1' });
+  });
+
   // Launching read the whole inbox, stamped the test id onto one plan, then
   // saved the array back — and that save deletes every plan missing from it. A
   // plan created in between (the wizard, a bulk launch, the background sync)
@@ -1060,6 +1086,68 @@ describe('smartPricingInboxStore', () => {
       const saved = JSON.parse(update[1].find(value => String(value).startsWith('{')));
       expect(saved).toMatchObject({ status: 'running', test_id: 'test-basket' });
       expect(result.relinked).toBe(1);
+    });
+
+    it('relinks a plan stuck on Running to its stopped test as Paused', async () => {
+      query.mockResolvedValueOnce({
+        rows: [
+          {
+            id: 'test-gift-card',
+            status: 'stopped',
+            started_at: new Date('2026-08-20T06:37:11Z'),
+            plan_id: 'SP-gift-card',
+          },
+        ],
+      });
+      query.mockResolvedValue({ rows: [] });
+      const client = lockingClient({
+        'SP-gift-card': {
+          plan_id: 'SP-gift-card',
+          plan_json: { id: 'SP-gift-card', title: 'Gift Card - $50', status: 'running' },
+          status: 'running',
+          test_id: null,
+        },
+      });
+      getClient.mockResolvedValueOnce(client);
+
+      const result = await restoreOrphanedLivePlans('Demo.myshopify.com');
+
+      const [relinkSql] = query.mock.calls[0];
+      expect(relinkSql).toContain("t.status = 'stopped'");
+      expect(relinkSql).toContain('t.deleted_at IS NULL');
+      const update = findCall(client, 'UPDATE smart_pricing_inbox_plans');
+      const saved = JSON.parse(update[1].find(value => String(value).startsWith('{')));
+      expect(saved).toMatchObject({ status: 'paused', test_id: 'test-gift-card' });
+      expect(result.relinked).toBe(1);
+    });
+
+    it('settles a plan that reads Running with no test of its own', async () => {
+      query
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce({
+          rows: [{ plan_id: 'SP-ghost', experiment_launched: true }],
+        });
+      query.mockResolvedValue({ rows: [] });
+      const client = lockingClient({
+        'SP-ghost': {
+          plan_id: 'SP-ghost',
+          plan_json: { id: 'SP-ghost', title: 'Gift Card - $50', status: 'running' },
+          status: 'running',
+          test_id: null,
+        },
+      });
+      getClient.mockResolvedValueOnce(client);
+
+      const result = await restoreOrphanedLivePlans('Demo.myshopify.com');
+
+      const [settleSql] = query.mock.calls[2];
+      expect(settleSql).toContain("IN ('running', 'paused')");
+      expect(settleSql).toContain('p.test_id IS NULL');
+      const update = findCall(client, 'UPDATE smart_pricing_inbox_plans');
+      const saved = JSON.parse(update[1].find(value => String(value).startsWith('{')));
+      expect(saved.status).toBe('completed');
+      expect(result.settled).toBe(1);
     });
 
     const classicOrphan = {

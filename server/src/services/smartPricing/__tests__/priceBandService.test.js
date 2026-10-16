@@ -203,4 +203,17 @@ describe('a challenger priced at the catalog price', () => {
       )
     ).toEqual([]);
   });
+
+  it('lets an AI price past max price change but still checks it is a price', () => {
+    const arms = [
+      { id: 'control', role: 'control', label: 'Control', price: 40 },
+      { id: 'var_a', role: 'challenger', label: 'Variation A', price: 60, price_source: 'ai' },
+      { id: 'var_b', role: 'challenger', label: 'Variation B', price: 0, price_source: 'ai' },
+      { id: 'var_c', role: 'challenger', label: 'Variation C', price: 60 },
+    ];
+    const violations = findPriceChangeViolations(40, arms, { max_price_change_percent: 15 });
+    expect(violations).toHaveLength(2);
+    expect(violations.join(' ')).toMatch(/Variation B does not have a valid price/);
+    expect(violations.join(' ')).toMatch(/Variation C at \$60 is outside/);
+  });
 });

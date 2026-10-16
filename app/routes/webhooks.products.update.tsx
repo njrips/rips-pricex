@@ -6,8 +6,9 @@ import {
 } from "../utils/expressInternalApi.server";
 
 /**
- * products/update — drops the shop's cached opportunity list so the next test
- * starts from the catalog's current prices. Best-effort: the cache also expires
+ * products/update and products/create — drop the shop's cached opportunity
+ * list so the next test starts from the catalog's current products and prices.
+ * Best-effort: the cache also expires
  * on its own, so a failed call is not worth a redelivery.
  */
 export const action = async ({ request }: ActionFunctionArgs) => {
