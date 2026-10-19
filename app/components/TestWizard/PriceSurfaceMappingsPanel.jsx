@@ -629,11 +629,18 @@ export default function PriceSurfaceMappingsPanel({
   const envPassword = String(
     envStorefrontPassword || getDevStorefrontPasswordDefault() || ''
   ).trim();
-  // Prefer `.env` / loader — never show a password field when that value is present.
+  // The configured password can be stale (the merchant changed it in Online Store
+  // preferences), so a rejected scan has to offer the field even when one is set.
+  const configuredPasswordRejected =
+    Boolean(envPassword) &&
+    (autoMapResult?.password_gate || autoMapResult?.unlock?.ok === false) &&
+    autoMapResult?.unlock?.reason !== 'rate_limited';
   const showStorefrontPasswordField =
-    localDevPasswordUi && !envPassword && typeof onStorefrontPasswordChange === 'function';
+    localDevPasswordUi &&
+    (!envPassword || configuredPasswordRejected || Boolean(storefrontPassword)) &&
+    typeof onStorefrontPasswordChange === 'function';
   const resolvedStorefrontPassword = localDevPasswordUi
-    ? resolveStorefrontPasswordForPreview(shopHost, envPassword || storefrontPassword)
+    ? resolveStorefrontPasswordForPreview(shopHost, storefrontPassword || envPassword)
     : envPassword || '';
   const needsStorefrontPassword =
     localDevPasswordUi && defaultPickerReady && !resolvedStorefrontPassword;
@@ -1049,7 +1056,9 @@ export default function PriceSurfaceMappingsPanel({
                   <p>
                     {autoMapResult.unlock?.reason === 'rate_limited'
                       ? 'Shopify paused storefront password attempts. Wait a few minutes, then scan again.'
-                      : 'Your storefront is password-protected. Enter the Online Store password, then scan again.'}
+                      : configuredPasswordRejected && showStorefrontPasswordField
+                        ? 'Your storefront is password-protected and the saved password was not accepted. Enter the current Online Store password in Storefront password above, then scan again.'
+                        : 'Your storefront is password-protected. Enter the Online Store password, then scan again.'}
                   </p>
                 </Banner>
               ) : null}

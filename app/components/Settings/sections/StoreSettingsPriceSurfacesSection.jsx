@@ -14,6 +14,7 @@ import {
   buildVisualPickerLaunchUrl,
   getDevStorefrontPasswordDefault,
   isLocalDevStorefrontPasswordUiEnabled,
+  loadPersistedStorefrontPassword,
   persistStorefrontPassword,
   resolvePreviewBaseUrl,
   resolveStorefrontPasswordForPreview,
@@ -47,12 +48,12 @@ export function StoreSettingsPriceSurfacesSection({ shopDomain = '', autoMapRequ
   const envPassword = String(
     outletCtx.devStorefrontPassword || getDevStorefrontPasswordDefault() || ''
   ).trim();
-  // The password is stored per shop, so a shop switch (or a newly provided .env
-  // value) starts over from whatever is on record for that shop.
+  // Only what the merchant typed, stored per shop. It wins over the configured
+  // password, which can be stale once the Online Store password changes.
   const passwordKey = `${envPassword}:${shopDomain}`;
   const initialPassword = useMemo(
-    () => envPassword || resolveStorefrontPasswordForPreview(shopDomain || '', ''),
-    [envPassword, shopDomain]
+    () => (shopDomain ? loadPersistedStorefrontPassword(shopDomain) : ''),
+    [shopDomain]
   );
   const [storefrontPassword, setStorefrontPassword] = useKeyedState(passwordKey, initialPassword);
   const [pickTarget, setPickTarget] = useState(null);
@@ -109,8 +110,9 @@ export function StoreSettingsPriceSurfacesSection({ shopDomain = '', autoMapRequ
   const { loading: pickerProductLoading } = pickerProduct;
 
   const localDevPasswordUi = isLocalDevStorefrontPasswordUiEnabled();
-  // When .env provides the password, never render the Settings password field.
-  const allowPasswordField = localDevPasswordUi && !envPassword;
+  // The panel decides when to render the field; with a configured password it
+  // appears only after that password is rejected.
+  const allowPasswordField = localDevPasswordUi;
 
   const getPickerLaunchUrl = useCallback(
     row => {
@@ -121,7 +123,7 @@ export function StoreSettingsPriceSurfacesSection({ shopDomain = '', autoMapRequ
       const surface = String(row?.surface || 'pdp').toLowerCase();
       const password = resolveStorefrontPasswordForPreview(
         domain,
-        envPassword || (allowPasswordField ? storefrontPassword : '')
+        (allowPasswordField ? storefrontPassword : '') || envPassword
       );
       // A url row names its own page, so it skips the per-surface templates
       // entirely. Only the path travels: previewing a custom domain through the
@@ -319,7 +321,7 @@ export function StoreSettingsPriceSurfacesSection({ shopDomain = '', autoMapRequ
     <PriceSurfaceMappingsPanel
       styles={targetingStyles}
       shopDomain={shopDomain}
-      storefrontPassword={envPassword || storefrontPassword}
+      storefrontPassword={storefrontPassword}
       envStorefrontPassword={envPassword}
       onStorefrontPasswordChange={allowPasswordField ? handleStorefrontPasswordChange : undefined}
       productPath={resolvedProductPath}
