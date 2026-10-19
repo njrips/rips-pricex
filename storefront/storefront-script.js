@@ -2606,13 +2606,95 @@
     return 'new';
   }
 
-  function getCountryCode() {
-    if (window.Shopify?.country) {
-      return window.Shopify.country;
+  // Shopify.country is the buyer's market, which on a single-market store is the
+  // shop's own country for every visitor. Country targeting needs where the
+  // visitor is, which Shopify's storefront geolocation endpoint reports.
+  var VISITOR_COUNTRY_KEY = 'ripx_visitor_country';
+  var VISITOR_COUNTRY_TTL_MS = 24 * 60 * 60 * 1000;
+  // A lookup that answered nothing is retried after an hour, not on every page,
+  // so a store without the endpoint does not wait on it each navigation.
+  var VISITOR_COUNTRY_MISS_TTL_MS = 60 * 60 * 1000;
+  var VISITOR_COUNTRY_TIMEOUT_MS = 1200;
+  var _visitorCountryPromise = null;
+
+  function readVisitorCountryLookup() {
+    try {
+      var cached = JSON.parse(window.localStorage.getItem(VISITOR_COUNTRY_KEY) || 'null');
+      if (!cached || typeof cached !== 'object') return null;
+      var code = String(cached.c || '');
+      var known = /^[A-Z]{2}$/.test(code);
+      var ttl = known ? VISITOR_COUNTRY_TTL_MS : VISITOR_COUNTRY_MISS_TTL_MS;
+      if (Date.now() - Number(cached.t || 0) >= ttl) return null;
+      return { country: known ? code : '' };
+    } catch (_e) {
+      // Storage blocked or corrupt: detect again.
     }
-    const language = navigator.language || '';
-    const parts = language.split('-');
-    return parts.length > 1 ? parts[1].toUpperCase() : '';
+    return null;
+  }
+
+  function writeVisitorCountryLookup(code) {
+    try {
+      window.localStorage.setItem(
+        VISITOR_COUNTRY_KEY,
+        JSON.stringify({ c: code || '', t: Date.now() })
+      );
+    } catch (_e) {
+      // Without storage the market country is used.
+    }
+  }
+
+  function readCachedVisitorCountry() {
+    var lookup = readVisitorCountryLookup();
+    return lookup ? lookup.country : '';
+  }
+
+  function getCountryCode() {
+    var detected = readCachedVisitorCountry();
+    if (detected) return detected;
+    var market = String(window.Shopify?.country || '').trim().toUpperCase();
+    return /^[A-Z]{2}$/.test(market) ? market : '';
+  }
+
+  function hasCountryTargetedTest() {
+    return (CONFIG.activeTests || []).some(function (t) {
+      return t && t.countryTargeting === true;
+    });
+  }
+
+  /**
+   * Resolves once the visitor's country is known, or after a short timeout.
+   * A lookup still in flight at the timeout is left to finish, so its answer
+   * is cached for the next page.
+   */
+  function ensureVisitorCountry() {
+    if (!hasCountryTargetedTest() || readVisitorCountryLookup()) {
+      return Promise.resolve();
+    }
+    if (_visitorCountryPromise) return _visitorCountryPromise;
+    var timer = null;
+    var lookup = fetch('/browsing_context_suggestions.json', {
+      credentials: 'same-origin',
+      headers: { Accept: 'application/json' },
+    })
+      .then(function (r) {
+        return r.ok ? r.json() : null;
+      })
+      .then(function (data) {
+        var code = String(data?.detected_values?.country?.handle || '')
+          .trim()
+          .toUpperCase();
+        writeVisitorCountryLookup(/^[A-Z]{2}$/.test(code) ? code : '');
+      })
+      .catch(function () {
+        writeVisitorCountryLookup('');
+      });
+    var timeout = new Promise(function (resolve) {
+      timer = setTimeout(resolve, VISITOR_COUNTRY_TIMEOUT_MS);
+    });
+    _visitorCountryPromise = Promise.race([lookup, timeout]).then(function () {
+      clearTimeout(timer);
+    });
+    return _visitorCountryPromise;
   }
 
   var TRAFFIC_SOURCE_COOKIE = 'ab_test_traffic_source';
@@ -3366,8 +3448,12 @@
     function fetchVariantChunk(chunkIds, chunkIndex) {
       var params = new URLSearchParams(baseParams.toString());
       params.set('test_ids', chunkIds.join(','));
-      var variantsUrl = CONFIG.apiUrl + '/track/variants?' + params.toString();
-      return fetchWithRetry(variantsUrl, { method: 'GET' }, 8000, 600)
+      return ensureVisitorCountry()
+        .then(function () {
+          params.set('country', getCountryCode() || '');
+          var variantsUrl = CONFIG.apiUrl + '/track/variants?' + params.toString();
+          return fetchWithRetry(variantsUrl, { method: 'GET' }, 8000, 600);
+        })
         .then(function (r) {
           if (!r.ok) {
             recordRipxSkip('runtime', 'variants_request_http_error', {
@@ -3720,6 +3806,7 @@
     const shopDomain = getShopDomain();
 
     try {
+      await ensureVisitorCountry();
       const device = getDeviceType();
       const operatingSystem = getOperatingSystem();
       const customer = getCustomerType();

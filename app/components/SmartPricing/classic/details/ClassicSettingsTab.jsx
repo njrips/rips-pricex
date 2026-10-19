@@ -13,7 +13,6 @@ import { formatRunningTestStatusLabel } from '../classicOverviewLayout';
 import {
   ensureRevenueGuardrailRows,
   MIN_VISITORS_FOR_REVENUE_GUARDRAIL,
-  MIN_CONVERSIONS_FOR_REVENUE_GUARDRAIL,
 } from '../revenueGuardrail';
 import DetailFactCard from './DetailFactCard';
 import styles from '../SmartPricingClassic.module.css';
@@ -54,19 +53,8 @@ function SettingRow({
   );
 }
 
-function titleCase(value) {
-  const text = String(value || '').trim();
-  if (!text) return '—';
-  return text.replace(/[_-]+/g, ' ').replace(/^\w/, character => character.toUpperCase());
-}
-
 function percentOrDash(value) {
   return value === null || value === undefined || value === '' ? '—' : `${value}%`;
-}
-
-/** Whether a section has anything worth a heading. */
-function hasAny(...values) {
-  return values.some(value => value !== null && value !== undefined && value !== '');
 }
 
 function mapSettingsStatusLabel(testStatus) {
@@ -95,6 +83,7 @@ export default function ClassicSettingsTab({
   onAdjustTraffic = null,
   onViewHistory = null,
   onViewTestsList = null,
+  testIds = [],
   lockedNote = '',
 }) {
   const [technicalOpen, setTechnicalOpen] = useState(false);
@@ -112,42 +101,18 @@ export default function ClassicSettingsTab({
     metrics?.guardrails,
     metrics?.max_revenue_drop_percent
   );
-  const isOffer = settings.experimentType === 'offer_test' || settings.experimentType === 'offer';
   const sourceFallback =
     audience?.trafficSource && String(audience.trafficSource).toLowerCase() !== 'all'
       ? formatAudienceFactValue([audience.trafficSource], 'All sources')
       : 'All sources';
   const minSample = audience?.minSampleSize || metrics?.minSampleSize || null;
-  const shopNotes = Array.isArray(settings.guardrailNotes) ? settings.guardrailNotes : [];
-
-  const collectionPlan =
-    metrics?.durationFeasibility === 'not_feasible'
-      ? 'Needs more traffic for a practical 2–8 week test'
-      : metrics?.practicalDurationRange
-        ? `Estimated ${metrics.practicalDurationRange}`
-        : hasAny(metrics?.durationFeasibility)
-          ? 'Needs qualified traffic data'
-          : null;
-  const visitorsNeeded =
-    metrics?.durationFeasibility === 'not_feasible' &&
-    Number(metrics.requiredDailyVisitorsForPracticalWindow) > 0
-      ? `About ${Number(metrics.requiredDailyVisitorsForPracticalWindow).toLocaleString()}/day`
-      : null;
-  const trafficEvidence = metrics?.trafficEvidence
-    ? metrics.trafficEvidence === 'estimated'
-      ? 'Estimated · verify with storefront history'
-      : metrics.trafficEvidence === 'modeled'
-        ? 'Modeled from order history'
-        : 'Measured storefront traffic'
-    : null;
-
-  const hasTrafficPlan = hasAny(
-    metrics?.recommendedSampleSize,
-    collectionPlan,
-    visitorsNeeded,
-    trafficEvidence
-  );
-  const hasLaunchExtras = hasAny(settings.scenarioPreset, settings.canaryDays);
+  const referenceTestIds = [
+    ...new Set(
+      [...(Array.isArray(testIds) ? testIds : []), settings.testId]
+        .map(id => String(id || '').trim())
+        .filter(Boolean)
+    ),
+  ];
 
   const trafficAllocation =
     audience?.trafficAllocation ?? settings.trafficRampPercent ?? null;
@@ -297,21 +262,20 @@ export default function ClassicSettingsTab({
               {on ? (
                 <div className={styles.guardrailRule}>
                   <span>
-                    Pause this test if revenue per visitor for any variation drops more than
+                    Pauses this test if revenue per visitor for any variation drops more than
                   </span>
                   <span className={styles.guardrailRuleValue}>
                     {String(row.threshold || '').replace(/^-/, '') || '—'}
                   </span>
                   <span>
-                    below the control, after{' '}
+                    vs control, once each variation has{' '}
                     {Number(minSample || MIN_VISITORS_FOR_REVENUE_GUARDRAIL).toLocaleString()}{' '}
-                    visitors per variation and at least {MIN_CONVERSIONS_FOR_REVENUE_GUARDRAIL}{' '}
-                    control conversions.
+                    visitors.
                   </span>
                 </div>
               ) : (
                 <div className={styles.guardrailRule}>
-                  <span>Not stopping on revenue drop. Stop this test yourself if needed.</span>
+                  <span>Doesn’t pause this test on a revenue per visitor drop. Pause it yourself if needed.</span>
                 </div>
               )}
               {/* row.hint is deliberately not rendered: the badge above and the
@@ -340,116 +304,21 @@ export default function ClassicSettingsTab({
         </summary>
         <div className={styles.advancedBody}>
           <div className={styles.settingsDisclosureGroup}>
-            <div className={styles.sectionLabel}>Launch behaviour</div>
-            <div className={styles.settingsRows}>
-              <SettingRow
-                label="Auto-stop"
-                value={settings.autoStopEnabled ? 'On' : 'Off'}
-              />
-              <SettingRow
-                label={isOffer ? 'Offer application' : 'Price application'}
-                value={
-                  settings.priceApplicationMethod === 'checkout_discount_function'
-                    ? 'Checkout discount'
-                    : titleCase(settings.priceApplicationMethod)
-                }
-              />
-              <SettingRow
-                label="Analysis method"
-                value={
-                  metrics?.analysisMethod === 'frequentist'
-                    ? 'Fixed-horizon'
-                    : 'Sequential, with your review'
-                }
-              />
-            </div>
-          </div>
-          {hasTrafficPlan ? (
-            <div className={styles.settingsDisclosureGroup}>
-              <div className={styles.sectionLabel}>Traffic plan</div>
-              <div className={styles.settingsRows}>
-                {metrics?.recommendedSampleSize ? (
-                  <SettingRow
-                    label="Planning reference"
-                    value={Number(metrics.recommendedSampleSize).toLocaleString()}
-                    infoHash="min-sample"
-                    infoLabel="Planning sample"
-                  />
-                ) : null}
-                {collectionPlan ? (
-                  <SettingRow
-                    label="Collection plan"
-                    value={collectionPlan}
-                    infoHash="min-sample"
-                    infoLabel="Collection planning window"
-                  />
-                ) : null}
-                {visitorsNeeded ? (
-                  <SettingRow label="Eligible visitors needed" value={visitorsNeeded} />
-                ) : null}
-                {trafficEvidence ? (
-                  <SettingRow label="Traffic evidence" value={trafficEvidence} />
-                ) : null}
-              </div>
-            </div>
-          ) : null}
-
-          {shopNotes.length ? (
-            <div className={styles.settingsDisclosureGroup}>
-              <div className={styles.sectionLabel}>Shop defaults at launch</div>
-              <p className={styles.help}>
-                Fixed limits this test was built against. They are not adjustable per
-                test.
-              </p>
-              <div className={styles.detailChipRow}>
-                {shopNotes.map(note => (
-                  <span key={note} className={styles.detailChip}>
-                    {note}
-                  </span>
-                ))}
-              </div>
-            </div>
-          ) : null}
-
-          {hasLaunchExtras ? (
-            <div className={styles.settingsDisclosureGroup}>
-              <div className={styles.sectionLabel}>Launch preferences</div>
-              <div className={styles.settingsRows}>
-                {settings.scenarioPreset ? (
-                  <SettingRow label="Scenario preset" value={titleCase(settings.scenarioPreset)} />
-                ) : null}
-                {hasAny(settings.canaryDays) ? (
-                  <SettingRow label="Canary days" value={settings.canaryDays} />
-                ) : null}
-              </div>
-            </div>
-          ) : null}
-
-          {onViewHistory || onViewTestsList ? (
-            <div className={styles.settingsDisclosureGroup}>
-              <div className={styles.sectionLabel}>Links</div>
-              <div className={`${styles.settingsRows} ${styles.variationPreviewRow}`}>
-                {onViewHistory ? (
-                  <Button variant="plain" onClick={onViewHistory}>
-                    View test history
-                  </Button>
-                ) : null}
-                {onViewTestsList ? (
-                  <Button variant="plain" onClick={onViewTestsList}>
-                    View test in Tests list
-                  </Button>
-                ) : null}
-              </div>
-            </div>
-          ) : null}
-
-          <div className={styles.settingsDisclosureGroup}>
             <div className={styles.sectionLabel}>Reference</div>
-            <p className={styles.help}>Quote these when contacting support.</p>
             <div className={styles.settingsRows}>
               <SettingRow
-                label="Test ID"
-                value={<span className={styles.monoValue}>{settings.testId || '—'}</span>}
+                label={referenceTestIds.length > 1 ? 'Test IDs' : 'Test ID'}
+                value={
+                  <span className={styles.monoValue}>
+                    {referenceTestIds[0] || '—'}
+                    {referenceTestIds.length > 1 ? ` +${referenceTestIds.length - 1} more` : ''}
+                  </span>
+                }
+                note={
+                  referenceTestIds.length > 1
+                    ? 'Each product runs as its own test. Copy test ID in the ⋯ menu copies all of them.'
+                    : null
+                }
               />
               {settings.createdAt ? (
                 <SettingRow
@@ -465,6 +334,24 @@ export default function ClassicSettingsTab({
               ) : null}
             </div>
           </div>
+
+          {onViewHistory || onViewTestsList ? (
+            <div className={styles.settingsDisclosureGroup}>
+              <div className={styles.sectionLabel}>Links</div>
+              <div className={styles.settingsLinks}>
+                {onViewHistory ? (
+                  <Button variant="plain" onClick={onViewHistory}>
+                    View test history
+                  </Button>
+                ) : null}
+                {onViewTestsList ? (
+                  <Button variant="plain" onClick={onViewTestsList}>
+                    View test in Tests list
+                  </Button>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
         </div>
       </details>
     </div>

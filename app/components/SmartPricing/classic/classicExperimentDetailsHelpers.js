@@ -74,12 +74,8 @@ export function formatAudienceFactValue(items, fallback = 'All') {
     )
     .filter(Boolean)
     .filter((item, index, list) => list.findIndex(other => other.toLowerCase() === item.toLowerCase()) === index)
-    .map(item =>
-      item
-        .split(/\s+/)
-        .map(part => (part ? part.charAt(0).toUpperCase() + part.slice(1) : part))
-        .join(' ')
-    );
+    // Sentence case, as the pills read elsewhere: "Paid ads", not "Paid Ads".
+    .map(item => item.charAt(0).toUpperCase() + item.slice(1));
   return values.length ? values.join(', ') : fallback;
 }
 
@@ -704,8 +700,11 @@ export function buildVariationsSummary(plan = null, analytics = null, options = 
       allocation: arm.allocation_percent ?? arm.traffic_percent ?? null,
       deltaPercent: arm.delta_percent ?? null,
       visitors: live?.visitors ?? null,
+      conversions: live?.conversions ?? null,
       conversionRate: live?.conversion_rate ?? null,
       revenuePerVisitor: live?.revenue_per_visitor ?? null,
+      avgOrderValue: live?.avg_order_value ?? null,
+      profitPerVisitor: live?.profit_per_visitor ?? null,
       variantId: variant?.id || null,
       variantName: variant?.name || null,
       armIndex: index,

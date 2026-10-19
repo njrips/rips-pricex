@@ -36,6 +36,7 @@ export default function ReviewLaunchStepPanel({
   onFixPriceSurfaces,
   onRefreshCheckout,
   plans = [],
+  notice = null,
 }) {
   const failedChecks = Array.isArray(checkoutReadiness?.failed_checks)
     ? checkoutReadiness.failed_checks.filter(Boolean)
@@ -111,6 +112,7 @@ export default function ReviewLaunchStepPanel({
 
   return (
     <div className={styles.reviewStack}>
+      {notice}
       {checkoutLoading ? (
         <Banner tone="info" title="Checking checkout readiness…">
           <p>

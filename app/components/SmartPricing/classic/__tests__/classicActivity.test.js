@@ -129,8 +129,43 @@ describe('classic activity log', () => {
       { kind: 'updated', title: 'Audience targeting changed' },
       { kind: 'qa', title: 'Self-QA passed' },
     ];
-    expect(filterActivityItems(items, 'lifecycle')).toHaveLength(3);
-    expect(activityFilterCounts(items)).toMatchObject({ all: 3, lifecycle: 3 });
+    expect(filterActivityItems(items, 'lifecycle')).toHaveLength(2);
+    expect(activityFilterCounts(items)).toMatchObject({ all: 3, lifecycle: 2, settings: 1 });
+  });
+
+  it('files settings edits under Settings changes and threshold edits under Guardrails', () => {
+    const items = [
+      { kind: 'updated', title: 'Audience targeting changed' },
+      { kind: 'updated', title: 'Traffic allocation changed' },
+      { kind: 'updated', title: 'Primary metric changed' },
+      { kind: 'updated', title: 'Guardrail turned off' },
+      { kind: 'updated', title: 'Guardrail threshold changed' },
+      { kind: 'paused', title: 'Test paused' },
+    ];
+    expect(filterActivityItems(items, 'settings').map(item => item.title)).toEqual([
+      'Audience targeting changed',
+      'Traffic allocation changed',
+      'Primary metric changed',
+      'Guardrail turned off',
+    ]);
+    expect(activityFilterCounts(items)).toMatchObject({
+      all: 6,
+      settings: 4,
+      guardrail: 1,
+      lifecycle: 1,
+    });
+  });
+
+  it('keeps a reverted price in Lifecycle with its own badge', () => {
+    const reverted = mapServerEventToActivity({
+      id: 'e1',
+      event_type: 'reverted',
+      created_at: '2026-10-01T10:00:00.000Z',
+      payload: {},
+    });
+    expect(reverted.kind).toBe('reverted');
+    expect(filterActivityItems([reverted], 'lifecycle')).toHaveLength(1);
+    expect(filterActivityItems([reverted], 'settings')).toHaveLength(0);
   });
 
   it('maps kind tones for the timeline dots', () => {

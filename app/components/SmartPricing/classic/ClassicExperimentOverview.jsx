@@ -1356,6 +1356,7 @@ export default function ClassicExperimentOverview() {
               }
               onViewHistory={() => selectTab('History')}
               onViewTestsList={() => navigate(ROUTES.appSmartPricing(shopDomain))}
+              testIds={linkedTestIds.length ? linkedTestIds : testId ? [testId] : []}
             />
           ) : null}
         </div>

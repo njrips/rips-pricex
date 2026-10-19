@@ -25,7 +25,8 @@ describe('helpFaq', () => {
         item =>
           /Results settings/i.test(item.a) &&
           /pauses the whole test/i.test(item.a) &&
-          /10 conversions/i.test(item.a) &&
+          /minimum visitors/i.test(item.a) &&
+          !/10 conversions/i.test(item.a) &&
           !/at least 5,000/i.test(item.a)
       )
     );

@@ -62,38 +62,42 @@ describe('countrySelection', () => {
     ).toBe('US, CA, DE, FR, JP, AU, NZ, IN + 1 more');
     expect(getCountryFieldHelp([], 'include')).toMatch(/worldwide/i);
     expect(getCountryFieldHelp([], 'exclude')).toMatch(/no countries excluded/i);
-    expect(getCountryFieldHelp(['US'], 'exclude', ['CA'])).toMatch(/other tab/i);
+    expect(getCountryFieldHelp(['US'], 'exclude')).toMatch(/only one list applies/i);
+    expect(getCountryFieldHelp(['US'], 'include')).toMatch(/only one list applies/i);
   });
 
-  it('keeps include and exclude lists independent when switching tabs', () => {
+  it('applies only one country list at a time', () => {
     expect(resolveCountryLists({ countries: ['US'], countryMode: 'include' })).toEqual({
       includeCountries: ['US'],
       excludeCountries: [],
       countryMode: 'include',
     });
     expect(
-      resolveCountryLists({
-        includeCountries: ['US'],
-        excludeCountries: [],
-        countries: ['US'],
-        countryMode: 'exclude',
-      })
-    ).toEqual({
-      includeCountries: ['US'],
-      excludeCountries: [],
-      countryMode: 'exclude',
-    });
+      resolveCountryLists({ includeCountries: [], excludeCountries: ['BD'], countryMode: 'exclude' })
+    ).toEqual({ includeCountries: [], excludeCountries: ['BD'], countryMode: 'exclude' });
+    expect(
+      resolveCountryLists({ includeCountries: [], excludeCountries: [], countryMode: 'exclude' })
+    ).toEqual({ includeCountries: [], excludeCountries: [], countryMode: 'exclude' });
+  });
+
+  it('settles an older audience holding both lists on the include list that ran', () => {
     expect(
       resolveCountryLists({
-        includeCountries: ['US'],
-        excludeCountries: ['GB', 'US'],
+        includeCountries: ['US', 'AF'],
+        excludeCountries: ['BD'],
         countryMode: 'exclude',
       })
-    ).toEqual({
-      includeCountries: ['US'],
-      excludeCountries: ['GB'],
-      countryMode: 'exclude',
-    });
+    ).toEqual({ includeCountries: ['US', 'AF'], excludeCountries: [], countryMode: 'include' });
+    expect(
+      resolveCountryLists({ includeCountries: [], excludeCountries: ['BD'], countryMode: 'include' })
+    ).toEqual({ includeCountries: [], excludeCountries: ['BD'], countryMode: 'exclude' });
+    expect(
+      formatSplitCountryAudienceLabel(
+        ...Object.values(
+          resolveCountryLists({ includeCountries: ['US', 'AF'], excludeCountries: ['BD'] })
+        ).slice(0, 2)
+      )
+    ).toBe('Include: US, AF');
   });
 
   it('formats include and exclude together for review', () => {

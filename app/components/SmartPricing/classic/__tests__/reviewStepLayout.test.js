@@ -227,3 +227,18 @@ describe('banner order', () => {
     expect(container.textContent).toContain('Everything in one paragraph.');
   });
 });
+
+describe('live edit notice', () => {
+  it('sits in the same spaced stack as the other banners, ahead of them', async () => {
+    await renderPanel({
+      checkoutReady: true,
+      estimatedDays: null,
+      notice: h('div', { 'data-testid': 'live-edit-notice' }, 'Saving does not restart the test'),
+    });
+    const notice = container.querySelector('[data-testid="live-edit-notice"]');
+    expect(notice).toBeTruthy();
+    const stack = notice.parentElement;
+    expect(stack.firstElementChild).toBe(notice);
+    expect(stack.textContent).toMatch(/Timeline needs measured product traffic/);
+  });
+});

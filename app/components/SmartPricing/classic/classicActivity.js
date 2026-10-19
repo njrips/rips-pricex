@@ -13,7 +13,8 @@ export const ACTIVITY_KIND_META = {
   archived: { label: 'Archived', group: 'lifecycle' },
   restored: { label: 'Restored', group: 'lifecycle' },
   deleted: { label: 'Deleted', group: 'lifecycle' },
-  updated: { label: 'Settings changed', group: 'lifecycle' },
+  updated: { label: 'Settings changed', group: 'settings' },
+  reverted: { label: 'Price reverted', group: 'lifecycle' },
   qa: { label: 'QA check', group: 'lifecycle' },
   guardrail: { label: 'Guardrail', group: 'guardrail' },
   winner_ready: { label: 'Winner ready', group: 'lifecycle' },
@@ -24,6 +25,7 @@ export const ACTIVITY_FILTERS = [
   { id: 'all', label: 'All' },
   { id: 'lifecycle', label: 'Lifecycle' },
   { id: 'guardrail', label: 'Guardrails' },
+  { id: 'settings', label: 'Settings changes' },
 ];
 
 const SNAPSHOT_KINDS = new Set([
@@ -124,9 +126,15 @@ export function activityKindMeta(kind) {
   return ACTIVITY_KIND_META[String(kind || '').trim()] || { label: 'Event', group: 'lifecycle' };
 }
 
-/** Guardrail setting changes belong under the Guardrails filter, not Lifecycle. */
+/**
+ * A threshold change is a guardrail event; turning the guardrail on or off,
+ * like audience, traffic and metric edits, is a settings change.
+ */
 function activityGroup(item = {}) {
-  if (String(item?.kind || '').trim() === 'updated' && /^guardrail\b/i.test(String(item?.title || ''))) {
+  if (
+    String(item?.kind || '').trim() === 'updated' &&
+    /^guardrail threshold/i.test(String(item?.title || ''))
+  ) {
     return 'guardrail';
   }
   return activityKindMeta(item?.kind).group;
@@ -151,7 +159,7 @@ export function activityKindTone(item = {}) {
     return 'success';
   }
   if (kind === 'paused' || kind === 'archived' || kind === 'stopped') return 'warning';
-  if (kind === 'updated') return 'info';
+  if (kind === 'updated' || kind === 'reverted') return 'info';
   return 'neutral';
 }
 

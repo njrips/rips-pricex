@@ -111,7 +111,7 @@ function normalizeGoalTemplate(raw = {}) {
   )
     .trim()
     .toLowerCase();
-  const allowed = ['profit_per_visitor', 'revenue_per_visitor', 'conversion_rate'];
+  const allowed = ['profit_per_visitor', 'revenue_per_visitor', 'conversion_rate', 'aov'];
   return {
     primary_metric: allowed.includes(metric) ? metric : 'revenue_per_visitor',
     secondary_events: Array.isArray(source.secondary_events)

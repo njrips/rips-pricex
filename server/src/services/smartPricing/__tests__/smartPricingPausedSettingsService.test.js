@@ -71,6 +71,23 @@ describe('buildPausedSettingsUpdate', () => {
     assert.ok(update.goal.min_sample_size >= 1);
   });
 
+  it('carries a switch to average order value onto the paused test', () => {
+    const plan = editedPlan();
+    plan.goal = { primary_metric: 'aov', min_sample_size: 250 };
+    const update = buildPausedSettingsUpdate(pausedTest(), plan, {});
+    assert.equal(update.goal.primary_metric, 'aov');
+    assert.equal(update.goal.metric, 'aov');
+  });
+
+  it('keeps an average order value test on its metric when something else is edited', () => {
+    const test = pausedTest();
+    test.goal = { ...test.goal, primary_metric: 'aov', metric: 'aov' };
+    const plan = editedPlan();
+    plan.goal = { primary_metric: 'made_up_metric', min_sample_size: 250 };
+    const update = buildPausedSettingsUpdate(test, plan, {});
+    assert.equal(update.goal.primary_metric, 'aov');
+  });
+
   it('leaves a latched revenue guardrail breach for Resume to clear', () => {
     const update = buildPausedSettingsUpdate(pausedTest(), editedPlan(), {});
     assert.equal(update.guardrail_config.breached_at, '2026-10-02T00:00:00Z');

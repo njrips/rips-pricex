@@ -2897,18 +2897,21 @@ export default function ClassicCreateWizard({ onTitleChange }) {
           />
         ) : null}
 
-        {step === 4 && liveEdit ? (
-          <Banner tone="info" title="Saving does not restart the test">
-            <p>
-              {plans.some(plan => String(plan?.status || '').toLowerCase() === 'paused')
-                ? 'This test is paused, so it picks up these settings when you resume it.'
-                : 'This test is running, so it keeps its current settings for now. Changes take effect the next time you pause and resume it.'}
-            </p>
-          </Banner>
-        ) : null}
-
         {step === 4 ? (
           <ReviewLaunchStepPanel
+            // Inside the panel's banner stack, so it is spaced like the rest
+            // instead of pressed against the first of them.
+            notice={
+              liveEdit ? (
+                <Banner tone="info" title="Saving does not restart the test">
+                  <p>
+                    {plans.some(plan => String(plan?.status || '').toLowerCase() === 'paused')
+                      ? 'This test is paused, so it picks up these settings when you resume it.'
+                      : 'This test is running, so it keeps its current settings for now. Changes take effect the next time you pause and resume it.'}
+                  </p>
+                </Banner>
+              ) : null
+            }
             name={name}
             experimentType={experimentType}
             experimentTypeLabel={experimentTypeLabel}

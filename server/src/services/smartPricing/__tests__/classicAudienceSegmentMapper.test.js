@@ -8,6 +8,13 @@ describe('classicAudienceSegmentMapper', () => {
     expect(normalizePrimaryMetric('paid_conversion_rate')).toBe('conversion_rate');
   });
 
+  it('accepts every primary metric step 4 offers', () => {
+    expect(normalizePrimaryMetric('revenue_per_visitor')).toBe('revenue_per_visitor');
+    expect(normalizePrimaryMetric('conversion_rate')).toBe('conversion_rate');
+    expect(normalizePrimaryMetric('aov')).toBe('aov');
+    expect(normalizePrimaryMetric('average_order_value')).toBe('aov');
+  });
+
   it('omits traffic_source_rules when every Classic source pill is selected', () => {
     const segs = classicAudienceToSegments({
       sources: ['Direct', 'Search', 'Social', 'Email', 'Paid ads', 'Referral'],
@@ -92,15 +99,25 @@ describe('classicAudienceSegmentMapper', () => {
     ]);
   });
 
-  it('keeps include and exclude lists independent', () => {
+  it('applies only the include list when an audience holds both', () => {
     const segs = classicAudienceToSegments({
       includeCountries: ['US', 'CA'],
       excludeCountries: ['GB'],
       countryMode: 'exclude',
     });
     expect(segs.countries).toEqual(['US', 'CA']);
+    expect(segs.audience_rules).toBeUndefined();
+  });
+
+  it('applies an exclude list on its own', () => {
+    const segs = classicAudienceToSegments({
+      includeCountries: [],
+      excludeCountries: ['BD'],
+      countryMode: 'exclude',
+    });
+    expect(segs.countries).toEqual([]);
     expect(segs.audience_rules).toEqual([
-      { type: 'exclude', field: 'country', value: ['GB'] },
+      { type: 'exclude', field: 'country', value: ['BD'] },
     ]);
   });
 });

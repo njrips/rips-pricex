@@ -131,7 +131,8 @@ describe('audienceUiFromSummaries', () => {
     expect(state.devices).toEqual(['Mobile']);
     expect(state.sources).toEqual(['Paid ads']);
     expect(state.includeCountries).toEqual(['US']);
-    expect(state.excludeCountries).toEqual(['CA']);
+    expect(state.excludeCountries).toEqual([]);
+    expect(state.countryMode).toBe('include');
     expect(state.primaryMetric).toBe('revenue_per_visitor');
     expect(state.secondaryMetrics).toEqual(['conversion_rate']);
   });

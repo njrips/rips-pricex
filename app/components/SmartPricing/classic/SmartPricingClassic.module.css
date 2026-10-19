@@ -385,7 +385,8 @@ button.stepItem {
   display: flex;
   align-items: center;
   justify-content: center;
-  margin: 0;
+  /* Polaris's offset that keeps the 20px icon inside a text-height button. */
+  margin: calc(var(--p-space-050) * -1) 0;
 }
 
 /*
@@ -2894,30 +2895,62 @@ button.stepItem {
 }
 
 .overviewTab {
+  position: relative;
   border: 0;
   background: transparent;
   padding: 10px 12px 12px;
   font-family: inherit;
   font-size: var(--classic-fs-label);
-  font-weight: var(--classic-fw-regular);
+  font-weight: var(--classic-fw-medium);
   color: var(--classic-muted);
   cursor: pointer;
-  border-bottom: 2px solid transparent;
-  margin-bottom: -1px;
   white-space: nowrap;
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  transition: color 120ms ease;
+}
+
+.overviewTab::after {
+  content: '';
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 0;
+  height: 3px;
+  border-radius: 3px 3px 0 0;
+  background: transparent;
+  transition: background-color 120ms ease;
 }
 
 .overviewTab:first-child {
   padding-left: 0;
 }
 
+.overviewTab:first-child::after {
+  left: 0;
+}
+
+.overviewTab:hover {
+  color: var(--classic-ink);
+}
+
+.overviewTab:hover::after {
+  background: var(--classic-line);
+}
+
+.overviewTab:focus-visible {
+  outline: 2px solid var(--p-color-border-focus, var(--classic-orange));
+  outline-offset: -2px;
+}
+
 .overviewTabActive {
-  color: var(--classic-ink); /* Figma active tab label is ink + orange underline */
-  font-weight: var(--classic-fw-regular);
-  border-bottom-color: var(--classic-orange);
+  color: var(--classic-ink);
+}
+
+.overviewTabActive::after,
+.overviewTabActive:hover::after {
+  background: var(--classic-orange);
 }
 
 .overviewTabActive svg {
@@ -4705,6 +4738,14 @@ button.stepItem {
 }
 
 .settingsDisclosureGroup .settingsRows {
+  margin-top: 10px;
+}
+
+.settingsLinks {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
   margin-top: 10px;
 }
 

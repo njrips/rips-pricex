@@ -99,7 +99,7 @@ export const HELP_FAQ_ITEMS = [
   },
   {
     q: 'Where is the revenue guardrail?',
-    a: 'On each test — Audience & goals when you create it, and Settings on the test after launch. It is not in Results settings. Choose 3%–50% (default 10%). It starts checking once every variation reaches the test’s minimum visitors and control has at least 10 conversions. Priceify then pauses the whole test if any variation’s revenue per visitor falls more than your threshold below control, and Resume continues it. After a resume the guardrail counts only new visitors, so it waits for the minimum again before it can pause. Max price change is enforced on Products & prices for manual and bulk-adjusted prices, not here; AI-suggested prices follow your band instead.',
+    a: 'On each test — Audience & goals when you create it, and Settings on the test after launch. It is not in Results settings. Choose 3%–50% (default 10%). It starts checking once every variation reaches the test’s minimum visitors. Priceify then pauses the whole test if any variation’s revenue per visitor falls more than your threshold below control, and Resume continues it. After a resume the guardrail counts only new visitors, so it waits for the minimum again before it can pause. Max price change is enforced on Products & prices for manual and bulk-adjusted prices, not here; AI-suggested prices follow your band instead.',
   },
   {
     q: 'How do I contact support?',

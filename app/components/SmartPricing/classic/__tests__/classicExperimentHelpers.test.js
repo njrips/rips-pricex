@@ -220,7 +220,7 @@ describe('classicExperimentHelpers', () => {
     expect(enriched.launch_preferences.min_sample_size).toBe(2000);
   });
 
-  it('remaps include and exclude country lists onto launch segments', () => {
+  it('launches only the include list when an older audience holds both', () => {
     const [enriched] = enrichInboxPlansForLaunch([
       {
         id: 'p2',
@@ -234,9 +234,7 @@ describe('classicExperimentHelpers', () => {
       },
     ]);
     expect(enriched.audience.segments.countries).toEqual(['US', 'CA']);
-    expect(enriched.audience.segments.audience_rules).toEqual([
-      { type: 'exclude', field: 'country', value: ['GB'] },
-    ]);
+    expect(enriched.audience.segments.audience_rules).toBeUndefined();
   });
 
   it('stamps experiment_type from metadata onto the plan root for list launch', () => {

@@ -3,7 +3,6 @@ export const MIN_REVENUE_DROP_PERCENT = 3;
 export const MAX_REVENUE_DROP_PERCENT = 50;
 /** The server's stand-in when a test stored no minimum visitors. */
 export const MIN_VISITORS_FOR_REVENUE_GUARDRAIL = 5000;
-export const MIN_CONVERSIONS_FOR_REVENUE_GUARDRAIL = 10;
 
 export function clampMaxRevenueDropPercent(raw, fallback = DEFAULT_MAX_REVENUE_DROP_PERCENT) {
   const num = Number(raw);
@@ -33,7 +32,7 @@ export function createRevenueGuardrailRow(
   return {
     id: 'revenue',
     label: 'Revenue guardrail',
-    hint: 'Pauses this test if any variation drops past this vs control, after every variation reaches the minimum visitors.',
+    hint: 'Pauses this test if revenue per visitor for any variation drops more than this vs control, once each variation reaches the minimum visitors.',
     rule: 'Must not drop',
     threshold: `-${n}%`,
     on: on !== false,

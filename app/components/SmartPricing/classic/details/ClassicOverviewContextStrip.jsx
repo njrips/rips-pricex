@@ -63,9 +63,6 @@ export default function ClassicOverviewContextStrip({
           )}
         </div>
       </div>
-      <p className={styles.help} style={{ marginBottom: 0 }}>
-        Controls whether new visitors can enter this test.
-      </p>
     </div>
   );
 }

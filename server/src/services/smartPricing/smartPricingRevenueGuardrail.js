@@ -11,7 +11,6 @@ const DEFAULT_MAX_REVENUE_DROP_PERCENT = 10;
 const MIN_MAX_REVENUE_DROP_PERCENT = 3;
 const MAX_MAX_REVENUE_DROP_PERCENT = 50;
 const MIN_VISITORS_FOR_REVENUE_GUARDRAIL = 5000;
-const MIN_CONVERSIONS_FOR_REVENUE_GUARDRAIL = 10;
 
 function clampMaxRevenueDropPercent(raw, fallback = DEFAULT_MAX_REVENUE_DROP_PERCENT) {
   const num = Number(raw);
@@ -80,7 +79,6 @@ function buildRevenueDropGuardrailConfig(shopGuardrails = {}, plan = {}) {
     metric: 'revenue_per_visitor',
     max_revenue_drop_percent: maxDrop,
     min_visitors_per_variant: minVisitors,
-    min_conversions_per_variant: MIN_CONVERSIONS_FOR_REVENUE_GUARDRAIL,
     action: 'pause',
   };
 }
@@ -111,7 +109,6 @@ function evaluateRevenueDrop({
   variants = [],
   thresholdPercent = DEFAULT_MAX_REVENUE_DROP_PERCENT,
   minVisitors = MIN_VISITORS_FOR_REVENUE_GUARDRAIL,
-  minConversions = MIN_CONVERSIONS_FOR_REVENUE_GUARDRAIL,
 } = {}) {
   const rows = Array.isArray(variants) ? variants : [];
   const threshold = clampMaxRevenueDropPercent(thresholdPercent);
@@ -123,12 +120,7 @@ function evaluateRevenueDrop({
   const control = rows[controlIndex];
   const controlRpv = variantRpv(control);
   const controlVisitors = Number(control.visitors) || 0;
-  const conversionFloor = Math.max(
-    1,
-    Number(minConversions) || MIN_CONVERSIONS_FOR_REVENUE_GUARDRAIL
-  );
-  const controlConversions = Number(control.conversions ?? control.orders) || 0;
-  if (!(controlRpv > 0) || controlVisitors < floor || controlConversions < conversionFloor) {
+  if (!(controlRpv > 0) || controlVisitors < floor) {
     return {
       ready: false,
       breached: false,
@@ -137,10 +129,7 @@ function evaluateRevenueDrop({
       // control earning nothing per visitor there is no drop to measure
       // against: revenue never goes below zero, so no challenger can be down
       // on it. The guardrail is idle here by arithmetic, not for want of data.
-      reason:
-        controlVisitors >= floor && controlConversions >= conversionFloor
-          ? 'control_has_no_revenue_yet'
-          : 'insufficient_control_sample',
+      reason: controlVisitors >= floor ? 'control_has_no_revenue_yet' : 'insufficient_control_sample',
       threshold_percent: threshold,
       control_rpv: Number.isFinite(controlRpv) ? controlRpv : null,
       control_visitors: controlVisitors,
@@ -148,9 +137,9 @@ function evaluateRevenueDrop({
   }
 
   // Every variation has to reach the minimum before any is judged, so the test
-  // is only paused on a full comparison. The conversion floor is control's
-  // alone: asked of a challenger too, a price nobody buys would never qualify,
-  // and that is the very variation this guardrail exists to catch.
+  // is only paused on a full comparison. Visitors are the only floor: an order
+  // count asked of a challenger would keep a price nobody buys from ever
+  // qualifying, and that is the very variation this guardrail exists to catch.
   const challengers = rows.filter(
     (row, index) => index !== controlIndex && !isControlVariant(row, index)
   );
@@ -199,7 +188,6 @@ function evaluateRevenueDrop({
 module.exports = {
   DEFAULT_MAX_REVENUE_DROP_PERCENT,
   MIN_VISITORS_FOR_REVENUE_GUARDRAIL,
-  MIN_CONVERSIONS_FOR_REVENUE_GUARDRAIL,
   clampMaxRevenueDropPercent,
   parseRevenueDropThreshold,
   resolveEffectiveMaxRevenueDropPercent,

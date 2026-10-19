@@ -1,4 +1,5 @@
 import { formatPrimaryMetricLabel } from './classicExperimentDetailsHelpers';
+import { resolveArmMetric } from './details/productDetailReport';
 import { formatTrafficPercent } from './variationsStepHelpers';
 
 /** One-line context strip for the running-test Overview tab (Global naming doc). */
@@ -42,30 +43,39 @@ export function buildTrafficSplitSummary(variations = []) {
   return `Traffic split: ${parts.join(' · ')}`;
 }
 
+/** A variation nobody has seen has no reading, whatever its zeros say. */
 function readArmMetric(arm, primaryMetric) {
-  const key = String(primaryMetric || 'revenue_per_visitor').trim();
-  if (key === 'conversion_rate') return Number(arm?.conversionRate);
-  return Number(arm?.revenuePerVisitor);
+  if (!(Number(arm?.visitors) > 0)) return null;
+  const raw = arm?.[resolveArmMetric(primaryMetric).key];
+  if (raw === null || raw === undefined || raw === '') return null;
+  const value = Number(raw);
+  return Number.isFinite(value) ? value : null;
 }
 
 /**
  * Leading / Underperforming badges on variation summary cards (doc § Overview).
+ * Same rules as the product page's "Ahead so far": a single clear leader with
+ * visitors and conversions, and none once a winner is declared.
  */
 export function resolveArmPerformanceBadge(arm, variations = [], { primaryMetric = 'revenue_per_visitor' } = {}) {
   const rows = Array.isArray(variations) ? variations : [];
   if (!arm || !rows.length) return null;
 
-  const scored = rows
-    .map(row => ({
-      id: String(row.id),
-      value: readArmMetric(row, primaryMetric),
-    }))
-    .filter(entry => Number.isFinite(entry.value));
-
-  if (!scored.length) return null;
-
-  const best = scored.reduce((max, entry) => (entry.value > max.value ? entry : max), scored[0]);
-  if (String(arm.id) === best.id) {
+  const measured = rows
+    .map(row => ({ id: String(row.id), value: readArmMetric(row, primaryMetric) }))
+    .filter(entry => entry.value !== null);
+  const best = measured.reduce((max, entry) => Math.max(max, entry.value), -Infinity);
+  const leaders = measured.filter(entry => entry.value === best);
+  const hasWinner = rows.some(row => row.isWinner);
+  const hasResults = Number(arm.visitors) > 0 && Number(arm.conversions) > 0;
+  if (
+    !hasWinner &&
+    hasResults &&
+    measured.length >= 2 &&
+    best > 0 &&
+    leaders.length === 1 &&
+    leaders[0].id === String(arm.id)
+  ) {
     return { label: 'Leading', tone: 'success' };
   }
 
@@ -74,8 +84,8 @@ export function resolveArmPerformanceBadge(arm, variations = [], { primaryMetric
     const controlValue = readArmMetric(control, primaryMetric);
     const armValue = readArmMetric(arm, primaryMetric);
     if (
-      Number.isFinite(controlValue) &&
-      Number.isFinite(armValue) &&
+      controlValue !== null &&
+      armValue !== null &&
       controlValue > 0 &&
       armValue < controlValue * 0.9
     ) {

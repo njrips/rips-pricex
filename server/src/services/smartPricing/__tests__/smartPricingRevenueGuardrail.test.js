@@ -108,10 +108,11 @@ describe('smartPricingRevenueGuardrail', () => {
     assert.equal(config.max_revenue_drop_percent, 12);
     assert.equal(config.metric, 'revenue_per_visitor');
     assert.equal(config.min_visitors_per_variant, 5000);
-    assert.equal(config.min_conversions_per_variant, 10);
+    assert.equal(config.min_conversions_per_variant, undefined);
   });
 
-  it('does not stop on a noisy revenue estimate before enough conversions', () => {
+  // The doc: "once each variation has [N] visitors" -- no order count on top.
+  it('starts checking once each variation has the minimum visitors, whatever control sold', () => {
     const verdict = evaluateRevenueDrop({
       thresholdPercent: 10,
       minVisitors: 100,
@@ -120,8 +121,35 @@ describe('smartPricingRevenueGuardrail', () => {
         { name: 'A', visitors: 500, conversions: 2, revenuePerVisitor: 1 },
       ],
     });
+    assert.equal(verdict.ready, true);
+    assert.equal(verdict.breached, true);
+    assert.equal(verdict.observed_drop_percent, 50);
+  });
+
+  it('waits while control is still short of the minimum visitors', () => {
+    const verdict = evaluateRevenueDrop({
+      thresholdPercent: 10,
+      minVisitors: 100,
+      variants: [
+        { name: 'Control', visitors: 80, conversions: 30, revenuePerVisitor: 2 },
+        { name: 'A', visitors: 200, conversions: 2, revenuePerVisitor: 1 },
+      ],
+    });
     assert.equal(verdict.ready, false);
     assert.equal(verdict.reason, 'insufficient_control_sample');
+  });
+
+  it('stays idle while control has earned nothing, since there is no drop to measure', () => {
+    const verdict = evaluateRevenueDrop({
+      thresholdPercent: 10,
+      minVisitors: 100,
+      variants: [
+        { name: 'Control', visitors: 200, conversions: 0, revenue: 0 },
+        { name: 'A', visitors: 200, conversions: 0, revenue: 0 },
+      ],
+    });
+    assert.equal(verdict.ready, false);
+    assert.equal(verdict.reason, 'control_has_no_revenue_yet');
   });
 
   // enabled:false is what makes models/test.js store guardrail_config as NULL,

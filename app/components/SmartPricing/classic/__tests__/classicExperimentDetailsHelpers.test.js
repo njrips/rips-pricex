@@ -58,6 +58,8 @@ describe('classicExperimentDetailsHelpers', () => {
 
   it('joins audience fact values like the details cards', () => {
     expect(formatAudienceFactValue(['desktop', 'mobile'], 'All devices')).toBe('Desktop, Mobile');
+    expect(formatAudienceFactValue(['Direct', 'Paid ads'], 'All sources')).toBe('Direct, Paid ads');
+    expect(formatAudienceFactValue(['paid_ads', 'organic_search'])).toBe('Paid ads, Organic search');
     expect(formatAudienceFactValue([], 'All devices')).toBe('All devices');
     expect(formatAudienceFactValue(undefined, 'All devices')).toBe('All devices');
   });
@@ -349,12 +351,31 @@ describe('classicExperimentDetailsHelpers', () => {
     };
     const rows = buildVariationsSummary(plan, {
       arms: [
-        { arm_id: 'c', visitors: 4000, conversion_rate: 0.0525, revenue_per_visitor: 2.05 },
-        { arm_id: 'a', visitors: 4000, conversion_rate: 0.0495, revenue_per_visitor: 2.275 },
+        { arm_id: 'c', visitors: 4000, conversions: 210, conversion_rate: 0.0525, revenue_per_visitor: 2.05 },
+        { arm_id: 'a', visitors: 4000, conversions: 198, conversion_rate: 0.0495, revenue_per_visitor: 2.275 },
       ],
     });
     expect(rows[0].revenuePerVisitor).toBe(2.05);
     expect(rows[1].revenuePerVisitor).toBe(2.275);
+    expect(rows[1].conversions).toBe(198);
+  });
+
+  it('carries average order value and profit per visitor for badge ranking', () => {
+    const plan = {
+      price_arms: [
+        { id: 'c', role: 'control', label: 'Control', price: 59, allocation_percent: 50 },
+        { id: 'a', role: 'challenger', label: 'A', price: 64, allocation_percent: 50 },
+      ],
+    };
+    const rows = buildVariationsSummary(plan, {
+      arms: [
+        { arm_id: 'c', visitors: 400, conversions: 20, avg_order_value: 61.5, profit_per_visitor: 1.1 },
+        { arm_id: 'a', visitors: 400, conversions: 18, avg_order_value: 66, profit_per_visitor: 1.3 },
+      ],
+    });
+    expect(rows[0].avgOrderValue).toBe(61.5);
+    expect(rows[1].avgOrderValue).toBe(66);
+    expect(rows[1].profitPerVisitor).toBe(1.3);
   });
 
   it('leaves revenue per visitor unset when an arm has no live data', () => {

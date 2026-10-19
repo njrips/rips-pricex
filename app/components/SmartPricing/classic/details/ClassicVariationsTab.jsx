@@ -314,7 +314,7 @@ async function openArmPreview(
 }
 
 const COPY_BLOCKED_MESSAGE =
-  'Your browser blocked the clipboard. Scan the QR code, or use Open link and copy the address from your browser.';
+  'Your browser blocked the clipboard. Scan the QR code, or use Preview and copy the address from your browser.';
 
 const TEST_VARIANT_UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -594,9 +594,6 @@ function VariationCard({
           {' '}Preview visits are not counted as test visitors.
         </p>
         <div className={styles.variationPreviewRow}>
-          <Button disabled={previewBtn.disabled} loading={previewBtn.loading} onClick={runPreview}>
-            Open link
-          </Button>
           <Button disabled={copyBtn.disabled} loading={copyBtn.loading} onClick={copyLink}>
             {copied ? 'Copied' : 'Copy link'}
           </Button>

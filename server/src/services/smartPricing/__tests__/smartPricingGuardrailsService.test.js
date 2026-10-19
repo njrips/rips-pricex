@@ -8,6 +8,15 @@ const {
   DEFAULT_GUARDRAILS,
 } = require('../smartPricingGuardrailsService');
 
+describe('default goal template', () => {
+  it('keeps average order value as the shop default primary metric', () => {
+    const normalized = normalizeGuardrails({
+      default_goal_template: { primary_metric: 'aov' },
+    });
+    assert.equal(normalized.default_goal_template.primary_metric, 'aov');
+  });
+});
+
 describe('mergePreviewGuardrails', () => {
   it('ignores caller attempts to widen price safety limits', () => {
     const merged = mergePreviewGuardrails(

@@ -98,6 +98,12 @@ function mapTestToStorefrontPayload(test) {
     })
     .filter(Boolean);
   const priceSurfaceMappings = normalizePriceSurfaceMappings(test.segments?.price_surface_mappings);
+  const audienceRules = Array.isArray(test.segments?.audience_rules)
+    ? test.segments.audience_rules
+    : [];
+  const countryTargeting =
+    (Array.isArray(test.segments?.countries) && test.segments.countries.length > 0) ||
+    audienceRules.some(rule => rule && rule.field === 'country');
   return {
     id: test.id,
     type: normalizeTestTypeForStorefront(test.type),
@@ -112,6 +118,7 @@ function mapTestToStorefrontPayload(test) {
       jsTargeting?.enabled && jsTargeting?.code ? { enabled: true, code: jsTargeting.code } : null,
     goalEvents,
     priceSurfaceMappings: priceSurfaceMappings.length > 0 ? priceSurfaceMappings : null,
+    countryTargeting,
   };
 }
 

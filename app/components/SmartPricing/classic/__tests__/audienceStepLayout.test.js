@@ -142,6 +142,64 @@ describe('step 4 sections', () => {
       'Average order value',
     ]);
   });
+
+  function primaryMetricLabels() {
+    const metrics = container.querySelector('#classic-metrics-editor');
+    return [...metrics.querySelectorAll('button')].map(node => (node.textContent || '').trim());
+  }
+
+  it('offers the same three primary metrics when editing a running test', async () => {
+    await renderPanel({
+      showTrafficAllocation: true,
+      value: { primaryMetric: 'conversion_rate' },
+    });
+    const labels = primaryMetricLabels();
+    expect(labels.slice(0, 3)).toEqual([
+      'Revenue per visitor (recommended)',
+      'Conversion rate',
+      'Average order value',
+    ]);
+    for (const secondaryOnly of [
+      'CTA click-through rate',
+      'Signup rate',
+      'Newsletter signups',
+      'Checkout completion',
+      'Day 7 activation',
+      'Bounce rate',
+      'Time on page',
+    ]) {
+      expect(labels).not.toContain(secondaryOnly);
+    }
+  });
+
+  it('keeps only the retired metric a test already runs on when editing', async () => {
+    await renderPanel({
+      showTrafficAllocation: true,
+      value: { primaryMetric: 'profit_per_visitor' },
+    });
+    const labels = primaryMetricLabels();
+    expect(labels).toContain('Profit per visitor (estimated)');
+    expect(labels).not.toContain('Bounce rate');
+    expect(labels).not.toContain('Time on page');
+  });
+
+  it('lets the merchant switch back to the retired metric before saving', async () => {
+    const { onChange } = await renderPanel({
+      showTrafficAllocation: true,
+      value: { primaryMetric: 'profit_per_visitor' },
+    });
+    const metrics = container.querySelector('#classic-metrics-editor');
+    const rpv = [...metrics.querySelectorAll('button')].find(node =>
+      (node.textContent || '').startsWith('Revenue per visitor')
+    );
+    await click(rpv);
+    await renderPanel({
+      showTrafficAllocation: true,
+      onChange,
+      value: lastChange(onChange),
+    });
+    expect(primaryMetricLabels()).toContain('Profit per visitor (estimated)');
+  });
 });
 
 describe('audience segment as a radio group', () => {

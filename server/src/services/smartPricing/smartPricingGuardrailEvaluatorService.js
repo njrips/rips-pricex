@@ -4,7 +4,6 @@
 
 const logger = require('../../utils/logger');
 const {
-  MIN_CONVERSIONS_FOR_REVENUE_GUARDRAIL,
   evaluateRevenueDrop,
   resolveGuardrailMinVisitors,
 } = require('./smartPricingRevenueGuardrail');
@@ -180,10 +179,6 @@ async function enforceRevenueDropGuardrail({ shopDomain, test, analytics } = {})
     minVisitors: resolveGuardrailMinVisitors(
       (test.goal && typeof test.goal === 'object' ? test.goal.min_sample_size : undefined) ??
         config.min_visitors_per_variant
-    ),
-    minConversions: Math.max(
-      MIN_CONVERSIONS_FOR_REVENUE_GUARDRAIL,
-      Number(config.min_conversions_per_variant) || 0
     ),
   });
 

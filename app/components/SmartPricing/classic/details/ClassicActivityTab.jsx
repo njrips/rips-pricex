@@ -34,6 +34,9 @@ export default function ClassicActivityTab({ activity }) {
             {counts.all} event{counts.all === 1 ? '' : 's'}
             {counts.lifecycle ? ` · ${counts.lifecycle} lifecycle` : ''}
             {counts.guardrail ? ` · ${counts.guardrail} guardrail` : ''}
+            {counts.settings
+              ? ` · ${counts.settings} settings change${counts.settings === 1 ? '' : 's'}`
+              : ''}
           </p>
         </div>
       </div>

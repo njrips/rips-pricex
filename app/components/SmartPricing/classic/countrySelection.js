@@ -111,9 +111,21 @@ export function normalizeCountryMode(raw) {
 }
 
 /**
- * Include and Exclude keep independent lists. Legacy drafts only have
- * `countries` + `countryMode` — those seed the active tab.
+ * Only one country list applies: an include list, an exclude list, or neither
+ * (worldwide). Older drafts and tests could hold both; there the include list
+ * is what actually ran, since an exclude rule cannot widen it, so it wins.
+ * Legacy drafts with only `countries` + `countryMode` seed the active tab.
  */
+function exclusiveCountryLists(includeCountries, excludeCountries, mode) {
+  if (includeCountries.length) {
+    return { includeCountries, excludeCountries: [], countryMode: 'include' };
+  }
+  if (excludeCountries.length) {
+    return { includeCountries: [], excludeCountries, countryMode: 'exclude' };
+  }
+  return { includeCountries: [], excludeCountries: [], countryMode: mode };
+}
+
 export function resolveCountryLists(state = {}) {
   const source = state && typeof state === 'object' ? state : {};
   const mode = normalizeCountryMode(source.countryMode || source.country_mode);
@@ -131,14 +143,6 @@ export function resolveCountryLists(state = {}) {
     ? collapseCountrySelection(excludeRaw, 'exclude')
     : null;
 
-  if (includeCountries === null && excludeCountries === null) {
-    return {
-      includeCountries: mode === 'exclude' ? [] : legacy,
-      excludeCountries: mode === 'exclude' ? legacy : [],
-      countryMode: mode,
-    };
-  }
-
   if (includeCountries === null) {
     includeCountries = mode === 'include' ? legacy : [];
   }
@@ -151,20 +155,12 @@ export function resolveCountryLists(state = {}) {
     else includeCountries = legacy;
   }
 
-  const includeSet = new Set(includeCountries);
-  excludeCountries = excludeCountries.filter(code => !includeSet.has(code));
-
-  return { includeCountries, excludeCountries, countryMode: mode };
+  return exclusiveCountryLists(includeCountries, excludeCountries, mode);
 }
 
 export function activeCountryList(state = {}) {
   const lists = resolveCountryLists(state);
   return lists.countryMode === 'exclude' ? lists.excludeCountries : lists.includeCountries;
-}
-
-export function blockedCountryCodes(state = {}) {
-  const lists = resolveCountryLists(state);
-  return lists.countryMode === 'exclude' ? lists.includeCountries : lists.excludeCountries;
 }
 
 export function formatSplitCountryAudienceLabel(
@@ -180,22 +176,14 @@ export function formatSplitCountryAudienceLabel(
   return parts.length ? parts.join(' · ') : ALL_COUNTRIES_LABEL;
 }
 
-export function getCountryFieldHelp(codes, mode = 'include', blockedCodes = []) {
+export function getCountryFieldHelp(codes, mode = 'include') {
   const list = collapseCountrySelection(codes, mode);
-  const blocked = collapseCountrySelection(blockedCodes, 'include').length;
-  const otherTab =
-    blocked > 0 ? ' Countries already on the other tab are hidden from this list.' : '';
   if (String(mode).toLowerCase() === 'exclude') {
-    return (
-      (list.length
-        ? 'Visitors in these countries will be excluded.'
-        : 'No countries excluded — visitors worldwide can enter. Pick countries to exclude.') +
-      otherTab
-    );
+    return list.length
+      ? 'Visitors in these countries will be excluded; everyone else can enter. Only one list applies — switching to Include sets these countries aside.'
+      : 'No countries excluded — visitors worldwide can enter. Pick countries to exclude.';
   }
-  return (
-    (list.length
-      ? 'Only visitors in these countries will enter. Choose All countries to go worldwide again.'
-      : 'All countries — visitors worldwide can enter. Pick a country to narrow.') + otherTab
-  );
+  return list.length
+    ? 'Only visitors in these countries will enter. Choose All countries to go worldwide again. Only one list applies — switching to Exclude sets these countries aside.'
+    : 'All countries — visitors worldwide can enter. Pick a country to narrow.';
 }

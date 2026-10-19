@@ -16,7 +16,6 @@ import {
 import ClassicCountryMultiSelect from './ClassicCountryMultiSelect';
 import {
   activeCountryList,
-  blockedCountryCodes,
   getCountryFieldHelp,
   resolveCountryLists,
 } from './countrySelection';
@@ -162,7 +161,9 @@ export default function AudienceSuccessStepPanel({
   const { devices, sources, countryMode } = targeting;
   const countryLists = resolveCountryLists({ ...state, ...targeting });
   const countries = activeCountryList(countryLists);
-  const otherTabCountries = blockedCountryCodes(countryLists);
+  // The list set aside by switching Include/Exclude, so switching back within
+  // this visit restores it. Only the active list is ever saved or applied.
+  const [parkedCountries, setParkedCountries] = useState({ include: [], exclude: [] });
   const trafficAllocation = Number(state.trafficAllocation) || 50;
   const activeSegment = CLASSIC_SEGMENT_OPTIONS.some(o => o.value === state.segment)
     ? state.segment
@@ -180,8 +181,13 @@ export default function AudienceSuccessStepPanel({
     : normalizeClassicCreatePrimaryMetric(state.primaryMetric);
   // Profit per visitor is no longer offered, but an experiment already running
   // on it keeps its pill so editing the audience does not re-goal the test.
-  const legacyPrimaryOptions = classicMetricOptionsFor([primaryMetric]).filter(
-    opt => !GOAL_METRIC_OPTIONS.some(goal => goal.value === opt.value)
+  // The metric the editor opened on keeps its pill after another is picked,
+  // so the merchant can switch back before saving.
+  const [openingPrimaryMetric] = useState(primaryMetric);
+  const legacyPrimaryOptions = classicMetricOptionsFor([primaryMetric, openingPrimaryMetric]).filter(
+    opt =>
+      (opt.value === primaryMetric || opt.value === openingPrimaryMetric) &&
+      !GOAL_METRIC_OPTIONS.some(goal => goal.value === opt.value)
   );
   const primaryMetricOptions = showTrafficAllocation
     ? [...GOAL_METRIC_OPTIONS, ...legacyPrimaryOptions]
@@ -360,12 +366,14 @@ export default function AudienceSuccessStepPanel({
             value={countryMode}
             disabled={disabled}
             onChange={next => {
-              const lists = resolveCountryLists({ ...state, ...targeting, countryMode: next });
+              if (disabled || next === countryMode) return;
+              const restored = parkedCountries[next] || [];
+              setParkedCountries(prev => ({ ...prev, [countryMode]: countries }));
               patch({
                 countryMode: next,
-                countries: next === 'exclude' ? lists.excludeCountries : lists.includeCountries,
-                includeCountries: lists.includeCountries,
-                excludeCountries: lists.excludeCountries,
+                countries: restored,
+                includeCountries: next === 'include' ? restored : [],
+                excludeCountries: next === 'exclude' ? restored : [],
               });
             }}
             ariaLabel="Country include or exclude"
@@ -375,14 +383,13 @@ export default function AudienceSuccessStepPanel({
           key={countryMode}
           value={countries}
           mode={countryMode}
-          blockedCodes={otherTabCountries}
           disabled={disabled}
           onChange={next => {
             if (countryMode === 'exclude') {
               patch({
                 countryMode: 'exclude',
                 excludeCountries: next,
-                includeCountries: countryLists.includeCountries,
+                includeCountries: [],
                 countries: next,
               });
               return;
@@ -390,13 +397,13 @@ export default function AudienceSuccessStepPanel({
             patch({
               countryMode: 'include',
               includeCountries: next,
-              excludeCountries: countryLists.excludeCountries,
+              excludeCountries: [],
               countries: next,
             });
           }}
         />
         <p className={styles.help}>
-          {getCountryFieldHelp(countries, countryMode, otherTabCountries)}
+          {getCountryFieldHelp(countries, countryMode)}
         </p>
       </div>
       </div>

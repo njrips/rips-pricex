@@ -154,7 +154,7 @@ function resolveServerActivityKind(event) {
     resumed: 'resumed',
     winner_applied: 'complete',
     auto_applied: 'complete',
-    reverted: 'updated',
+    reverted: 'reverted',
     finished_control: 'complete',
     rerun_queued: 'queued',
     guardrail_stopped: 'guardrail',

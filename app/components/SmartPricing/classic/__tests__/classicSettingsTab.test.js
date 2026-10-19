@@ -107,17 +107,57 @@ describe('ClassicSettingsTab', () => {
     expect(visible).toContain('Confidence level');
     expect(visible).toContain('Minimum visitors per variation');
     expect(visible).toContain('5,000');
-    const details = container.querySelector('details');
-    expect(details.textContent).toContain('Auto-stop');
-    expect(details.textContent).toContain('Price application');
   });
 
-  it('keeps analysis method in reference while confidence stays visible', async () => {
-    await render({ settings: SETTINGS, audience: AUDIENCE, metrics: METRICS });
-    const visible = visibleText();
-    expect(visible).toContain('90%');
-    expect(visibleText()).not.toContain('Sequential directional evidence · manual winner review');
-    expect(container.querySelector('details').textContent).toContain('Sequential, with your review');
+  it('keeps Reference & identifiers to the documented Reference and Links blocks', async () => {
+    const onViewHistory = vi.fn();
+    const onViewTestsList = vi.fn();
+    await render({
+      settings: { ...SETTINGS, createdAt: '2026-10-01T10:00:00Z', startedAt: '2026-10-02T10:00:00Z' },
+      audience: AUDIENCE,
+      metrics: METRICS,
+      onViewHistory,
+      onViewTestsList,
+    });
+    const details = container.querySelector('details').textContent;
+    expect(details).toContain('Reference');
+    expect(details).toContain('Test ID');
+    expect(details).toContain('Created date');
+    expect(details).toContain('Started date');
+    expect(details).toContain('Links');
+    expect(details).toContain('View test history');
+    expect(details).toContain('View test in Tests list');
+    for (const removed of [
+      'Launch behaviour',
+      'Auto-stop',
+      'Price application',
+      'Analysis method',
+      'Traffic plan',
+      'Traffic evidence',
+      'Shop defaults at launch',
+      'Launch preferences',
+      'Canary',
+    ]) {
+      expect(details).not.toContain(removed);
+    }
+    await act(async () => {
+      buttonLabelled('View test history').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      buttonLabelled('View test in Tests list').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(onViewHistory).toHaveBeenCalledTimes(1);
+    expect(onViewTestsList).toHaveBeenCalledTimes(1);
+  });
+
+  it('lists every product test ID when a test spans several products', async () => {
+    await render({
+      settings: SETTINGS,
+      audience: AUDIENCE,
+      metrics: METRICS,
+      testIds: ['test-abc-123', 'test-def-456', 'test-ghi-789'],
+    });
+    const details = container.querySelector('details').textContent;
+    expect(details).toContain('Test IDs');
+    expect(details).toContain('test-abc-123 +2 more');
   });
 
   it('keeps reference material and identifiers folded away until asked for', async () => {
@@ -130,10 +170,8 @@ describe('ClassicSettingsTab', () => {
     expect(details.textContent).toContain('test-abc-123');
     expect(details.textContent).not.toContain('plan-xyz-789');
     expect(details.textContent).not.toContain('Plan ID');
-    expect(details.textContent).toContain('Traffic evidence');
-    expect(details.textContent).toContain('Max price change: ±20%');
     expect(visibleText()).not.toContain('plan-xyz-789');
-    expect(visibleText()).not.toContain('Traffic evidence');
+    expect(visibleText()).not.toContain('test-abc-123');
   });
 
   it('shows audience targeting blocks with the doc helper text', async () => {
@@ -150,7 +188,7 @@ describe('ClassicSettingsTab', () => {
     expect(visibleText()).toContain('Revenue guardrail');
     expect(visibleText()).toContain('10%');
     expect(visibleText()).toMatch(
-      /Pause this test if revenue per visitor for any variation drops more than\s*10%\s*below the control, after 5,000 visitors per variation/i
+      /Pauses this test if revenue per visitor for any variation drops more than\s*10%\s*vs control, once each variation has 5,000 visitors\./i
     );
     expect(visibleText()).not.toMatch(/other products keep running/i);
     const edit = buttonLabelled('Edit guardrail');
@@ -173,21 +211,6 @@ describe('ClassicSettingsTab', () => {
     expect(visibleText()).not.toContain('Adjust traffic');
     expect(visibleText()).not.toContain('Edit targeting');
     expect(visibleText()).not.toContain('Edit metrics');
-  });
-
-  it('describes offer tests as applying a checkout discount', async () => {
-    await render({
-      settings: {
-        ...SETTINGS,
-        experimentType: 'offer_test',
-        priceApplicationMethod: 'checkout_discount_function',
-      },
-      audience: AUDIENCE,
-      metrics: METRICS,
-    });
-    const details = container.querySelector('details');
-    expect(details.textContent).toContain('Offer application');
-    expect(details.textContent).toContain('Checkout discount');
   });
 
   it('omits sections it has no data for rather than showing empty rows', async () => {

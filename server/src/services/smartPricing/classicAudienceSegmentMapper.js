@@ -3,7 +3,12 @@
  * Keep CLASSIC_SOURCE_TO_RULES in sync with smartPricingAudienceHelpers.js.
  */
 
-const PRIMARY_METRICS = new Set(['profit_per_visitor', 'revenue_per_visitor', 'conversion_rate']);
+const PRIMARY_METRICS = new Set([
+  'profit_per_visitor',
+  'revenue_per_visitor',
+  'conversion_rate',
+  'aov',
+]);
 
 const CLASSIC_SOURCE_TO_RULES = {
   Direct: ['direct'],
@@ -24,6 +29,9 @@ function normalizePrimaryMetric(raw, fallback = 'conversion_rate') {
     .toLowerCase();
   if (value === 'paid_conversion_rate') {
     return 'conversion_rate';
+  }
+  if (value === 'average_order_value') {
+    return 'aov';
   }
   if (PRIMARY_METRICS.has(value)) {
     return value;
@@ -137,12 +145,6 @@ function resolveCountryLists(audienceUi = {}) {
     : null;
   let excludeCountries = Array.isArray(excludeRaw) ? normalizeCountryList(excludeRaw) : null;
 
-  if (includeCountries === null && excludeCountries === null) {
-    return {
-      includeCountries: mode === 'exclude' ? [] : legacy,
-      excludeCountries: mode === 'exclude' ? legacy : [],
-    };
-  }
   if (includeCountries === null) {
     includeCountries = mode === 'include' ? legacy : [];
   }
@@ -153,9 +155,10 @@ function resolveCountryLists(audienceUi = {}) {
     if (mode === 'exclude') excludeCountries = legacy;
     else includeCountries = legacy;
   }
-  const includeSet = new Set(includeCountries);
-  excludeCountries = excludeCountries.filter(code => !includeSet.has(code));
-  return { includeCountries, excludeCountries };
+  // Only one list applies. Where an older audience holds both, the include
+  // list is what ran (an exclude rule cannot widen it), so it wins.
+  if (includeCountries.length) return { includeCountries, excludeCountries: [] };
+  return { includeCountries: [], excludeCountries };
 }
 
 function segmentCustomerFromUi(segment) {
@@ -176,8 +179,7 @@ function classicAudienceToSegments(audienceUi = {}, baseSegments = {}) {
   const countryLists = resolveCountryLists(audienceUi);
   const devices = mapClassicDevicesToEngine(audienceUi.devices);
   const sourceValues = expandClassicSources(audienceUi.sources);
-  const excludeSet = new Set(countryLists.excludeCountries);
-  const countries = countryLists.includeCountries.filter(code => !excludeSet.has(code));
+  const countries = countryLists.includeCountries;
   const excludeCountries = countryLists.excludeCountries;
   const traffic = clampTrafficPercent(
     audienceUi.trafficAllocation ?? audienceUi.traffic_allocation

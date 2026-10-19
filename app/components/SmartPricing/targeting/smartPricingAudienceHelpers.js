@@ -676,10 +676,8 @@ export function classicAudienceToSegments(audienceUi = {}, baseSegments = {}) {
   const countryLists = resolveCountryLists(audienceUi);
   const devices = mapClassicDevicesToEngine(audienceUi.devices);
   const sourceValues = expandClassicSources(audienceUi.sources);
-  const includeCountries = countryLists.includeCountries;
+  const countries = countryLists.includeCountries;
   const excludeCountries = countryLists.excludeCountries;
-  const excludeSet = new Set(excludeCountries);
-  const countries = includeCountries.filter(code => !excludeSet.has(code));
   const traffic = clampTrafficPercent(audienceUi.trafficAllocation);
 
   const out = {

@@ -991,9 +991,31 @@ class ABTestEngine {
       }
     }
 
-    // Audience rules: multiple include/exclude (customer, country)
-    const audienceRules = segments.audience_rules;
-    if (Array.isArray(audienceRules) && audienceRules.length > 0) {
+    // Audience rules: multiple include/exclude (customer, country). The single
+    // customer and countries fields still apply to any field the rules leave
+    // alone: a country exclude rule must not drop the new/returning segment.
+    const audienceRules = Array.isArray(segments.audience_rules) ? segments.audience_rules : [];
+    const hasRuleFor = (field, type) =>
+      audienceRules.some(r => r && r.field === field && (!type || r.type === type));
+    const customer = (segments.customer || 'all').toLowerCase();
+    if (
+      !hasRuleFor('customer') &&
+      customer !== 'all' &&
+      context.customer &&
+      context.customer.toLowerCase() !== customer
+    ) {
+      return false;
+    }
+    // An include list admits only visitors known to be in it; an unknown
+    // country cannot be shown to be inside the list.
+    const countries = Array.isArray(segments.countries) ? segments.countries : [];
+    if (countries.length > 0 && !hasRuleFor('country', 'include')) {
+      const countrySet = new Set(countries.map(c => String(c).toLowerCase()));
+      if (!context.country || !countrySet.has(String(context.country).toLowerCase())) {
+        return false;
+      }
+    }
+    if (audienceRules.length > 0) {
       const includesByField = {};
       for (const r of audienceRules) {
         if (r.type === 'exclude') {
@@ -1034,19 +1056,6 @@ class ABTestEngine {
           if (!anyMatch && rules.length > 0) {
             return false;
           }
-        }
-      }
-    } else {
-      // Legacy: single customer and countries
-      const customer = (segments.customer || 'all').toLowerCase();
-      const countries = Array.isArray(segments.countries) ? segments.countries : [];
-      if (customer !== 'all' && context.customer && context.customer.toLowerCase() !== customer) {
-        return false;
-      }
-      if (countries.length > 0 && context.country) {
-        const countrySet = new Set(countries.map(c => String(c).toLowerCase()));
-        if (!countrySet.has(String(context.country).toLowerCase())) {
-          return false;
         }
       }
     }
