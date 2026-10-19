@@ -800,7 +800,7 @@ function createPricePreviewBootstrapHandlers({ validatePreviewBootstrapRequest, 
 
     const storefrontPassword = resolveStorefrontPasswordForPreviewRequest(
       typeof req.query.storefront_password === 'string' ? req.query.storefront_password : '',
-      req.get('host') || ''
+      normalizedShop
     );
     let prefetchedHtml = null;
     let prefetchError = null;

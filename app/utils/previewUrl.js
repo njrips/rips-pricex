@@ -477,9 +477,21 @@ export function isLocalDevStorefrontPasswordUiEnabled() {
   return readViteDevFlag();
 }
 
+// The current shop's dev password from the /app loader. The build-time VITE
+// value is one password for every shop, so once the loader has answered for
+// this shop its value wins, including an empty one.
+let shopDevStorefrontPassword = null;
+
+/** @param {string|null|undefined} password */
+export function setShopDevStorefrontPassword(password) {
+  shopDevStorefrontPassword =
+    password === null || password === undefined ? null : String(password).trim();
+}
+
 /**
- * Optional local-dev default from `.env` (VITE_RIPX_DEV_STOREFRONT_PASSWORD or
- * RIPX_DEV_STOREFRONT_PASSWORD). Never hardcode a shared password in the UI.
+ * Optional local-dev default: the shop's password from the loader
+ * (RIPX_DEV_STOREFRONT_PASSWORDS), else VITE_RIPX_DEV_STOREFRONT_PASSWORD or
+ * RIPX_DEV_STOREFRONT_PASSWORD. Never hardcode a shared password in the UI.
  * Production merchant installs do not use this.
  *
  * @returns {string}
@@ -488,6 +500,7 @@ export function getDevStorefrontPasswordDefault() {
   if (!isLocalDevStorefrontPasswordUiEnabled()) {
     return '';
   }
+  if (shopDevStorefrontPassword !== null) return shopDevStorefrontPassword;
   return readViteDevStorefrontPassword();
 }
 

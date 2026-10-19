@@ -18,30 +18,68 @@ const BROWSER_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 const CLI_UA = 'Shopify CLI; v=3.80.0';
 
+function normalizeShopKey(raw) {
+  const host = String(raw || '')
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//, '')
+    .split(/[/?#]/)[0];
+  if (!host) return '';
+  return host.includes('.') ? host : `${host}.myshopify.com`;
+}
+
 /**
- * Dev default only when RIPX_DEV_STOREFRONT_PASSWORD is explicitly configured.
- * Do not hardcode "sp" — that caused false "password was not accepted" on shops
- * whose storefront password is different (e.g. ripx-plus).
+ * Per-shop dev storefront passwords from RIPX_DEV_STOREFRONT_PASSWORDS:
+ * `shop.myshopify.com=password` pairs separated by commas. The store handle
+ * alone (without .myshopify.com) is accepted too. Passwords cannot contain
+ * commas.
  *
- * @param {string} [_requestHost]
+ * @returns {Map<string, string>}
+ */
+function parseDevStorefrontPasswords(raw = process.env.RIPX_DEV_STOREFRONT_PASSWORDS) {
+  const map = new Map();
+  String(raw || '')
+    .split(',')
+    .forEach(pair => {
+      const at = pair.indexOf('=');
+      if (at <= 0) return;
+      const shop = normalizeShopKey(pair.slice(0, at));
+      const password = pair.slice(at + 1).trim();
+      if (shop && password) map.set(shop, password);
+    });
+  return map;
+}
+
+/**
+ * Dev default only when configured: the shop's own entry in
+ * RIPX_DEV_STOREFRONT_PASSWORDS, else RIPX_DEV_STOREFRONT_PASSWORD. Do not
+ * hardcode "sp" — that caused false "password was not accepted" on shops whose
+ * storefront password is different (e.g. ripx-plus).
+ *
+ * @param {string} [shopDomain]
  * @returns {string}
  */
-function getDevStorefrontPasswordDefault(_requestHost = '') {
+function getDevStorefrontPasswordDefault(shopDomain = '') {
+  const shop = normalizeShopKey(shopDomain);
+  if (shop) {
+    const own = parseDevStorefrontPasswords().get(shop);
+    if (own) return own;
+  }
   return String(process.env.RIPX_DEV_STOREFRONT_PASSWORD || '').trim();
 }
 
 /**
  * @param {string} queryPassword
- * @param {string} [requestHost]
+ * @param {string} [shopDomain]
  * @returns {string}
  */
-function resolveStorefrontPasswordForPreviewRequest(queryPassword, requestHost = '') {
+function resolveStorefrontPasswordForPreviewRequest(queryPassword, shopDomain = '') {
   const explicit =
     queryPassword !== null && queryPassword !== undefined ? String(queryPassword).trim() : '';
   if (explicit) {
     return explicit;
   }
-  return getDevStorefrontPasswordDefault(requestHost);
+  return getDevStorefrontPasswordDefault(shopDomain);
 }
 
 function collectSetCookies(response, jar) {
