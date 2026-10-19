@@ -478,14 +478,14 @@ export function isLocalDevStorefrontPasswordUiEnabled() {
 }
 
 // The current shop's dev password from the /app loader. The build-time VITE
-// value is one password for every shop, so once the loader has answered for
-// this shop its value wins, including an empty one.
-let shopDevStorefrontPassword = null;
+// value is one password for every shop, so the shop's own wins when the loader
+// has one. An empty answer keeps the build-time value: the admin process may
+// not carry the password env vars the build saw.
+let shopDevStorefrontPassword = '';
 
 /** @param {string|null|undefined} password */
 export function setShopDevStorefrontPassword(password) {
-  shopDevStorefrontPassword =
-    password === null || password === undefined ? null : String(password).trim();
+  shopDevStorefrontPassword = String(password ?? '').trim();
 }
 
 /**
@@ -500,8 +500,7 @@ export function getDevStorefrontPasswordDefault() {
   if (!isLocalDevStorefrontPasswordUiEnabled()) {
     return '';
   }
-  if (shopDevStorefrontPassword !== null) return shopDevStorefrontPassword;
-  return readViteDevStorefrontPassword();
+  return shopDevStorefrontPassword || readViteDevStorefrontPassword();
 }
 
 /**

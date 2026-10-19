@@ -7,7 +7,7 @@ import {
 } from '../previewUrl';
 
 afterEach(() => {
-  setShopDevStorefrontPassword(null);
+  setShopDevStorefrontPassword('');
   vi.unstubAllEnvs();
 });
 
@@ -19,8 +19,10 @@ describe("the current shop's dev storefront password", () => {
     expect(resolveStorefrontPasswordForPreview('store-a.myshopify.com', '')).toBe('zoprew');
   });
 
-  it('falls back to the build-time password until the loader answers', () => {
+  it('falls back to the build-time password when the loader has none', () => {
     vi.stubEnv('VITE_RIPX_DEV_STOREFRONT_PASSWORD', 'shared');
+    expect(getDevStorefrontPasswordDefault()).toBe('shared');
+    setShopDevStorefrontPassword('');
     expect(getDevStorefrontPasswordDefault()).toBe('shared');
   });
 
