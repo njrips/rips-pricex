@@ -761,7 +761,7 @@ router.post(
         : typeof req.body?.storefrontPassword === 'string'
           ? req.body.storefrontPassword
           : '',
-      shopDomain
+      req.get('host') || ''
     );
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 25000);

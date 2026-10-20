@@ -20,8 +20,6 @@ import "@shopify/polaris/build/esm/styles.css";
 import { authenticate } from "../shopify.server";
 import { setShopContext } from "../services/api";
 import { internalServiceHeaders } from "../utils/expressInternalApi.server";
-import { devStorefrontPasswordForShop } from "../utils/devStorefrontPassword.server";
-import { setShopDevStorefrontPassword } from "../utils/previewUrl";
 import {
   fetchSubscriptionEntitlement,
   pushEntitlementToExpress,
@@ -262,7 +260,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     staffEmail,
     devEntitleAll,
     // Dev-only; empty in production. Powers price-surface unlock without showing a password field.
-    devStorefrontPassword: devStorefrontPasswordForShop(shop),
+    devStorefrontPassword: String(
+      process.env.VITE_RIPX_DEV_STOREFRONT_PASSWORD ||
+        process.env.RIPX_DEV_STOREFRONT_PASSWORD ||
+        "",
+    ).trim(),
   };
 };
 
@@ -276,7 +278,6 @@ export default function App() {
   // fired their first API calls.
   if (typeof window !== "undefined") {
     setShopContext(data.shop, "/api");
-    setShopDevStorefrontPassword(data.devStorefrontPassword);
   }
 
   // Render the real UI on the server. NavMenu / TitleBar are App Bridge custom
