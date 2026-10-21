@@ -5,6 +5,8 @@ const express = require('express');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
+const zlib = require('zlib');
+const { promisify } = require('util');
 const { query } = require('../utils/database');
 const { getActiveTestsForStorefront, getTestById } = require('../models/test');
 const {
@@ -48,11 +50,10 @@ router.use((req, res, next) => {
 
 const installedShopCache = new Map();
 
-async function requireInstalledShop(req, res) {
-  const shop = resolveShop(req);
-  if (!shop) return null;
+/** 'installed' | 'not_installed' | 'unavailable' */
+async function shopInstallStatus(shop) {
   const cachedUntil = installedShopCache.get(shop) || 0;
-  if (cachedUntil > Date.now()) return shop;
+  if (cachedUntil > Date.now()) return 'installed';
   try {
     const result = await query(
       `SELECT 1
@@ -63,22 +64,93 @@ async function requireInstalledShop(req, res) {
         LIMIT 1`,
       [shop]
     );
-    if ((result.rowCount || 0) < 1) {
-      res.status(403).json({ error: 'Shop is not installed' });
-      return null;
-    }
+    if ((result.rowCount || 0) < 1) return 'not_installed';
     installedShopCache.set(shop, Date.now() + 60_000);
-    return shop;
+    return 'installed';
   } catch (error) {
     logger.error('installed shop check failed', { shop, message: error.message });
-    res.status(503).json({ error: 'Shop install status unavailable' });
-    return null;
+    return 'unavailable';
   }
 }
 
+async function requireInstalledShop(req, res) {
+  const shop = resolveShop(req);
+  if (!shop) return null;
+  const status = await shopInstallStatus(shop);
+  if (status === 'not_installed') {
+    res.status(403).json({ error: 'Shop is not installed' });
+    return null;
+  }
+  if (status === 'unavailable') {
+    res.status(503).json({ error: 'Shop install status unavailable' });
+    return null;
+  }
+  return shop;
+}
+
+/** A *.myshopify.com preview target names its shop even when the link dropped shop=. */
+function previewTargetShop(targetUrl) {
+  try {
+    const host = new URL(String(targetUrl || '')).hostname.toLowerCase();
+    return host.endsWith('.myshopify.com') ? host : '';
+  } catch {
+    return '';
+  }
+}
+
+const gzip = promisify(zlib.gzip);
+const brotliCompress = promisify(zlib.brotliCompress);
+const STOREFRONT_SCRIPT_PATH = path.resolve(__dirname, '../../../storefront/storefront-script.js');
+let scriptBodyCache = { mtimeMs: -1, body: '' };
+
 function loadScriptBody() {
-  const p = path.resolve(__dirname, '../../../storefront/storefront-script.js');
-  return fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : '/* missing storefront script */';
+  let stat;
+  try {
+    stat = fs.statSync(STOREFRONT_SCRIPT_PATH);
+  } catch {
+    return '/* missing storefront script */';
+  }
+  if (stat.mtimeMs !== scriptBodyCache.mtimeMs) {
+    scriptBodyCache = {
+      mtimeMs: stat.mtimeMs,
+      body: fs.readFileSync(STOREFRONT_SCRIPT_PATH, 'utf8'),
+    };
+  }
+  return scriptBodyCache.body;
+}
+
+const COMPRESSED_SCRIPT_CACHE_MAX = 64;
+const compressedScriptCache = new Map();
+
+function pickScriptEncoding(req) {
+  const accepted = String(req.get('Accept-Encoding') || '').toLowerCase();
+  if (/\bbr\b/.test(accepted)) return 'br';
+  if (/\bgzip\b/.test(accepted)) return 'gzip';
+  return '';
+}
+
+async function compressScriptBody(body, encoding) {
+  const key = `${encoding}:${crypto.createHash('sha1').update(body).digest('base64')}`;
+  const cached = compressedScriptCache.get(key);
+  if (cached) {
+    compressedScriptCache.delete(key);
+    compressedScriptCache.set(key, cached);
+    return cached;
+  }
+  const compressed =
+    encoding === 'br'
+      ? await brotliCompress(body, {
+          params: {
+            [zlib.constants.BROTLI_PARAM_QUALITY]: 5,
+            [zlib.constants.BROTLI_PARAM_MODE]: zlib.constants.BROTLI_MODE_TEXT,
+          },
+        })
+      : await gzip(body, { level: 6 });
+  compressedScriptCache.set(key, compressed);
+  if (compressedScriptCache.size > COMPRESSED_SCRIPT_CACHE_MAX) {
+    compressedScriptCache.delete(compressedScriptCache.keys().next().value);
+  }
+  return compressed;
 }
 
 function resolveShop(req) {
@@ -160,6 +232,13 @@ async function serveScript(req, res) {
   }
   // apiUrl comes from resolvePublicAppUrl(req) inside buildStorefrontRuntimeConfig —
   // do not re-stamp RIPSPRICEX_PUBLIC_API_BASE here (stale after tunnel rotation).
+  if (shop && config.runtimeSource !== 'ripspricex-track-fallback') {
+    try {
+      require('../services/storefrontHintService').noteServedStorefrontConfig(shop, config);
+    } catch (err) {
+      logger.warn('storefront hint note failed', { shop, message: err.message });
+    }
+  }
 
   let early = '';
   try {
@@ -184,6 +263,18 @@ async function serveScript(req, res) {
       ),
     }) || 'public, max-age=60'
   );
+  res.setHeader('Vary', 'Accept-Encoding');
+  const encoding = pickScriptEncoding(req);
+  if (encoding) {
+    try {
+      const compressed = await compressScriptBody(body, encoding);
+      res.setHeader('Content-Encoding', encoding);
+      res.send(compressed);
+      return;
+    } catch (err) {
+      logger.warn('storefront script compression failed', { encoding, message: err.message });
+    }
+  }
   res.send(body);
 }
 
@@ -365,17 +456,51 @@ router.get(['/preview', '/preview-storefront-test'], async (req, res) => {
 });
 
 router.get(['/preview-document', '/preview-document/'], async (req, res) => {
+  const { servePreviewDocument, buildErrorPage } = require('./previewDocument');
+  const parentOrigin = String(req.query.parent_origin || '').trim();
+  // The admin modal shows this document as-is, so every failure has to be a page
+  // that says what went wrong; a bare comment or JSON reads as a blank preview.
+  const sendError = (status, title, message, reason) =>
+    res
+      .status(status)
+      .type('html')
+      .send(buildErrorPage({ title, message, parentOrigin, reason }));
   try {
-    if (!resolveShop(req)) {
-      return res.status(400).type('html').send('<!-- missing shop -->');
+    const shop = resolveShop(req) || previewTargetShop(req.query.url || req.query.target);
+    if (!shop) {
+      return sendError(
+        400,
+        'Shop not specified',
+        'Open the picker from the Priceify app in your Shopify admin so it knows which store to preview.',
+        'missing_shop'
+      );
     }
-    const installedShop = await requireInstalledShop(req, res);
-    if (!installedShop) return undefined;
-    const { servePreviewDocument } = require('./previewDocument');
-    return servePreviewDocument(req, res);
+    const status = await shopInstallStatus(shop);
+    if (status === 'not_installed') {
+      return sendError(
+        403,
+        'Priceify is not connected to this store',
+        'Open Priceify from this store\u2019s Shopify admin to reconnect it, then try Pick again.',
+        'not_installed'
+      );
+    }
+    if (status === 'unavailable') {
+      return sendError(
+        503,
+        'Preview unavailable',
+        'Priceify could not confirm this store right now. Try Pick again in a moment.',
+        'install_status_unavailable'
+      );
+    }
+    return servePreviewDocument(req, res, { shop });
   } catch (err) {
     logger.error('preview-document failed', { message: err.message, stack: err.stack });
-    res.status(500).type('html').send(`<!-- preview-document error: ${publicErrorMessage(err)} -->`);
+    return sendError(
+      500,
+      'Preview unavailable',
+      'Something went wrong loading your storefront. Try Pick again.',
+      'server_error'
+    );
   }
 });
 

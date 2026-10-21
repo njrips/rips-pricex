@@ -34,7 +34,7 @@ export default function CodeSnippetEditor({
   rows = 16,
 }) {
   const textareaRef = useRef(null);
-  const gutterRef = useRef(null);
+  const gutterLinesRef = useRef(null);
 
   const lines = useMemo(() => {
     const text = String(value ?? '');
@@ -42,13 +42,14 @@ export default function CodeSnippetEditor({
     return Array.from({ length: count }, (_, i) => i + 1);
   }, [value]);
 
-  const minHeight = Math.max(8, rows) * 1.45;
-
+  // Moved rather than scrolled: the numbers sit outside layout so they never
+  // make the editor taller than its textarea, and a transform can follow the
+  // textarea all the way down past its horizontal scrollbar.
   const syncScroll = useCallback(() => {
     const ta = textareaRef.current;
-    const gutter = gutterRef.current;
-    if (!ta || !gutter) return;
-    gutter.scrollTop = ta.scrollTop;
+    const gutterLines = gutterLinesRef.current;
+    if (!ta || !gutterLines) return;
+    gutterLines.style.transform = `translateY(${-ta.scrollTop}px)`;
   }, []);
 
   useEffect(() => {
@@ -82,11 +83,11 @@ export default function CodeSnippetEditor({
     >
       <div className={settingsStyles.codeEditorSurface}>
         <div
-          ref={gutterRef}
           className={settingsStyles.codeEditorGutter}
           aria-hidden
-          style={{ minHeight: `${minHeight}rem` }}
+          style={{ width: `calc(${String(lines.length).length}ch + 18px)` }}
         >
+          <div ref={gutterLinesRef} className={settingsStyles.codeEditorGutterLines}>
           {lines.map(line => (
             <div
               key={line}
@@ -100,6 +101,7 @@ export default function CodeSnippetEditor({
               {line}
             </div>
           ))}
+          </div>
         </div>
         <textarea
           ref={textareaRef}
@@ -112,6 +114,7 @@ export default function CodeSnippetEditor({
           disabled={disabled}
           placeholder={placeholder}
           spellCheck={false}
+          wrap="off"
           autoComplete="off"
           autoCorrect="off"
           autoCapitalize="off"

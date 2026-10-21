@@ -164,15 +164,6 @@ function mapGoalMetricDefinitionToRuntime(definition) {
   };
 }
 
-function getHeatmapCollectionRuntimeConfig() {
-  const sampleRateRaw = Number.parseFloat(process.env.RIPX_HEATMAP_SAMPLE_RATE || '1');
-  const sampleRate = Number.isFinite(sampleRateRaw) ? Math.min(1, Math.max(0, sampleRateRaw)) : 1;
-  return {
-    enabled: process.env.RIPX_HEATMAP_COLLECTION_ENABLED === 'true',
-    sampleRate,
-  };
-}
-
 /**
  * @param {string} shop
  * @param {object[]} tests
@@ -239,7 +230,6 @@ function buildStorefrontRuntimeConfig(
     version: SCRIPT_VERSION,
     runtimeSource,
     consentRequired: process.env.RIPX_CONSENT_REQUIRED === 'true',
-    heatmapCollection: getHeatmapCollectionRuntimeConfig(),
     activeTests: (tests || []).map(mapTestToStorefrontPayload),
     goalMetricDefinitions: (goalMetricDefinitions || [])
       .map(mapGoalMetricDefinitionToRuntime)
@@ -358,10 +348,10 @@ function buildPriceAntiFlickerCss(activeTests, priceSurfaceRegistry = {}) {
 
 /**
  * Upper bound on how long the pre-script snippet may keep prices hidden on its
- * own. Comfortably past the runtime's 1.4s guard, so a healthy page is always
- * released by the runtime and this never fires.
+ * own. Past the runtime's longest configurable guard (2s), so a healthy page is
+ * always released by the runtime and this never fires.
  */
-const EARLY_ANTI_FLICKER_FAILSAFE_MS = 4000;
+const EARLY_ANTI_FLICKER_FAILSAFE_MS = 2500;
 
 /**
  * Synchronous snippet injected before the main storefront script so anti-flicker can hide the page
@@ -387,7 +377,14 @@ function buildEarlyStorefrontAntiFlickerBootstrap(activeTests, priceSurfaceRegis
     'var wn=String(window.name||"");if(wn.indexOf("__ripx_preview_ctx_v1__:")===0)return true;' +
     '}catch(_ePreviewCtx){}return false;}' +
     'if(ripxHasPreviewCtx())return;var h=document.documentElement;if(!h||h.getAttribute("data-ripx-af"))return;' +
-    `h.setAttribute("data-ripx-af","${mode}");var id="ripx-anti-flicker-style";` +
+    // Hiding a price the shopper has already seen reads as the price vanishing,
+    // which is worse than the flicker this guards against. That covers a page
+    // that has painted, and a page whose inline theme guard already gave up.
+    'if(window.__RIPX_AF_RELEASED__)return;var ia=window.__RIPX_INLINE_PRICE_AF__;if(ia&&!ia.active)return;' +
+    'try{var pp=window.performance;if(pp&&typeof pp.getEntriesByType==="function"&&' +
+    'typeof PerformancePaintTiming!=="undefined"){if(pp.getEntriesByType("paint").some(function(e){' +
+    'return e.name==="first-contentful-paint";}))return;}else if(document.readyState!=="loading")return;}catch(_eP){}' +
+    `window.__RIPX_AF_STARTED_AT__=Date.now();h.setAttribute("data-ripx-af","${mode}");var id="ripx-anti-flicker-style";` +
     'if(!document.getElementById(id)){var s=document.createElement("style");s.id=id;' +
     `s.textContent=${JSON.stringify(css)};` +
     '(document.head||h).appendChild(s);}' +
@@ -398,7 +395,7 @@ function buildEarlyStorefrontAntiFlickerBootstrap(activeTests, priceSurfaceRegis
     // strict mode that leaves the whole body at opacity 0 with nothing left to
     // clear it. The runtime releases within ~1.4s, so this only ever fires when
     // it did not arrive.
-    `setTimeout(function(){try{h.removeAttribute("data-ripx-af");}catch(_eR){}},${EARLY_ANTI_FLICKER_FAILSAFE_MS});` +
+    `setTimeout(function(){try{window.__RIPX_AF_RELEASED__=true;h.removeAttribute("data-ripx-af");}catch(_eR){}},${EARLY_ANTI_FLICKER_FAILSAFE_MS});` +
     '}catch(_e){}})();\n'
   );
 }
@@ -407,8 +404,8 @@ module.exports = {
   SCRIPT_VERSION,
   buildStorefrontRuntimeConfig,
   buildEarlyStorefrontAntiFlickerBootstrap,
+  collectPriceAntiFlickerSelectors,
   getStorefrontScriptCacheControl,
-  getHeatmapCollectionRuntimeConfig,
   normalizeTestTypeForStorefront,
   normalizeTargetTypeForStorefront,
   isStorefrontEmbeddedTestType,

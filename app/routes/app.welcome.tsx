@@ -90,12 +90,21 @@ export default function PlanWelcomePage() {
         <div className={styles.adminRow}>
           <p className={styles.adminRowTitle}>Next steps</p>
           <p className={styles.adminRowBody}>
-            1. Confirm readiness on <Link to={embeddedPath('/app/setup')}>Store setup</Link> (Theme connection,
-            Checkout pricing functions, price locations).
+            {/* Plain text where the footer button already goes there. */}
+            1. Confirm readiness on{' '}
+            {entitled ? 'Store setup' : <Link to={embeddedPath('/app/setup')}>Store setup</Link>}{' '}
+            (Theme connection, Checkout pricing functions, price locations).
           </p>
           <p className={styles.adminRowBody}>
             2. Review or change the subscription anytime under{' '}
-            <Link to={embeddedPath('/app/settings', { tab: 'plan' })}>App settings → Plan &amp; usage</Link>.
+            {entitled ? (
+              <Link to={embeddedPath('/app/settings', { tab: 'plan' })}>
+                App settings → Plan &amp; usage
+              </Link>
+            ) : (
+              'App settings → Plan & usage'
+            )}
+            .
           </p>
           <p className={styles.adminRowBody}>
             3. Create your first test from New test (or the title bar).

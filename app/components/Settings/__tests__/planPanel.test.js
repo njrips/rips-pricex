@@ -100,6 +100,21 @@ describe('Plan & usage panel', () => {
     );
   });
 
+  it('offers one way to Store setup and shows its status on its own line', async () => {
+    await render({ priceReady: false, offerReady: true });
+    const includes = Array.from(container.querySelectorAll('p')).find(
+      node => node.textContent === 'What your plan includes'
+    ).parentElement.parentElement;
+    expect(includes.querySelectorAll('a')).toHaveLength(0);
+    const toSetup = Array.from(includes.querySelectorAll('button')).filter(node =>
+      /setup/i.test(node.textContent || '')
+    );
+    expect(toSetup.map(node => node.textContent.trim())).toEqual(['Open setup checklist']);
+    expect(includes.textContent).not.toContain('Store setup:');
+    // Polaris prefixes the badge with its tone for screen readers.
+    expect(includes.textContent).toMatch(/Store setup(Info)?Offer tests ready/);
+  });
+
   it('keeps Upgrade off and says why while App Pricing plans are not set up', async () => {
     const locked = {
       entitled: false,

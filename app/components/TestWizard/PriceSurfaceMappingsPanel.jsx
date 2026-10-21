@@ -90,6 +90,32 @@ function buildMappingKey(row) {
   return `${row.surface}:${scopeKey}:${row.selector}`;
 }
 
+/** Why the table cannot be saved as it stands, or '' when it can. */
+export function priceLocationsSaveError(rows) {
+  const missingSelector = rows.findIndex(row => !String(row.selector || '').trim());
+  if (missingSelector >= 0) {
+    return `Row ${missingSelector + 1}: add a theme selector or use Pick on site before saving.`;
+  }
+  const seen = new Set();
+  for (const row of rows) {
+    const key = buildMappingKey(row);
+    if (seen.has(key)) {
+      return 'Each page and price type can use a theme selector only once.';
+    }
+    seen.add(key);
+  }
+  // The server refuses a url mapping with no usable page, and would drop the
+  // row rather than store a selector that could never be found. Say so here
+  // instead of letting the row quietly disappear on save.
+  const badPage = rows.findIndex(
+    row => row.surface === 'url' && priceSurfacePageUrlError(row.pageUrl)
+  );
+  if (badPage >= 0) {
+    return `Row ${badPage + 1}: ${priceSurfacePageUrlError(rows[badPage].pageUrl)}`;
+  }
+  return '';
+}
+
 // Returns a result instead of writing state so the initial load can run from an
 // effect without setting state synchronously.
 async function fetchShopMappings(settingsPath) {
@@ -347,6 +373,8 @@ export default function PriceSurfaceMappingsPanel({
   const [noticeTitle, setNoticeTitle] = useState('Saved');
   const [previewPickError, setPreviewPickError] = useState('');
   const [pickerModalUrl, setPickerModalUrl] = useState('');
+  // Keyed on the url so opening a new pick starts from "loading" without an effect.
+  const [pickerFrame, setPickerFrame] = useState({ url: '', loaded: false, error: '', attempt: 0 });
   const [saveFlash, setSaveFlash] = useState(null);
   const lastAutoMapTokenRef = useRef(0);
   const autoMapCancelledRef = useRef(false);
@@ -363,6 +391,10 @@ export default function PriceSurfaceMappingsPanel({
   // The iframe only makes sense while the parent has a live pick target, so a
   // captured selector or a timeout over there closes it here too.
   const pickerModalOpen = Boolean(pickTarget) && Boolean(pickerModalUrl);
+  const pickerFrameCurrent = pickerFrame.url === pickerModalUrl;
+  const pickerFrameLoaded = pickerFrameCurrent && pickerFrame.loaded;
+  const pickerFrameError = pickerFrameCurrent ? pickerFrame.error : '';
+  const pickerFrameAttempt = pickerFrameCurrent ? pickerFrame.attempt : 0;
 
   // Takes the whole row, not just its surface: a url row carries the page to
   // open, so the picker cannot be told where to go from the surface alone.
@@ -442,6 +474,17 @@ export default function PriceSurfaceMappingsPanel({
         onCancelVisualPick?.();
         return;
       }
+      if (data.type === 'ripx-preview-error' && data.source === 'ripx-preview-document') {
+        const message =
+          String(data.message || '').trim() || 'The storefront preview could not be loaded.';
+        setPickerFrame(prev => ({
+          url: pickerModalUrl,
+          loaded: true,
+          error: message,
+          attempt: prev.url === pickerModalUrl ? prev.attempt : 0,
+        }));
+        return;
+      }
       if (data.type !== 'ripx-visual-selector') {
         return;
       }
@@ -451,7 +494,24 @@ export default function PriceSurfaceMappingsPanel({
     };
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
-  }, [pickerModalOpen, closePickerModal, onCancelVisualPick]);
+  }, [pickerModalOpen, pickerModalUrl, closePickerModal, onCancelVisualPick]);
+
+  const markPickerFrameLoaded = useCallback(() => {
+    setPickerFrame(prev =>
+      prev.url === pickerModalUrl
+        ? { ...prev, loaded: true }
+        : { url: pickerModalUrl, loaded: true, error: '', attempt: 0 }
+    );
+  }, [pickerModalUrl]);
+
+  const retryPickerFrame = useCallback(() => {
+    setPickerFrame(prev => ({
+      url: pickerModalUrl,
+      loaded: false,
+      error: '',
+      attempt: (prev.url === pickerModalUrl ? prev.attempt : 0) + 1,
+    }));
+  }, [pickerModalUrl]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -484,6 +544,7 @@ export default function PriceSurfaceMappingsPanel({
       })
     );
     setNotice('');
+    setError('');
   };
 
   const addShopMapping = (overrides = {}) => {
@@ -502,6 +563,7 @@ export default function PriceSurfaceMappingsPanel({
       normalizePriceSurfaceMappingsForEditor(shopMappings).filter((_, idx) => idx !== index)
     );
     setNotice('');
+    setError('');
   };
 
   // One save path for both the Save button and Auto-map's "Apply & save", so
@@ -544,28 +606,9 @@ export default function PriceSurfaceMappingsPanel({
 
   const saveShopDefaults = async () => {
     const rows = normalizePriceSurfaceMappingsForEditor(shopMappings);
-    const missingSelector = rows.findIndex(row => !String(row.selector || '').trim());
-    if (missingSelector >= 0) {
-      setError(
-        `Row ${missingSelector + 1}: add a theme selector or use Pick on site before saving.`
-      );
-      return;
-    }
-    if (duplicateKeys.size > 0) {
-      setError('Each page and price type can use a theme selector only once.');
-      return;
-    }
-    // The server refuses a url mapping with no usable page, and would drop the
-    // row rather than store a selector that could never be found. Say so here
-    // instead of letting the row quietly disappear on save.
-    const badPage = rows.findIndex(
-      row =>
-        row.surface === 'url' &&
-        String(row.selector || '').trim() &&
-        priceSurfacePageUrlError(row.pageUrl)
-    );
-    if (badPage >= 0) {
-      setError(`Row ${badPage + 1}: ${priceSurfacePageUrlError(rows[badPage].pageUrl)}`);
+    const saveError = priceLocationsSaveError(rows);
+    if (saveError) {
+      setError(saveError);
       return;
     }
     await persistShopMappings(rows, { flash: 'Price locations saved' });
@@ -714,9 +757,15 @@ export default function PriceSurfaceMappingsPanel({
         return false;
       }
       const existing = normalizePriceSurfaceMappingsForEditor(shopMappings);
+      // A blank row the merchant added holds no choice to protect; detection
+      // fills that slot instead of being skipped for it.
       const lockedVisual = new Set(
         existing
-          .filter(row => ['visual', 'merchant'].includes(String(row.source || '')))
+          .filter(
+            row =>
+              ['visual', 'merchant'].includes(String(row.source || '')) &&
+              String(row.selector || '').trim()
+          )
           .map(row => `${row.surface}:${row.role}`)
       );
       const withoutReplaced = existing.filter(row => {
@@ -750,6 +799,13 @@ export default function PriceSurfaceMappingsPanel({
       );
       setShopMappings(normalized);
       setAutoMapOpen(false);
+      // Checked against the table just shown, so the row number in the message
+      // is the one the merchant sees.
+      const saveError = save ? priceLocationsSaveError(normalized) : '';
+      if (saveError) {
+        setError(`${saveError} Detected prices were added to the table but not saved.`);
+        return false;
+      }
       if (!save) {
         setNoticeTitle('Applied');
         setNotice('Detected prices added to the table. Click Save to keep them.');
@@ -1184,12 +1240,33 @@ export default function PriceSurfaceMappingsPanel({
             Click a price in the preview. The selector is sent back to Price locations
             automatically. Store links stay inside this preview so picking does not break.
           </Text>
+          {pickerFrameError ? (
+            <Banner
+              tone="critical"
+              title="Preview could not load"
+              action={{ content: 'Try again', onAction: retryPickerFrame }}
+            >
+              <p>{pickerFrameError}</p>
+            </Banner>
+          ) : null}
           {pickerModalUrl ? (
-            <iframe
-              title="Priceify price location picker"
-              src={pickerModalUrl}
-              className={styles.priceSurfacePickerIframe}
-            />
+            <div className={styles.priceSurfacePickerFrameWrap}>
+              <iframe
+                key={`${pickerModalUrl}#${pickerFrameAttempt}`}
+                title="Priceify price location picker"
+                src={pickerModalUrl}
+                className={styles.priceSurfacePickerIframe}
+                onLoad={markPickerFrameLoaded}
+              />
+              {pickerFrameLoaded ? null : (
+                <div className={styles.priceSurfacePickerLoading} role="status">
+                  <Spinner size="small" accessibilityLabel="Loading your storefront" />
+                  <Text as="span" variant="bodySm" tone="subdued">
+                    Loading your storefront…
+                  </Text>
+                </div>
+              )}
+            </div>
           ) : null}
         </div>
       </Modal>

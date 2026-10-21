@@ -254,6 +254,7 @@ export function buildPreviewDocumentUrl({
   priceSurfacePick = false,
   storefrontPassword,
   parentOrigin,
+  tenantDomain,
 }) {
   const directPreviewUrl = typeof previewUrl === 'string' ? previewUrl.trim() : '';
   if (!directPreviewUrl) return null;
@@ -275,6 +276,15 @@ export function buildPreviewDocumentUrl({
         ? new URL(previewDocPath)
         : new URL(previewDocPath, 'https://preview.invalid');
     previewDoc.searchParams.set('url', directPreviewUrl);
+    // The API refuses to proxy a page without knowing which installed shop asked.
+    const shop = String(tenantDomain || '')
+      .trim()
+      .replace(/^https?:\/\//i, '')
+      .replace(/\/+$/, '')
+      .toLowerCase();
+    if (shop) {
+      previewDoc.searchParams.set('shop', shop);
+    }
     if (visualEditor) {
       previewDoc.searchParams.set(PREVIEW_PARAMS.VISUAL_EDITOR, PREVIEW_VALUE);
     }
@@ -412,6 +422,7 @@ export function buildVisualPickerLaunchUrl({
       priceSurfacePick,
       storefrontPassword,
       parentOrigin,
+      tenantDomain,
     }) || directPreviewUrl
   );
 }

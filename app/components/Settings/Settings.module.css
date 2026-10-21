@@ -2,6 +2,10 @@
  * target descendants — a bare [data-palette='admin'] matches the app wrapper. */
 
 .codeEditorShell {
+  /* Whole pixels: a fractional line height rounds differently in the gutter
+     and the textarea, and the numbers drift further from their lines the
+     longer the snippet. */
+  --code-editor-line-height: 18px;
   border: 1px solid var(--border-subtle, rgba(0, 0, 0, 0.12));
   border-radius: 10px;
   overflow: hidden;
@@ -21,8 +25,10 @@
 
 .codeEditorGutter {
   flex: 0 0 auto;
+  position: relative;
+  box-sizing: border-box;
   min-width: 2.75rem;
-  padding: 10px 8px 10px 10px;
+  padding: 0 8px 0 10px;
   text-align: right;
   user-select: none;
   overflow: hidden;
@@ -30,12 +36,21 @@
   border-right: 1px solid var(--border-subtle, rgba(0, 0, 0, 0.08));
   font-family: var(--settings-font-mono, ui-monospace, monospace);
   font-size: 12px;
-  line-height: 1.45;
+  line-height: var(--code-editor-line-height);
   color: var(--text-secondary, #6b7280);
 }
 
+/* Out of flow, so the textarea alone sets the editor's height. */
+.codeEditorGutterLines {
+  position: absolute;
+  top: 10px;
+  right: 8px;
+  left: 10px;
+  will-change: transform;
+}
+
 .codeEditorGutterLine {
-  height: 1.45em;
+  height: var(--code-editor-line-height);
 }
 
 .codeEditorGutterLineError {
@@ -49,6 +64,10 @@
   flex: 1 1 auto;
   width: 100%;
   min-height: 12rem;
+  /* Dragging the resize handle past the surface's cap would only hide the
+     bottom of the snippet. */
+  max-height: 28rem;
+  box-sizing: border-box;
   margin: 0;
   padding: 10px 12px;
   border: none;
@@ -57,8 +76,11 @@
   overflow: auto;
   font-family: var(--settings-font-mono, ui-monospace, monospace);
   font-size: 12px;
-  line-height: 1.45;
+  line-height: var(--code-editor-line-height);
   tab-size: 2;
+  /* A wrapped line would take two rows against one gutter number. */
+  white-space: pre;
+  overflow-wrap: normal;
   background: transparent;
   color: inherit;
 }

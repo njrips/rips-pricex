@@ -345,6 +345,59 @@ describe('a row can name a specific page', () => {
     expect(target).toContain('demo.myshopify.com');
     expect(target).not.toContain('custom-domain.com');
   });
+
+  const openUrlRowPicker = async () => {
+    await render();
+    await addRow();
+    await setValue(selects()[0], 'url');
+    await setValue(
+      inputs().find(node => node.placeholder === '/pages/black-friday'),
+      '/pages/black-friday'
+    );
+    await click(pickButton());
+    return () => document.querySelector('iframe');
+  };
+
+  it('tells the preview which shop it is for', async () => {
+    // Without shop= the API answered with an empty comment: a blank modal.
+    const frame = await openUrlRowPicker();
+    const src = new URL(frame().getAttribute('src'));
+    expect(src.pathname).toBe('/track/preview-document');
+    expect(src.searchParams.get('shop')).toBe('demo.myshopify.com');
+  });
+
+  it('shows loading until the storefront arrives', async () => {
+    const frame = await openUrlRowPicker();
+    expect(document.body.textContent).toContain('Loading your storefront');
+    await act(async () => {
+      frame().dispatchEvent(new Event('load'));
+    });
+    expect(document.body.textContent).not.toContain('Loading your storefront');
+  });
+
+  it('shows a preview error inside the modal and can try again', async () => {
+    const frame = await openUrlRowPicker();
+    const first = frame();
+    await act(async () => {
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          data: {
+            type: 'ripx-preview-error',
+            source: 'ripx-preview-document',
+            message: 'Priceify could not confirm this store right now.',
+          },
+        })
+      );
+    });
+    expect(document.body.textContent).toContain('Preview could not load');
+    expect(document.body.textContent).toContain('Priceify could not confirm this store right now.');
+    await click(
+      [...document.querySelectorAll('button')].find(btn => btn.textContent === 'Try again')
+    );
+    expect(document.body.textContent).not.toContain('Priceify could not confirm this store');
+    expect(frame()).not.toBe(first);
+    expect(document.body.textContent).toContain('Loading your storefront');
+  });
 });
 
 describe('two rows are only duplicates when they mean the same thing', () => {
@@ -681,5 +734,48 @@ describe('saving', () => {
     await click(buttonNamed('Save'));
     expect(savedBodies).toHaveLength(0);
     expect(text()).toMatch(/Row 1: add a theme selector/i);
+  });
+
+  it('holds Auto-detect to the same checks as Save when a row is left blank', async () => {
+    savedMappings = [{ surface: 'pdp', role: 'regular', selector: '.price-item--regular' }];
+    autoMapPostResponse = {
+      ready_to_save: true,
+      password_gate: false,
+      theme_drift: { detected: false },
+      surfaces: [
+        { surface: 'pdp', role: 'regular', status: 'matched', selector: '.price-item--regular' },
+      ],
+      theme: { id: 'gid://shopify/Theme/1', name: 'Dawn' },
+    };
+    await render();
+    await addRow();
+    await click(buttonNamed('Auto-detect prices'));
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 50));
+    });
+    expect(savedBodies).toHaveLength(0);
+    expect(text()).toMatch(/Row 2: add a theme selector/i);
+    expect(text()).not.toMatch(/Theme prices mapped/);
+  });
+
+  it('fills a blank row instead of keeping it over the price it detected', async () => {
+    autoMapPostResponse = {
+      ready_to_save: true,
+      password_gate: false,
+      theme_drift: { detected: false },
+      surfaces: [
+        { surface: 'pdp', role: 'regular', status: 'matched', selector: '.price-item--regular' },
+      ],
+      theme: { id: 'gid://shopify/Theme/1', name: 'Dawn' },
+    };
+    await render();
+    // A new row starts as a blank product-page regular price: the slot detected below.
+    await addRow();
+    await click(buttonNamed('Auto-detect prices'));
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 600));
+    });
+    expect(savedBodies).toHaveLength(1);
+    expect(savedBodies[0].mappings.map(row => row.selector)).toEqual(['.price-item--regular']);
   });
 });

@@ -76,11 +76,12 @@ describe('Plan welcome', () => {
       root.render(h(RouterProvider, { router }));
     });
     expect(revalidate).toHaveBeenCalledTimes(1);
-    const setup = Array.from(container.querySelectorAll('a')).find(node =>
-      (node.textContent || '').includes('Store setup')
-    );
-    expect(setup.getAttribute('href')).toContain('shop=demo.myshopify.com');
-    expect(setup.getAttribute('href')).toContain('host=abc');
+    const links = Array.from(container.querySelectorAll('a'));
+    // The footer button is the one way to Store setup; the step names it in plain text.
+    expect(links.some(node => (node.textContent || '').includes('Store setup'))).toBe(false);
+    const plan = links.find(node => (node.textContent || '').includes('Plan & usage'));
+    expect(plan.getAttribute('href')).toContain('shop=demo.myshopify.com');
+    expect(plan.getAttribute('href')).toContain('host=abc');
     const next = Array.from(container.querySelectorAll('button')).find(
       node => node.textContent === 'Open Store setup'
     );

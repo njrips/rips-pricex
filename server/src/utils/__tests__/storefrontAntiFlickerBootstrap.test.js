@@ -55,3 +55,73 @@ describe('early anti-flicker bootstrap', () => {
     assert.match(snippet, /ripxHasPreviewCtx/);
   });
 });
+
+/** Runs the snippet against a minimal page and reports whether it hid prices. */
+function runSnippet({ painted = false, readyState = 'loading', paintApi = true, win = {} } = {}) {
+  const attrs = {};
+  const html = {
+    getAttribute: name => (name in attrs ? attrs[name] : null),
+    setAttribute: (name, value) => {
+      attrs[name] = String(value);
+    },
+    removeAttribute: name => {
+      delete attrs[name];
+    },
+    appendChild: () => {},
+  };
+  const document = {
+    documentElement: html,
+    head: html,
+    readyState,
+    cookie: '',
+    getElementById: () => null,
+    createElement: () => ({}),
+  };
+  const window = {
+    location: { search: '' },
+    name: '',
+    performance: {
+      getEntriesByType: type =>
+        type === 'paint' && painted ? [{ name: 'first-contentful-paint' }] : [],
+    },
+    ...win,
+  };
+  const timers = [];
+  const run = new Function(
+    'window',
+    'document',
+    'PerformancePaintTiming',
+    'setTimeout',
+    buildEarlyStorefrontAntiFlickerBootstrap([PRICE_TEST])
+  );
+  run(window, document, paintApi ? function PerformancePaintTiming() {} : undefined, fn =>
+    timers.push(fn)
+  );
+  return { hidden: attrs['data-ripx-af'] || null, window, timers };
+}
+
+describe('early anti-flicker bootstrap on a live page', () => {
+  it('hides prices when it runs before the page has painted', () => {
+    const { hidden, window, timers } = runSnippet();
+    assert.equal(hidden, 'price');
+    assert.equal(typeof window.__RIPX_AF_STARTED_AT__, 'number');
+    assert.equal(timers.length, 1);
+  });
+
+  // The script usually arrives through the app proxy after first paint. Hiding
+  // then blanks a price the shopper is already reading.
+  it('does not hide prices the shopper has already seen', () => {
+    assert.equal(runSnippet({ painted: true }).hidden, null);
+  });
+
+  it('falls back to document readiness where paint timing is unsupported', () => {
+    assert.equal(runSnippet({ paintApi: false, readyState: 'interactive' }).hidden, null);
+    assert.equal(runSnippet({ paintApi: false, readyState: 'loading' }).hidden, 'price');
+  });
+
+  it('does not hide again after the theme guard or the runtime let prices show', () => {
+    const inlineGaveUp = { __RIPX_INLINE_PRICE_AF__: { active: false, at: 1 } };
+    assert.equal(runSnippet({ win: inlineGaveUp }).hidden, null);
+    assert.equal(runSnippet({ win: { __RIPX_AF_RELEASED__: true } }).hidden, null);
+  });
+});

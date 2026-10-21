@@ -53,7 +53,6 @@
     shopDomain: null,
     activeTests: [],
     featureFlagUrl: '',
-    heatmapCollection: { enabled: false, sampleRate: 1 },
   };
 
   const CONFIG = Object.assign({}, DEFAULT_CONFIG, window.AB_TEST_RUNTIME_CONFIG || {});
@@ -476,12 +475,49 @@
       );
     } catch (_ePriceAfHint) {}
   }
+  function ripxPageAlreadyPainted() {
+    try {
+      var perf = window.performance;
+      if (
+        perf &&
+        typeof perf.getEntriesByType === 'function' &&
+        typeof PerformancePaintTiming !== 'undefined'
+      ) {
+        return perf.getEntriesByType('paint').some(function (entry) {
+          return entry.name === 'first-contentful-paint';
+        });
+      }
+      return document.readyState !== 'loading';
+    } catch (_ePainted) {
+      return false;
+    }
+  }
+  /** When prices were first hidden on this page view, or 0 if they are not hidden. */
+  function ripxAntiFlickerHiddenSince() {
+    var hiddenAttr =
+      document.documentElement && document.documentElement.getAttribute('data-ripx-af');
+    if (!hiddenAttr) return 0;
+    var inline = window.__RIPX_INLINE_PRICE_AF__;
+    var candidates = [Number(window.__RIPX_AF_STARTED_AT__) || 0];
+    if (inline && inline.active) candidates.push(Number(inline.at) || 0);
+    candidates = candidates.filter(Boolean);
+    return candidates.length ? Math.min.apply(Math, candidates) : Date.now();
+  }
   function installAntiFlickerGuard(timeoutMs, mode, tests) {
     if (antiFlickerState.active || typeof document === 'undefined') return;
+    // Once per page view: a second hide after release blanks a price the
+    // shopper has just seen, and so does a first hide after the page painted.
+    if (antiFlickerState.lastReleasedAt || window.__RIPX_AF_RELEASED__) return;
+    var hiddenSince = ripxAntiFlickerHiddenSince();
+    if (!hiddenSince && ripxPageAlreadyPainted()) {
+      markRipxTiming('anti_flicker_skipped', { reason: 'already_painted' });
+      return;
+    }
+    var budgetMs = timeoutMs || ANTI_FLICKER_MAX_MS;
     antiFlickerState.active = true;
     antiFlickerState.pending = 0;
-    antiFlickerState.installedAt = Date.now();
-    antiFlickerState.timeoutMs = timeoutMs || ANTI_FLICKER_MAX_MS;
+    antiFlickerState.installedAt = hiddenSince || Date.now();
+    antiFlickerState.timeoutMs = budgetMs;
     antiFlickerState.mode = mode === 'price' ? 'price' : 'strict';
     antiFlickerState.lastReleaseReason = null;
     var styleId = 'ripx-anti-flicker-style';
@@ -498,9 +534,12 @@
       var existing = document.documentElement.getAttribute('data-ripx-af');
       document.documentElement.setAttribute('data-ripx-af', existing || antiFlickerState.mode);
     }
-    antiFlickerState.timeoutId = setTimeout(function () {
-      releaseAntiFlickerGuard('timeout');
-    }, antiFlickerState.timeoutMs);
+    antiFlickerState.timeoutId = setTimeout(
+      function () {
+        releaseAntiFlickerGuard('timeout');
+      },
+      Math.max(0, budgetMs - (Date.now() - antiFlickerState.installedAt))
+    );
     markRipxTiming('anti_flicker_installed', {
       mode: antiFlickerState.mode,
       timeoutMs: antiFlickerState.timeoutMs,
@@ -681,6 +720,14 @@
 
   function releaseAntiFlickerGuard(reason) {
     var releaseReason = reason || 'manual';
+    try {
+      window.__RIPX_AF_RELEASED__ = true;
+    } catch (_eReleasedFlag) {}
+    if (!antiFlickerState.active && document.documentElement) {
+      // The pre-script snippet can hide prices (or the body, in strict mode)
+      // without the runtime ever taking the guard over.
+      document.documentElement.removeAttribute('data-ripx-af');
+    }
     if (antiFlickerState.active) {
       var installedAt = antiFlickerState.installedAt || 0;
       var pendingAtRelease = antiFlickerState.pending || 0;
@@ -1885,13 +1932,22 @@
   }
 
   function bootstrapAntiFlickerAndAssignment() {
-    if (!hasValidConfig) return;
+    // Every early return below means nothing on this page will repaint a price
+    // now, so whatever the pre-script snippet hid has to come back at once.
+    if (!hasValidConfig) {
+      releaseAntiFlickerGuard('invalid_config');
+      return;
+    }
     var tests = getRuntimeActiveTestsForBootstrap();
     if (!PREVIEW_MODE && tests.length === 0) {
       updatePriceAntiFlickerBootstrapHint([]);
+      releaseAntiFlickerGuard('no_tests');
       return;
     }
-    if (consentRequired && !hasConsent() && !PREVIEW_MODE && !FORCE_LIVE_MODE) return;
+    if (consentRequired && !hasConsent() && !PREVIEW_MODE && !FORCE_LIVE_MODE) {
+      releaseAntiFlickerGuard('consent_pending');
+      return;
+    }
     if (PREVIEW_MODE && PREVIEW_TEST_ID && !hasAntiFlickerEligibleTests(tests)) {
       updatePriceAntiFlickerBootstrapHint([]);
       releaseAntiFlickerGuard('preview_non_price');
@@ -1905,6 +1961,7 @@
         tests
       );
     }
+    if (!antiFlickerState.active) releaseAntiFlickerGuard('not_needed');
   }
 
   bootstrapAntiFlickerAndAssignment();
@@ -3152,6 +3209,8 @@
   var _ripxPriceMethodByVariantId = {};
   var _ripxAssignedPriceByProductId = {};
   var _ripxAssignedPriceByVariantId = {};
+  /** One product-page repaint watcher per test and product, keyed `testId|productId`. */
+  var _ripxPdpPaintWatchers = {};
   var _ripxPaintParityAudit = { checked: 0, ok: 0, mismatches: [], updatedAt: 0 };
   var _ripxPaintParityPublishTimer = null;
   var RIPX_PAINT_PARITY_TOLERANCE = 0.02;
@@ -3631,11 +3690,14 @@
     var attempts = 0;
     var maxAttempts = 48;
     var ids = Array.isArray(targetIds) ? targetIds : [];
-    var iv = setInterval(function () {
+    var iv = null;
+    var resolved = false;
+    function tick() {
       attempts++;
       var cid = getCurrentProductId();
       if (cid) {
-        clearInterval(iv);
+        resolved = true;
+        if (iv) clearInterval(iv);
         var shouldApply =
           tt === 'all-products' ||
           tt === 'all_products' ||
@@ -3678,7 +3740,9 @@
         });
         if (shouldTrackAntiFlicker) markAntiFlickerDone();
       }
-    }, 125);
+    }
+    tick();
+    if (!resolved) iv = setInterval(tick, 125);
     return true;
   }
 
@@ -4531,8 +4595,14 @@
         );
         scanWithObserver(observer);
         if (config.observeDomChanges !== false && typeof MutationObserver === 'function') {
+          // A full-document querySelectorAll per mutation is too much on busy themes.
+          var rescanTimer = null;
           var mutationObserver = new MutationObserver(function () {
-            scanWithObserver(observer);
+            if (rescanTimer) return;
+            rescanTimer = setTimeout(function () {
+              rescanTimer = null;
+              scanWithObserver(observer);
+            }, 200);
           });
           mutationObserver.observe(document.documentElement || document.body, {
             childList: true,
@@ -4653,32 +4723,83 @@
       true
     );
 
-    if (typeof MutationObserver === 'function') {
-      var lastCartVisibleAt = 0;
-      var observer = new MutationObserver(function () {
-        var root = cartUiRoot();
-        if (!root) return;
-        var now = Date.now();
-        if (now - lastCartVisibleAt < 2000) return;
-        lastCartVisibleAt = now;
+    // One event per time the cart is shown: arriving on /cart, or a drawer
+    // going from closed to open. Themes keep the drawer element (and every PDP
+    // keeps a /cart/add form) in the page while closed, so presence alone is not
+    // a cart view.
+    var cartWasOpen = false;
+    var cartCheckTimer = null;
+    function checkCartOpen() {
+      cartCheckTimer = null;
+      var open = openCartUiElement();
+      if (open && !cartWasOpen) {
         fireAutomaticGoalEvent(
           'view_cart',
-          'cart_ui_visible',
+          isCartPagePath() ? 'cart_page' : 'cart_ui_visible',
           { metadata: { cart_ui_detected: true } },
-          root,
+          open,
           tests,
           2000
         );
+      }
+      cartWasOpen = Boolean(open);
+    }
+    checkCartOpen();
+
+    if (typeof MutationObserver === 'function' && !isCartPagePath()) {
+      var observer = new MutationObserver(function () {
+        if (cartCheckTimer) return;
+        cartCheckTimer = setTimeout(checkCartOpen, 150);
       });
       try {
         observer.observe(document.documentElement || document.body, {
           childList: true,
           subtree: true,
           attributes: true,
-          attributeFilter: ['class', 'open', 'aria-hidden', 'style'],
+          attributeFilter: ['class', 'open', 'aria-hidden', 'hidden', 'style'],
         });
       } catch (_eCartObserver) {}
     }
+  }
+
+  function isCartPagePath() {
+    var path = stripStorefrontLocalePrefix(
+      String((window.location && window.location.pathname) || '/')
+    ).replace(/\/+$/, '');
+    return path === '/cart';
+  }
+
+  function isRipxElementShown(el) {
+    if (!el || el.getAttribute('aria-hidden') === 'true' || el.hidden) return false;
+    try {
+      if (typeof el.getClientRects === 'function' && !el.getClientRects().length) return false;
+      var style = window.getComputedStyle ? window.getComputedStyle(el) : null;
+      if (style && (style.visibility === 'hidden' || style.display === 'none')) return false;
+    } catch (_eShown) {}
+    return true;
+  }
+
+  /** The cart the shopper is looking at right now, or null. */
+  function openCartUiElement() {
+    if (isCartPagePath()) {
+      return cartUiRoot() || document.querySelector('main') || document.body;
+    }
+    var drawers;
+    try {
+      drawers = document.querySelectorAll(
+        'cart-drawer.active, cart-drawer[open], .cart-drawer.active, .cart-drawer.is-open, ' +
+          '.cart-drawer.is-active, .cart-drawer--open, #CartDrawer.is-open, #CartDrawer.drawer--is-open, ' +
+          '#CartDrawer.active, .drawer--cart.is-open, .drawer--cart.active, ' +
+          '[data-cart-drawer].is-open, [data-cart-drawer].active, [data-cart-drawer][aria-hidden="false"], ' +
+          'details[id*="cart"][open], details[id*="Cart"][open]'
+      );
+    } catch (_eDrawerSel) {
+      return null;
+    }
+    for (var i = 0; i < drawers.length; i += 1) {
+      if (isRipxElementShown(drawers[i])) return drawers[i];
+    }
+    return null;
   }
 
   function installGoalMetricCatalogTriggers(tests) {
@@ -9004,9 +9125,28 @@
     } catch (e) {}
     setTimeout(paint, 400);
 
+    // Reapply passes call this again for the same test; each pass replaces the
+    // previous watcher, or observers and listeners pile up and every theme
+    // change repaints once per pass the page has seen.
+    var watcherKey = String(testId) + '|' + String(productId || '');
+    if (_ripxPdpPaintWatchers[watcherKey]) _ripxPdpPaintWatchers[watcherKey].stop();
     var t = null;
+    var frame = null;
+    var obs = null;
+    var nextFrame =
+      typeof window.requestAnimationFrame === 'function'
+        ? window.requestAnimationFrame.bind(window)
+        : null;
     try {
-      var obs = new MutationObserver(function () {
+      obs = new MutationObserver(function () {
+        // Repaint before the browser draws the theme's re-rendered (control)
+        // price; the trailing pass catches themes that render in several steps.
+        if (nextFrame && !frame) {
+          frame = nextFrame(function () {
+            frame = null;
+            paint();
+          });
+        }
         if (t) clearTimeout(t);
         t = setTimeout(paint, 80);
       });
@@ -9021,19 +9161,32 @@
       }
       if (currentDisplay) paint();
     }
-    ['variant:change', 'shopify:section:load', 'product:update'].forEach(function (evt) {
-      document.addEventListener(evt, function () {
-        setTimeout(recomputeAndPaint, 50);
-      });
+    function onThemePriceChange() {
+      setTimeout(recomputeAndPaint, 50);
+    }
+    var themeEvents = ['variant:change', 'shopify:section:load', 'product:update'];
+    themeEvents.forEach(function (evt) {
+      document.addEventListener(evt, onThemePriceChange);
     });
     var variantInput = document.querySelector(
       'input[name="id"], input[name="variant_id"], [data-variant-picker] input'
     );
     if (variantInput) {
-      variantInput.addEventListener('change', function () {
-        setTimeout(recomputeAndPaint, 50);
-      });
+      variantInput.addEventListener('change', onThemePriceChange);
     }
+    _ripxPdpPaintWatchers[watcherKey] = {
+      stop: function () {
+        if (t) clearTimeout(t);
+        if (frame && typeof window.cancelAnimationFrame === 'function') {
+          window.cancelAnimationFrame(frame);
+        }
+        if (obs) obs.disconnect();
+        themeEvents.forEach(function (evt) {
+          document.removeEventListener(evt, onThemePriceChange);
+        });
+        if (variantInput) variantInput.removeEventListener('change', onThemePriceChange);
+      },
+    };
 
     if (variantIdForCart != null && String(variantIdForCart).trim() !== '') {
       var sourceVariantIdForCart = normalizeCartVariantId(currentPdpVariantId);
@@ -11308,12 +11461,18 @@
           doc.searchParams.set(key, String(value).trim());
         }
       });
-      if (!doc.searchParams.get('parent_origin')) {
+      // The next page goes through the same proxy, which needs the shop and the
+      // storefront password again; without them it renders a blank error.
+      ['parent_origin', 'shop', 'storefront_password'].forEach(function (key) {
+        if (doc.searchParams.get(key)) return;
         try {
-          var parentOrigin = getPreviewParam('parent_origin');
-          if (parentOrigin) doc.searchParams.set('parent_origin', parentOrigin);
-        } catch (_eParentOrigin) {}
-      }
+          var carried = key === 'parent_origin' ? getPreviewParam(key) : URL_PARAMS.get(key);
+          if (key === 'shop' && !carried) {
+            carried = String(CONFIG.shopDomain || PREVIEW_TENANT_DOMAIN || '').trim();
+          }
+          if (carried) doc.searchParams.set(key, carried);
+        } catch (_eCarry) {}
+      });
       return doc.toString();
     } catch (_eDoc) {
       return '';
@@ -12917,7 +13076,7 @@
     if (saleNow || saleWas) {
       if (saleWas) {
         rememberOfferPdpOrigText(saleWas);
-        saleWas.textContent = wasDisplay;
+        if (saleWas.textContent !== wasDisplay) saleWas.textContent = wasDisplay;
       } else if (saleNow && saleNow.parentNode) {
         saleWas = document.createElement('s');
         saleWas.className = 'price-item price-item--regular';
@@ -12927,7 +13086,7 @@
       }
       if (saleNow) {
         rememberOfferPdpOrigText(saleNow);
-        saleNow.textContent = nowDisplay;
+        if (saleNow.textContent !== nowDisplay) saleNow.textContent = nowDisplay;
       }
       priceRoot.setAttribute(OFFER_PDP_HOST_PAINTED_ATTR, '1');
       priceRoot.setAttribute('data-ripx-offer-cutout-test', String(testId || ''));
@@ -12944,10 +13103,10 @@
       }
       if (cmp) {
         rememberOfferPdpOrigText(cmp);
-        cmp.textContent = wasDisplay;
+        if (cmp.textContent !== wasDisplay) cmp.textContent = wasDisplay;
       }
       rememberOfferPdpOrigText(horizonNow);
-      horizonNow.textContent = nowDisplay;
+      if (horizonNow.textContent !== nowDisplay) horizonNow.textContent = nowDisplay;
       priceRoot.setAttribute(OFFER_PDP_HOST_PAINTED_ATTR, '1');
       priceRoot.setAttribute('data-ripx-offer-cutout-test', String(testId || ''));
       return true;
@@ -13363,14 +13522,27 @@
         if (stack.firstChild) stack.insertBefore(cutoutEl, stack.firstChild);
         else stack.appendChild(cutoutEl);
       }
-      cutoutEl.textContent = '';
-      var wasNode = document.createElement('s');
-      wasNode.textContent = wasDisplay;
-      var nowNode = document.createElement('span');
-      nowNode.setAttribute('data-ripx-offer-pdp-now', '1');
-      nowNode.textContent = nowDisplay;
-      cutoutEl.appendChild(wasNode);
-      cutoutEl.appendChild(nowNode);
+      // The PDP observer reapplies on any child change under the product root,
+      // so rebuilding an unchanged cutout here re-triggers it forever.
+      var shownWas = cutoutEl.children.length === 2 ? cutoutEl.children[0] : null;
+      var shownNow = cutoutEl.children.length === 2 ? cutoutEl.children[1] : null;
+      var cutoutCurrent =
+        shownWas &&
+        shownNow &&
+        shownWas.tagName === 'S' &&
+        shownWas.textContent === wasDisplay &&
+        shownNow.getAttribute('data-ripx-offer-pdp-now') === '1' &&
+        shownNow.textContent === nowDisplay;
+      if (!cutoutCurrent) {
+        cutoutEl.textContent = '';
+        var wasNode = document.createElement('s');
+        wasNode.textContent = wasDisplay;
+        var nowNode = document.createElement('span');
+        nowNode.setAttribute('data-ripx-offer-pdp-now', '1');
+        nowNode.textContent = nowDisplay;
+        cutoutEl.appendChild(wasNode);
+        cutoutEl.appendChild(nowNode);
+      }
     } else if (cutoutEl && cutoutEl.parentNode) {
       cutoutEl.parentNode.removeChild(cutoutEl);
     }
@@ -14159,219 +14331,6 @@
       }
     }
     return false;
-  }
-
-  /**
-   * Heatmap: buffer and flush click/scroll events
-   */
-  const heatmapBuffer = [];
-  const HEATMAP_FLUSH_INTERVAL = 10000;
-  const HEATMAP_CAPTURE_VERSION = 'full-page-v2';
-
-  function getHeatmapCollectionConfig() {
-    var config = CONFIG.heatmapCollection || {};
-    var sampleRate = Number(config.sampleRate);
-    if (!Number.isFinite(sampleRate)) sampleRate = 1;
-    return {
-      enabled: config.enabled !== false,
-      sampleRate: Math.max(0, Math.min(1, sampleRate)),
-    };
-  }
-
-  const HEATMAP_COLLECTION_CONFIG = getHeatmapCollectionConfig();
-  const HEATMAP_SESSION_INCLUDED = Math.random() < HEATMAP_COLLECTION_CONFIG.sampleRate;
-
-  function shouldCollectHeatmap() {
-    return (
-      hasValidConfig &&
-      !PREVIEW_MODE &&
-      HEATMAP_COLLECTION_CONFIG.enabled &&
-      HEATMAP_SESSION_INCLUDED
-    );
-  }
-
-  function clampHeatmapValue(value, min, max) {
-    var numeric = Number(value);
-    if (!Number.isFinite(numeric)) return null;
-    return Math.max(min, Math.min(max, numeric));
-  }
-
-  function getHeatmapViewportDimensions() {
-    return {
-      width: Math.max(0, Number(window.innerWidth) || 0),
-      height: Math.max(0, Number(window.innerHeight) || 0),
-    };
-  }
-
-  function hasLikelyScrollableContainer() {
-    try {
-      var nodes = document.querySelectorAll('body *');
-      var limit = Math.min(nodes.length, 250);
-      for (var i = 0; i < limit; i += 1) {
-        var node = nodes[i];
-        var style = window.getComputedStyle ? window.getComputedStyle(node) : null;
-        if (!style) continue;
-        var overflowY = String(style.overflowY || '').toLowerCase();
-        if (
-          (overflowY === 'auto' || overflowY === 'scroll') &&
-          node.scrollHeight > node.clientHeight + 80
-        ) {
-          return true;
-        }
-      }
-    } catch (_eScrollable) {}
-    return false;
-  }
-
-  function getHeatmapPageDimensions() {
-    var doc = document.documentElement || {};
-    var body = document.body || {};
-    var viewport = getHeatmapViewportDimensions();
-    var widthCandidates = [
-      Number(doc.scrollWidth) || 0,
-      Number(body.scrollWidth) || 0,
-      Number(doc.offsetWidth) || 0,
-      Number(body.offsetWidth) || 0,
-      viewport.width,
-    ];
-    var heightCandidates = [
-      Number(doc.scrollHeight) || 0,
-      Number(body.scrollHeight) || 0,
-      Number(doc.offsetHeight) || 0,
-      Number(body.offsetHeight) || 0,
-      viewport.height,
-    ];
-    var width = Math.max.apply(Math, widthCandidates);
-    var height = Math.max.apply(Math, heightCandidates);
-    return {
-      width: width,
-      height: height,
-      heightSource:
-        height === (Number(doc.scrollHeight) || 0)
-          ? 'document'
-          : height === (Number(body.scrollHeight) || 0)
-            ? 'body'
-            : 'fallback',
-      scrollContainerDetected: hasLikelyScrollableContainer(),
-    };
-  }
-
-  function captureHeatmapEvent(testId, variantId, eventType, data) {
-    if (!shouldCollectHeatmap()) return;
-    var viewport = getHeatmapViewportDimensions();
-    heatmapBuffer.push({
-      test_id: testId,
-      variant_id: variantId,
-      page_url: window.location.href,
-      event_type: eventType,
-      device: getDeviceType(),
-      country: getCountryCode(),
-      viewport_width: viewport.width || null,
-      viewport_height: viewport.height || null,
-      capture_version: HEATMAP_CAPTURE_VERSION,
-      ...data,
-    });
-  }
-
-  function flushHeatmap(sync) {
-    if (heatmapBuffer.length === 0) return;
-    const events = heatmapBuffer.splice(0, heatmapBuffer.length);
-    const shopDomain = getShopDomain();
-    const body = JSON.stringify({
-      shop_domain: shopDomain,
-      site: !shopDomain ? window.location.hostname : null,
-      events,
-    });
-
-    if (sync && navigator.sendBeacon) {
-      var beaconBody =
-        typeof Blob === 'function' ? new Blob([body], { type: 'text/plain;charset=UTF-8' }) : body;
-      navigator.sendBeacon(`${CONFIG.apiUrl}/track/heatmap`, beaconBody);
-    } else {
-      fetch(`${CONFIG.apiUrl}/track/heatmap`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body,
-      }).catch(function () {});
-    }
-  }
-
-  function initHeatmap() {
-    if (!shouldCollectHeatmap()) return;
-
-    getVariantCachePromise().then(function (cache) {
-      document.addEventListener(
-        'click',
-        function (e) {
-          if (!hasConsent()) return;
-          const viewport = getHeatmapViewportDimensions();
-          if (!viewport.width || !viewport.height) return;
-          const pageDimensions = getHeatmapPageDimensions();
-          if (!pageDimensions.width || !pageDimensions.height) return;
-          const x = clampHeatmapValue((e.clientX / viewport.width) * 100, 0, 100);
-          const y = clampHeatmapValue((e.clientY / viewport.height) * 100, 0, 100);
-          const pageX = clampHeatmapValue(e.pageX, 0, pageDimensions.width);
-          const pageY = clampHeatmapValue(e.pageY, 0, pageDimensions.height);
-          CONFIG.activeTests.forEach(function (test) {
-            if (!matchesTarget(test)) return;
-            const v = cache[test.id];
-            if (!v || !v.variantId) return;
-            captureHeatmapEvent(test.id, v.variantId, 'click', {
-              x,
-              y,
-              page_x: pageX,
-              page_y: pageY,
-              page_width: pageDimensions.width,
-              page_height: pageDimensions.height,
-              page_height_source: pageDimensions.heightSource,
-              scroll_container_detected: pageDimensions.scrollContainerDetected,
-            });
-          });
-        },
-        true
-      );
-
-      var scrollThrottle = null;
-      window.addEventListener(
-        'scroll',
-        function () {
-          if (!hasConsent()) return;
-          if (scrollThrottle) return;
-          scrollThrottle = setTimeout(function () {
-            scrollThrottle = null;
-            const viewport = getHeatmapViewportDimensions();
-            const pageDimensions = getHeatmapPageDimensions();
-            if (!viewport.height || !pageDimensions.height) return;
-            const depth = clampHeatmapValue(
-              ((window.scrollY + viewport.height) / pageDimensions.height) * 100,
-              0,
-              100
-            );
-            CONFIG.activeTests.forEach(function (test) {
-              if (!matchesTarget(test)) return;
-              const v = cache[test.id];
-              if (!v || !v.variantId) return;
-              captureHeatmapEvent(test.id, v.variantId, 'scroll', {
-                scroll_depth: depth,
-                page_width: pageDimensions.width,
-                page_height: pageDimensions.height,
-                page_height_source: pageDimensions.heightSource,
-                scroll_container_detected: pageDimensions.scrollContainerDetected,
-              });
-            });
-          }, 200);
-        },
-        { passive: true }
-      );
-    });
-
-    setInterval(function () {
-      flushHeatmap(false);
-    }, HEATMAP_FLUSH_INTERVAL);
-
-    window.addEventListener('beforeunload', function () {
-      flushHeatmap(true);
-    });
   }
 
   function installPreviewDebugFloatingPanel() {
@@ -15388,8 +15347,6 @@
             }
           });
         }
-
-        initHeatmap();
 
         if (shouldRunAllProductsCartFallback()) {
           if (!(PREVIEW_MODE && PREVIEW_TEST_ID && !previewFocusLooksLikePrice())) {

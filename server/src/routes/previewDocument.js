@@ -183,7 +183,7 @@ function rewriteHtmlForPreviewDocument({
   return next;
 }
 
-async function servePreviewDocument(req, res) {
+async function servePreviewDocument(req, res, { shop: resolvedShop = '' } = {}) {
   const targetUrl = String(req.query.url || req.query.target || '').trim();
   const parentOrigin = String(req.query.parent_origin || '').trim();
   if (!targetUrl) {
@@ -235,7 +235,7 @@ async function servePreviewDocument(req, res) {
   }
 
   const shop =
-    String(req.query.shop || req.query.domain || '').trim().toLowerCase() ||
+    String(resolvedShop || req.query.shop || req.query.domain || '').trim().toLowerCase() ||
     shopFromTargetUrl(targetUrl);
   const storefrontPassword = resolveStorefrontPasswordForPreviewRequest(
     typeof req.query.storefront_password === 'string'

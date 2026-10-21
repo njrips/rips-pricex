@@ -87,12 +87,18 @@
 /* COGS block - within Primary metrics */
 
 .priceSurfacePickerModal {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  display: flex;
+  flex-direction: column;
   gap: 10px;
   height: min(92vh, 960px);
   min-height: min(720px, calc(100vh - 120px));
   overflow: hidden;
+}
+
+.priceSurfacePickerFrameWrap {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .priceSurfacePickerIframe {
@@ -101,6 +107,16 @@
   min-height: min(680px, calc(100vh - 160px));
   border: 0;
   display: block;
+  background: #fff;
+}
+
+.priceSurfacePickerLoading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
   background: #fff;
 }
 
@@ -250,7 +266,8 @@
   display: flex;
   align-items: stretch;
   gap: 4px;
-  padding-right: 6px;
+  /* Lines the label up with the table body below, which is inset 12px. */
+  padding: 8px 12px;
 }
 
 .priceSurfaceHeaderMain {

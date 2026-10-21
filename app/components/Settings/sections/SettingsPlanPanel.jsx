@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router';
+import { useNavigate, useSearchParams } from 'react-router';
 import { withCurrentEmbeddedSearch } from '../../../utils/shopifyEmbeddedSearch';
 import { Badge, Banner, Button } from '@shopify/polaris';
 import { rpxApi } from '../../../lib/api.client';
@@ -234,26 +234,39 @@ export default function SettingsPlanPanel({ ctx, planState }) {
           <p className={styles.adminRowBody}>• Create and run offer tests</p>
           <p className={styles.adminRowBody}>• Track revenue per visitor and test confidence</p>
           <p className={styles.adminRowBody}>
-            After upgrading, complete{' '}
-            <Link to={withCurrentEmbeddedSearch(searchParams, '/app/setup')}>Store setup</Link>.
-            Offer tests need
-            Checkout pricing functions; price tests also need Theme connection and price locations.
-            Store setup:{' '}
-            <strong>
+            After upgrading, complete Store setup. Offer tests need Checkout pricing functions;
+            price tests also need Theme connection and price locations.
+          </p>
+          <div className={styles.adminStatusLines}>
+            <div className={styles.adminStatusLine}>
+              <span className={styles.adminStatusLineLabel}>Store setup</span>
+            <Badge
+              tone={
+                loading
+                  ? undefined
+                  : checkoutReady === true
+                    ? offerReady && priceReady
+                      ? 'success'
+                      : 'info'
+                    : checkoutReady === false
+                      ? 'warning'
+                      : undefined
+              }
+            >
               {loading
-                ? '…'
+                ? 'Checking…'
                 : checkoutReady === true
                   ? offerReady && !priceReady
-                    ? 'offer tests ready'
+                    ? 'Offer tests ready'
                     : priceReady && !offerReady
-                      ? 'price tests ready'
-                      : 'ready'
+                      ? 'Price tests ready'
+                      : 'Ready'
                   : checkoutReady === false
-                    ? 'needs attention'
-                    : 'unknown'}
-            </strong>
-            .
-          </p>
+                    ? 'Needs attention'
+                    : 'Unknown'}
+              </Badge>
+            </div>
+          </div>
           <div className={styles.adminRowActions}>
             {unlocked ? (
               <Button

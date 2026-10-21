@@ -758,13 +758,29 @@ class TestModel {
 // Export functions for convenience
 const model = new TestModel();
 
+/** The theme embed's storefront hint mirrors which tests run where. */
+function afterStorefrontChange(shop) {
+  return result => {
+    if (result) {
+      try {
+        require('../services/storefrontHintService').requestStorefrontHintSync(shop);
+      } catch {
+        // The script route resyncs on the next storefront page view.
+      }
+    }
+    return result;
+  };
+}
+
 module.exports = {
-  createTest: data => model.createTest(data),
+  createTest: data => model.createTest(data).then(afterStorefrontChange(data?.shop_domain)),
   getTestById: (id, shop) => model.getTestById(id, shop),
   getTestsByIds: (ids, shop) => model.getTestsByIds(ids, shop),
   getTestsByShop: (shop, status) => model.getTestsByShop(shop, status),
   getActiveTestsForStorefront: shop => model.getActiveTestsForStorefront(shop),
-  updateTestStatus: (id, shop, status) => model.updateTestStatus(id, shop, status),
-  updateTest: (id, shop, updates) => model.updateTest(id, shop, updates),
-  deleteTest: (id, shop) => model.deleteTest(id, shop),
+  updateTestStatus: (id, shop, status) =>
+    model.updateTestStatus(id, shop, status).then(afterStorefrontChange(shop)),
+  updateTest: (id, shop, updates) =>
+    model.updateTest(id, shop, updates).then(afterStorefrontChange(shop)),
+  deleteTest: (id, shop) => model.deleteTest(id, shop).then(afterStorefrontChange(shop)),
 };

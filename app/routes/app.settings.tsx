@@ -349,14 +349,6 @@ export default function SettingsPage() {
           }
         : null;
 
-  const footerSecondary =
-    tab === 'plan' && planState.needsSetup && !planState.loading
-      ? {
-          label: 'Open setup checklist',
-          onClick: () => navigate(withCurrentEmbeddedSearch(searchParams, '/app/setup')),
-        }
-      : undefined;
-
   const settingsBootstrapping =
     (tab === 'stats' && guardrailsLoading) ||
     (tab === 'plan' && planState.loading) ||
@@ -372,7 +364,6 @@ export default function SettingsPage() {
       activeTab={tab}
       onTabChange={id => setTab(id as TabId)}
       footerPrimary={footerPrimary}
-      footerSecondary={footerSecondary}
     >
       {settingsBootstrapping ? (
         <ClassicPageLoader

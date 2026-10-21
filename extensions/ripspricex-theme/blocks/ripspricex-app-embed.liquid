@@ -14,6 +14,29 @@
     var shopHost = '{{ request.host }}';
     var version = '1.0.66';
     var styleId = 'ripx-anti-flicker-style';
+    /* Written by the app whenever the running tests change: where a price test
+       repaints, and which origin the storefront script calls. */
+    var serverHint = {{ app.metafields.priceify.storefront_hint.value | json }};
+    var pageContext = {
+      template: {{ template.name | json }},
+      productId: {{ product.id | json }},
+      productCollectionIds: {% if product %}{{ product.collections | map: 'id' | json }}{% else %}[]{% endif %},
+      collectionId: {{ collection.id | json }}
+    };
+    function preconnectToApi() {
+      try {
+        var origin = serverHint && serverHint.api_origin ? String(serverHint.api_origin) : '';
+        if (!/^https:\/\/[^/]+$/.test(origin) || origin === window.location.origin) return;
+        var link = document.createElement('link');
+        link.rel = 'preconnect';
+        link.href = origin;
+        /* The script's API calls are CORS requests without credentials, which
+           only reuse a connection opened the same way. */
+        link.crossOrigin = 'anonymous';
+        (document.head || document.documentElement).appendChild(link);
+      } catch (_ePreconnect) {}
+    }
+    preconnectToApi();
     var defaultPriceSelectors = [
       '.price',
       '.money',
@@ -234,8 +257,53 @@
       }
       return true;
     }
+    function hasPreviewContext() {
+      try {
+        var params = new URLSearchParams(window.location.search || '');
+        if (params.get('ab_preview') === '1' || params.get('ab_preview_test')) return true;
+        if (window.sessionStorage && window.sessionStorage.getItem('__ripx_preview_ctx_v1__')) {
+          return true;
+        }
+        if (String(document.cookie || '').indexOf('__ripx_preview_ctx_v1=') !== -1) return true;
+        return String(window.name || '').indexOf('__ripx_preview_ctx_v1__:') === 0;
+      } catch (_ePreviewCtx) {
+        return false;
+      }
+    }
+    function listHas(list, id) {
+      if (id == null || !Array.isArray(list)) return false;
+      return list.indexOf(String(id)) !== -1;
+    }
+    /* Only pages a running price test is certain to repaint. Hiding every price
+       on every page for a test on one product is what this replaces. */
+    function serverHintCoversPage(price) {
+      if (!price || typeof price !== 'object') return false;
+      var template = String(pageContext.template || '');
+      if (template === 'product' && pageContext.productId != null) {
+        if (price.all_products) return !listHas(price.excluded_product_ids, pageContext.productId);
+        if (listHas(price.product_ids, pageContext.productId)) return true;
+        return (pageContext.productCollectionIds || []).some(function (id) {
+          return listHas(price.collection_ids, id);
+        });
+      }
+      if (template === 'collection' && pageContext.collectionId != null) {
+        if (listHas(price.collection_ids, pageContext.collectionId)) return true;
+      }
+      return (
+        !!price.all_products &&
+        (template === 'collection' || template === 'index' || template === 'search' || template === 'cart')
+      );
+    }
     try {
       if (installPreviewGuardIfNeeded()) return;
+      if (serverHint && serverHint.v === 1) {
+        if (hasPreviewContext() || inPricePickerContext()) return;
+        var price = serverHint.price;
+        if (serverHintCoversPage(price)) {
+          applyPriceGuard(price.selectors, 'inline_server_hint', Number(price.timeout_ms) || 1200);
+        }
+        return;
+      }
       if (!window.sessionStorage || !document.documentElement) return;
       var raw = window.sessionStorage.getItem(storageKey);
       if (!raw) return;
