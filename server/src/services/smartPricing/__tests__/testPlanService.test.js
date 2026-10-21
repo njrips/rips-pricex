@@ -1,6 +1,5 @@
 const {
   buildSmartPricingTestPlan,
-  buildDemoBatchPlans,
   applyPriceArmOverrides,
 } = require('../testPlanService');
 
@@ -76,12 +75,6 @@ describe('testPlanService', () => {
     expect(plan.launch_preferences.min_sample_size).toBe(2500);
     expect(plan.statistical_design.min_sample_size).toBe(2500);
     expect(plan.goal.significance_level).toBe(0.95);
-  });
-
-  it('builds demo batch with distinct SKUs', () => {
-    const plans = buildDemoBatchPlans('demo.myshopify.com');
-    expect(plans).toHaveLength(3);
-    expect(new Set(plans.map(p => p.product_id)).size).toBe(3);
   });
 
   it('builds a cut on a low-margin product, keeping its cost for reference only', () => {

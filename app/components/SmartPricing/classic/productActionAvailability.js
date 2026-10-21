@@ -311,29 +311,3 @@ function formatEventDetail(event) {
   }
   return payload.note || payload.reason || null;
 }
-
-/**
- * Merge server events (preferred) with legacy client activity_log entries.
- */
-export function mergeServerAndLegacyActivity(serverEvents = [], legacyActivity = []) {
-  const fromServer = (Array.isArray(serverEvents) ? serverEvents : [])
-    .map(mapServerEventToActivity)
-    .filter(Boolean);
-  const fromLegacy = (Array.isArray(legacyActivity) ? legacyActivity : []).map(row => ({
-    ...row,
-    source: row.source || 'legacy',
-  }));
-
-  // Prefer server events; keep legacy rows that do not collide on id/timestamp+title.
-  const serverKeys = new Set(
-    fromServer.map(row => `${row.at}|${row.title}|${row.plan_id || ''}`)
-  );
-  const keptLegacy = fromLegacy.filter(row => {
-    const key = `${row.at}|${row.title}|${row.plan_id || ''}`;
-    return !serverKeys.has(key);
-  });
-
-  return [...fromServer, ...keptLegacy].sort((a, b) =>
-    String(b.at || '').localeCompare(String(a.at || ''))
-  );
-}

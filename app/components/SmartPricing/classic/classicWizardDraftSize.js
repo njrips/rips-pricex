@@ -44,15 +44,6 @@ export const DROPPED_DRAFT_PLAN_FIELDS = Object.freeze([
   'traffic_split_strategy',
 ]);
 
-/** Bytes this snapshot would take on the wire, which is what the cap counts. */
-export function wizardSnapshotBytes(snapshot) {
-  try {
-    return new TextEncoder().encode(JSON.stringify(snapshot ?? null)).length;
-  } catch {
-    return 0;
-  }
-}
-
 /** Drop preview-only plan fields before inbox sync or launch POST bodies. */
 export function compactInboxPlan(plan) {
   if (!plan || typeof plan !== 'object') return plan;

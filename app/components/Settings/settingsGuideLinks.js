@@ -91,15 +91,3 @@ export function openPublicDocsHref(href) {
   }
   return assignTabLocation(tab, url);
 }
-
-export function handleSettingsInfoLinkClick(event, href) {
-  if (event && typeof event.stopImmediatePropagation === 'function') {
-    event.stopImmediatePropagation();
-  } else if (event && typeof event.stopPropagation === 'function') {
-    event.stopPropagation();
-  }
-  if (event && typeof event.preventDefault === 'function') {
-    event.preventDefault();
-  }
-  return openPublicDocsHref(href);
-}

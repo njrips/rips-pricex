@@ -57,15 +57,6 @@ function pickReadinessSnapshot(readiness) {
   };
 }
 
-function previewLastMessage(body, max = 120) {
-  const text = String(body || '')
-    .replace(/\s+/g, ' ')
-    .trim();
-  if (!text) return '';
-  const limit = Math.max(24, Number(max) || 120);
-  return text.length > limit ? `${text.slice(0, limit - 1)}…` : text;
-}
-
 function yesNo(value) {
   return value === true ? 'yes' : 'no';
 }
@@ -99,6 +90,5 @@ module.exports = {
   sanitizeDiagnostics,
   pickRecentPlans,
   pickReadinessSnapshot,
-  previewLastMessage,
   summarizeDiagnostics,
 };

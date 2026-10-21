@@ -214,26 +214,6 @@ async function launchSmartPricingPlanAsTest(
     if (!autoStart) {
       return { test: created, startedTest: created, started: false };
     }
-    try {
-      const { ensureDefaultSchedule, startQaRun } = require('../selfQa/selfQaOrchestratorService');
-      // Classic/inbox launch already gates on checkout readiness.
-      // Self-QA still runs, but must not hard-block (password-protected shops and
-      // theme mapping gaps are common on Shopify development stores).
-      await ensureDefaultSchedule(shopDomain, created.id, {
-        enabled: true,
-        on_fail_pause: true,
-        pack: 'essential',
-        block_launch: false,
-      });
-      await startQaRun({
-        shopDomain,
-        testId: created.id,
-        trigger: 'launch',
-        sync: false,
-      });
-    } catch (_qaErr) {
-      // Self-QA optional if tables missing / Redis unavailable
-    }
     const running = (await abTestEngine.startTest(created.id, shopDomain)) || created;
     return {
       test: created,

@@ -86,26 +86,6 @@ export function isAllCountriesOptionVisible(query, mode = 'include') {
   return ALL_QUERY.test(q);
 }
 
-export function formatCountryAudienceValue(codes, mode = 'include', maxVisible = 8) {
-  const list = collapseCountrySelection(codes, mode);
-  if (String(mode).toLowerCase() === 'exclude') {
-    return list.length ? `Exclude: ${formatCountryCodesSummary(list, maxVisible)}` : NONE_EXCLUDED_LABEL;
-  }
-  if (!list.length) return ALL_COUNTRIES_LABEL;
-  return formatCountryCodesSummary(list, maxVisible);
-}
-
-export function formatCountryAudienceLabel(codes, mode = 'include', maxVisible = 8) {
-  const list = collapseCountrySelection(codes, mode);
-  if (String(mode).toLowerCase() === 'exclude') {
-    return list.length
-      ? `Exclude: ${formatCountryCodesSummary(list, maxVisible)}`
-      : NONE_EXCLUDED_LABEL;
-  }
-  if (!list.length) return ALL_COUNTRIES_LABEL;
-  return `Include: ${formatCountryCodesSummary(list, maxVisible)}`;
-}
-
 export function normalizeCountryMode(raw) {
   return String(raw || 'include').toLowerCase() === 'exclude' ? 'exclude' : 'include';
 }

@@ -491,7 +491,6 @@ function isReadyState(state) {
 
 module.exports = {
   PRODUCT_DECISION_STATE: STATE,
-  PRODUCT_DECISION_SORT_RANK: SORT_RANK,
   resolveProductRolloutDecision,
   isReadyState,
 };

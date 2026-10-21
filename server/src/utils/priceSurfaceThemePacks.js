@@ -29,29 +29,32 @@ const PRICE_SURFACE_THEME_PACKS = Object.freeze({
       {
         surface: 'pdp',
         role: 'regular',
-        // Dawn puts --regular on the same node as .price-item (not nested .price-item__regular).
-        selector: '.price-item--regular',
+        // Dawn prints both layouts and hides one with CSS: `.price__regular
+        // .price-item--regular` at full price, `.price__sale .price-item--sale` on
+        // sale. The struck `s.price-item--regular` is skipped when repainting.
+        selector: '.price-item--regular, .price-item--sale',
         priority: 12,
         source: 'theme_pack',
       },
       {
         surface: 'pdp',
         role: 'compare_at',
-        selector: '.price-item--compare',
+        // Dawn has no compare class: the was-price is `<s class="price-item price-item--regular">`.
+        selector: 's.price-item--regular',
         priority: 11,
         source: 'theme_pack',
       },
       {
         surface: 'plp',
         role: 'regular',
-        selector: '.price-item--regular',
+        selector: '.price-item--regular, .price-item--sale',
         priority: 10,
         source: 'theme_pack',
       },
       {
         surface: 'plp',
         role: 'compare_at',
-        selector: '.price-item--compare',
+        selector: 's.price-item--regular',
         priority: 9,
         source: 'theme_pack',
       },
@@ -72,7 +75,7 @@ const PRICE_SURFACE_THEME_PACKS = Object.freeze({
       {
         surface: 'search',
         role: 'regular',
-        selector: '.price-item--regular',
+        selector: '.price-item--regular, .price-item--sale',
         priority: 7,
         source: 'theme_pack',
       },

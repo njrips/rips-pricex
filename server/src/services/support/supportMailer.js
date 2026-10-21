@@ -33,10 +33,6 @@ function normalizeNotifyEmail(value) {
   return email;
 }
 
-function supportInbox() {
-  return normalizeNotifyEmail(process.env.RIPSPRICEX_SUPPORT_EMAIL) || DEFAULT_STAFF_NOTIFY_EMAIL;
-}
-
 function supportNotifyAddressing() {
   const extras = String(process.env.RIPSPRICEX_SUPPORT_EMAIL || '')
     .split(',')
@@ -46,11 +42,6 @@ function supportNotifyAddressing() {
     to: DEFAULT_STAFF_NOTIFY_EMAIL,
     bcc: [...new Set(extras)],
   };
-}
-
-function supportNotifyRecipients() {
-  const { to, bcc } = supportNotifyAddressing();
-  return [to, ...bcc];
 }
 
 function isTicketNotifySuppressed() {
@@ -449,9 +440,7 @@ async function notifyStatusChange(ticket, previousStatus) {
 
 module.exports = {
   DEFAULT_STAFF_NOTIFY_EMAIL,
-  supportInbox,
   supportNotifyAddressing,
-  supportNotifyRecipients,
   staffTicketUrl,
   firstEnv,
   escapeHtml,

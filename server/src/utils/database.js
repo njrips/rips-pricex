@@ -152,27 +152,6 @@ async function query(sql, params = []) {
     throw error;
   }
 }
-
-/**
- * Close database connections gracefully
- *
- * @returns {Promise<void>}
- */
-async function closeDatabase() {
-  if (pool) {
-    try {
-      await pool.end();
-      pool = null;
-      const logger = require('./logger');
-      logger.info('Database connections closed');
-    } catch (error) {
-      const logger = require('./logger');
-      logger.error('Error closing database connections', { error });
-      throw error;
-    }
-  }
-}
-
 /**
  * Get a database client for transactions (caller must release with client.release())
  *
@@ -224,7 +203,6 @@ module.exports = {
   getClient,
   getPoolMax,
   initDatabase,
-  closeDatabase,
   withTransaction,
   ping,
 };

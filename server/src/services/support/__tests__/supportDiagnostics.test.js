@@ -3,7 +3,6 @@ const assert = require('node:assert/strict');
 const {
   pickRecentPlans,
   pickReadinessSnapshot,
-  previewLastMessage,
   sanitizeDiagnostics,
   summarizeDiagnostics,
 } = require('../supportDiagnostics');
@@ -58,6 +57,5 @@ describe('supportDiagnostics', () => {
     });
     assert.equal(rows[0][1], 'ripx-plus.myshopify.com');
     assert.match(String(rows.find((row) => row[0] === 'Failed checks')?.[1]), /theme embed/);
-    assert.equal(previewLastMessage('  hello   world  '), 'hello world');
   });
 });

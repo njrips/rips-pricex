@@ -52,7 +52,6 @@ vi.mock('../../lib/useThemeEmbedRedirect', () => ({
       https: 'https://admin.shopify.com/store/demo/themes/1/editor?context=apps',
       shopify: 'shopify://admin/themes/1/editor?context=apps',
     },
-    themeName: 'Dawn',
   }),
 }));
 
@@ -174,8 +173,9 @@ describe('Setup checklist', () => {
       readiness({ theme_embed: { status: 'enabled', theme_name: 'Craft' } })
     );
     await render();
-    expect(text()).toContain('No action needed');
-    expect(text()).toContain('Craft');
+    // The theme name is not part of the copy in the naming doc.
+    expect(text()).toContain('Priceify is installed in your live theme. No action needed.');
+    expect(text()).not.toContain('Craft');
     // Offering "Enable" next to "already enabled" is the confusion this fixes,
     // in the step and in the page footer alike.
     expect(buttonByLabel('Open theme settings')).toBeUndefined();

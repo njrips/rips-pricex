@@ -154,10 +154,7 @@
   font-weight: 600;
 }
 
-.staff-input,
-.staff-field input,
-.staff-field select,
-.staff-field textarea {
+.staff-input {
   width: 100%;
   font: inherit;
   padding: 12px 14px;
@@ -167,10 +164,7 @@
   color: var(--px-ink);
 }
 
-.staff-input:focus,
-.staff-field input:focus,
-.staff-field select:focus,
-.staff-field textarea:focus {
+.staff-input:focus {
   outline: 2px solid var(--px-brand);
   outline-offset: 2px;
   border-color: var(--px-brand-200);

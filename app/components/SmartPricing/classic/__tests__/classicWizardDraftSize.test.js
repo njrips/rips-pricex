@@ -6,8 +6,9 @@ import {
   DROPPED_DRAFT_PLAN_FIELDS,
   omitPlansFromSnapshot,
   prepareWizardSnapshotForSave,
-  wizardSnapshotBytes,
 } from '../classicWizardDraftSize';
+
+const wizardSnapshotBytes = snapshot => new TextEncoder().encode(JSON.stringify(snapshot)).length;
 
 const audience = {
   segment: 'all_visitors',

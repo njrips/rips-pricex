@@ -35,7 +35,7 @@
 | 6 | Cart line attributes | Keep `_ripx_*` for MVP (rebrand later) |
 | 7 | Admin + API | React Router Admin + sibling Express API |
 | 8 | Unpaid open | List visible + locked Create |
-| 9 | Goals & Metrics | Picker only (`/api/goal-metrics` + builtins); no full Goals app in MVP |
+| 9 | Goals & Metrics | Picker only (built-in standard metrics); no full Goals app in MVP |
 | 10 | Sidebar labels | Experiments, Create, Setup, Settings (Plan under Settings) |
 | 11 | Create entry points | Sidebar + TitleBar |
 | 12 | Visual source of truth | **Admin / Polaris 13** (near-black primary, gray canvas, Inter). EchoTest Figma remains **layout / IA** only — not cream/orange pixels. See [2026-08-17_ADMIN_POLARIS_SKIN.md](./2026-08-17_ADMIN_POLARIS_SKIN.md). |

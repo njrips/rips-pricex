@@ -10,6 +10,7 @@ import {
   normalizeAudienceSegment,
   normalizeAudienceSourcePills,
   parseMinSampleSize,
+  resolveLiveEditActivityEntries,
   resolveMinSampleSize,
   validateClassicAudienceUi,
   resolveAudienceHistoryActivityTitle,
@@ -374,5 +375,40 @@ describe('resolveAudienceHistoryActivityTitle', () => {
     expect(resolveAudienceHistoryActivityTitle('guardrail', prev, next)).toBe(
       'Guardrail turned off'
     );
+  });
+});
+
+describe('resolveLiveEditActivityEntries', () => {
+  const base = {
+    segment: 'all_visitors',
+    devices: ['all'],
+    trafficAllocation: 100,
+    primaryMetric: 'revenue_per_visitor',
+    guardrails: [{ id: 'revenue', on: true, threshold: '-10%' }],
+  };
+  const titles = (prev, next) => resolveLiveEditActivityEntries(prev, next).map(e => e.title);
+
+  it('logs a guardrail threshold edit as its own entry', () => {
+    const next = { ...base, guardrails: [{ id: 'revenue', on: true, threshold: '-15%' }] };
+    expect(titles(base, next)).toEqual(['Guardrail threshold changed']);
+  });
+
+  it('logs one entry per area that changed', () => {
+    const next = {
+      ...base,
+      trafficAllocation: 50,
+      guardrails: [{ id: 'revenue', on: false, threshold: '-10%' }],
+    };
+    expect(titles(base, next)).toEqual(['Guardrail turned off', 'Traffic allocation changed']);
+  });
+
+  it('falls back to a generic entry when only the name or hypothesis changed', () => {
+    expect(titles(base, { ...base })).toEqual(['Settings changed']);
+  });
+
+  it('does not invent changes for an older test missing metric or traffic fields', () => {
+    const prev = { segment: 'all_visitors', devices: ['all'], guardrails: [] };
+    const next = { ...prev, primaryMetric: 'revenue_per_visitor', guardrails: [] };
+    expect(titles(prev, next)).toEqual(['Settings changed']);
   });
 });

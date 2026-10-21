@@ -1,9 +1,6 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
-const {
-  resolveAiPriceLiftBand,
-  resolveSuggestionMarginPercent,
-} = require('../aiPriceLiftBand');
+const { resolveAiPriceLiftBand } = require('../aiPriceLiftBand');
 
 describe('AI price lift band', () => {
   it('caps the merchant band at shop max price change', () => {
@@ -24,21 +21,6 @@ describe('AI price lift band', () => {
     // Scaled, not collapsed onto the cap: every variation would otherwise be
     // priced at exactly 15% and the test would compare nothing.
     assert.equal(band.min, 10);
-  });
-
-  it('uses Default COGS when catalog margin is missing', () => {
-    assert.equal(resolveSuggestionMarginPercent({}, { default_cogs_percent: 55 }), 45);
-    assert.equal(
-      resolveSuggestionMarginPercent({ margin_percent: 60 }, { default_cogs_percent: 55 }),
-      60
-    );
-  });
-
-  it('preserves a recorded zero margin instead of replacing it with an assumption', () => {
-    assert.equal(
-      resolveSuggestionMarginPercent({ margin_percent: 0 }, { default_cogs_percent: 55 }),
-      0
-    );
   });
 });
 

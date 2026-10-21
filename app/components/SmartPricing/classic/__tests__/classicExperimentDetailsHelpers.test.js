@@ -790,9 +790,8 @@ describe('classicExperimentDetailsHelpers', () => {
         title: 'Test',
       },
       test: { started_at: '2026-07-02T00:00:00.000Z', status: 'running' },
-      qaRuns: [{ id: 'r1', status: 'pass', finished_at: '2026-07-03T00:00:00.000Z' }],
     });
-    expect(items[0].id).toBe('qa_r1');
+    expect(items[0].id).toBe('started');
     expect(items.some(item => item.id === 'created')).toBe(true);
     expect(items.find(item => item.id === 'created')?.title).toBe('Created test');
     expect(items.find(item => item.id === 'started')?.title).toBe('Launched test');

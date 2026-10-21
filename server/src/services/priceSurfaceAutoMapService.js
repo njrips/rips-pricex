@@ -3,7 +3,6 @@
  * OpenAI (optional) only chooses among verified live candidates — never invents CSS.
  */
 
-const shopifyService = require('./shopifyService');
 const { suggestShopPriceSurfaceMappings } = require('./priceSurfaceSuggestService');
 const {
   fetchStorefrontPreviewHtml,
@@ -17,10 +16,12 @@ const {
   extractMainProductSection,
   extractCartItemsSection,
   findPriceElements,
+  selectorElementFacts,
   candidatesFromPriceElements,
   moneyCentsInText,
   looksLikePriceSample,
 } = require('../utils/priceSurfaceHtmlProbe');
+const { resolvePriceCheckSamples, looksLikeGiftCard } = require('./priceSurfaceSampleProducts');
 const { filterThemeFileCandidatesForTarget } = require('../utils/priceSurfaceThemeExtract');
 const { scanThemePriceFiles } = require('./priceSurfaceThemeFileService');
 const { chatJson, hasOpenAiKey } = require('./smartPricing/smartPricingAiProvider');
@@ -115,30 +116,6 @@ function normalizeProductPath(productPath) {
   return `/products/${encodeURIComponent(raw)}`;
 }
 
-async function resolveSampleProductPath(shopDomain, accessToken, explicitPath) {
-  const fromExplicit = normalizeProductPath(explicitPath);
-  if (fromExplicit && fromExplicit.includes('/products/')) {
-    return fromExplicit;
-  }
-  if (!accessToken) {
-    return fromExplicit || '';
-  }
-  try {
-    const result = await shopifyService.listProducts(shopDomain, accessToken, '', 5, null);
-    const list = Array.isArray(result?.list) ? result.list : [];
-    const withHandle = list.find(p => p?.handle);
-    if (withHandle?.handle) {
-      return `/products/${encodeURIComponent(String(withHandle.handle).trim())}`;
-    }
-  } catch (error) {
-    logger.warn('Auto-map: sample product lookup failed', {
-      shopDomain,
-      error: error.message,
-    });
-  }
-  return fromExplicit || '';
-}
-
 async function probePage(url, storefrontPassword, signal, cookie = '') {
   const result = await fetchStorefrontPreviewHtml(url, storefrontPassword, signal, {
     cookie: cookie || undefined,
@@ -182,26 +159,6 @@ function collectVariantPrices(variants, unit, into) {
   return into;
 }
 
-/** Real prices of the sample product (`/products/<handle>.js` amounts are minor units). */
-async function loadSampleProductPrices(origin, productPath, cookie, signal) {
-  if (!productPath) {
-    return null;
-  }
-  const res = await fetchStorefrontJson(`${origin}${productPath}.js`, { cookie, signal }).catch(
-    () => null
-  );
-  const product = res?.ok ? res.json : null;
-  if (!product || !Array.isArray(product.variants) || !product.variants.length) {
-    return null;
-  }
-  const prices = collectVariantPrices(product.variants, 'minor', {
-    regular: new Set(),
-    compare: new Set(),
-  });
-  const buyable = product.variants.find(v => v?.available) || null;
-  return { ...prices, variantId: buyable?.id || null, title: String(product.title || '') };
-}
-
 /** Prices of the first listing products (`products.json` amounts are major units). */
 async function loadListingPrices(origin, collectionPath, cookie, signal) {
   const res = await fetchStorefrontJson(`${origin}${collectionPath}/products.json?limit=50`, {
@@ -222,22 +179,16 @@ async function loadListingPrices(origin, collectionPath, cookie, signal) {
           const compare = centsFrom(v?.compare_at_price, 'major');
           return Boolean(price && compare && compare > price && v?.available !== false);
         }),
-        giftCard: String(product.product_type || '').toLowerCase() === 'gift card',
+        hasCompareAt: variants.some(v => {
+          const price = centsFrom(v?.price, 'major');
+          const compare = centsFrom(v?.compare_at_price, 'major');
+          return Boolean(price && compare && compare > price);
+        }),
+        giftCard: looksLikeGiftCard(product.product_type, product.handle),
       });
     }
   });
   return into;
-}
-
-/**
- * A product the storefront really shows: in stock (so the cart can be seeded) and,
- * when possible, on sale (so compare-at prices can be verified too).
- */
-function pickSampleProductPath(products) {
-  const list = (Array.isArray(products) ? products : []).filter(p => p.handle && !p.giftCard);
-  const pick =
-    list.find(p => p.available && p.onSale) || list.find(p => p.available) || list[0] || null;
-  return pick ? `/products/${encodeURIComponent(pick.handle)}` : '';
 }
 
 const STOREFRONT_STEP_TIMEOUT_MS = 9000;
@@ -292,7 +243,7 @@ function unionSets(...sets) {
   return out;
 }
 
-function knownPricesForTarget(target, { product, listing, cartSeeded }) {
+function knownPricesForTarget(target, { product, otherProduct, listing, cartSeeded }) {
   const productRegular = product?.regular || new Set();
   const productCompare = product?.compare || new Set();
   if (target.surface === 'pdp') {
@@ -307,9 +258,50 @@ function knownPricesForTarget(target, { product, listing, cartSeeded }) {
     return seeded?.unit?.size ? seeded.unit : productRegular;
   }
   if (target.role === 'compare_at') {
-    return unionSets(listing?.compare, productCompare);
+    return unionSets(listing?.compare, productCompare, otherProduct?.compare);
   }
-  return unionSets(listing?.regular, productRegular);
+  return unionSets(listing?.regular, productRegular, otherProduct?.regular);
+}
+
+/**
+ * A product page's current price often sits in one element when the product is on
+ * sale and another when it is not. Check the chosen selector on the other product's
+ * page too, and when it misses there, find what covers both layouts.
+ * @returns {{ candidate: object, layouts: number, combined: boolean }}
+ */
+function coverBothProductLayouts({ chosen, candidates, primaryHtml, primary, otherHtml, other }) {
+  const missesOther = selector => {
+    const anchor = anchorSelectorToPrices(otherHtml, selector, other.regular);
+    return anchor.checked && !anchor.matched ? 'miss' : anchor.matched ? 'hit' : 'unknown';
+  };
+  const first = missesOther(chosen.selector);
+  if (first !== 'miss') {
+    return { candidate: chosen, layouts: first === 'hit' ? 2 : 1, combined: false };
+  }
+  const both = candidates.find(c => c.verified && missesOther(c.selector) === 'hit');
+  if (both) {
+    return { candidate: { ...both }, layouts: 2, combined: false };
+  }
+  // Join a selector that shows the other page's price, unless on this page it
+  // would also catch the struck-through compare-at price.
+  const otherElements = findPriceElements(
+    otherHtml,
+    text => moneyCentsInText(text).some(cents => other.regular.has(cents)),
+    { limit: 40 }
+  );
+  const addOn = candidatesFromPriceElements(otherElements, { role: 'regular' }).find(row => {
+    if (row.selector === chosen.selector) return false;
+    if (!primary.compare.size) return true;
+    return !anchorSelectorToPrices(primaryHtml, row.selector, primary.compare).matched;
+  });
+  if (!addOn) {
+    return { candidate: chosen, layouts: 1, combined: false };
+  }
+  return {
+    candidate: { ...chosen, selector: `${chosen.selector}, ${addOn.selector}` },
+    layouts: 2,
+    combined: true,
+  };
 }
 
 /**
@@ -413,14 +405,99 @@ const SLOT_DESCRIPTIONS = Object.freeze({
   'search:regular': 'the price on product cards in search results',
 });
 
+const SAMPLE_GAP_RATIONALE = Object.freeze({
+  no_buyable_product:
+    'Every product checked is sold out or not on the Online Store, so no product page could be checked. Choose a product to check with, or restock one, then scan again.',
+  no_sample_product:
+    'Could not open a product page to check. Choose a product to check with, then scan again.',
+  no_sale_products:
+    'None of your in-stock products has a compare-at price, so there was no "was" price to find. Add a compare-at price to a product and scan again, or pick this price on the page.',
+  not_on_sale:
+    'The product used for the check is not on sale, so there was no "was" price to find. Choose a product with a compare-at price, then scan again.',
+  cart_not_filled:
+    'Could not add a product to a test cart (no in-stock product was found), so cart prices could not be checked.',
+});
+
 function formatCentsForPrompt(cents) {
   return (Number(cents) / 100).toFixed(2);
 }
 
+const AUTO_MAP_SYSTEM_PROMPT = [
+  'You map where prices appear in a Shopify storefront so an app can repaint them.',
+  'Each slot says what it is looking_for and lists candidate CSS selectors found on the live page.',
+  'Pick the candidate whose elements are exactly that price, or -1 when none is.',
+  'Evidence, strongest first:',
+  '1) shows_expected_price=true, ideally with elements_with_other_amounts=0;',
+  '   showing one of must_not_show (the other price role) is a strong sign of the wrong element.',
+  '2) labels: themes print screen-reader text such as "Sale price", "Regular price", "Unit price" beside prices;',
+  '   for compare_at, "Regular price" next to a struck price is the was-price.',
+  '3) struck_prices: compare_at slots want struck (s/del/strike) prices; regular slots want none.',
+  '4) dom_path inside a price wrapper (.price, .product__price, .card__information); source theme_file or theme_pack.',
+  'Reject savings badges ("Save $5"), unit prices ("/100g"), cart counts, subtotals for line slots,',
+  'and selectors whose prices are all screen_reader_only.',
+  'Answer with candidate indexes only; never write or modify CSS. Keep each rationale under 20 words.',
+].join(' ');
+
+function promptCandidate(candidate, index, elements) {
+  const facts = selectorElementFacts(elements, candidate.selector);
+  return {
+    index,
+    selector: candidate.selector,
+    sample_text: String(candidate.sample_text || '').slice(0, 60),
+    dom_path: candidate.dom_path ? String(candidate.dom_path).slice(0, 200) : null,
+    source: candidate.source || 'heuristic',
+    file_hint: candidate.file_hint || null,
+    shows_expected_price: candidate.verified === true,
+    elements_with_expected_price: candidate.real_price_hits ?? null,
+    elements_with_other_amounts: candidate.other_amounts ?? null,
+    prices_on_page: facts.prices,
+    struck_prices: facts.struck,
+    screen_reader_only: facts.hidden,
+    labels: facts.labels,
+  };
+}
+
+function autoMapPicksSchema(slotKeys) {
+  return {
+    type: 'object',
+    additionalProperties: false,
+    required: ['picks'],
+    properties: {
+      picks: {
+        type: 'array',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['slot', 'index', 'rationale'],
+          properties: {
+            slot: { type: 'string', enum: slotKeys },
+            index: { type: 'integer' },
+            rationale: { type: 'string' },
+          },
+        },
+      },
+    },
+  };
+}
+
+/** Accepts the schema's `picks` array and the older `{ picks: { slot: pick } }` shape. */
+function picksBySlot(parsed) {
+  if (!parsed || typeof parsed !== 'object') return {};
+  if (Array.isArray(parsed.picks)) {
+    const out = {};
+    parsed.picks.forEach(pick => {
+      if (pick && typeof pick.slot === 'string' && !(pick.slot in out)) out[pick.slot] = pick;
+    });
+    return out;
+  }
+  return parsed.picks && typeof parsed.picks === 'object' ? parsed.picks : parsed;
+}
+
 /**
  * One OpenAI call for every slot the rules could not settle. The model sees each
- * candidate's DOM path, sample text and real-price evidence, may only answer with
- * a candidate index (or -1 for "none of these is right"), and never writes CSS.
+ * candidate's DOM path, labels, struck/hidden counts and real-price evidence, may
+ * only answer with a candidate index (or -1 for "none of these is right"), and
+ * never writes CSS.
  * @returns {Promise<Record<string, { index: number, rationale: string }>>}
  */
 async function maybeRankAllSurfacesWithOpenAi({ themeName, surfaceBuckets, shopDomain = null }) {
@@ -431,21 +508,16 @@ async function maybeRankAllSurfacesWithOpenAi({ themeName, surfaceBuckets, shopD
     .filter(bucket => Array.isArray(bucket.candidates) && bucket.candidates.length > 0)
     .map(bucket => {
       const key = `${bucket.surface}:${bucket.role}`;
+      const elements = bucket.html ? findPriceElements(bucket.html, looksLikePriceSample, { limit: 80 }) : [];
       return {
         key,
         looking_for: SLOT_DESCRIPTIONS[key] || `${bucket.role} price on ${bucket.surface}`,
         expected_prices: [...(bucket.knownPrices || [])].slice(0, 6).map(formatCentsForPrompt),
-        candidates: bucket.candidates.slice(0, 6).map((c, index) => ({
-          index,
-          selector: c.selector,
-          sample_text: String(c.sample_text || '').slice(0, 60),
-          dom_path: c.dom_path ? String(c.dom_path).slice(0, 200) : null,
-          source: c.source || 'heuristic',
-          file_hint: c.file_hint || null,
-          shows_expected_price: c.verified === true,
-          elements_with_expected_price: c.real_price_hits ?? null,
-          elements_with_other_amounts: c.other_amounts ?? null,
-        })),
+        must_not_show: [...(bucket.otherRolePrices || [])]
+          .filter(cents => !bucket.knownPrices?.has?.(cents))
+          .slice(0, 6)
+          .map(formatCentsForPrompt),
+        candidates: bucket.candidates.slice(0, 6).map((c, index) => promptCandidate(c, index, elements)),
       };
     });
   if (!compactBuckets.length) {
@@ -453,30 +525,19 @@ async function maybeRankAllSurfacesWithOpenAi({ themeName, surfaceBuckets, shopD
   }
 
   const parsed = await chatJson({
-    systemPrompt: [
-      'You map where prices appear in a Shopify storefront so an app can repaint them.',
-      'For each slot, read "looking_for" and pick the candidate whose element is that price.',
-      'Evidence, strongest first: shows_expected_price=true; few elements_with_other_amounts;',
-      'a dom_path inside a price wrapper (e.g. .price, .product__price, .card__information);',
-      'source theme_file/theme_pack; tag s/del/strike or a compare/was class only for compare_at slots.',
-      'Reject savings badges ("Save $5"), unit prices ("/100g"), cart counts, subtotals for line slots,',
-      'and visually-hidden labels. If no candidate fits, answer index -1.',
-      'Answer only with candidate indexes; never write or modify CSS.',
-      'Return JSON: { "picks": { "<slot key>": { "index": number, "rationale": "short reason" } } }.',
-    ].join(' '),
+    systemPrompt: AUTO_MAP_SYSTEM_PROMPT,
     userPrompt: JSON.stringify({ theme: themeName || null, slots: compactBuckets }),
     temperature: 0,
     // An index pick under an 8 second limit: thinking would only cost time.
     reasoningEffort: 'none',
     maxTokens: 900,
     timeoutMs: 8000,
+    responseSchema: autoMapPicksSchema(compactBuckets.map(bucket => bucket.key)),
+    responseSchemaName: 'price_surface_picks',
     label: 'price_surface_auto_map',
     shopDomain,
   });
-  if (!parsed || typeof parsed !== 'object') {
-    return {};
-  }
-  const picks = parsed.picks && typeof parsed.picks === 'object' ? parsed.picks : parsed;
+  const picks = picksBySlot(parsed);
   const out = {};
   for (const bucket of compactBuckets) {
     const pick = picks[bucket.key];
@@ -579,22 +640,43 @@ async function autoMapShopPriceSurfaces(shopDomain, options = {}) {
     ? await loadListingPrices(origin, collectionPath, sharedCookie, stepSignal()).catch(() => null)
     : null;
   const explicitPath = normalizeProductPath(options.productPath);
-  const productPath =
-    (explicitPath.includes('/products/') && explicitPath) ||
-    pickSampleProductPath(listingPrices?.products) ||
-    (await resolveSampleProductPath(domain, accessToken, options.productPath));
+  const samples = canReachStorefront
+    ? await resolvePriceCheckSamples({
+        origin,
+        shopDomain: domain,
+        accessToken,
+        productId: options.productId || '',
+        productPath: explicitPath.includes('/products/') ? explicitPath : '',
+        listingProducts: listingPrices?.products,
+        cookie: sharedCookie,
+        signalFor: stepSignal,
+      }).catch(error => {
+        logger.warn('Auto-map: choosing products to check failed', {
+          shopDomain: domain,
+          error: error.message,
+        });
+        return { primary: null, secondary: null, source: 'none', store: {} };
+      })
+    : { primary: null, secondary: null, source: 'none', store: {} };
+  const productPrices = samples.primary;
+  const otherProduct = samples.secondary;
+  // Without a confirmed product the page is still checked by pattern alone.
+  const productPath = productPrices?.path || samples.unverifiedPath || '';
+  const cartVariantId =
+    (productPrices?.available && productPrices.variantId) ||
+    productPrices?.buyableVariantId ||
+    otherProduct?.buyableVariantId ||
+    null;
 
   const probePlan = {
-    pdp: productPath ? `${origin}${productPath}` : null,
+    pdp: productPath ? `${origin}${productPrices?.pagePath || productPath}` : null,
+    pdp_other: otherProduct ? `${origin}${otherProduct.pagePath}` : null,
     plp: `${origin}${collectionPath}`,
     cart: `${origin}/cart`,
     home: `${origin}/`,
-    search: `${origin}${searchPathForProduct(productPath)}`,
+    search: `${origin}${searchPathForProduct(otherProduct?.path || productPath)}`,
   };
 
-  const productPricesPromise = canReachStorefront
-    ? loadSampleProductPrices(origin, productPath, sharedCookie, stepSignal()).catch(() => null)
-    : Promise.resolve(null);
   let cartSeeded = null;
 
   const probeEntries = await Promise.all(
@@ -625,13 +707,7 @@ async function autoMapShopPriceSurfaces(shopDomain, options = {}) {
       try {
         let cookie = sharedCookie;
         if (key === 'cart') {
-          const product = await productPricesPromise;
-          const seeded = await seedSampleCart(
-            origin,
-            product?.variantId,
-            sharedCookie,
-            stepSignal()
-          );
+          const seeded = await seedSampleCart(origin, cartVariantId, sharedCookie, stepSignal());
           if (seeded) {
             cookie = seeded.cookie;
             cartSeeded = seeded;
@@ -665,11 +741,12 @@ async function autoMapShopPriceSurfaces(shopDomain, options = {}) {
     ? scannedThemeFiles.candidates
     : [];
 
-  const productPrices = await productPricesPromise;
   const scopedHtml = {
     pdp: extractMainProductSection(probes.pdp?.html || ''),
     cart: extractCartItemsSection(probes.cart?.html || ''),
   };
+  const otherPdpHtml =
+    otherProduct && probes.pdp_other?.ok ? extractMainProductSection(probes.pdp_other.html || '') : '';
 
   const surfaceBuckets = [];
   for (const target of AUTO_MAP_TARGETS) {
@@ -677,11 +754,16 @@ async function autoMapShopPriceSurfaces(shopDomain, options = {}) {
     const probeOk = Boolean(probes[target.surface]?.ok && pageHtml);
     const scoped = scopedHtml[target.surface];
     const html = scoped && discoverPriceCandidates(scoped, 1).length ? scoped : pageHtml;
-    const knownPrices = knownPricesForTarget(target, {
-      product: productPrices,
-      listing: listingPrices,
-      cartSeeded,
-    });
+    const priceContext = { product: productPrices, otherProduct, listing: listingPrices, cartSeeded };
+    const knownPrices = knownPricesForTarget(target, priceContext);
+    // The other price role on the same surface: what this slot must not show.
+    const otherRolePrices =
+      target.role === 'cart_line' || target.surface === 'cart'
+        ? new Set()
+        : knownPricesForTarget(
+            { surface: target.surface, role: target.role === 'compare_at' ? 'regular' : 'compare_at' },
+            priceContext
+          );
     const packRow = packMappingForTarget(packMappings, target.surface, target.role);
     if (!probeOk) {
       surfaceBuckets.push({
@@ -792,6 +874,7 @@ async function autoMapShopPriceSurfaces(shopDomain, options = {}) {
       probeOk: true,
       html,
       knownPrices,
+      otherRolePrices,
       candidates: candidatePool,
     });
   }
@@ -801,36 +884,44 @@ async function autoMapShopPriceSurfaces(shopDomain, options = {}) {
     shopDomain,
     // A price-verified top pick or a single candidate leaves the model nothing
     // to decide, so those slots skip the call (and its latency and cost).
+    // A compare-at slot with no compare-at price to look for has nothing to
+    // verify; the model would only reject every candidate.
     surfaceBuckets: surfaceBuckets
       .filter(
         bucket =>
-          bucket.probeOk && bucket.candidates.length > 1 && !bucket.candidates[0].verified
+          bucket.probeOk &&
+          bucket.candidates.length > 1 &&
+          !bucket.candidates[0].verified &&
+          !(bucket.target.role === 'compare_at' && !bucket.knownPrices?.size)
       )
       .map(bucket => ({
         surface: bucket.target.surface,
         role: bucket.target.role,
+        html: bucket.html,
         knownPrices: bucket.knownPrices,
+        otherRolePrices: bucket.otherRolePrices,
         candidates: bucket.candidates,
       })),
   });
 
   const surfaces = [];
   for (const bucket of surfaceBuckets) {
-    const { target, packRow, probeOk, html, candidates, knownPrices } = bucket;
+    const { target, packRow, probeOk, html, knownPrices } = bucket;
+    let { candidates } = bucket;
     if (!probeOk) {
       const probeReason = probes[target.surface]?.reason || 'unavailable';
       let rationale = `Could not load ${target.surface} HTML for verification.`;
-      if (target.surface === 'pdp' && !productPath) {
-        rationale = 'No sample product path available for live verification.';
-      } else if (
-        probeReason === 'password_required' ||
-        unlockFailure?.reason === 'invalid_password'
-      ) {
+      let verification = null;
+      if (probeReason === 'password_required' || unlockFailure?.reason === 'invalid_password') {
         rationale =
           'Storefront password was required or not accepted. Enter the Online Store password, then try Auto-detect prices again.';
       } else if (probeReason === 'rate_limited') {
         rationale =
           'Shopify temporarily blocked storefront password attempts. Wait a few minutes and retry.';
+      } else if (target.surface === 'pdp' && !productPath) {
+        verification =
+          samples.store?.hasBuyableProduct === false ? 'no_buyable_product' : 'no_sample_product';
+        rationale = SAMPLE_GAP_RATIONALE[verification];
       }
       surfaces.push({
         surface: target.surface,
@@ -839,6 +930,7 @@ async function autoMapShopPriceSurfaces(shopDomain, options = {}) {
         selector: packRow?.selector || '',
         sample_text: '',
         source: packRow ? 'theme_pack' : 'heuristic',
+        ...(verification ? { verification } : {}),
         alternatives: [],
         probe: {
           ok: false,
@@ -865,11 +957,47 @@ async function autoMapShopPriceSurfaces(shopDomain, options = {}) {
       rationale = aiPick.rationale || 'None of the prices found here looked right.';
     }
 
-    const verification = chosen?.verified
-      ? 'price_match'
-      : target.role === 'compare_at' && knownPrices && !knownPrices.size && productPrices
-        ? 'not_on_sale'
-        : 'pattern';
+    let layoutsChecked = null;
+    if (
+      chosen?.verified &&
+      slotKey === 'pdp:regular' &&
+      otherPdpHtml &&
+      otherProduct?.regular?.size
+    ) {
+      const covered = coverBothProductLayouts({
+        chosen,
+        candidates,
+        primaryHtml: html,
+        primary: productPrices,
+        otherHtml: otherPdpHtml,
+        other: otherProduct,
+      });
+      if (covered.candidate.selector !== chosen.selector) {
+        candidates = [chosen, ...candidates];
+        rationale = covered.combined
+          ? 'Sale and full-price products show the price in different places; both are covered.'
+          : 'Shows the price on both a sale and a full-price product.';
+      }
+      chosen = covered.candidate;
+      layoutsChecked = covered.layouts;
+    }
+
+    let verification = 'pattern';
+    if (chosen?.verified) {
+      verification = 'price_match';
+    } else if (target.surface === 'cart' && !cartSeeded) {
+      verification = 'cart_not_filled';
+    } else if (target.role === 'compare_at' && knownPrices && !knownPrices.size) {
+      if (samples.store?.hasSaleProduct === false) {
+        verification = 'no_sale_products';
+      } else if (productPrices) {
+        verification = 'not_on_sale';
+      }
+    }
+    const gapRationale =
+      !chosen?.verified && SAMPLE_GAP_RATIONALE[verification]
+        ? SAMPLE_GAP_RATIONALE[verification]
+        : '';
 
     if (chosen) {
       surfaces.push({
@@ -882,6 +1010,7 @@ async function autoMapShopPriceSurfaces(shopDomain, options = {}) {
         file_hint: chosen.file_hint || null,
         score: chosen.score,
         verification,
+        ...(layoutsChecked ? { layouts_checked: layoutsChecked } : {}),
         alternatives: candidates
           .filter(row => row.selector !== chosen.selector && row.status !== 'missing')
           .slice(0, 3)
@@ -899,6 +1028,7 @@ async function autoMapShopPriceSurfaces(shopDomain, options = {}) {
           .slice(0, 4),
         rationale:
           rationale ||
+          gapRationale ||
           (chosen.verified
             ? `Shows ${chosen.sample_text}, which matches a real price in your store.`
             : chosen.price_mismatch
@@ -926,7 +1056,7 @@ async function autoMapShopPriceSurfaces(shopDomain, options = {}) {
         score: 0,
         verification,
         alternatives: buildAlternatives(html, '', 4),
-        rationale: 'No price-like selector matched the live page HTML.',
+        rationale: gapRationale || 'No price-like selector matched the live page HTML.',
         probe: {
           ok: true,
           url: probes[target.surface]?.url || null,
@@ -1015,6 +1145,12 @@ async function autoMapShopPriceSurfaces(shopDomain, options = {}) {
     price_check: {
       product: Boolean(productPrices?.regular?.size),
       product_title: productPrices?.title || null,
+      product_on_sale: Boolean(productPrices?.onSale),
+      product_available: Boolean(productPrices?.available),
+      other_product_title: otherProduct?.title || null,
+      chosen_by: samples.source,
+      store_has_sale_product: samples.store?.hasSaleProduct ?? null,
+      store_has_buyable_product: samples.store?.hasBuyableProduct ?? null,
       listing: Boolean(listingPrices?.regular?.size),
       cart: Boolean(cartSeeded),
     },
@@ -1034,14 +1170,14 @@ async function autoMapShopPriceSurfaces(shopDomain, options = {}) {
 module.exports = {
   AUTO_MAP_TARGETS,
   autoMapShopPriceSurfaces,
-  resolveSampleProductPath,
   normalizeProductPath,
   getPriceSurfaceThemeMeta,
   savePriceSurfaceThemeMeta,
   buildThemeDrift,
   persistAutoMapSource,
-  pickSampleProductPath,
   knownPricesForTarget,
+  coverBothProductLayouts,
+  picksBySlot,
   anchorCandidate,
   searchPathForProduct,
 };

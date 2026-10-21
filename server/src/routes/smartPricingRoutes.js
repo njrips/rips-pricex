@@ -3,15 +3,12 @@ const { asyncHandler } = require('../middleware/asyncHandler');
 const { sendSuccess, sendValidationError, sendError } = require('../utils/response');
 const { HTTP_STATUS, ERROR_MESSAGES } = require('../constants');
 const { getShopSession } = require('../models/shopSession');
-const { buildVariantCountOptions } = require('../services/smartPricing/statisticalDesignService');
-const { applyScenarioPreset } = require('../services/smartPricing/priceBandService');
 const {
   listOpportunities,
   clearOpportunityCache,
 } = require('../services/smartPricing/opportunityService');
 const { readCatalogProgress } = require('../services/smartPricing/catalogLoadProgress');
 const { createBatchFromSelection } = require('../services/smartPricing/batchService');
-const { quickStartBatch } = require('../services/smartPricing/quickStartService');
 const {
   launchSmartPricingPlanAsTest,
 } = require('../services/smartPricing/smartPricingLaunchService');
@@ -26,7 +23,6 @@ const {
 } = require('../services/smartPricing/smartPricingGuardrailsService');
 const {
   countRunningPriceTests,
-  resolveLaunchCapacity,
 } = require('../services/smartPricing/smartPricingLaunchGuardService');
 const {
   applySmartPricingWinnerRollout,
@@ -70,11 +66,7 @@ const {
   saveShopWizardDraft,
   deleteShopWizardDraft,
 } = require('../services/smartPricing/smartPricingWizardDraftStore');
-const {
-  buildSmartPricingTestPlan,
-  buildDemoBatchPlans,
-  applyPriceArmOverrides,
-} = require('../services/smartPricing/testPlanService');
+const { buildSmartPricingTestPlan } = require('../services/smartPricing/testPlanService');
 const {
   syncSmartPricingInboxForTest,
 } = require('../services/smartPricing/smartPricingInboxStopSyncService');
@@ -139,20 +131,6 @@ async function resolveShopifyAccessToken(req) {
     sessionToken: session?.access_token,
   });
 }
-
-router.get(
-  '/launch-capacity',
-  asyncHandler(async (req, res) => {
-    const requestedCount = Number.parseInt(
-      String(req.query.count || req.query.requested || '0'),
-      10
-    );
-    const capacity = await resolveLaunchCapacity(req.shopDomain, {
-      requestedCount: Number.isFinite(requestedCount) ? requestedCount : 0,
-    });
-    return sendSuccess(res, HTTP_STATUS.OK, { capacity });
-  })
-);
 
 router.get(
   '/guardrails',
@@ -342,21 +320,6 @@ router.post(
 );
 
 router.post(
-  '/quick-start',
-  asyncHandler(async (req, res) => {
-    const body = req.body && typeof req.body === 'object' ? req.body : {};
-    const accessToken = await resolveShopifyAccessToken(req);
-    const batch = await quickStartBatch({
-      shopDomain: req.shopDomain,
-      accessToken,
-      variantIds: body.variant_ids,
-      scenarioPreset: body.scenario_preset,
-    });
-    return sendSuccess(res, HTTP_STATUS.OK, batch);
-  })
-);
-
-router.post(
   '/plans/launch',
   asyncHandler(async (req, res) => {
     const body = req.body && typeof req.body === 'object' ? req.body : {};
@@ -442,69 +405,6 @@ router.post(
         checkoutReadiness.ready,
     });
     return sendSuccess(res, HTTP_STATUS.OK, { plan, checkout_readiness: checkoutReadiness });
-  })
-);
-
-router.post(
-  '/plans/apply-price-arms',
-  asyncHandler(async (req, res) => {
-    const body = req.body && typeof req.body === 'object' ? req.body : {};
-    const plan = body.plan;
-    if (!plan || typeof plan !== 'object') {
-      return sendValidationError(res, ['plan is required']);
-    }
-    const armPrices = body.arm_prices && typeof body.arm_prices === 'object' ? body.arm_prices : {};
-    const guardrails = await getShopSmartPricingGuardrails(req.shopDomain).catch(() => ({}));
-    try {
-      const updated = applyPriceArmOverrides(plan, armPrices, guardrails);
-      return sendSuccess(res, HTTP_STATUS.OK, { plan: updated });
-    } catch (err) {
-      return sendValidationError(res, [err.message || 'Invalid price arms']);
-    }
-  })
-);
-
-router.get(
-  '/plans/demo-batch',
-  asyncHandler((req, res) => {
-    const plans = buildDemoBatchPlans(req.shopDomain);
-    return sendSuccess(res, HTTP_STATUS.OK, {
-      plans,
-      batch_id: `batch-${Date.now()}`,
-      source: 'demo',
-    });
-  })
-);
-
-router.post(
-  '/variant-options',
-  asyncHandler((req, res) => {
-    const body = req.body && typeof req.body === 'object' ? req.body : {};
-    const options = buildVariantCountOptions({
-      dailyVisitors: body.daily_visitors,
-      baselineConversionRate: body.baseline_conversion_rate,
-      mdePercent: body.mde_percent,
-      confidenceLevel: body.confidence_level,
-      power: body.statistical_power,
-      targetDays: body.target_days,
-    });
-    return sendSuccess(res, HTTP_STATUS.OK, { options });
-  })
-);
-
-router.post(
-  '/scenario-preview',
-  asyncHandler(async (req, res) => {
-    const body = req.body && typeof req.body === 'object' ? req.body : {};
-    const currentPrice = Number(body.current_price);
-    const presetId = body.scenario_preset || 'recommended';
-    const shopGuardrails = await getShopSmartPricingGuardrails(req.shopDomain).catch(() => ({}));
-    const preview = applyScenarioPreset(
-      currentPrice,
-      presetId,
-      mergePreviewGuardrails(shopGuardrails, body.guardrails)
-    );
-    return sendSuccess(res, HTTP_STATUS.OK, { preview });
   })
 );
 

@@ -196,7 +196,7 @@ describe('Priceify guides content', () => {
     };
 
     assert.match(copyOf('max-price-change'), /15%/);
-    assert.match(copyOf('max-price-change'), /no longer a field in Settings/i);
+    assert.match(copyOf('max-price-change'), /no longer a field in App settings/i);
     assert.match(copyOf('max-price-change'), /Products step/);
     assert.match(copyOf('max-price-change'), /no margin floor/i);
     assert.ok(!DOCS_SECTIONS.some(section => section.id === 'cost-floor'));

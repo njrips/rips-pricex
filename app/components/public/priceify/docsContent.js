@@ -138,7 +138,7 @@ export const DOCS_SECTIONS = [
     paragraphs: [
       'This is the widest a price you type or bulk-adjust may sit from the product’s current catalog price. It is a hard cap rather than a guideline: a typed price outside it is flagged in its cell, Bulk adjust stops at it, and launch refuses one that slips past.',
       'AI-suggested prices are the exception. The min–max band you type for AI Suggest is used as typed, however wide, and the prices it fills are not clamped to max price change, at launch or on a follow-up round. The one limit is a cut of at most 99%, so a price never reaches $0. Edit an AI price by hand or bulk-adjust it and it becomes an ordinary price again, held to max price change.',
-      'It is no longer a field in Settings, and the Products step is the only place you encounter it.',
+      'It is no longer a field in App settings, and the Products step is the only place you encounter it.',
       'There is no margin floor underneath it. You set every price, and the revenue guardrail is the safety net once a test is live: it pauses the test if a variation loses revenue per visitor against control.',
       'A store that changed this value before it stopped being a field keeps the figure it chose. That is why the number quoted on your Products step may not be 15%.',
     ],
@@ -478,8 +478,8 @@ export const DOCS_SECTIONS = [
 
 export const DOCS_FAQ = [
   {
-    q: 'Do Settings changes affect a running test?',
-    a: 'No. Every value a test is judged against is stamped on it at launch. Change confidence or minimum visitors per variation in Settings and the next test you launch picks them up; the revenue guardrail lives on the test itself, so edit it there.',
+    q: 'Do App settings changes affect a running test?',
+    a: 'No. Every value a test is judged against is stamped on it at launch. Change confidence or minimum visitors per variation in App settings → Results settings and the next test you launch picks them up; the revenue guardrail lives on the test itself, so edit it there.',
   },
   {
     q: 'Where did the guardrail settings go?',

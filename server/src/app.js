@@ -158,21 +158,6 @@ try {
 }
 
 try {
-  const qaStubRoutes = require('./routes/qaStubRoutes');
-  app.use('/api/qa', requireShopifySession, qaStubRoutes);
-} catch (err) {
-  logger.warn('qaStubRoutes not available', { message: err.message });
-}
-
-try {
-  const goalMetricRoutes = require('./routes/goalMetricRoutes');
-  app.use('/api/goal-metrics', requireShopifySession, goalMetricRoutes);
-  logger.info('Goal metrics routes mounted (Classic Goals picker)');
-} catch (err) {
-  logger.warn('goalMetricRoutes not available', { message: err.message });
-}
-
-try {
   const supportTicketRoutes = require('./routes/supportTicketRoutes');
   const staffSupportRoutes = require('./routes/staffSupportRoutes');
   const { requireStaff } = require('./middleware/staffContext');

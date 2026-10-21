@@ -90,11 +90,6 @@ function calibrateShopConversionRate(orderMetrics = new Map()) {
   return Math.min(0.12, Math.max(0.008, units60d / estimatedVisitors60d));
 }
 
-function estimateTrafficMetrics(units30d = 0, shopConversionRate = DEFAULT_CONVERSION_RATE) {
-  const { resolveSkuTrafficMetrics } = require('./catalogTrafficService');
-  return resolveSkuTrafficMetrics({ units30d, shopConversionRate, shopProfile: {} });
-}
-
 function estimateBaselinePpv(
   currentPrice,
   conversionRate,
@@ -468,7 +463,6 @@ module.exports = {
   DEFAULT_MAX_CATALOG_PRODUCTS,
   buildCatalogMetricsSnapshot,
   estimateMarginPercent,
-  estimateTrafficMetrics,
   estimateBaselinePpv,
   flattenCatalogRows,
   calibrateShopConversionRate,

@@ -13,9 +13,7 @@ Purpose: enable **independent** research and planning for RipsPriceX without ope
 6. [04_MERCHANT_FLOWS.md](./04_MERCHANT_FLOWS.md) — merchant journeys  
 7. [03_API_AND_DATA_MAP.md](./03_API_AND_DATA_MAP.md) — APIs & schema  
 8. [05_FURTHER_RESEARCH_ROADMAP.md](./05_FURTHER_RESEARCH_ROADMAP.md) — open research tracks  
-9. [PHASE_STATUS.md](./PHASE_STATUS.md) — P0–P5 progress vs blueprint  
-10. [RIPSPRICEX_IMPLEMENTATION_PLAN.md](./RIPSPRICEX_IMPLEMENTATION_PLAN.md) — original blueprint (phases, risks)  
-11. [CLASSIC_FLOW_AND_PRICE_SURFACES_AUDIT.md](./CLASSIC_FLOW_AND_PRICE_SURFACES_AUDIT.md) — price surfaces audit  
+9. [RIPSPRICEX_IMPLEMENTATION_PLAN.md](./RIPSPRICEX_IMPLEMENTATION_PLAN.md) — original blueprint (phases, risks)  
 
 ## How to add further research
 
@@ -31,14 +29,9 @@ When starting a new investigation in this project:
 | Date | Doc | Status | Summary |
 |------|-----|--------|---------|
 | 2026-08-08 | [RIPSPRICEX_IMPLEMENTATION_PLAN.md](./RIPSPRICEX_IMPLEMENTATION_PLAN.md) | Blueprint (canonical) | Full extraction plan moved here from RipX; living hub siblings preferred for day-to-day |
-| 2026-08-09 | [CLASSIC_FLOW_AND_PRICE_SURFACES_AUDIT.md](./CLASSIC_FLOW_AND_PRICE_SURFACES_AUDIT.md) | Done | Create/details parity OK; price surfaces ported |
 | 2026-08-09 | [00–05 suite](./00_PRODUCT_BRIEF.md) | Living | As-built + further research hub |
-| 2026-08-09 | [PHASE_STATUS.md](./PHASE_STATUS.md) | Living | Blueprint phases vs as-built |
 | 2026-08-10 | [CLASSIC_FIGMA_DELTA.md](./CLASSIC_FIGMA_DELTA.md) | Done | EchoTest Final frames → Classic components |
 | 2026-08-10 | [RIPX_SMART_PRICING_PARITY.md](./RIPX_SMART_PRICING_PARITY.md) | Done | RipX Classic SP inventory; Goals + surface runtime restored |
-| 2026-08-10 | [2026-08-10_LIVE_E2E_FINISH.md](./2026-08-10_LIVE_E2E_FINISH.md) | In progress | Deploy CT, ensure install, surfaces, readiness green; embed Save left |
-| 2026-08-10 | [PROJECT_FINISH_STATUS.md](./PROJECT_FINISH_STATUS.md) | Pilot-complete | Embed on + live running test; winner needs conversions |
-| 2026-08-10 | [2026-08-10_LIVE_E2E_COMPLETE.md](./2026-08-10_LIVE_E2E_COMPLETE.md) | Done | Embed verified; launch/assign/pause/resume proven |
 | 2026-08-11 | [2026-08-11_SETUP_BILLING_SETTINGS_IA.md](./2026-08-11_SETUP_BILLING_SETTINGS_IA.md) | Done | Fold Billing → Settings Plan; welcome route; sync-entitlement |
 | 2026-08-12 | [2026-08-12_PREVIEW_PRICE_MISMATCH.md](./2026-08-12_PREVIEW_PRICE_MISMATCH.md) | Done | Classic Preview forced Control; fixed /track/preview matcher + matrix |
 | 2026-08-12 | [2026-08-12_THEME_EMBED_REFUSED_TO_CONNECT.md](./2026-08-12_THEME_EMBED_REFUSED_TO_CONNECT.md) | Done | Theme embed deep link broke out of iframe via shopify:// + _top |
@@ -48,6 +41,7 @@ When starting a new investigation in this project:
 | 2026-08-18 | [2026-08-18_OFFER_TEST.md](./2026-08-18_OFFER_TEST.md) | Done | Classic Offer Test: 5-step wizard, checkout Discount Function, automatic discount, scope sync |
 | 2026-08-18 | [2026-08-18_REVENUE_GUARDRAIL.md](./2026-08-18_REVENUE_GUARDRAIL.md) | Done | Always-on max revenue drop %; runtime pause vs control RPV |
 | 2026-09-03 | [2026-09-03_CHECKOUT_PRICE_AUTHORITY.md](./2026-09-03_CHECKOUT_PRICE_AUTHORITY.md) | Plan | Move applied price off shopper-settable cart attributes onto function metafields |
+| 2026-09-03 | [2026-09-03_CONFIDENCE_METHOD.md](./2026-09-03_CONFIDENCE_METHOD.md) | Done | How test confidence is computed and why |
 | 2026-10-15 | [2026-10-15_AI_PRICING_SIGNALS_AND_WEIGHTS.md](./2026-10-15_AI_PRICING_SIGNALS_AND_WEIGHTS.md) | Awaiting client | Shopify variable lists, weighted-signal scoring plan, ShopifyQL / Level 2 data needs |
 | 2026-10-15 | [2026-10-15_STEP3_CATALOG_LOADING.md](./2026-10-15_STEP3_CATALOG_LOADING.md) | Phase 1 done; 2–3 proposed | Where step 3's catalog wait goes, AI ranking off the critical path, progress and large-catalog options |
 

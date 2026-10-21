@@ -41,10 +41,6 @@ export function shouldAutoPersistAutoMapResult(result) {
   return true;
 }
 
-export function shouldQuickSaveAutoMapResult(result) {
-  return shouldAutoPersistAutoMapResult(result);
-}
-
 const ROLE_FRIENDLY = {
   regular: 'Regular price',
   compare_at: 'Compare-at price',
@@ -107,10 +103,36 @@ function buildAutoMapCheckedBase(result) {
     if (check.cart) pages.push('cart');
     const list =
       pages.length > 1 ? `${pages.slice(0, -1).join(', ')} and ${pages[pages.length - 1]}` : pages[0];
-    return `Verified means the price shown on your ${list} matched the real price of ${title}.`;
+    const products = check.other_product_title
+      ? `${title} and “${check.other_product_title}”`
+      : title;
+    return `Verified means the price shown on your ${list} matched the real price of ${products}.`;
+  }
+  if (check.store_has_buyable_product === false) {
+    return 'Every product we checked is sold out or not on your Online Store, so prices were found by pattern only.';
   }
   return 'We read your live storefront pages and theme files to find where prices appear.';
 }
+
+const GAP_REASONS = {
+  no_sale_products:
+    'None of your in-stock products has a compare-at price, so there was no “was” price to find. Add one to a product and scan again, or pick it on your store.',
+  not_on_sale:
+    'The product used for the check is not on sale, so there was no “was” price to find. Choose a product with a compare-at price, then scan again.',
+  no_buyable_product:
+    'Every product we checked is sold out or not on your Online Store. Choose a product to check with, or restock one, then scan again.',
+  no_sample_product:
+    'We could not open a product page to check. Choose a product to check with, then scan again.',
+  cart_not_filled:
+    'We could not add an in-stock product to a test cart, so cart prices were not checked.',
+};
+
+/** Why a found location could not be confirmed against a real price. */
+const UNCHECKED_NOTES = {
+  no_sale_products: 'Not checked: none of your in-stock products is on sale.',
+  not_on_sale: 'Not checked: the product used for the check is not on sale.',
+  cart_not_filled: 'Not checked: no in-stock product could be added to a test cart.',
+};
 
 export function friendlyGapReason(row) {
   const probe = String(row?.probe?.reason || '').replace(/_/g, ' ');
@@ -120,8 +142,8 @@ export function friendlyGapReason(row) {
   if (row?.status === 'ambiguous') {
     return 'A price was found here, but it did not match your product. Pick it on your store to be sure.';
   }
-  if (row?.verification === 'not_on_sale') {
-    return 'The sample product is not on sale, so there was no compare-at price to find.';
+  if (GAP_REASONS[row?.verification]) {
+    return GAP_REASONS[row.verification];
   }
   if (probe) {
     return 'This page could not be loaded. Pick the price on your store instead.';
@@ -134,9 +156,19 @@ export function describeAutoMapRow(row) {
   if (row?.status === 'matched' && String(row.selector || '').trim()) {
     const sample = String(row.sample_text || '').trim();
     if (row.verification === 'price_match') {
+      if (row.layouts_checked === 2) {
+        return sample
+          ? `Shows ${sample}; matches on both a sale and a full-price product.`
+          : 'Matches on both a sale and a full-price product.';
+      }
       return sample ? `Shows ${sample}, which matches your product.` : 'Matches your product price.';
     }
-    return sample ? `Shows ${sample}` : 'Found on the page.';
+    const found = sample ? `Shows ${sample}.` : 'Found on the page.';
+    return UNCHECKED_NOTES[row.verification]
+      ? `${found} ${UNCHECKED_NOTES[row.verification]}`
+      : sample
+        ? `Shows ${sample}`
+        : found;
   }
   return friendlyGapReason(row);
 }

@@ -7,7 +7,6 @@ import {
   buildDefaultAcceptedSlots,
   describeAutoMapRow,
   shouldAutoPersistAutoMapResult,
-  shouldQuickSaveAutoMapResult,
   summarizeAutoMapResult,
 } from '../priceSurfaceAutoMapUi';
 
@@ -31,7 +30,6 @@ describe('priceSurfaceAutoMapUi', () => {
 
   it('auto-persists when server says ready (setup link or Auto-detect)', () => {
     expect(shouldAutoPersistAutoMapResult(baseResult)).toBe(true);
-    expect(shouldQuickSaveAutoMapResult(baseResult)).toBe(true);
   });
 
   it('writes a one-line headline from the summary', () => {
@@ -69,6 +67,44 @@ describe('priceSurfaceAutoMapUi', () => {
     expect(
       describeAutoMapRow({ status: 'missing', role: 'compare_at', verification: 'not_on_sale' })
     ).toMatch(/not on sale/);
+    expect(describeAutoMapRow({ ...verified, layouts_checked: 2 })).toBe(
+      'Shows $24.00; matches on both a sale and a full-price product.'
+    );
+  });
+
+  it('says why a row could not be checked, not just that it was not found', () => {
+    const gap = verification => describeAutoMapRow({ status: 'missing', verification });
+    expect(gap('no_sale_products')).toMatch(/None of your in-stock products has a compare-at price/);
+    expect(gap('no_buyable_product')).toMatch(/sold out/);
+    expect(gap('no_sample_product')).toMatch(/Choose a product/);
+    expect(gap('cart_not_filled')).toMatch(/test cart/);
+    // Found but unconfirmed: say what was found and why it was not checked.
+    expect(
+      describeAutoMapRow({
+        status: 'matched',
+        selector: 's.price-item--regular',
+        verification: 'no_sale_products',
+      })
+    ).toBe('Found on the page. Not checked: none of your in-stock products is on sale.');
+    // A password problem still wins over any of these.
+    expect(
+      describeAutoMapRow({
+        status: 'missing',
+        verification: 'no_sample_product',
+        probe: { reason: 'password_required' },
+      })
+    ).toMatch(/password-protected/);
+  });
+
+  it('names both products when the check used two', () => {
+    expect(
+      buildAutoMapCheckedLine({
+        price_check: { product: true, product_title: 'Sale Tee', other_product_title: 'Plain Tee' },
+      })
+    ).toMatch(/“Sale Tee” and “Plain Tee”/);
+    expect(
+      buildAutoMapCheckedLine({ price_check: { product: false, store_has_buyable_product: false } })
+    ).toMatch(/sold out/);
   });
 
   it('blocks quick-save when theme drift or ambiguous', () => {

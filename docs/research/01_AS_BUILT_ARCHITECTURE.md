@@ -101,7 +101,6 @@ Registered in `app/routes/app.tsx` via App Bridge `NavMenu` (4 items; Billing fo
 | `/api/tests` | price-test lifecycle |
 | `/api/shopify` | slim catalog / store-resources |
 | `/api/track` + `/api/proxy` | storefront script + events |
-| `/api/qa` | stubs for local QA |
 
 Auth context: `requireShop` middleware reads `X-Shopify-Shop-Domain` (and optional access token headers for ensure/GraphQL).
 
@@ -178,11 +177,11 @@ Started from `server/src/app.js` via `jobs/backgroundJobs.js` (inbox refresh, ca
 | Area | State |
 |------|-------|
 | Partner `client_id` | Linked (M.A.K. Ripon / RipsPriceX) |
-| Goals & Metrics page | Routes to Settings; picker uses `/api/goal-metrics` |
+| Goals & Metrics page | Not ported; picker uses built-in standard metrics |
 | Full Polaris redesign of Classic body | Deferred — Classic CSS kept |
-| Live E2E on Partner store | Not fully proven — enable theme embed + see roadmap |
+| Live E2E on Partner store | Embed, launch, assign, pause/resume proven (2026-08-10); winner apply needs real conversions |
 | Attribute rebrand | Still `_ripx_*` |
-| Self-QA runs | Soft stub (empty runs) |
+| Self-QA runs | Not ported (by design) |
 | Command Center UI | Not ported (by design) |
 
 ---

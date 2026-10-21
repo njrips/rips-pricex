@@ -542,7 +542,10 @@ function readTagAttrs(raw) {
  * @param {string} html
  * @param {(text: string) => boolean} isTargetText
  * @param {{ limit?: number }} [options]
- * @returns {Array<{ tag: string, classes: string[], data: string[], text: string, hidden: boolean, path: Array<{ tag: string, classes: string[] }> }>}
+ * `label` is the short text just before the price inside the same wrapper, such as
+ * a visually-hidden "Sale price" or "Regular price" that themes print for screen
+ * readers; `struck` is true inside `<s>`, `<del>` or `<strike>`.
+ * @returns {Array<{ tag: string, classes: string[], data: string[], text: string, hidden: boolean, struck: boolean, label: string, path: Array<{ tag: string, classes: string[] }> }>}
  */
 function findPriceElements(html, isTargetText, { limit = 60 } = {}) {
   const raw = String(html || '');
@@ -550,6 +553,7 @@ function findPriceElements(html, isTargetText, { limit = 60 } = {}) {
     /<!--[\s\S]*?-->|<(script|style)\b[^>]*>[\s\S]*?<\/\1\s*>|<(\/?)([a-zA-Z][a-zA-Z0-9-]*)\b((?:[^>"']|"[^"]*"|'[^']*')*)>|([^<]+)/g;
   const stack = [];
   const out = [];
+  let lastLabel = null;
   let match;
   while ((match = re.exec(raw)) && out.length < limit) {
     if (match[3] !== undefined) {
@@ -566,20 +570,76 @@ function findPriceElements(html, isTargetText, { limit = 60 } = {}) {
       continue;
     }
     const text = match[5] ? match[5].replace(/\s+/g, ' ').trim() : '';
-    if (!text || text.length > 80 || !stack.length || !isTargetText(text)) {
+    if (!text || text.length > 80 || !stack.length) {
+      continue;
+    }
+    if (!isTargetText(text)) {
+      if (text.length <= 40 && /\p{L}/u.test(text) && !moneyCentsInText(text).length) {
+        lastLabel = { text, depth: stack.length };
+      }
       continue;
     }
     const path = stack.slice(-4).reverse();
+    // A label belongs to this price only when it sits in the same small wrapper.
+    const label =
+      lastLabel && stack.length - lastLabel.depth <= 2 && lastLabel.depth >= stack.length - 3
+        ? lastLabel.text
+        : '';
+    lastLabel = null;
     out.push({
       tag: path[0].tag,
       classes: path[0].classes,
       data: path[0].data,
       text,
       hidden: stack.some(entry => entry.classes.some(cls => HIDDEN_CLASS.test(cls))),
+      struck: stack.slice(-3).some(entry => STRIKE_TAGS.has(entry.tag)),
+      label,
       path: path.map(entry => ({ tag: entry.tag, classes: entry.classes.slice(0, 4) })),
     });
   }
   return out;
+}
+
+function elementMatchesPart(element, part) {
+  const classes = extractSimpleClasses(part);
+  const tag = extractLeadingTag(part);
+  const attrs = extractAttrSelectors(part);
+  if (!classes.length && !tag && !attrs.length) return false;
+  // The selector may name the price element itself or a wrapper close above it.
+  return element.path.some(
+    (entry, depth) =>
+      depth <= 2 &&
+      (!tag || entry.tag === tag) &&
+      classes.every(cls => entry.classes.includes(cls)) &&
+      (!attrs.length || (depth === 0 && attrs.every(attr => element.data.includes(attr.name))))
+  );
+}
+
+/**
+ * What a selector would repaint on this page, for a reviewer that cannot render
+ * it: how many prices, how many are struck through or screen-reader only, and
+ * the labels themes print beside them.
+ * @param {ReturnType<typeof findPriceElements>} elements every price on the page
+ * @param {string} selector
+ * @returns {{ prices: number, struck: number, hidden: number, labels: string[] }}
+ */
+function selectorElementFacts(elements, selector) {
+  const parts = tokenizeCssSelector(selector).map(part => part.split(/\s+|>/).filter(Boolean).pop() || '');
+  const matched = (Array.isArray(elements) ? elements : []).filter(element =>
+    parts.some(part => part && elementMatchesPart(element, part))
+  );
+  const labels = [];
+  matched.forEach(element => {
+    if (element.label && !labels.includes(element.label) && labels.length < 3) {
+      labels.push(element.label);
+    }
+  });
+  return {
+    prices: matched.length,
+    struck: matched.filter(element => element.struck).length,
+    hidden: matched.filter(element => element.hidden).length,
+    labels,
+  };
 }
 
 function usableClasses(classes) {
@@ -654,6 +714,7 @@ function candidatesFromPriceElements(elements, { role = 'regular' } = {}) {
 
 module.exports = {
   findPriceElements,
+  selectorElementFacts,
   candidatesFromPriceElements,
   describeElementPath,
   parseMoneyNumberToCents,

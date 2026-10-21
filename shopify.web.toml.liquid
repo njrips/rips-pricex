@@ -1,7 +1,0 @@
-name = "Priceify"
-roles = ["frontend", "backend"]
-webhooks_path = "/webhooks/app/uninstalled"
-
-[commands]
-predev = "npm exec prisma generate"
-dev = "npm exec prisma migrate deploy && node scripts/sync-tunnel-env.js && npm exec react-router dev"

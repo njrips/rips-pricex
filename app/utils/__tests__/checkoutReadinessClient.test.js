@@ -5,7 +5,6 @@ import {
   priceSurfacesUnmapped,
   priceSurfaceSummary,
   themeEmbedStatus,
-  themeEmbedThemeName,
   unwrapCheckoutReadiness,
 } from '../checkoutReadinessClient';
 import { isOfferCheckoutReady } from '../../components/SmartPricing/classic/offerSelection';
@@ -128,16 +127,6 @@ describe('theme app embed status', () => {
     expect(themeEmbedStatus({})).toBe('unknown');
     expect(themeEmbedStatus({ theme_embed: { reason: 'lookup_failed' } })).toBe('unknown');
   });
-
-  it('names the theme the answer came from, when the server reports one', () => {
-    expect(themeEmbedThemeName({ theme_embed: { status: 'enabled', theme_name: 'Dawn' } })).toBe(
-      'Dawn'
-    );
-    expect(themeEmbedThemeName({ theme_embed: { status: 'enabled' } })).toBeNull();
-    expect(themeEmbedThemeName({ summary: { theme_embed: 'unknown' } })).toBeNull();
-    expect(themeEmbedThemeName(null)).toBeNull();
-  });
-
   describe('priceSurfacesUnmapped', () => {
     it('reports an unmapped shop', () => {
       expect(

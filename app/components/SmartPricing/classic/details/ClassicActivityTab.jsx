@@ -14,12 +14,9 @@ import {
 import styles from '../SmartPricingClassic.module.css';
 
 export default function ClassicActivityTab({ activity }) {
-  const [requestedFilter, setFilter] = useState('all');
+  const [filter, setFilter] = useState('all');
   const items = useMemo(() => (Array.isArray(activity) ? activity : []), [activity]);
   const counts = useMemo(() => activityFilterCounts(items), [items]);
-  // New activity can empty out the selected bucket; fall back to All rather than
-  // showing a filter chip that no longer exists.
-  const filter = requestedFilter !== 'all' && !counts[requestedFilter] ? 'all' : requestedFilter;
   const visible = useMemo(() => filterActivityItems(items, filter), [items, filter]);
   const groups = useMemo(() => groupActivityByDay(visible), [visible]);
   const filters = ACTIVITY_FILTERS;

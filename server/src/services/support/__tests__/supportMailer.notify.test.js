@@ -5,7 +5,6 @@ const {
   notifyStatusChange,
   notifyTicketEvent,
   supportNotifyAddressing,
-  supportNotifyRecipients,
   ticketNotifyEmail,
 } = require('../supportMailer');
 
@@ -16,7 +15,6 @@ describe('supportMailer ticket notify', () => {
     try {
       delete process.env.RIPSPRICEX_SUPPORT_EMAIL;
       assert.deepEqual(supportNotifyAddressing(), { to: 'ripon@echologyx.com', bcc: [] });
-      assert.deepEqual(supportNotifyRecipients(), ['ripon@echologyx.com']);
       process.env.RIPSPRICEX_SUPPORT_EMAIL = 'ops@echologyx.com, not-an-email';
       assert.deepEqual(supportNotifyAddressing(), {
         to: 'ripon@echologyx.com',

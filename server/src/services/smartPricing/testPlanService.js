@@ -331,47 +331,8 @@ function applyPriceArmOverrides(plan = {}, armPrices = {}, guardrails = {}) {
   };
 }
 
-function buildDemoBatchPlans(shopDomain = 'demo.myshopify.com') {
-  const skus = [
-    {
-      productId: 'gid://shopify/Product/101',
-      variantId: 'gid://shopify/ProductVariant/1001',
-      title: 'Classic Hoodie M',
-      currentPrice: 59,
-      dailyVisitors: 140,
-      baselinePpv: 1.84,
-    },
-    {
-      productId: 'gid://shopify/Product/102',
-      variantId: 'gid://shopify/ProductVariant/1002',
-      title: 'Organic Tee L',
-      currentPrice: 34,
-      dailyVisitors: 95,
-      baselinePpv: 0.92,
-    },
-    {
-      productId: 'gid://shopify/Product/103',
-      variantId: 'gid://shopify/ProductVariant/1003',
-      title: 'Canvas Tote',
-      currentPrice: 28,
-      dailyVisitors: 52,
-      baselinePpv: 0.61,
-    },
-  ];
-  return skus.map((sku, index) =>
-    buildSmartPricingTestPlan({
-      ...sku,
-      shopDomain,
-      planId: `SP-104${index + 2}`,
-      scenarioPreset: index === 1 ? 'conservative' : 'recommended',
-      variantCount: index === 2 ? 2 : 3,
-    })
-  );
-}
-
 module.exports = {
   buildSmartPricingTestPlan,
-  buildDemoBatchPlans,
   buildGuardrailChecks,
   buildArmProjections,
   buildLearningPath,

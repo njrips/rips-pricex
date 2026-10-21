@@ -1,24 +1,17 @@
 import { useEffect, useState } from 'react';
 import { Banner } from '@shopify/polaris';
-import { useUpgradeRedirect } from '../lib/useUpgradeRedirect';
+import { useViewPlans } from '../lib/useViewPlans';
 
 /**
  * Both API clients dispatch this when Shopify billing returns HTTP 402.
  * The banner is the recovery path for any screen that does not handle it itself.
  */
-export default function PaymentRequiredNotice({ upgradeUrl = '' }) {
+export default function PaymentRequiredNotice() {
   const [open, setOpen] = useState(false);
-  const [remoteUrl, setRemoteUrl] = useState('');
-  // The loader's URL carries the handle Shopify reported; the API's is only as
-  // right as SHOPIFY_APP_HANDLE.
-  const openPlans = useUpgradeRedirect(upgradeUrl || remoteUrl);
+  const openPlans = useViewPlans();
 
   useEffect(() => {
-    const onRequired = event => {
-      const next = event?.detail?.upgradeUrl;
-      if (typeof next === 'string' && next.trim()) setRemoteUrl(next.trim());
-      setOpen(true);
-    };
+    const onRequired = () => setOpen(true);
     window.addEventListener('ripspricex:payment-required', onRequired);
     return () => window.removeEventListener('ripspricex:payment-required', onRequired);
   }, []);
@@ -29,7 +22,13 @@ export default function PaymentRequiredNotice({ upgradeUrl = '' }) {
       <Banner
         tone="warning"
         title="An active Priceify plan is required."
-        action={{ content: 'View plans', onAction: openPlans }}
+        action={{
+          content: 'View plans',
+          onAction: () => {
+            setOpen(false);
+            openPlans();
+          },
+        }}
         onDismiss={() => setOpen(false)}
       />
     </div>

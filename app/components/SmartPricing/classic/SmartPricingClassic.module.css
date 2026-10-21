@@ -1424,10 +1424,6 @@ button.stepItem {
   line-height: 1.45;
 }
 
-.aiSuggestRaise {
-  margin-top: 2px;
-}
-
 .priceFieldRow {
   display: flex;
   align-items: center;
@@ -2654,19 +2650,6 @@ button.stepItem {
 }
 
 /* Overview KPI cards: label → value → caption with 4px stack */
-.statGrid > .statCard:has(.statValueLg) {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.statGrid > .statCard:has(.statValueLg) .statLabel {
-  margin-bottom: 0;
-}
-
-.statGrid > .statCard:has(.statValueLg) .productSub {
-  margin-top: 0;
-}
 
 .barTrack {
   height: 8px;
@@ -4876,15 +4859,6 @@ button.stepItem {
   font-weight: var(--classic-fw-medium);
   background: rgba(0, 82, 124, 0.12);
   color: #00527c;
-}
-
-.activityList {
-  list-style: none;
-  margin: 12px 0 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
 }
 
 .activityWhen {

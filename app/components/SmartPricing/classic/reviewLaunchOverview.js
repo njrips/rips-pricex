@@ -25,21 +25,6 @@ function pricingModeOverviewText(mode) {
   return formatReviewPricingModeLabel(mode);
 }
 
-/** Step 5 Products badge + Test overview line (shared so UI cannot drift). */
-export function resolveReviewPricingSummaryText({
-  isOfferTest,
-  priceMode = 'manual',
-  pricingByArm = null,
-  variations = [],
-}) {
-  return resolvePricingOverviewText({
-    isOfferTest,
-    priceMode,
-    pricingByArm,
-    variations,
-  });
-}
-
 function resolvePricingOverviewText({ isOfferTest, priceMode, pricingByArm, variations }) {
   if (isOfferTest) return 'Offers per variation';
   if (pricingByArm && typeof pricingByArm === 'object') {

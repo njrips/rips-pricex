@@ -3,16 +3,6 @@ function resolveShopMaxChangePercent(guardrails = {}) {
   return Number.isFinite(n) && n > 0 ? n : 15;
 }
 
-function resolveSuggestionMarginPercent(row = {}, guardrails = {}) {
-  const direct = Number(row.margin_percent);
-  if (row.margin_percent !== null && row.margin_percent !== undefined && Number.isFinite(direct)) {
-    return Math.max(0, Math.min(100, direct));
-  }
-  const cogs = Number(guardrails.default_cogs_percent);
-  if (Number.isFinite(cogs) && cogs >= 0 && cogs < 100) return 100 - cogs;
-  return 50;
-}
-
 /**
  * Rounded on magnitude, so the sign does not change the answer.
  *
@@ -107,7 +97,6 @@ function resolveAiPriceLiftBand(minPct, maxPct, guardrails = {}) {
 
 module.exports = {
   resolveShopMaxChangePercent,
-  resolveSuggestionMarginPercent,
   resolveAiPriceLiftBand,
   bandDirection,
 };

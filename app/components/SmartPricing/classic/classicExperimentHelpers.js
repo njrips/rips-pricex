@@ -2,9 +2,7 @@
  * Classic Smart Pricing: group per-SKU inbox plans into experiment rows.
  */
 
-import { classicAudienceToSegments } from '../targeting/smartPricingAudienceHelpers';
-import { stampStatisticalFields } from './sampleSizePolicy';
-import { ensureRevenueGuardrailRows, revenueGuardrailGoalConfig } from './revenueGuardrail';
+import { ensureRevenueGuardrailRows } from './revenueGuardrail';
 
 /**
  * How many unfinished experiments the browser keeps.
@@ -405,103 +403,6 @@ export function findPlanInCatalog(plans, planId) {
     list.find(p => String(p.test_id || '').trim() === needle) ||
     null
   );
-}
-
-/** Map stored Classic audience_ui onto launch payload if plan.audience was never enriched. */
-export function enrichInboxPlansForLaunch(plans = [], shopGuardrails = {}) {
-  return (Array.isArray(plans) ? plans : []).map(plan => {
-    const existingAudience = plan.audience && typeof plan.audience === 'object' ? plan.audience : {};
-    const audienceUi =
-      plan.metadata?.audience_ui && typeof plan.metadata.audience_ui === 'object'
-        ? plan.metadata.audience_ui
-        : null;
-    const segments = audienceUi
-      ? classicAudienceToSegments(audienceUi, existingAudience.segments)
-      : existingAudience.segments;
-    const experimentType =
-      plan.experiment_type ||
-      plan.experimentType ||
-      plan.metadata?.experiment_type ||
-      null;
-    const stats = stampStatisticalFields(plan, shopGuardrails);
-    const shopRaw =
-      shopGuardrails?.guardrails && typeof shopGuardrails.guardrails === 'object'
-        ? shopGuardrails.guardrails
-        : shopGuardrails;
-    const sampleFromUi = Number(audienceUi?.minSampleSize ?? audienceUi?.min_sample_size);
-    const sampleFromAudience = Number(existingAudience.min_sample_size);
-    const sampleFromShop = Number(shopRaw?.min_sample_size_per_variation);
-    const sampleSize = [sampleFromUi, sampleFromAudience, sampleFromShop].find(
-      n => Number.isFinite(n) && n >= 1
-    );
-    const roundedSample = Number.isFinite(sampleSize) ? Math.round(sampleSize) : null;
-    return {
-      ...plan,
-      ...(experimentType ? { experiment_type: experimentType } : {}),
-      audience: {
-        inherit_from_shop_defaults: false,
-        ...existingAudience,
-        ...(audienceUi
-          ? {
-              traffic_allocation:
-                audienceUi.trafficAllocation ?? existingAudience.traffic_allocation,
-              devices: audienceUi.devices ?? existingAudience.devices,
-              sources: audienceUi.sources ?? existingAudience.sources,
-              countries: audienceUi.countries ?? existingAudience.countries,
-              include_countries:
-                audienceUi.includeCountries ??
-                audienceUi.include_countries ??
-                existingAudience.include_countries,
-              exclude_countries:
-                audienceUi.excludeCountries ??
-                audienceUi.exclude_countries ??
-                existingAudience.exclude_countries,
-              device_mode: audienceUi.deviceMode || existingAudience.device_mode || 'include',
-              source_mode: audienceUi.sourceMode || existingAudience.source_mode || 'include',
-              country_mode: audienceUi.countryMode || existingAudience.country_mode || 'include',
-              min_sample_size: (() => {
-                const n = Number(
-                  audienceUi.minSampleSize ??
-                    audienceUi.min_sample_size ??
-                    existingAudience.min_sample_size
-                );
-                return Number.isFinite(n) && n >= 1 ? Math.round(n) : existingAudience.min_sample_size;
-              })(),
-            }
-          : {}),
-        segments: segments || existingAudience.segments,
-      },
-      launch_preferences: {
-        auto_round2: shopRaw?.auto_round2_default !== false,
-        ...(plan.launch_preferences && typeof plan.launch_preferences === 'object'
-          ? plan.launch_preferences
-          : {}),
-        auto_start: true,
-        ...(roundedSample ? { min_sample_size: roundedSample } : {}),
-      },
-      goal: {
-        ...(plan.goal && typeof plan.goal === 'object' ? plan.goal : {}),
-        analysis_method: stats.analysis_method,
-        mde_percent: stats.mde_percent,
-        statistical_power: stats.statistical_power,
-        significance_level: stats.significance_level,
-        guardrails: revenueGuardrailGoalConfig(
-          audienceUi?.guardrails,
-          Number(shopRaw?.max_revenue_drop_percent)
-        ),
-        ...(roundedSample ? { min_sample_size: roundedSample } : {}),
-      },
-      statistical_design: {
-        ...(plan.statistical_design && typeof plan.statistical_design === 'object'
-          ? plan.statistical_design
-          : {}),
-        analysis_method: stats.analysis_method,
-        mde_percent: stats.mde_percent,
-        statistical_power: stats.statistical_power,
-        confidence_level: stats.confidence_level,
-      },
-    };
-  });
 }
 
 export function formatClassicStatusLabel(status, _experimentType) {

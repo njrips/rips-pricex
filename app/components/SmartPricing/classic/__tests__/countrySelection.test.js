@@ -1,11 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ISO_COUNTRIES } from '../../../../utils/iso3166CountryDisplay';
 import {
-  ALL_COUNTRIES_LABEL,
-  NONE_EXCLUDED_LABEL,
   collapseCountrySelection,
-  formatCountryAudienceLabel,
-  formatCountryAudienceValue,
   formatSplitCountryAudienceLabel,
   getCountryFieldHelp,
   isAllCountriesOptionVisible,
@@ -49,17 +45,7 @@ describe('countrySelection', () => {
     expect(isAllCountriesOptionVisible('', 'exclude')).toBe(false);
   });
 
-  it('formats review and field copy without listing every country', () => {
-    expect(formatCountryAudienceLabel([], 'include')).toBe(ALL_COUNTRIES_LABEL);
-    expect(formatCountryAudienceLabel([], 'exclude')).toBe(NONE_EXCLUDED_LABEL);
-    expect(formatCountryAudienceLabel(['US'], 'include')).toBe('Include: US');
-    expect(formatCountryAudienceValue(['US', 'CA'], 'exclude')).toBe('Exclude: US, CA');
-    expect(formatCountryAudienceValue(['United States', 'Canada', 'DE', 'FR'], 'include')).toBe(
-      'US, CA, DE, FR'
-    );
-    expect(
-      formatCountryAudienceValue(['US', 'CA', 'DE', 'FR', 'JP', 'AU', 'NZ', 'IN', 'BR'], 'include')
-    ).toBe('US, CA, DE, FR, JP, AU, NZ, IN + 1 more');
+  it('explains which country list applies in the field help', () => {
     expect(getCountryFieldHelp([], 'include')).toMatch(/worldwide/i);
     expect(getCountryFieldHelp([], 'exclude')).toMatch(/no countries excluded/i);
     expect(getCountryFieldHelp(['US'], 'exclude')).toMatch(/only one list applies/i);

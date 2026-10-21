@@ -63,8 +63,6 @@ Important families:
 | `/api/tests` | Price-test lifecycle (start/stop/pause…) |
 | `/api/shopify` | Slim store resources (e.g. product for visual pick) |
 | `/api/track` & `/api/proxy` | Storefront script + assignment/events (embeds goals + price surfaces) |
-| `/api/goal-metrics` | Classic Goals picker catalog (builtins + custom CRUD) |
-
 ---
 
 ## 3. Frontend API clients

@@ -14,7 +14,6 @@ import {
   describeSmartPricingLaunchReadiness,
   priceSurfaceSummary,
   themeEmbedStatus,
-  themeEmbedThemeName,
   unwrapCheckoutReadiness,
 } from '../utils/checkoutReadinessClient';
 import TooltipWrapper from '../components/shared/TooltipWrapper';
@@ -93,7 +92,6 @@ function idleReadiness(loading: boolean) {
     hints: [] as string[],
     surface: { known: false, ready: false, configured: 0, message: '' },
     embedStatus: 'unknown' as 'enabled' | 'disabled' | 'unknown',
-    embedThemeName: null as string | null,
     busy: loading,
   };
 }
@@ -112,7 +110,6 @@ async function loadReadiness(target: ApiTarget, { refresh = false } = {}) {
       hints,
       surface: priceSurfaceSummary(readiness),
       embedStatus: themeEmbedStatus(readiness),
-      embedThemeName: themeEmbedThemeName(readiness),
       busy: false,
     };
   } catch {
@@ -127,7 +124,6 @@ async function loadReadiness(target: ApiTarget, { refresh = false } = {}) {
       hints: [] as string[],
       surface: { known: false, ready: false, configured: 0, message: '' },
       embedStatus: 'unknown' as 'enabled' | 'disabled' | 'unknown',
-      embedThemeName: null as string | null,
       busy: false,
     };
   }
@@ -148,15 +144,11 @@ export default function SetupPage() {
     openInNewTab: openEmbedInNewTab,
     embedUrl,
     urls: embedUrls,
-    themeName,
   } = useThemeEmbedRedirect(ctx);
   const embedHttpsUrl = embedUrls?.https || '';
   const cart = useCartTransformStatus(shop);
   const discount = useCheckoutDiscountStatus(shop);
   const { hints, surface, embedStatus, launchSummary, busy: readinessBusy } = readiness;
-  // Prefer the theme the status was actually read from; fall back to the theme
-  // the deep link targets so the copy is not blank before readiness lands.
-  const embedThemeName = readiness.embedThemeName || themeName;
   // An unread status while the request is still out is "checking", not a verdict
   // the merchant should act on.
   const embedView: EmbedView =
@@ -347,14 +339,7 @@ export default function SetupPage() {
           {embedView === 'enabled' ? (
             <Banner tone="success">
               <p>
-                Priceify is installed in your live theme
-                {embedThemeName ? (
-                  <>
-                    {' '}
-                    (<strong>{embedThemeName}</strong>)
-                  </>
-                ) : null}
-                . No action needed.
+                Priceify is installed in your live theme. No action needed.
               </p>
             </Banner>
           ) : (

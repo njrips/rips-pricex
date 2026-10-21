@@ -21,7 +21,6 @@ import {
   priceOverrideKey,
   reconcileSelectedVariantIds,
   getAiSuggestCopy,
-  filterPriceSuggestionsRespectingEdits,
   resolveAiSuggestTargetArms,
   resolveAiSuggestSpreadArms,
   siblingArmPrices,
@@ -38,7 +37,6 @@ import {
   AI_BAND_MIN_PERCENT,
   spreadAiBandPriceEntries,
   aiSuggestBlockedReason,
-  countOutOfRangeTestPrices,
   guardrailPriceWindow,
   sanitizePriceInput,
   variantIdentity,
@@ -890,23 +888,6 @@ describe('resolveAiSuggestTargetArms', () => {
   });
 });
 
-describe('filterPriceSuggestionsRespectingEdits', () => {
-  it('skips cells the merchant edited after AI filled them', () => {
-    const key = priceOverrideKey('v1', 'var_a');
-    const suggestions = [
-      { variant_id: 'v1', arm_id: 'var_a', price: 50 },
-      { variant_id: 'v1', arm_id: 'var_b', price: 55 },
-    ];
-    const filtered = filterPriceSuggestionsRespectingEdits(
-      suggestions,
-      { [key]: '48.00' },
-      {},
-    );
-    expect(filtered).toHaveLength(1);
-    expect(filtered[0].arm_id).toBe('var_b');
-  });
-});
-
 describe('removing a variation', () => {
   const arms = [{ id: 'control' }, { id: 'var_b' }, { id: 'var_c' }];
 
@@ -987,7 +968,6 @@ describe('QA round: step 3 price inputs', () => {
       maxChangePercent: 30,
     };
     const over = { 'gid://shopify/ProductVariant/1::arm_b': '500' };
-    expect(countOutOfRangeTestPrices({ ...base, priceOverrides: over })).toBe(1);
     const gate = getProductsStepContinueState({ ...base, priceOverrides: over });
     expect(gate.disabled).toBe(true);
     expect(gate.reason).toBe('outside_max_price_change');
@@ -998,7 +978,9 @@ describe('QA round: step 3 price inputs', () => {
     });
     expect(ok.disabled).toBe(false);
     // An unknown cap never reports a price as out of range.
-    expect(countOutOfRangeTestPrices({ ...base, maxChangePercent: null, priceOverrides: over })).toBe(0);
+    expect(
+      getProductsStepContinueState({ ...base, maxChangePercent: null, priceOverrides: over }).reason
+    ).not.toBe('outside_max_price_change');
   });
 
   it('does not hold a price Suggest produced to max price change, but does once it is edited', () => {

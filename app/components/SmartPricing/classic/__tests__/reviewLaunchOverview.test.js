@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import {
   buildReviewSections,
   formatReviewPricingModeLabel,
-  resolveReviewPricingSummaryText,
 } from '../reviewLaunchOverview';
 
 const VARIATIONS = [
@@ -10,17 +9,6 @@ const VARIATIONS = [
   { id: 'var_a', name: 'Var A', letter: 'A', traffic: 33 },
   { id: 'var_b', name: 'Var B', letter: 'B', traffic: 33 },
 ];
-
-describe('resolveReviewPricingSummaryText', () => {
-  it('matches overview pricing strings for price tests', () => {
-    expect(
-      resolveReviewPricingSummaryText({ isOfferTest: false, priceMode: 'ai', variations: [] }),
-    ).toBe('AI suggested prices');
-    expect(
-      resolveReviewPricingSummaryText({ isOfferTest: true, priceMode: 'ai', variations: [] }),
-    ).toBe('Offers per variation');
-  });
-});
 
 describe('formatReviewPricingModeLabel', () => {
   it('matches the Step 5 pricing strings', () => {

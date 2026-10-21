@@ -169,17 +169,6 @@ async function resolveWinnerVariantForPublish(test, shopDomain, selectedVariantI
   return findWinnerVariant(test, analytics);
 }
 
-function csvEscape(value) {
-  if (value === undefined || value === null) {
-    return '';
-  }
-  const s = String(value);
-  if (/[",\n]/.test(s)) {
-    return `"${s.replace(/"/g, '""')}"`;
-  }
-  return s;
-}
-
 function buildRolloutRows(test, winnerVariant) {
   const config =
     winnerVariant && winnerVariant.config && typeof winnerVariant.config === 'object'
@@ -792,23 +781,6 @@ async function publishWinnerPricesToShopify({
   };
 }
 
-function buildCsv(headers, rows) {
-  const head = headers.map(csvEscape).join(',');
-  const body = rows.map(row => headers.map(h => csvEscape(row[h])).join(',')).join('\n');
-  return `${head}\n${body}\n`;
-}
-
-function safeFileName(value) {
-  const raw = String(value || 'price-test')
-    .trim()
-    .toLowerCase();
-  const cleaned = raw
-    .replace(/[^a-z0-9-_]+/g, '-')
-    .replace(/-+/g, '-')
-    .replace(/^-|-$/g, '');
-  return cleaned || 'price-test';
-}
-
 module.exports = {
   parseTargetIds,
   normalizePriceMode,
@@ -816,9 +788,6 @@ module.exports = {
   findWinnerVariant,
   resolveWinnerVariantForPublish,
   buildRolloutRows,
-  csvEscape,
-  buildCsv,
-  safeFileName,
   fetchTargetProductsForPublish,
   publishWinnerPricesToShopify,
   getEffectivePriceConfigForPublish,

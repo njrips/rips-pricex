@@ -1,6 +1,5 @@
 const {
   estimateMarginPercent,
-  estimateTrafficMetrics,
   flattenCatalogRows,
   calibrateShopConversionRate,
   buildProductQueries,
@@ -25,12 +24,6 @@ describe('catalogMetricsService', () => {
       ['gid://shopify/ProductVariant/2', { units_60d: 80 }],
     ]);
     expect(calibrateShopConversionRate(metrics)).toBeGreaterThan(0.008);
-  });
-
-  it('estimates traffic from recent unit sales', () => {
-    const traffic = estimateTrafficMetrics(25, 0.03);
-    expect(traffic.daily_visitors).toBeGreaterThan(1);
-    expect(traffic.visitors_30d).toBeGreaterThan(traffic.daily_visitors);
   });
 
   it('flattens catalog products into SKU rows', () => {

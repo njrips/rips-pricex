@@ -2012,21 +2012,10 @@ export function buildMetricsSummary(plan = null, test = null) {
   };
 }
 
-function qaRunTitle(status) {
-  const key = String(status || '')
-    .trim()
-    .toLowerCase();
-  if (key === 'pass' || key === 'passed' || key === 'success') return 'Self-QA passed';
-  if (key === 'fail' || key === 'failed' || key === 'error') return 'Self-QA failed';
-  if (key === 'running' || key === 'queued') return 'Self-QA running';
-  return status ? `Self-QA ${status}` : 'Self-QA run';
-}
-
 export function buildActivityTimeline({
   plan = null,
   test = null,
   analytics = null,
-  qaRuns = [],
   plans = [],
   serverEvents = [],
 } = {}) {
@@ -2093,19 +2082,6 @@ export function buildActivityTimeline({
       kind: 'queued',
       actor,
       detail: 'Not launched yet',
-    });
-  }
-
-  for (const run of Array.isArray(qaRuns) ? qaRuns : []) {
-    items.push({
-      id: `qa_${run.id || run.created_at}`,
-      at: run.finished_at || run.created_at || run.started_at,
-      title: qaRunTitle(run.status),
-      kind: 'qa',
-      actor,
-      status: run.status || '',
-      detail:
-        run.verdict_summary || run.verdict_json?.ai_summary?.headline || run.trigger || 'QA check',
     });
   }
 

@@ -1,35 +1,114 @@
 const { test, describe } = require('node:test');
 const assert = require('node:assert/strict');
 const {
-  pickSampleProductPath,
   knownPricesForTarget,
   anchorCandidate,
   searchPathForProduct,
+  coverBothProductLayouts,
+  picksBySlot,
 } = require('../priceSurfaceAutoMapService');
 const { rankThemeFilenames } = require('../priceSurfaceThemeFileService');
 const { anchorSelectorToPrices } = require('../../utils/priceSurfaceHtmlProbe');
 
-describe('pickSampleProductPath', () => {
-  test('prefers an in-stock product on sale, then any in-stock product', () => {
-    const products = [
-      { handle: 'sold-out', available: false, onSale: true },
-      { handle: 'plain', available: true, onSale: false },
-      { handle: 'on-sale', available: true, onSale: true },
-    ];
-    assert.equal(pickSampleProductPath(products), '/products/on-sale');
-    assert.equal(pickSampleProductPath(products.slice(0, 2)), '/products/plain');
+describe('coverBothProductLayouts', () => {
+  // A theme that prints only the layout in use: one element on sale, another at full price.
+  const saleHtml =
+    '<div class="price"><span class="price-now">$20.00</span><s class="price-was">$30.00</s></div>';
+  const plainHtml = '<div class="price"><span class="price-single">$25.00</span></div>';
+  const primary = { regular: new Set([2000]), compare: new Set([3000]) };
+  const other = { regular: new Set([2500]), compare: new Set() };
+
+  test('keeps a selector that shows the price on both products', () => {
+    const chosen = { selector: '.price', verified: true };
+    const result = coverBothProductLayouts({
+      chosen,
+      candidates: [chosen],
+      primaryHtml: saleHtml,
+      primary,
+      otherHtml: '<div class="price">$25.00</div>',
+      other,
+    });
+    assert.equal(result.candidate.selector, '.price');
+    assert.equal(result.layouts, 2);
+    assert.equal(result.combined, false);
   });
 
-  test('skips gift cards and handles an empty listing', () => {
-    assert.equal(
-      pickSampleProductPath([
-        { handle: 'gift', available: true, onSale: false, giftCard: true },
-        { handle: 'tee', available: true, onSale: false },
-      ]),
-      '/products/tee'
+  test('switches to a verified candidate that covers both layouts', () => {
+    const chosen = { selector: '.price-now', verified: true };
+    const both = { selector: '.price', verified: true };
+    const result = coverBothProductLayouts({
+      chosen,
+      candidates: [chosen, both],
+      primaryHtml: saleHtml,
+      primary,
+      // On the full-price page `.price-now` shows another amount: a real miss.
+      otherHtml: '<div class="price">$25.00</div><span class="price-now">$99.00</span>',
+      other,
+    });
+    assert.equal(result.candidate.selector, '.price');
+    assert.equal(result.layouts, 2);
+    assert.equal(result.combined, false);
+  });
+
+  test('leaves the pick alone when the other page shows no readable price', () => {
+    const chosen = { selector: '.price-now', verified: true };
+    const result = coverBothProductLayouts({
+      chosen,
+      candidates: [chosen],
+      primaryHtml: saleHtml,
+      primary,
+      otherHtml: '<span class="price-now"></span>',
+      other,
+    });
+    assert.equal(result.candidate.selector, '.price-now');
+    assert.equal(result.layouts, 1);
+  });
+
+  test('joins the full-price element when the chosen one misses there', () => {
+    const chosen = { selector: '.price-now', verified: true };
+    const result = coverBothProductLayouts({
+      chosen,
+      candidates: [chosen],
+      primaryHtml: saleHtml,
+      primary,
+      otherHtml: `${plainHtml}<span class="price-now">$99.00</span>`,
+      other,
+    });
+    assert.equal(result.combined, true);
+    assert.equal(result.layouts, 2);
+    assert.equal(result.candidate.selector, '.price-now, .price-single');
+  });
+
+  test('never joins an element that would catch the struck compare-at price', () => {
+    const chosen = { selector: '.price-now', verified: true };
+    const result = coverBothProductLayouts({
+      chosen,
+      candidates: [chosen],
+      primaryHtml: saleHtml,
+      primary,
+      otherHtml: '<span class="price-was">$25.00</span><span class="price-now">$99.00</span>',
+      other,
+    });
+    assert.equal(result.candidate.selector, '.price-now');
+    assert.equal(result.layouts, 1);
+  });
+});
+
+describe('picksBySlot', () => {
+  test('reads the strict-schema array and the older keyed object', () => {
+    assert.deepEqual(
+      picksBySlot({
+        picks: [
+          { slot: 'pdp:regular', index: 1, rationale: 'a' },
+          { slot: 'pdp:regular', index: 2, rationale: 'duplicate ignored' },
+        ],
+      }),
+      { 'pdp:regular': { slot: 'pdp:regular', index: 1, rationale: 'a' } }
     );
-    assert.equal(pickSampleProductPath([]), '');
-    assert.equal(pickSampleProductPath(undefined), '');
+    assert.deepEqual(picksBySlot({ picks: { 'plp:regular': { index: 0 } } }), {
+      'plp:regular': { index: 0 },
+    });
+    assert.deepEqual(picksBySlot(null), {});
   });
 });
 

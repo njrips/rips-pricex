@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
   countWinningExperiments,
-  enrichInboxPlansForLaunch,
   formatClassicStatusLabel,
   formatExperimentTypeLabel,
   getPlanExperimentId,
@@ -168,83 +167,6 @@ describe('classicExperimentHelpers', () => {
     expect(formatClassicStatusLabel('applied', 'price_test')).toBe('Finished');
     expect(formatClassicStatusLabel('completed', 'price_test')).toBe('Finished');
     expect(formatClassicStatusLabel('archived', 'price_test')).toBe('Archived');
-  });
-
-  it('enriches inbox drafts from audience_ui before list launch', () => {
-    const [enriched] = enrichInboxPlansForLaunch([
-      {
-        id: 'p1',
-        metadata: {
-          audience_ui: {
-            segment: 'new_visitors',
-            trafficAllocation: 35,
-            devices: ['Mobile'],
-            deviceMode: 'include',
-            countries: ['US'],
-            includeCountries: ['US'],
-            countryMode: 'include',
-            minSampleSize: '3200',
-          },
-        },
-      },
-    ]);
-    expect(enriched.audience.inherit_from_shop_defaults).toBe(false);
-    expect(enriched.audience.segments.customer).toBe('new');
-    expect(enriched.audience.traffic_allocation).toBe(35);
-    expect(enriched.audience.include_countries).toEqual(['US']);
-    expect(enriched.audience.segments.countries).toEqual(['US']);
-    expect(enriched.launch_preferences.auto_start).toBe(true);
-    expect(enriched.audience.min_sample_size).toBe(3200);
-    expect(enriched.launch_preferences.min_sample_size).toBe(3200);
-    expect(enriched.goal.analysis_method).toBe('sequential');
-    expect(enriched.goal.significance_level).toBe(0.9);
-    expect(enriched.statistical_design.analysis_method).toBe('sequential');
-    expect(enriched.statistical_design.confidence_level).toBe(90);
-    expect(enriched.goal.guardrails).toEqual({
-      auto_stop: true,
-      enabled: true,
-      max_revenue_drop_percent: 10,
-    });
-  });
-
-  it('uses shop statistical defaults when the inbox plan has none', () => {
-    const [enriched] = enrichInboxPlansForLaunch(
-      [{ id: 'p-shop', metadata: { audience_ui: { minSampleSize: '2000' } } }],
-      { confidence_level: 95, mde_percent: 8 }
-    );
-    expect(enriched.goal.significance_level).toBe(0.95);
-    expect(enriched.goal.mde_percent).toBe(8);
-    expect(enriched.goal.min_sample_size).toBe(2000);
-    expect(enriched.statistical_design.confidence_level).toBe(95);
-    expect(enriched.statistical_design.mde_percent).toBe(8);
-    expect(enriched.launch_preferences.min_sample_size).toBe(2000);
-  });
-
-  it('launches only the include list when an older audience holds both', () => {
-    const [enriched] = enrichInboxPlansForLaunch([
-      {
-        id: 'p2',
-        metadata: {
-          audience_ui: {
-            includeCountries: ['US', 'CA'],
-            excludeCountries: ['GB'],
-            countryMode: 'exclude',
-          },
-        },
-      },
-    ]);
-    expect(enriched.audience.segments.countries).toEqual(['US', 'CA']);
-    expect(enriched.audience.segments.audience_rules).toBeUndefined();
-  });
-
-  it('stamps experiment_type from metadata onto the plan root for list launch', () => {
-    const [enriched] = enrichInboxPlansForLaunch([
-      {
-        id: 'p-offer',
-        metadata: { experiment_type: 'offer_test' },
-      },
-    ]);
-    expect(enriched.experiment_type).toBe('offer_test');
   });
 
   it('replaces prior inbox plans for the same experiment on upsert', () => {

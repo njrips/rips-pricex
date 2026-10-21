@@ -10,7 +10,6 @@ import { readInboxPlans, updateInboxPlan } from './smartPricingConstants';
 
 const persistTimers = new Map();
 const revisionByDomain = new Map();
-const conflictByDomain = new Map();
 const PERSIST_DEBOUNCE_MS = 800;
 
 export function getInboxServerRevision(domain) {
@@ -20,14 +19,6 @@ export function getInboxServerRevision(domain) {
 export function setInboxServerRevision(domain, revision) {
   if (!domain || !revision) return;
   revisionByDomain.set(String(domain), revision);
-}
-
-export function getInboxConflict(domain) {
-  return conflictByDomain.get(String(domain || 'default')) || null;
-}
-
-export function clearInboxConflict(domain) {
-  conflictByDomain.delete(String(domain || 'default'));
 }
 
 function extractConflictPayload(err) {
@@ -172,142 +163,11 @@ export async function hydrateInboxFromServer(domain, localPlans = [], options = 
   }
 }
 
-export function buildInboxConflictDiff(localPlans = [], serverPlans = []) {
-  const localById = new Map(
-    (Array.isArray(localPlans) ? localPlans : []).filter(p => p?.id).map(p => [p.id, p])
-  );
-  const serverById = new Map(
-    (Array.isArray(serverPlans) ? serverPlans : []).filter(p => p?.id).map(p => [p.id, p])
-  );
-  const allIds = new Set([...localById.keys(), ...serverById.keys()]);
-  const conflicts = [];
-  const localOnly = [];
-  const serverOnly = [];
-
-  allIds.forEach(id => {
-    const local = localById.get(id);
-    const server = serverById.get(id);
-    if (local && !server) {
-      localOnly.push(local);
-      return;
-    }
-    if (server && !local) {
-      serverOnly.push(server);
-      return;
-    }
-    if (local && server && JSON.stringify(local) !== JSON.stringify(server)) {
-      conflicts.push({
-        id,
-        title: local.title || server.title || id,
-        local,
-        server,
-        field_conflicts: buildPlanFieldConflicts(local, server),
-      });
-    }
-  });
-
-  return { conflicts, localOnly, serverOnly };
-}
-
-export const INBOX_MERGE_FIELDS = ['status', 'launch_queue_order', 'test_id', 'title'];
-
-function formatFieldValue(value) {
-  if (value === undefined || value === null || value === '') {
-    return '—';
-  }
-  if (typeof value === 'object') {
-    return JSON.stringify(value);
-  }
-  return String(value);
-}
-
-export function buildPlanFieldConflicts(localPlan = {}, serverPlan = {}) {
-  const fields = [];
-  INBOX_MERGE_FIELDS.forEach(key => {
-    const localValue = localPlan?.[key];
-    const serverValue = serverPlan?.[key];
-    if (JSON.stringify(localValue) !== JSON.stringify(serverValue)) {
-      fields.push({
-        key,
-        label: key.replace(/_/g, ' '),
-        local: localValue,
-        server: serverValue,
-        local_label: formatFieldValue(localValue),
-        server_label: formatFieldValue(serverValue),
-      });
-    }
-  });
-
-  const localArms = JSON.stringify(localPlan?.price_arms || []);
-  const serverArms = JSON.stringify(serverPlan?.price_arms || []);
-  if (localArms !== serverArms) {
-    fields.push({
-      key: 'price_arms',
-      label: 'price variations',
-      local: localPlan?.price_arms,
-      server: serverPlan?.price_arms,
-      local_label: `${(localPlan?.price_arms || []).length} variation(s)`,
-      server_label: `${(serverPlan?.price_arms || []).length} variation(s)`,
-      complex: true,
-    });
-  }
-
-  return fields;
-}
-
-export function mergeInboxPlanChoices(
-  localPlans = [],
-  serverPlans = [],
-  choices = {},
-  fieldChoices = {}
-) {
-  const { conflicts, localOnly, serverOnly } = buildInboxConflictDiff(localPlans, serverPlans);
-  const localById = new Map(localPlans.filter(p => p?.id).map(p => [p.id, p]));
-  const serverById = new Map(serverPlans.filter(p => p?.id).map(p => [p.id, p]));
-  const mergedById = new Map();
-
-  serverOnly.forEach(plan => mergedById.set(plan.id, plan));
-
-  conflicts.forEach(row => {
-    const fieldPick = fieldChoices[row.id];
-    if (fieldPick && typeof fieldPick === 'object' && Object.keys(fieldPick).length > 0) {
-      const merged = { ...row.server };
-      Object.entries(fieldPick).forEach(([key, source]) => {
-        merged[key] = source === 'local' ? row.local?.[key] : row.server?.[key];
-      });
-      mergedById.set(row.id, merged);
-      return;
-    }
-    const pick = choices[row.id] === 'local' ? row.local : row.server;
-    mergedById.set(row.id, pick);
-  });
-
-  localOnly.forEach(plan => mergedById.set(plan.id, plan));
-
-  const unchangedIds = new Set([...localById.keys(), ...serverById.keys()]);
-  conflicts.forEach(row => unchangedIds.delete(row.id));
-  localOnly.forEach(p => unchangedIds.delete(p.id));
-  serverOnly.forEach(p => unchangedIds.delete(p.id));
-
-  unchangedIds.forEach(id => {
-    if (!mergedById.has(id)) {
-      mergedById.set(id, serverById.get(id) || localById.get(id));
-    }
-  });
-
-  const serverOrder = serverPlans.map(p => p.id).filter(Boolean);
-  const localOrder = localPlans.map(p => p.id).filter(Boolean);
-  const order = [...new Set([...serverOrder, ...localOrder])];
-  return order.map(id => mergedById.get(id)).filter(Boolean);
-}
-
-export function schedulePersistInboxPlans(domain, plans, { onStatus, onConflict } = {}) {
+export function schedulePersistInboxPlans(domain, plans) {
   const key = String(domain || 'default');
   if (persistTimers.has(key)) {
     clearTimeout(persistTimers.get(key));
   }
-
-  onStatus?.('saving');
 
   const timer = setTimeout(async () => {
     persistTimers.delete(key);
@@ -318,17 +178,8 @@ export function schedulePersistInboxPlans(domain, plans, { onStatus, onConflict 
       if (saved?.revision) {
         setInboxServerRevision(domain, saved.revision);
       }
-      clearInboxConflict(domain);
-      onStatus?.('saved');
-    } catch (err) {
-      const conflictPayload = extractConflictPayload(err);
-      if (conflictPayload) {
-        conflictByDomain.set(key, conflictPayload);
-        onConflict?.(conflictPayload, plans);
-        onStatus?.('error', 'Inbox changed elsewhere — choose how to merge.');
-        return;
-      }
-      onStatus?.('error', err?.message || 'Could not save inbox to your account.');
+    } catch {
+      // Best effort: the next explicit save (persistInboxPlansNow) merges and retries.
     }
   }, PERSIST_DEBOUNCE_MS);
 
@@ -354,7 +205,6 @@ export async function persistInboxPlansNow(domain, plans, { deletedPlanIds = [] 
     if (saved?.revision) {
       setInboxServerRevision(domain, saved.revision);
     }
-    clearInboxConflict(domain);
     return saved;
   } catch (err) {
     const conflictPayload = extractConflictPayload(err);
@@ -371,7 +221,6 @@ export async function persistInboxPlansNow(domain, plans, { deletedPlanIds = [] 
     if (saved?.revision) {
       setInboxServerRevision(domain, saved.revision);
     }
-    clearInboxConflict(domain);
     return saved;
   }
 }

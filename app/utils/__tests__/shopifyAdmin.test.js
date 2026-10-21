@@ -2,10 +2,7 @@ import { describe, it } from 'vitest';
 import assert from 'node:assert/strict';
 import {
   coerceShopifyShopInput,
-  describeShopOpenError,
   isShopifyStoreDomain,
-  shopOpenPreview,
-  toShopifyShopHandleField,
 } from '../shopifyAdmin.js';
 
 describe('coerceShopifyShopInput', () => {
@@ -39,25 +36,5 @@ describe('coerceShopifyShopInput', () => {
     assert.equal(isShopifyStoreDomain(coerceShopifyShopInput('admin.shopify.com')), false);
     assert.equal(isShopifyStoreDomain(coerceShopifyShopInput('www.example.com')), false);
     assert.equal(isShopifyStoreDomain(coerceShopifyShopInput('not a shop')), false);
-  });
-});
-
-describe('shop field helpers', () => {
-  it('collapses pasted Admin URLs to a handle', () => {
-    assert.equal(
-      toShopifyShopHandleField('https://admin.shopify.com/store/ripx-plus'),
-      'ripx-plus'
-    );
-  });
-
-  it('previews a valid shop host', () => {
-    assert.equal(shopOpenPreview('ripx-plus'), 'ripx-plus.myshopify.com');
-    assert.equal(shopOpenPreview(''), '');
-  });
-
-  it('explains custom domains and bare Admin hosts', () => {
-    assert.match(describeShopOpenError(''), /handle/);
-    assert.match(describeShopOpenError('admin.shopify.com'), /Admin URL/);
-    assert.match(describeShopOpenError('www.example.com'), /custom domain/);
   });
 });

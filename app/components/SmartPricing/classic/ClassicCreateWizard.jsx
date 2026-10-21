@@ -171,6 +171,7 @@ import {
   DEFAULT_MIN_SAMPLE_SIZE,
   applyAudienceUiToPlans,
   mergeInboxPlansById,
+  resolveLiveEditActivityEntries,
   resolveMinSampleSize,
   validateClassicAudienceUi,
 } from './classicAudienceEdit';
@@ -2162,19 +2163,30 @@ export default function ClassicCreateWizard({ onTitleChange }) {
     setBusy(true);
     setMessage('');
     try {
-      const nextPlans = appendActivityToPlans(
-        applyAudienceUiToPlans(livePlans, audience || createDefaultAudienceState(), {
+      const nextAudience = audience || createDefaultAudienceState();
+      const actor = livePlans[0]?.owner_name || livePlans[0]?.created_by_name || 'You';
+      const savedAt = Date.now();
+      const nextPlans = resolveLiveEditActivityEntries(
+        livePlans[0]?.metadata?.audience_ui,
+        nextAudience
+      ).reduce(
+        (acc, entry, index) =>
+          appendActivityToPlans(
+            acc,
+            createActivityEntry({
+              id: `updated_${savedAt}_${index}`,
+              kind: 'updated',
+              title: entry.title,
+              detail: entry.detail,
+              actor,
+            })
+          ),
+        applyAudienceUiToPlans(livePlans, nextAudience, {
           experimentId,
           experimentTitle: trimmedName,
           hypothesis,
           experimentType,
           shopGuardrails,
-        }),
-        createActivityEntry({
-          kind: 'updated',
-          title: 'Settings changed',
-          detail: 'Test details, audience, metrics, guardrail or traffic allocation changed.',
-          actor: livePlans[0]?.owner_name || livePlans[0]?.created_by_name || 'You',
         })
       );
       const merged = mergeInboxPlansById(readInboxPlans(shopDomain) || [], nextPlans);

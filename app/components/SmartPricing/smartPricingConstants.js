@@ -91,19 +91,3 @@ export function updateInboxPlan(domain, planId, patch) {
   writeInboxPlans(domain, plans);
   return plans;
 }
-
-export function reorderQueuedPlans(domain, orderedQueuedIds) {
-  const plans = readInboxPlans(domain);
-  const queued = plans.filter(plan => plan.status === 'queued' || plan.status === 'draft');
-  const others = plans.filter(plan => plan.status !== 'queued' && plan.status !== 'draft');
-  const byId = new Map(queued.map(plan => [plan.id, plan]));
-  const reordered = (Array.isArray(orderedQueuedIds) ? orderedQueuedIds : [])
-    .map(id => byId.get(id))
-    .filter(Boolean);
-  queued.forEach(plan => {
-    if (!reordered.some(row => row.id === plan.id)) {
-      reordered.push(plan);
-    }
-  });
-  return writeInboxPlans(domain, [...reordered, ...others]);
-}

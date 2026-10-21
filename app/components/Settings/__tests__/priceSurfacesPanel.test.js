@@ -26,18 +26,24 @@ if (!window.matchMedia) {
 }
 
 const savedBodies = [];
-/** What /store-resources answers with, so a test can take the product away. */
-let storeProducts = [{ handle: 'sample-tee' }];
-const storeResourceRequests = [];
+/** What …/check-product answers with, so a test can take the product away. */
+const SAMPLE_CHECK_PRODUCT = {
+  chosen: null,
+  sample: {
+    path: '/products/sample-tee',
+    page_path: '/products/sample-tee?variant=7',
+    title: 'Sample tee',
+    on_sale: true,
+    available: true,
+  },
+  store_has_sale_product: true,
+  store_has_buyable_product: true,
+};
+let checkProductResponse = SAMPLE_CHECK_PRODUCT;
+const checkProductRequests = [];
+const checkProductSaves = [];
 
 vi.mock('../../../services', () => ({
-  apiGet: path => {
-    if (String(path).includes('store-resources')) {
-      storeResourceRequests.push(String(path));
-      return Promise.resolve({ data: { resources: storeProducts } });
-    }
-    return Promise.resolve({ data: {} });
-  },
   getApiBaseUrl: () => 'https://app.example.com',
 }));
 
@@ -45,16 +51,26 @@ vi.mock('../../../services', () => ({
 let savedMappings = [];
 /** When set, POST …/auto-map returns this payload (Settings deep link + Auto-detect). */
 let autoMapPostResponse = null;
+const autoMapBodies = [];
 
 vi.mock('../../../services/api', () => ({
   apiGet: () => Promise.resolve({ data: { mappings: savedMappings } }),
-  apiPost: path => {
+  apiPost: (path, body) => {
     if (String(path).includes('auto-map')) {
+      autoMapBodies.push(body);
       return Promise.resolve({ data: autoMapPostResponse || { surfaces: [] } });
+    }
+    if (String(path).includes('check-product')) {
+      checkProductRequests.push(String(path));
+      return Promise.resolve({ data: checkProductResponse });
     }
     return Promise.resolve({ data: {} });
   },
   apiPut: (path, body) => {
+    if (String(path).includes('check-product')) {
+      checkProductSaves.push(body);
+      return Promise.resolve({ data: { chosen: null } });
+    }
     savedBodies.push(body);
     return Promise.resolve({ data: { mappings: body.mappings } });
   },
@@ -148,10 +164,12 @@ const addRow = async () => {
 
 beforeEach(() => {
   savedBodies.length = 0;
-  storeResourceRequests.length = 0;
+  checkProductRequests.length = 0;
+  checkProductSaves.length = 0;
+  autoMapBodies.length = 0;
   savedMappings = [];
   autoMapPostResponse = null;
-  storeProducts = [{ handle: 'sample-tee' }];
+  checkProductResponse = SAMPLE_CHECK_PRODUCT;
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -442,20 +460,56 @@ describe('why Pick is unavailable', () => {
     expect(pickReason()).toMatch(/page URL first/i);
   });
 
-  it('explains a product-page row when the shop has no published product', async () => {
-    storeProducts = [];
+  it('explains a product-page row when the shop has no product to preview', async () => {
+    checkProductResponse = {
+      chosen: null,
+      sample: null,
+      store_has_sale_product: false,
+      store_has_buyable_product: false,
+    };
     await render();
     await addRow();
     expect(isDisabled(pickButton())).toBe(true);
-    expect(pickReason()).toMatch(/no published product/i);
+    expect(pickReason()).toMatch(/no in-stock product/i);
     expect(pickReason()).toMatch(/Specific URL/);
+    expect(container.textContent).toMatch(/No in-stock product on your Online Store/);
   });
 
-  it('asks Shopify only for products a storefront preview can load', async () => {
-    // An unpublished product 404s, so Pick would open on an error page.
+  it('asks the server which product to check, and says why it was picked', async () => {
+    // The server picks an in-stock product on sale, so Pick never lands on a
+    // sold-out page or one with no compare-at price.
     await render();
-    expect(storeResourceRequests[0]).toContain('type=product');
-    expect(decodeURIComponent(storeResourceRequests[0])).toContain('published_status:published');
+    expect(checkProductRequests[0]).toContain('/settings/price-surfaces/check-product');
+    expect(container.textContent).toMatch(/“Sample tee”, an in-stock product on sale/);
+  });
+
+  it('leaves the product choice to the server when auto-detecting', async () => {
+    autoMapPostResponse = { surfaces: [] };
+    await render();
+    const autoDetect = Array.from(container.querySelectorAll('button')).find(button =>
+      /Auto-detect prices/.test(button.textContent || '')
+    );
+    await act(async () => {
+      autoDetect.click();
+    });
+    expect(autoMapBodies).toHaveLength(1);
+    expect(autoMapBodies[0]).not.toHaveProperty('product_path');
+  });
+
+  it('offers to go back to automatic once a product is chosen', async () => {
+    checkProductResponse = {
+      ...SAMPLE_CHECK_PRODUCT,
+      chosen: { id: 'gid://shopify/Product/1', title: 'Sample tee', handle: 'sample-tee' },
+    };
+    await render();
+    expect(container.textContent).toMatch(/which you chose/);
+    const automatic = Array.from(container.querySelectorAll('button')).find(button =>
+      /Pick automatically/.test(button.textContent || '')
+    );
+    await act(async () => {
+      automatic.click();
+    });
+    expect(checkProductSaves).toEqual([{ product_id: null }]);
   });
 
   it('enables Pick once a product is found', async () => {

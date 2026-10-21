@@ -325,7 +325,8 @@ export default function PriceSurfaceMappingsPanel({
   onRegisterShopPickHandler,
   onStatusChange,
   autoMapRequestToken = 0,
-  productPath = '',
+  /** Shown beside Auto-detect: which product the price check runs on. */
+  checkProductControl = null,
 }) {
   const [shopMappings, setShopMappings] = useState([]);
   // Declared here, above the callbacks that read it, so the rows keep one
@@ -782,9 +783,10 @@ export default function PriceSurfaceMappingsPanel({
       const autoMapPath = base.includes('?')
         ? `${base.split('?')[0]}/auto-map?${base.split('?')[1]}`
         : `${base}/auto-map`;
+      // No product here: the server checks the merchant's chosen product, or picks
+      // an in-stock one on sale (and one at full price) itself.
       const response = await apiPost(autoMapPath, {
         storefront_password: storefrontPassword || undefined,
-        product_path: productPath || undefined,
       });
       if (autoMapCancelledRef.current) {
         return;
@@ -820,7 +822,7 @@ export default function PriceSurfaceMappingsPanel({
     } finally {
       setAutoMapping(false);
     }
-  }, [applyAutoMapToShop, priceSurfaceSettingsPath, productPath, storefrontPassword]);
+  }, [applyAutoMapToShop, priceSurfaceSettingsPath, storefrontPassword]);
 
   useEffect(() => {
     const token = Number(autoMapRequestToken) || 0;
@@ -1006,6 +1008,7 @@ export default function PriceSurfaceMappingsPanel({
             {savingShop ? 'Saving…' : 'Save'}
           </Button>
         </InlineStack>
+        {checkProductControl}
       </div>
       <Modal
         open={autoMapOpen}

@@ -34,7 +34,7 @@ afterEach(async () => {
   container.remove();
 });
 
-async function render(overrides = {}) {
+async function render(overrides = {}, ctx = { shop: 'demo.myshopify.com' }) {
   const planState = {
     loading: false,
     loadError: null,
@@ -50,6 +50,8 @@ async function render(overrides = {}) {
     refresh: vi.fn(),
     calloutTitle: 'Ready to launch tests',
     canOpenPricing: true,
+    hasUpgradeUrl: true,
+    pricingPlansReady: true,
     planCtaLabel: 'Manage plan',
     ...overrides,
   };
@@ -62,7 +64,7 @@ async function render(overrides = {}) {
           MemoryRouter,
           null,
           h(SettingsPlanPanel, {
-            ctx: { shop: 'demo.myshopify.com' },
+            ctx,
             planState,
           })
         )
@@ -96,6 +98,29 @@ describe('Plan & usage panel', () => {
         'Open setup checklist',
       ])
     );
+  });
+
+  it('keeps Upgrade off and says why while App Pricing plans are not set up', async () => {
+    const locked = {
+      entitled: false,
+      unlocked: false,
+      calloutTitle: 'Create and Launch are locked',
+      canOpenPricing: false,
+      pricingPlansReady: false,
+      planCtaLabel: 'Upgrade',
+    };
+    await render(locked, { shop: 'demo.myshopify.com', isProductionBuild: false });
+    const upgrade = Array.from(container.querySelectorAll('button')).find(
+      node => (node.textContent || '').trim() === 'Upgrade'
+    );
+    expect(upgrade.disabled || upgrade.getAttribute('aria-disabled') === 'true').toBe(true);
+    expect(container.textContent).toContain('Plans are not open for sign-up yet.');
+    expect(container.textContent).toContain('SHOPIFY_APP_PRICING_READY=true');
+
+    // Merchants on a production build get the plain explanation, not the setup note.
+    await render(locked, { shop: 'demo.myshopify.com', isProductionBuild: true });
+    expect(container.textContent).toContain('Plans are not open for sign-up yet.');
+    expect(container.textContent).not.toContain('SHOPIFY_APP_PRICING_READY');
   });
 
   it('surfaces plan loading errors without hiding the current-plan section', async () => {

@@ -6,13 +6,13 @@ import { preserveEmbeddedSearch } from '../utils/shopifyEmbeddedSearch';
 import ClassicCreateWizard from '../components/SmartPricing/classic/ClassicCreateWizard';
 import ClassicAdminShell from '../components/SmartPricing/classic/ClassicAdminShell';
 import styles from '../components/SmartPricing/classic/SmartPricingClassic.module.css';
-import { useUpgradeRedirect } from '../lib/useUpgradeRedirect';
+import { useViewPlans } from '../lib/useViewPlans';
 import type { AppOutletContext } from '../lib/api.client';
 import '../styles/classic-theme.css';
 
 export default function CreateExperiment() {
   const ctx = useOutletContext<AppOutletContext>();
-  const upgrade = useUpgradeRedirect(ctx.upgradeUrl);
+  const upgrade = useViewPlans();
   const navigate = useNavigate();
   const [draftTitle, setDraftTitle] = useState('');
 
@@ -35,8 +35,8 @@ export default function CreateExperiment() {
         <div style={{ marginBottom: 16 }}>
           <Banner tone="warning" title="Active plan required">
             <p>
-              Plans open in Shopify Admin. After you approve a plan, you come back here to finish
-              Store setup.
+              View plans to see your plan status and choose a plan. After you approve one, come
+              back here to finish Store setup.
             </p>
           </Banner>
         </div>

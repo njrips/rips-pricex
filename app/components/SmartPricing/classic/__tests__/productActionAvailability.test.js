@@ -3,7 +3,6 @@ import {
   resolveProductActionAvailability,
   mapServerEventToActivity,
   resolveProductEventTitle,
-  mergeServerAndLegacyActivity,
   PRODUCT_EVENT_LABELS,
 } from '../productActionAvailability';
 
@@ -230,40 +229,6 @@ describe('mapServerEventToActivity', () => {
     expect(row.title).toBe(PRODUCT_EVENT_LABELS.winner_applied);
     expect(row.detail).toMatch(/1 Shopify price/);
     expect(row.source).toBe('server');
-  });
-});
-
-describe('mergeServerAndLegacyActivity', () => {
-  it('prefers server events and keeps unique legacy rows', () => {
-    const merged = mergeServerAndLegacyActivity(
-      [
-        {
-          id: 's1',
-          event_type: 'stopped',
-          actor: 'merchant',
-          created_at: '2026-09-02T12:00:00.000Z',
-          plan_id: 'SP-1',
-          payload: {},
-        },
-      ],
-      [
-        {
-          id: 'legacy-1',
-          at: '2026-09-02T11:00:00.000Z',
-          title: 'Created',
-          kind: 'created',
-        },
-        {
-          id: 'legacy-dup',
-          at: '2026-09-02T12:00:00.000Z',
-          title: PRODUCT_EVENT_LABELS.stopped,
-          kind: 'paused',
-          plan_id: 'SP-1',
-        },
-      ]
-    );
-    expect(merged.some(row => row.source === 'server')).toBe(true);
-    expect(merged.some(row => row.title === 'Created')).toBe(true);
   });
 });
 

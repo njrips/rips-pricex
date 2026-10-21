@@ -390,3 +390,52 @@ export function resolveAudienceHistoryActivityTitle(editFocus, prev = {}, next =
   if (trafficChanged && !targetingChanged) return 'Traffic allocation changed';
   return 'Audience targeting changed';
 }
+
+const GUARDRAIL_EDIT_DETAIL = 'Revenue per visitor guardrail settings changed.';
+
+/**
+ * History entries for a live-test edit saved from the wizard, one per area
+ * that changed, so a guardrail edit is filed under Guardrails rather than
+ * hidden inside a generic "Settings changed".
+ */
+export function resolveLiveEditActivityEntries(prev = {}, next = {}) {
+  const before = prev && typeof prev === 'object' ? prev : {};
+  const after = next && typeof next === 'object' ? next : {};
+  const entries = [];
+
+  const prevRail = revenueGuardrailUiRow(before);
+  const nextRail = revenueGuardrailUiRow(after);
+  const prevOn = prevRail?.on !== false;
+  const nextOn = nextRail?.on !== false;
+  if (prevOn !== nextOn) {
+    entries.push({
+      title: nextOn ? 'Guardrail turned on' : 'Guardrail turned off',
+      detail: GUARDRAIL_EDIT_DETAIL,
+    });
+  }
+  if (String(prevRail?.threshold || '') !== String(nextRail?.threshold || '')) {
+    entries.push({ title: 'Guardrail threshold changed', detail: GUARDRAIL_EDIT_DETAIL });
+  }
+
+  if (
+    String(before.primaryMetric || 'revenue_per_visitor') !==
+      String(after.primaryMetric || 'revenue_per_visitor') ||
+    String(before.primaryCustomGoal || '') !== String(after.primaryCustomGoal || '')
+  ) {
+    entries.push({ title: 'Primary metric changed', detail: 'Primary success metric changed.' });
+  }
+
+  if (audienceTargetingFingerprint(before) !== audienceTargetingFingerprint(after)) {
+    entries.push({
+      title: 'Audience targeting changed',
+      detail: 'Segment, devices, sources, or countries changed.',
+    });
+  }
+  if (String(before.trafficAllocation ?? '') !== String(after.trafficAllocation ?? '')) {
+    entries.push({ title: 'Traffic allocation changed', detail: 'Traffic allocation changed.' });
+  }
+
+  return entries.length
+    ? entries
+    : [{ title: 'Settings changed', detail: 'Test details changed.' }];
+}

@@ -1,13 +1,8 @@
 // @vitest-environment jsdom
-import { act, createElement as h } from 'react';
+import { act, createElement as h, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-
-const openPlans = vi.hoisted(() => vi.fn());
-
-vi.mock('../../lib/useUpgradeRedirect', () => ({
-  useUpgradeRedirect: () => openPlans,
-}));
+import { MemoryRouter, useLocation } from 'react-router';
 
 vi.mock('@shopify/polaris', () => ({
   Banner: ({ title, action, onDismiss }) =>
@@ -22,9 +17,18 @@ vi.mock('@shopify/polaris', () => ({
 
 let container;
 let root;
+const seen = { location: null };
+
+function LocationProbe() {
+  const current = useLocation();
+  useEffect(() => {
+    seen.location = current;
+  }, [current]);
+  return null;
+}
 
 beforeEach(async () => {
-  openPlans.mockReset();
+  seen.location = null;
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   container = document.createElement('div');
   document.body.appendChild(container);
@@ -32,10 +36,17 @@ beforeEach(async () => {
 });
 
 describe('PaymentRequiredNotice', () => {
-  it('shows View plans after either API client reports HTTP 402', async () => {
+  it('shows View plans after an API client reports HTTP 402, and opens Plan & usage', async () => {
     const { default: PaymentRequiredNotice } = await import('../PaymentRequiredNotice');
     await act(async () => {
-      root.render(h(PaymentRequiredNotice, { upgradeUrl: 'https://admin.shopify.com/plans' }));
+      root.render(
+        h(
+          MemoryRouter,
+          { initialEntries: ['/app?shop=demo.myshopify.com&host=abc'] },
+          h(PaymentRequiredNotice),
+          h(LocationProbe)
+        )
+      );
     });
     expect(container.textContent).toBe('');
     await act(async () => {
@@ -52,7 +63,13 @@ describe('PaymentRequiredNotice', () => {
     await act(async () => {
       viewPlans.click();
     });
-    expect(openPlans).toHaveBeenCalledTimes(1);
+    // In-app, never straight to Shopify's plan page, which 404s until plans exist.
+    expect(seen.location.pathname).toBe('/app/settings');
+    const params = new URLSearchParams(seen.location.search);
+    expect(params.get('tab')).toBe('plan');
+    expect(params.get('shop')).toBe('demo.myshopify.com');
+    expect(params.get('host')).toBe('abc');
+    expect(container.textContent).toBe('');
     await act(async () => root.unmount());
     container.remove();
   });

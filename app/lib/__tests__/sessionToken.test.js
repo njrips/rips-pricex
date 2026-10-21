@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { getSessionToken, sessionAuthHeader } from '../sessionToken';
+import { getSessionToken } from '../sessionToken';
 
 afterEach(() => {
   delete window.shopify;
@@ -25,16 +25,5 @@ describe('getSessionToken', () => {
   it('tolerates an App Bridge global without the ID token API', async () => {
     window.shopify = {};
     expect(await getSessionToken()).toBe('');
-  });
-});
-
-describe('sessionAuthHeader', () => {
-  it('builds a bearer header when a token is available', async () => {
-    window.shopify = { idToken: () => Promise.resolve('token-123') };
-    expect(await sessionAuthHeader()).toEqual({ Authorization: 'Bearer token-123' });
-  });
-
-  it('omits the header entirely when there is no token', async () => {
-    expect(await sessionAuthHeader()).toEqual({});
   });
 });

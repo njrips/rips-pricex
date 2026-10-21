@@ -191,7 +191,7 @@ Cart transform `lineUpdate` requires **Shopify Plus** or a **development store**
 
 For a real production host (not Cloudflare tunnel):
 
-1. Deploy Admin + Express to your host (HTTPS). The React Router app and the Express API are separate processes. Route `/api` and `/health` to Express (`server/src/app.js` listens for `GET /health`). A single container that only runs `npm run docker-start` does not start both.
+1. Deploy Admin + Express to your host (HTTPS). The React Router app and the Express API are separate processes. Route `/api` and `/health` to Express (`server/src/app.js` listens for `GET /health`). `deploy/ecosystem.config.cjs` runs both under pm2 (`ripspricex-api` and `ripspricex-admin`).
 2. Set Partner app **App URL** / TOML `application_url` + `redirect_urls` to that host.
 3. Set host env: `SHOPIFY_APP_URL`, `APP_URL`, `RIPSPRICEX_PUBLIC_API_BASE`, `DATABASE_URL`, secrets. Leave `RIPSPRICEX_DEV_ENTITLE_ALL` unset or false. Do not rely on `SHOPIFY_ACCESS_TOKEN`; it is ignored when `NODE_ENV=production`.
 4. Prisma SQLite (`prisma/dev.sqlite`) stores Shopify sessions. PostgreSQL stores pricing and other business data. Production needs a persistent session database; do not use an ephemeral SQLite file.
@@ -297,7 +297,6 @@ Configured in `app/routes/app.tsx` via App Bridge `NavMenu`:
 | [docs/COMPLETE_RUNBOOK.md](docs/COMPLETE_RUNBOOK.md) | Local / ops runbook |
 | [docs/research/README.md](docs/research/README.md) | Research index |
 | [docs/research/RIPX_SMART_PRICING_PARITY.md](docs/research/RIPX_SMART_PRICING_PARITY.md) | RipX Classic parity |
-| [docs/research/2026-08-10_LIVE_E2E_FINISH.md](docs/research/2026-08-10_LIVE_E2E_FINISH.md) | Live E2E progress on ripx-plus |
 | [docs/CLASSIC_ONLY.md](docs/CLASSIC_ONLY.md) | Classic UI scope |
 
 ---

@@ -14,7 +14,7 @@
 | `/api/smart-pricing/*` services | ✅ Ported | Service directory names match RipX 1:1 |
 | Price-test lifecycle (`start` / `stop` / winner) | ✅ Ported | Slim `/api/tests` + winner rollout services |
 | Storefront script + cart transform | ✅ Same runtime | `storefront-script.js` line-count match; CT function match |
-| Goals catalog for Classic picker | ✅ Restored 2026-08-10 | Was stub `[]`; now `/api/goal-metrics` + builtins + DB |
+| Goals catalog for Classic picker | ✅ Restored 2026-08-10 | Built-in standard metrics; custom goals retired (existing tests keep theirs) |
 | Price surfaces in storefront config | ✅ Restored 2026-08-10 | Script now embeds shop mappings (was `{}`) |
 | Legacy Command Center / Inbox UI | ❌ Out of scope | Product brief — Classic only |
 | Full Goals & Metrics app page | ❌ Out of scope | Picker only; link → Settings |
@@ -52,7 +52,7 @@
 | Opportunity Command Center inbox UI | ✅ | ❌ by design |
 | COGS CSV API | ✅ | ✅ |
 | Dedicated COGS merchant UI | ✅ thicker | 🟡 thin |
-| Self-QA runs on launch | ✅ fuller | 🟡 stub empty runs |
+| Self-QA runs on launch | ✅ fuller | ⬜ not ported (by design) |
 | Entitlement / App Pricing | RipX billing | Dev entitle + Partner plans pending polish |
 
 ---
@@ -81,7 +81,7 @@ Runbook equivalent: RipX `PRICE_TEST_FLOW.md`.
 1. **`goalMetricsApi` stub** — returned `[]`, so Classic goal picker catalog was empty.  
    - Added `migrations/004_goal_metric_definitions.sql`  
    - Ported `server/src/models/goalMetricDefinition.js` (shop-scoped; 23 builtins)  
-   - Ported `server/src/routes/goalMetricRoutes.js` → `/api/goal-metrics`  
+   - Ported `/api/goal-metrics` (later removed with custom goals; the storefront still reads existing definitions)  
    - Restored `app/services/goalMetricsApi.js` to call real API  
 
 2. **Storefront script omitted Goals + price surfaces** — `trackSlimRoutes` passed `[]` / `{}`.  
@@ -119,6 +119,5 @@ See [00_PRODUCT_BRIEF.md](./00_PRODUCT_BRIEF.md) §3:
 
 - [02_PARITY_MATRIX.md](./02_PARITY_MATRIX.md)  
 - [CLASSIC_FIGMA_DELTA.md](./CLASSIC_FIGMA_DELTA.md)  
-- [CLASSIC_FLOW_AND_PRICE_SURFACES_AUDIT.md](./CLASSIC_FLOW_AND_PRICE_SURFACES_AUDIT.md)  
 - [04_MERCHANT_FLOWS.md](./04_MERCHANT_FLOWS.md)  
 - RipX: `PRICE_TEST_FLOW.md`, `docs/research/AI_SMART_PRICING_CLASSIC_LIGHT_WORKFLOW_V25.md`  

@@ -15,7 +15,6 @@ export const ACTIVITY_KIND_META = {
   deleted: { label: 'Deleted', group: 'lifecycle' },
   updated: { label: 'Settings changed', group: 'settings' },
   reverted: { label: 'Price reverted', group: 'lifecycle' },
-  qa: { label: 'QA check', group: 'lifecycle' },
   guardrail: { label: 'Guardrail', group: 'guardrail' },
   winner_ready: { label: 'Winner ready', group: 'lifecycle' },
   complete: { label: 'Winner applied', group: 'lifecycle' },
@@ -142,13 +141,7 @@ function activityGroup(item = {}) {
 
 export function activityKindTone(item = {}) {
   const kind = String(item.kind || '').trim();
-  const status = String(item.status || '').trim().toLowerCase();
   if (kind === 'guardrail' || kind === 'deleted') return 'critical';
-  if (kind === 'qa') {
-    if (status === 'fail' || status === 'failed' || status === 'error') return 'critical';
-    if (status === 'pass' || status === 'passed' || status === 'success') return 'success';
-    return 'warning';
-  }
   if (
     kind === 'complete' ||
     kind === 'winner_ready' ||
@@ -241,24 +234,6 @@ export function stampLaunchOnPlan(plan, { status = 'running', testId = null } = 
   )[0];
 }
 
-export function mergeQaRuns(runLists = [], limit = 16) {
-  const byId = new Map();
-  for (const list of Array.isArray(runLists) ? runLists : []) {
-    for (const run of Array.isArray(list) ? list : []) {
-      const id = String(run?.id || run?.created_at || '').trim();
-      if (!id || byId.has(id)) continue;
-      byId.set(id, run);
-    }
-  }
-  return [...byId.values()]
-    .sort(
-      (a, b) =>
-        new Date(b.finished_at || b.created_at || b.started_at || 0).getTime() -
-        new Date(a.finished_at || a.created_at || a.started_at || 0).getTime()
-    )
-    .slice(0, Math.max(1, Number(limit) || 16));
-}
-
 export function collectActivityLogs(plans = [], fallbackActor = 'You') {
   const byId = new Map();
   for (const plan of Array.isArray(plans) ? plans : []) {
@@ -345,27 +320,6 @@ export function mergeActivityTimeline(reconstructed = [], logged = [], serverEve
         .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())
     )
   );
-}
-
-export function formatActivityRelative(value, now = Date.now()) {
-  if (!value) return '';
-  const stamp = new Date(value);
-  if (Number.isNaN(stamp.getTime())) return String(value);
-  const delta = Math.max(0, Number(now) - stamp.getTime());
-  const minutes = Math.floor(delta / 60000);
-  if (minutes < 1) return 'Just now';
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.round(hours / 24);
-  if (days < 7) return `${days}d ago`;
-  return stamp.toLocaleString(undefined, {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  });
 }
 
 export function createActivityEntry({

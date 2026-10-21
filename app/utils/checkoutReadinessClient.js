@@ -231,22 +231,3 @@ export function themeEmbedStatus(readiness) {
   if (token === 'disabled' || token === 'false') return 'disabled';
   return 'unknown';
 }
-
-/**
- * The live theme the embed status was read from, so Setup can name the theme it
- * is reporting on rather than the one a deep link happens to target.
- * @param {Record<string, unknown> | null | undefined} readiness
- * @returns {string | null}
- */
-export function themeEmbedThemeName(readiness) {
-  const raw =
-    readiness?.theme_embed ??
-    (readiness?.summary && typeof readiness.summary === 'object'
-      ? /** @type {Record<string, unknown>} */ (readiness.summary).theme_embed
-      : null);
-  if (!raw || typeof raw !== 'object') return null;
-  const name = String(
-    /** @type {{ theme_name?: string }} */ (raw).theme_name || ''
-  ).trim();
-  return name || null;
-}

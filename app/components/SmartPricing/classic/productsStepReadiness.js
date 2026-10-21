@@ -664,44 +664,6 @@ export function dropArmEntries(map, armIds = [], { byOverrideKey = false } = {})
   return Object.fromEntries(Object.entries(map).filter(([key]) => !ids.has(armOf(key))));
 }
 
-/** Skip cells the merchant edited (override kept, AI meta cleared). */
-export function filterPriceSuggestionsRespectingEdits(
-  suggestions = [],
-  priceOverrides = {},
-  priceSuggestionMeta = {},
-) {
-  return (Array.isArray(suggestions) ? suggestions : []).filter(item => {
-    if (!item?.variant_id || !item?.arm_id) return false;
-    const key = priceOverrideKey(item.variant_id, item.arm_id);
-    const raw = priceOverrides[key];
-    const hasOverride =
-      raw !== undefined && raw !== null && String(raw).trim() !== '';
-    const hasMeta =
-      priceSuggestionMeta[key] && typeof priceSuggestionMeta[key] === 'object';
-    if (hasOverride && !hasMeta) return false;
-    return true;
-  });
-}
-
-/** Same skip rule for local band patches keyed variant::arm. */
-export function filterPriceOverridePatch(
-  patch = {},
-  priceOverrides = {},
-  priceSuggestionMeta = {},
-) {
-  const out = {};
-  Object.entries(patch || {}).forEach(([key, value]) => {
-    const raw = priceOverrides[key];
-    const hasOverride =
-      raw !== undefined && raw !== null && String(raw).trim() !== '';
-    const hasMeta =
-      priceSuggestionMeta[key] && typeof priceSuggestionMeta[key] === 'object';
-    if (hasOverride && !hasMeta) return;
-    out[key] = value;
-  });
-  return out;
-}
-
 /**
  * The sentence explaining why a product is being suggested, if there is one.
  *
@@ -1368,15 +1330,6 @@ export function getProductsStepContinueState({
     };
   }
   return { disabled: false, reason: null, hint: '' };
-}
-
-/**
- * How many test prices sit outside max price change, across every variation.
- * Zero when the cap is unknown, so a shop still loading its defaults is never
- * told its prices are out of range.
- */
-export function countOutOfRangeTestPrices(args = {}) {
-  return findOutOfRangeTestPrices(args).length;
 }
 
 /** The test prices outside max price change, one entry per variant and variation. */

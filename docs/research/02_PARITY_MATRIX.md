@@ -27,7 +27,7 @@ Use this matrix for further parity research. Update cells when closing gaps; do 
 | Variations | Classic | ✅ |
 | Products / pricing modes + AI suggest | Classic | ✅ |
 | Product picker modal | Classic | ✅ |
-| Audience + goal picker | Classic | ✅ Catalog via `/api/goal-metrics` (builtins + custom); full Goals page → Settings by design |
+| Audience + goal picker | Classic | ✅ Built-in standard metrics; custom goals retired; full Goals page out of scope by design |
 | Review + launch | Classic | ✅ |
 | Fix setup deep link | Store Settings installation | ✅ → `/app/settings?tab=installation` |
 | Fix price surfaces + automap | Store Settings surfaces | ✅ → `?tab=price-surfaces&automap=1` |
@@ -111,4 +111,4 @@ Use this matrix for further parity research. Update cells when closing gaps; do 
 
 ## 8. Audit history
 
-See [CLASSIC_FLOW_AND_PRICE_SURFACES_AUDIT.md](./CLASSIC_FLOW_AND_PRICE_SURFACES_AUDIT.md) for the 2026-08-09 deep check that closed the price-surfaces gap.
+The 2026-08-09 deep check closed the price-surfaces gap: settings tabs, price-surface and cart-transform routes, auto-map services and `PriceSurfaceMappingsPanel` were ported.

@@ -63,10 +63,15 @@ export default function PlanWelcomePage() {
               label: 'New test',
               onClick: () => navigate(embeddedPath('/app/experiments/new')),
             }
-          : {
-              label: 'Open Shopify plan selection',
-              onClick: () => upgrade(),
-            }
+          : ctx.pricingPlansReady
+            ? {
+                label: 'Open Shopify plan selection',
+                onClick: () => upgrade(),
+              }
+            : {
+                label: 'Back to tests',
+                onClick: () => navigate(embeddedPath('/app')),
+              }
       }
     >
       <div style={{ marginBottom: 20 }}>

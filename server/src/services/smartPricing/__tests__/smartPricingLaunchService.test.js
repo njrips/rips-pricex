@@ -65,14 +65,6 @@ jest.mock('../../../models/smartPricingDeletionStore', () => ({
   findDeletions: jest.fn(),
 }));
 
-const mockEnsureDefaultSchedule = jest.fn().mockResolvedValue({});
-const mockStartQaRun = jest.fn().mockResolvedValue({});
-jest.mock('../../selfQa/selfQaOrchestratorService', () => ({
-  ensureDefaultSchedule: (...args) => mockEnsureDefaultSchedule(...args),
-  startQaRun: (...args) => mockStartQaRun(...args),
-  evaluateLaunchGate: jest.fn(),
-}));
-
 const abTestEngine = require('../../abTestEngine');
 const { createTest } = require('../../../models/test');
 const { buildPriceTestPayloadFromPlan } = require('../planToPriceTestService');
@@ -103,8 +95,6 @@ describe('smartPricingLaunchService', () => {
     getShopSession.mockResolvedValue({ access_token: 'token' });
     resolveSmartPricingCheckoutReadiness.mockResolvedValue({ ready: true });
     linkInboxPlanToTest.mockResolvedValue({ id: 'plan-1', test_id: 99, status: 'running' });
-    mockEnsureDefaultSchedule.mockResolvedValue({});
-    mockStartQaRun.mockResolvedValue({});
     ensureOfferCheckoutDiscount.mockResolvedValue({ created: false });
     findDeletions.mockResolvedValue({ experiments: new Set(), tests: new Set() });
     shopifyService.getProduct.mockResolvedValue({ id: 'gid://shopify/Product/7', status: 'ACTIVE' });
@@ -198,26 +188,11 @@ describe('smartPricingLaunchService', () => {
     expect(abTestEngine.startTest).toHaveBeenCalled();
   });
 
-  it('runs Self-QA without blocking Smart Pricing auto-start', async () => {
+  it('starts the created test when auto-start is on', async () => {
     await launchSmartPricingPlanAsTest({ id: 'plan-1' }, 'demo.myshopify.com', {
       autoStart: true,
     });
 
-    expect(mockEnsureDefaultSchedule).toHaveBeenCalledWith(
-      'demo.myshopify.com',
-      99,
-      expect.objectContaining({
-        block_launch: false,
-        on_fail_pause: true,
-      })
-    );
-    expect(mockStartQaRun).toHaveBeenCalledWith(
-      expect.objectContaining({
-        shopDomain: 'demo.myshopify.com',
-        testId: 99,
-        sync: false,
-      })
-    );
     expect(abTestEngine.startTest).toHaveBeenCalledWith(99, 'demo.myshopify.com');
   });
 

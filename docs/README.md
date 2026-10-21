@@ -28,9 +28,8 @@ docs/
     ├── 03_API_AND_DATA_MAP.md         ← routes, tables, identity
     ├── 04_MERCHANT_FLOWS.md           ← install → win journeys
     ├── 05_FURTHER_RESEARCH_ROADMAP.md ← open tracks for separate research
-    ├── PHASE_STATUS.md                ← P0–P5 vs blueprint
     ├── RIPSPRICEX_IMPLEMENTATION_PLAN.md  ← original extraction blueprint
-    └── CLASSIC_FLOW_AND_PRICE_SURFACES_AUDIT.md  ← 2026-08-09 audit
+    └── YYYY-MM-DD_*.md                ← dated investigations (see research/README.md)
 ```
 
 ## Relationship to RipX

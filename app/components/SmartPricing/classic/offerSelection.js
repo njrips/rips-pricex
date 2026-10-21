@@ -123,13 +123,6 @@ export function formatOfferRule(raw = {}, currency = 'USD') {
   return `${whole ? Math.round(n) : n}% off`;
 }
 
-export function formatOfferSummary(raw = {}, currency = 'USD') {
-  const rule = formatOfferRule(raw, currency);
-  const message = normalizeOfferConfig(raw).offer_message;
-  if (!message || rule === 'No offer') return rule;
-  return `${rule} — ${message}`;
-}
-
 /**
  * Copy shown under the PDP price for an assigned offer arm.
  * Custom message wins; otherwise the formatted offer amount so treatment is visible

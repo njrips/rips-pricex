@@ -78,7 +78,11 @@ export function usePlanBillingState(ctx, { enabled = true } = {}) {
   const offerReady = launchSummary.offerReady;
   const needsSetup = entitled && checkoutReady !== true;
   const unlocked = entitled && checkoutReady === true;
-  const canOpenPricing = Boolean(String(upgradeUrl || '').trim());
+  const hasUpgradeUrl = Boolean(String(upgradeUrl || '').trim());
+  // Shopify's plan page 404s until App Pricing plans exist, so it opens only once
+  // the operator says they do.
+  const pricingPlansReady = ctx.pricingPlansReady === true;
+  const canOpenPricing = hasUpgradeUrl && pricingPlansReady;
 
   const refresh = useCallback(async () => {
     if (!request.enabled) return;
@@ -113,6 +117,8 @@ export function usePlanBillingState(ctx, { enabled = true } = {}) {
     upgrade,
     refresh,
     canOpenPricing,
+    hasUpgradeUrl,
+    pricingPlansReady,
     planCtaLabel: entitled ? 'Manage plan' : 'Upgrade',
     calloutTitle: loading
       ? 'Checking plan status…'
@@ -147,6 +153,8 @@ export default function SettingsPlanPanel({ ctx, planState }) {
     refresh,
     calloutTitle,
     canOpenPricing,
+    hasUpgradeUrl,
+    pricingPlansReady,
     planCtaLabel,
   } = planState;
 
@@ -163,7 +171,9 @@ export default function SettingsPlanPanel({ ctx, planState }) {
                 ? 'Your plan is active. You can create and run price and offer tests.'
                 : launchSummary.detail ||
                   'Your plan is active. You can create and run price and offer tests.'
-              : 'Plans are billed through Shopify. Choosing a plan opens Shopify\u2019s plan page; your plan status shows here.'}
+              : pricingPlansReady
+                ? 'Plans are billed through Shopify. Choosing a plan opens Shopify\u2019s plan page; your plan status shows here.'
+                : 'Plans are not open for sign-up yet. Your plan status shows here, and Upgrade opens Shopify\u2019s plan page once plans are available.'}
           </p>
         </Banner>
       </div>
@@ -191,9 +201,16 @@ export default function SettingsPlanPanel({ ctx, planState }) {
               without a Partner charge.
             </p>
           )}
-          {!canOpenPricing && !loading ? (
+          {!hasUpgradeUrl && !loading ? (
             <p className={styles.help}>
               Missing upgrade URL — set <code>SHOPIFY_APP_HANDLE</code> to your Partner app handle.
+            </p>
+          ) : null}
+          {hasUpgradeUrl && !pricingPlansReady && !loading && !ctx.isProductionBuild ? (
+            <p className={styles.help}>
+              Shopify&rsquo;s plan page shows &ldquo;page not found&rdquo; until App Pricing plans
+              exist for this app in the Partner Dashboard. Add them, then set{' '}
+              <code>SHOPIFY_APP_PRICING_READY=true</code> to turn on Upgrade.
             </p>
           ) : null}
           <div className={styles.adminRowActions}>

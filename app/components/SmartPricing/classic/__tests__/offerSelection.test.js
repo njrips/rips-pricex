@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
   formatOfferRule,
-  formatOfferSummary,
   resolveOfferPdpDisplayText,
   hasAnyTestOfferConfigured,
   offerByArmFromPlanArms,
@@ -37,13 +36,6 @@ describe('offerSelection', () => {
     expect(resolveOfferPdpDisplayText({ discount_type: 'percent', discount_value: 15 })).toBe(
       '15% off'
     );
-    expect(
-      formatOfferSummary({
-        discount_type: 'percent',
-        discount_value: 10,
-        offer_message: 'Save 10%',
-      })
-    ).toBe('10% off — Save 10%');
     expect(slugOfferCodeName('Summer sale', 'Variation A')).toMatch(/^[A-Z0-9-]+$/);
     expect(isOfferExperimentType('offer_test')).toBe(true);
     expect(isOfferCheckoutReady(null, { loading: true })).toBe(false);

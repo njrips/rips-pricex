@@ -18,7 +18,6 @@
 | APIs / schema | [03_API_AND_DATA_MAP.md](./03_API_AND_DATA_MAP.md) |
 | Merchant journeys | [04_MERCHANT_FLOWS.md](./04_MERCHANT_FLOWS.md) |
 | Further research tracks | [05_FURTHER_RESEARCH_ROADMAP.md](./05_FURTHER_RESEARCH_ROADMAP.md) |
-| Latest Classic/surfaces audit | [CLASSIC_FLOW_AND_PRICE_SURFACES_AUDIT.md](./CLASSIC_FLOW_AND_PRICE_SURFACES_AUDIT.md) |
 
 ---
 

@@ -8,10 +8,8 @@ import {
   createActivityEntry,
   dedupeActivityItems,
   filterActivityItems,
-  formatActivityRelative,
   mergeActivityTimeline,
   mergePlanActivityLogs,
-  mergeQaRuns,
   prependActivityLog,
   stampLaunchOnPlan,
 } from '../classicActivity';
@@ -127,7 +125,7 @@ describe('classic activity log', () => {
     const items = [
       { kind: 'started', title: 'Launched' },
       { kind: 'updated', title: 'Audience targeting changed' },
-      { kind: 'qa', title: 'Self-QA passed' },
+      { kind: 'paused', title: 'Paused' },
     ];
     expect(filterActivityItems(items, 'lifecycle')).toHaveLength(2);
     expect(activityFilterCounts(items)).toMatchObject({ all: 3, lifecycle: 2, settings: 1 });
@@ -170,8 +168,7 @@ describe('classic activity log', () => {
 
   it('maps kind tones for the timeline dots', () => {
     expect(activityKindTone({ kind: 'guardrail' })).toBe('critical');
-    expect(activityKindTone({ kind: 'qa', status: 'pass' })).toBe('success');
-    expect(activityKindTone({ kind: 'qa', status: 'fail' })).toBe('critical');
+    expect(activityKindTone({ kind: 'started' })).toBe('success');
     expect(activityKindTone({ kind: 'paused' })).toBe('warning');
   });
 
@@ -209,27 +206,6 @@ describe('classic activity log', () => {
     });
   });
 
-  it('merges Self-QA runs from every linked test', () => {
-    const runs = mergeQaRuns(
-      [
-        [{ id: 'a', status: 'pass', finished_at: '2026-08-20T10:00:00.000Z' }],
-        [
-          { id: 'a', status: 'pass', finished_at: '2026-08-20T10:00:00.000Z' },
-          { id: 'b', status: 'fail', finished_at: '2026-08-21T10:00:00.000Z' },
-        ],
-      ],
-      8
-    );
-    expect(runs.map(run => run.id)).toEqual(['b', 'a']);
-  });
-
-  it('formats recent stamps as relative time', () => {
-    const now = Date.parse('2026-08-23T12:00:00.000Z');
-    expect(formatActivityRelative('2026-08-23T11:59:20.000Z', now)).toBe('Just now');
-    expect(formatActivityRelative('2026-08-23T11:10:00.000Z', now)).toBe('50m ago');
-    expect(formatActivityRelative('2026-08-23T09:00:00.000Z', now)).toBe('3h ago');
-    expect(formatActivityRelative('2026-08-21T12:00:00.000Z', now)).toBe('2d ago');
-  });
 });
 
 describe('buildActivityTimeline log merge', () => {
@@ -256,18 +232,6 @@ describe('buildActivityTimeline log merge', () => {
     expect(items.find(item => item.kind === 'updated')?.title).toBe('Audience targeting changed');
     expect(items.find(item => item.kind === 'archived')?.title).toBe('Test archived');
     expect(items.find(item => item.kind === 'created')?.title).toBe('Created test');
-  });
-
-  it('labels Self-QA pass and fail clearly', () => {
-    const items = buildActivityTimeline({
-      plan: { created_at: '2026-08-01T00:00:00.000Z' },
-      qaRuns: [
-        { id: 'ok', status: 'pass', finished_at: '2026-08-02T00:00:00.000Z' },
-        { id: 'bad', status: 'fail', finished_at: '2026-08-03T00:00:00.000Z' },
-      ],
-    });
-    expect(items.find(item => item.id === 'qa_ok')?.title).toBe('Self-QA passed');
-    expect(items.find(item => item.id === 'qa_bad')?.title).toBe('Self-QA failed');
   });
 
   it('does not describe a manually stopped test as keeping the catalog price', () => {

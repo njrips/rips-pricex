@@ -19,7 +19,6 @@ import {
   findPlanInCatalog,
 } from '../components/SmartPricing/classic/classicExperimentHelpers';
 import { mergeInboxPlansById } from '../components/SmartPricing/classic/classicAudienceEdit';
-import { mergeQaRuns } from '../components/SmartPricing/classic/classicActivity';
 import { mapWithConcurrency } from '../utils/mapWithConcurrency';
 import {
   buildActivityTimeline,
@@ -167,7 +166,6 @@ export function useClassicExperimentDetails(shopDomain, planId) {
     analytics: null,
     analyticsByTestId: {},
     test: null,
-    qaRuns: [],
     serverEvents: [],
     loading: Boolean(shopDomain) && experimentTestIds.length > 0,
   }));
@@ -175,7 +173,6 @@ export function useClassicExperimentDetails(shopDomain, planId) {
     analytics,
     analyticsByTestId,
     test,
-    qaRuns,
     serverEvents,
     loading: analyticsLoading,
   } = analyticsState;
@@ -294,7 +291,7 @@ export function useClassicExperimentDetails(shopDomain, planId) {
           analytics: merged,
         }));
 
-        const [testRes, productEventLists, qaLists] = await Promise.all([
+        const [testRes, productEventLists] = await Promise.all([
           testId
             ? apiGet(`/tests/${encodeURIComponent(testId)}`)
                 .then(res => unwrapTest(unwrapData(res)))
@@ -314,21 +311,11 @@ export function useClassicExperimentDetails(shopDomain, planId) {
               }
             }
           ).then(lists => lists.flat()),
-          mapWithConcurrency(experimentTestIds, id =>
-            apiGet(`/qa/tests/${encodeURIComponent(id)}/runs`)
-              .then(res => {
-                const body = unwrapData(res);
-                const runs = body?.runs || body;
-                return Array.isArray(runs) ? runs : [];
-              })
-              .catch(() => [])
-          ),
         ]);
         if (cancelled) return;
         setAnalyticsState(prev => ({
           ...prev,
           test: testRes,
-          qaRuns: mergeQaRuns(qaLists, 16),
           serverEvents: Array.isArray(productEventLists) ? productEventLists : [],
         }));
         const autoWinnerKey = Object.entries(nextByTestId)
@@ -418,11 +405,10 @@ export function useClassicExperimentDetails(shopDomain, planId) {
         plan,
         test,
         analytics,
-        qaRuns,
         plans: experimentPlans,
         serverEvents,
       }),
-    [plan, test, analytics, qaRuns, experimentPlans, serverEvents]
+    [plan, test, analytics, experimentPlans, serverEvents]
   );
   const settings = useMemo(
     () => buildSettingsSummary(plan, test, shopGuardrails, experiment),
@@ -492,7 +478,6 @@ export function useClassicExperimentDetails(shopDomain, planId) {
     testId,
     analytics,
     analyticsByTestId,
-    qaRuns,
     kpis,
     conversionRows,
     variationAverages,

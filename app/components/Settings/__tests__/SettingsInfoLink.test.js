@@ -2,7 +2,6 @@ import { describe, it } from 'vitest';
 import assert from 'node:assert/strict';
 import {
   ADMIN_DOCS_HASHES,
-  handleSettingsInfoLinkClick,
   openPublicDocsHref,
   publicDocsHref,
 } from '../settingsGuideLinks.js';
@@ -113,39 +112,6 @@ describe('openPublicDocsHref', () => {
       () => {
         assert.equal(openPublicDocsHref('/docs#ai-price'), false);
         assert.equal(openCalls, 1);
-      }
-    );
-  });
-});
-
-describe('handleSettingsInfoLinkClick', () => {
-  it('always stops the parent row from eating the click', () => {
-    const calls = { prevent: 0, stop: 0, immediate: 0 };
-    withWindow(
-      {
-        open() {
-          return null;
-        },
-      },
-      () => {
-        URL.createObjectURL = undefined;
-        const opened = handleSettingsInfoLinkClick(
-          {
-            preventDefault() {
-              calls.prevent += 1;
-            },
-            stopPropagation() {
-              calls.stop += 1;
-            },
-            stopImmediatePropagation() {
-              calls.immediate += 1;
-            },
-          },
-          '/docs#ai-price'
-        );
-        assert.equal(opened, false);
-        assert.equal(calls.immediate, 1);
-        assert.equal(calls.prevent, 1);
       }
     );
   });

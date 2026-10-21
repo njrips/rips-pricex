@@ -59,7 +59,7 @@ curl -X POST http://127.0.0.1:3456/api/billing/dev-entitle \
 7. Experiment details tabs → Preview (Variations) → storefront paint
 8. Stop → Apply winner
 
-Parity notes: `docs/research/CLASSIC_FLOW_AND_PRICE_SURFACES_AUDIT.md`
+Parity notes: `docs/research/02_PARITY_MATRIX.md`
 
 ## Smoke test
 

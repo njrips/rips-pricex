@@ -18,7 +18,6 @@ export function useThemeEmbedRedirect(
 ) {
   const { prefetch = true } = options;
   const [themeId, setThemeId] = useState<string | null>(null);
-  const [themeName, setThemeName] = useState<string | null>(null);
   const fetchingRef = useRef<Promise<string | null> | null>(null);
 
   const fallbackUrl = themeEmbedActivateUrl(ctx.shop, ctx.apiKey, themeId);
@@ -37,7 +36,6 @@ export function useThemeEmbedRedirect(
           normalizeThemeNumericId(main?.numericId) ||
           normalizeThemeNumericId(main?.id);
         if (resolved) setThemeId(resolved);
-        if (main?.name) setThemeName(String(main.name));
         return resolved;
       } catch {
         return null;
@@ -101,7 +99,6 @@ export function useThemeEmbedRedirect(
     openInNewTab,
     embedUrl: fallbackUrl,
     themeId,
-    themeName,
     urls: themeEmbedActivateUrls({
       shop: ctx.shop,
       apiKey: ctx.apiKey,

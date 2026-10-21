@@ -223,7 +223,7 @@ ${resourceHints}<script src="${scriptUrl}" defer crossorigin="anonymous" fetchpr
           'Configure App Proxy: subpath prefix "apps", subpath "ripspricex"',
           'Complete Theme connection on Store setup (Online Store → Themes → Customize)',
           'Install Checkout pricing functions on Store setup for cart and checkout pricing',
-          'Map price locations under Settings → Price locations for storefront paint',
+          'Map price locations under App settings → Price locations for storefront paint',
         ],
       },
     });
@@ -767,16 +767,122 @@ router.post(
     const timeoutId = setTimeout(() => controller.abort(), 25000);
     try {
       const { autoMapShopPriceSurfaces } = require('../services/priceSurfaceAutoMapService');
+      const { getCheckProductChoice } = require('../services/priceSurfaceSampleProducts');
+      const requestedPath = req.body?.product_path || req.body?.productPath || '';
+      const requestedId = req.body?.product_id || req.body?.productId || '';
+      const saved = requestedPath || requestedId ? null : await getCheckProductChoice(shopDomain);
       const result = await autoMapShopPriceSurfaces(shopDomain, {
         accessToken,
         storefrontPassword,
-        productPath: req.body?.product_path || req.body?.productPath || '',
+        productPath: requestedPath || (saved?.handle ? `/products/${encodeURIComponent(saved.handle)}` : ''),
+        productId: requestedId,
         collectionPath: req.body?.collection_path || req.body?.collectionPath || '',
         signal: controller.signal,
       });
       return sendSuccess(res, HTTP_STATUS.OK, result);
     } finally {
       clearTimeout(timeoutId);
+    }
+  })
+);
+
+/**
+ * POST /api/settings/price-surfaces/check-product
+ * The product price checks and Pick run on: the merchant's choice, or the
+ * in-stock product (on sale when there is one) the server picks.
+ * POST, not GET, because the storefront password travels in the body.
+ */
+router.post(
+  '/price-surfaces/check-product',
+  asyncHandler(async (req, res) => {
+    const shopDomain = resolveShopDomain(req);
+    if (!shopDomain || shopDomain.includes('@')) {
+      return sendError(res, 401, 'Shop domain required');
+    }
+    const fallbackSession = await getShopSession(shopDomain);
+    const accessToken = req.shopifyAccessToken || fallbackSession?.access_token || '';
+    const {
+      resolveStorefrontPasswordForPreviewRequest,
+      unlockShopifyStorefrontSession,
+    } = require('../utils/storefrontPasswordPreview');
+    const {
+      getCheckProductChoice,
+      resolvePriceCheckSamples,
+    } = require('../services/priceSurfaceSampleProducts');
+    const storefrontPassword = resolveStorefrontPasswordForPreviewRequest(
+      typeof req.body?.storefront_password === 'string' ? req.body.storefront_password : '',
+      req.get('host') || ''
+    );
+    const origin = `https://${shopDomain}`;
+    const signalFor = () => AbortSignal.timeout(8000);
+    let cookie = '';
+    if (storefrontPassword && /\.myshopify\.com$/i.test(shopDomain)) {
+      const unlock = await unlockShopifyStorefrontSession(
+        new URL(`${origin}/`),
+        storefrontPassword,
+        signalFor()
+      ).catch(() => null);
+      cookie = unlock?.ok ? unlock.cookie || '' : '';
+    }
+    const chosen = await getCheckProductChoice(shopDomain);
+    const samples = await resolvePriceCheckSamples({
+      origin,
+      shopDomain,
+      accessToken,
+      productPath: chosen?.handle ? `/products/${encodeURIComponent(chosen.handle)}` : '',
+      cookie,
+      signalFor,
+    });
+    const sample = samples.primary;
+    return sendSuccess(res, HTTP_STATUS.OK, {
+      chosen,
+      sample: sample
+        ? {
+            path: sample.path,
+            page_path: sample.pagePath,
+            title: sample.title,
+            on_sale: sample.onSale,
+            available: sample.available,
+          }
+        : samples.unverifiedPath
+          ? { path: samples.unverifiedPath, page_path: samples.unverifiedPath, title: '', on_sale: null, available: null }
+          : null,
+      store_has_sale_product: samples.store?.hasSaleProduct ?? null,
+      store_has_buyable_product: samples.store?.hasBuyableProduct ?? null,
+    });
+  })
+);
+
+/**
+ * PUT /api/settings/price-surfaces/check-product
+ * Body `{ product_id }` (Admin gid) to choose the check product, or `{ product_id: null }`
+ * to go back to automatic.
+ */
+router.put(
+  '/price-surfaces/check-product',
+  asyncHandler(async (req, res) => {
+    const shopDomain = resolveShopDomain(req);
+    if (!shopDomain || shopDomain.includes('@')) {
+      return sendError(res, 401, 'Shop domain required');
+    }
+    const productId = String(req.body?.product_id || '').trim();
+    if (productId && !/^gid:\/\/shopify\/Product\/\d+$/.test(productId)) {
+      return sendError(res, 400, 'product_id must be a Shopify product id');
+    }
+    const fallbackSession = await getShopSession(shopDomain);
+    const accessToken = req.shopifyAccessToken || fallbackSession?.access_token || '';
+    if (productId && !accessToken) {
+      return sendError(res, 401, 'Shop session required');
+    }
+    const { saveCheckProductChoice } = require('../services/priceSurfaceSampleProducts');
+    try {
+      const chosen = await saveCheckProductChoice(shopDomain, accessToken, productId);
+      return sendSuccess(res, HTTP_STATUS.OK, { chosen });
+    } catch (error) {
+      if (error.statusCode === 404) {
+        return sendError(res, 404, 'That product was not found in your store.');
+      }
+      throw error;
     }
   })
 );

@@ -5,7 +5,7 @@ import { preserveEmbeddedSearch } from '../utils/shopifyEmbeddedSearch';
 import { Banner, Box } from '@shopify/polaris';
 import ClassicExperimentsList from '../components/SmartPricing/classic/ClassicExperimentsList';
 import { useKeyedState } from '../hooks/useKeyedState';
-import { useUpgradeRedirect } from '../lib/useUpgradeRedirect';
+import { useViewPlans } from '../lib/useViewPlans';
 import type { AppOutletContext } from '../lib/api.client';
 import { rpxApi } from '../lib/api.client';
 import {
@@ -17,7 +17,7 @@ import '../styles/classic-theme.css';
 export default function ExperimentsHome() {
   const ctx = useOutletContext<AppOutletContext>();
   const navigate = useNavigate();
-  const upgrade = useUpgradeRedirect(ctx.upgradeUrl);
+  const upgrade = useViewPlans();
   const { shop, entitled, apiBase } = ctx;
   const target = useMemo(() => ({ shop, apiBase }), [shop, apiBase]);
   // Keyed on the shop being asked about. An unentitled or shopless render reads

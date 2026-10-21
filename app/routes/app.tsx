@@ -256,6 +256,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     entitled,
     planHandle,
     upgradeUrl,
+    // Shopify's plan page is a "page not found" until App Pricing plans exist in
+    // the Partner Dashboard, and no API reports whether they do.
+    pricingPlansReady:
+      String(process.env.SHOPIFY_APP_PRICING_READY || "").trim().toLowerCase() === "true",
+    isProductionBuild: process.env.NODE_ENV === "production",
     apiBase: "/api",
     staffEmail,
     devEntitleAll,
@@ -297,7 +302,7 @@ export default function App() {
         </NavMenu>
         <SupportLinkHandler />
         <div data-palette="admin">
-          <PaymentRequiredNotice upgradeUrl={data.upgradeUrl} />
+          <PaymentRequiredNotice />
           <ClassicRouteLoading />
           <Outlet context={data} />
         </div>

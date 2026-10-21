@@ -511,8 +511,6 @@
 
 :global([data-palette='admin']) .priceSurfaceEmptyState,
 :global([data-palette='orange-classic']) .priceSurfaceEmptyState,
-:global([data-palette='admin']) .priceSurfaceAutoMapCard,
-:global([data-palette='orange-classic']) .priceSurfaceAutoMapCard,
 :global([data-palette='admin']) .priceSurfaceInlineStatus,
 :global([data-palette='orange-classic']) .priceSurfaceInlineStatus {
   border: 1px solid var(--p-color-border, #e3e3e3);

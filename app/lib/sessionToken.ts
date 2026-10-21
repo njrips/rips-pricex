@@ -22,12 +22,3 @@ export async function getSessionToken(): Promise<string> {
     return "";
   }
 }
-
-/**
- * Authorization header for an admin API request, or nothing when no session
- * token is available.
- */
-export async function sessionAuthHeader(): Promise<Record<string, string>> {
-  const token = await getSessionToken();
-  return token ? { Authorization: `Bearer ${token}` } : {};
-}

@@ -7,6 +7,9 @@ export type AppOutletContext = {
   shop: string;
   entitled: boolean;
   upgradeUrl: string;
+  /** SHOPIFY_APP_PRICING_READY: App Pricing plans exist, so upgradeUrl opens a real page */
+  pricingPlansReady?: boolean;
+  isProductionBuild?: boolean;
   apiBase: string;
   planHandle: string | null;
   /** Shopify app client id (loader) — used for theme embed deep links */
