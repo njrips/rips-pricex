@@ -1748,6 +1748,8 @@ export default function ClassicCreateWizard({ onTitleChange }) {
         source: 'deterministic',
         fallbackLine,
         unit,
+        band: { min, max },
+        hasPrices: Boolean(painted),
       });
       setAiPriceMeta({
         source: 'deterministic',
@@ -1899,6 +1901,7 @@ export default function ClassicCreateWizard({ onTitleChange }) {
               source: 'deterministic',
               fallbackLine: `Even spread across your ${describeAiBandRange(min, max, unit)} band (AI unavailable).`,
               unit,
+              band: { min, max },
             });
             setAiPriceMeta({
               source: 'deterministic',
@@ -1938,6 +1941,8 @@ export default function ClassicCreateWizard({ onTitleChange }) {
           sourceNotice,
           limitedNotice,
           unit,
+          band: { min, max },
+          hasPrices: suggestions.length > 0,
         });
         setAiPriceMeta({
           source,
@@ -1962,6 +1967,7 @@ export default function ClassicCreateWizard({ onTitleChange }) {
             fallbackLine: `Even spread across your ${describeAiBandRange(min, max, unit)} band (AI unavailable).`,
             errorMessage: apiMessage,
             unit,
+            band: { min, max },
           });
           setAiPriceMeta({
             source: 'deterministic',
@@ -1973,6 +1979,7 @@ export default function ClassicCreateWizard({ onTitleChange }) {
           const { status, detail } = composeAiSuggestBanner({
             errorMessage: apiMessage,
             unit,
+            band: { min, max },
           });
           setAiPriceMeta({
             source: null,

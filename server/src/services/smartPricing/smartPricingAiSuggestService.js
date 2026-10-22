@@ -1532,22 +1532,26 @@ async function suggestPricesForAllArms({
  * model switched off.
  */
 function describeSuggestionSource({ modelSummary, fromModel, filled, min, max, products, aiProducts }) {
-  const band = describeSignedBand(min, max, '%');
-  const forProducts =
-    Number(aiProducts) > 0 ? ` for ${aiProducts} product${aiProducts === 1 ? '' : 's'}` : '';
-  const base = modelSummary || `AI suggested ${fromModel} test prices${forProducts} within ${band}.`;
+  const answered = Number(aiProducts) || 0;
+  const applied =
+    answered > 0
+      ? `AI recommendations were applied to ${answered} product${answered === 1 ? '' : 's'}`
+      : `AI suggested ${fromModel} test prices within ${describeSignedBand(min, max, '%')}`;
   if (filled <= 0) {
-    return base;
+    return modelSummary || `${applied}.`;
   }
-  const missedProducts = Number(products) - Number(aiProducts);
-  const missed =
-    missedProducts > 0
-      ? ` for ${missedProducts} product${missedProducts === 1 ? '' : 's'} the AI did not answer in time`
-      : ' the AI did not return';
-  const note = `${filled} price${filled === 1 ? '' : 's'}${missed} ${
-    filled === 1 ? 'was' : 'were'
-  } filled with the even ${band} spread.`;
-  return `${base} ${note}`.slice(0, 320);
+  if (answered <= 0 && !(Number(fromModel) > 0)) {
+    return 'AI did not return usable prices, so every product received an even spread within your guardrails.';
+  }
+  const rest =
+    Number(products) - answered > 0
+      ? 'remaining products'
+      : `the other ${filled} price${filled === 1 ? '' : 's'}`;
+  const note = `${rest} received an even spread within your guardrails.`;
+  if (modelSummary) {
+    return `${modelSummary} ${note.charAt(0).toUpperCase()}${note.slice(1)}`.slice(0, 320);
+  }
+  return `${applied}; ${note}`.slice(0, 320);
 }
 
 /**

@@ -40,7 +40,9 @@ import {
   buildManualSelectionCountLabel,
   buildProductsStepEmptyMessage,
   buildWithheldDetail,
+  buildIneligibleDetail,
   countCatalogProducts,
+  countIneligibleProducts,
   resolveCatalogLoadedProductCount,
   resolveStoreCatalogProductCount,
   buildStoreCatalogStatusText,
@@ -578,7 +580,7 @@ export default function ProductsPricingStepPanel({
   const bandDirection = aiBandDirection(aiBand);
   const aiBarTooltip = [
     describeAiBandDirectionTooltip(bandDirection),
-    describeAiPriceCalculationTooltip({ unit: aiUnit }),
+    describeAiPriceCalculationTooltip({ unit: aiUnit, band: aiBand }),
   ]
     .filter(Boolean)
     .join(' ');
@@ -949,6 +951,18 @@ export default function ProductsPricingStepPanel({
     withheldCount,
     catalogTruncated,
   });
+  const catalogStatusDetail = [
+    withheldDetail,
+    buildIneligibleDetail(
+      countIneligibleProducts({
+        storeProductCount: storeCatalogProductCount,
+        availableProductCount,
+        withheldCount,
+      })
+    ),
+  ]
+    .filter(Boolean)
+    .join('\n\n');
   // A dollar band moves in cents, a percent band in whole points.
   const aiBandStep = aiUnit === 'amount' ? 0.01 : 1;
   const aiBandNumberProps = {
@@ -1066,14 +1080,16 @@ export default function ProductsPricingStepPanel({
             {!loading && !loadError && storeCatalogStatusText ? (
               <p className={styles.help} style={{ margin: '4px 0 0' }}>
                 {storeCatalogStatusText}
-                {withheldCount > 0 ? (
+                {catalogStatusDetail ? (
                   <>
                     {' '}
-                    <TooltipWrapper content={withheldDetail}>
+                    <TooltipWrapper
+                      content={<span className={styles.tooltipLines}>{catalogStatusDetail}</span>}
+                    >
                       <button
                         type="button"
                         className={styles.helpHint}
-                        aria-label={withheldDetail}
+                        aria-label={catalogStatusDetail}
                       >
                         Details
                       </button>
@@ -1170,17 +1186,13 @@ export default function ProductsPricingStepPanel({
           </button>
         ))}
       </div>
-      <p className={styles.help} style={{ marginTop: 0, marginBottom: 18 }}>
-        Control keeps your current catalog prices, so there&rsquo;s nothing to set for it.
-      </p>
-
       {/* Control's price cells are read-only, so a pricing strategy has nothing
           to act on there. Manual, AI and Bulk all stay hidden until a variation
           that can actually take a new price is selected. */}
       {!isControlArm ? (
         <>
       <p className={styles.help} style={{ marginTop: 0, marginBottom: 12 }}>
-        For each variation, choose how you&rsquo;d like Priceify to set prices.
+        Configure pricing rules for your variations below.
       </p>
       <LabelWithInfo hash="ai-price" label="AI price suggestions">
         How would you like to set prices?
@@ -1245,7 +1257,7 @@ export default function ProductsPricingStepPanel({
               <p className={styles.aiSuggestStatusLine}>
                 {aiSuggestCopy.body}
                 <TooltipWrapper
-                  content={aiSuggestTooltip}
+                  content={<span className={styles.tooltipLines}>{aiSuggestTooltip}</span>}
                   accessibilityLabel="AI suggestion details"
                 >
                   <button

@@ -33,6 +33,29 @@ export function resolveStoreCatalogProductCount({
 }
 
 /**
+ * Active products that never became rows: not sold on the Online Store, gift
+ * cards, or no usable price. Counted so the totals on the step add up.
+ */
+export function countIneligibleProducts({
+  storeProductCount = 0,
+  availableProductCount = 0,
+  withheldCount = 0,
+} = {}) {
+  const store = Number(storeProductCount) || 0;
+  if (store <= 0) return 0;
+  return Math.max(0, store - (Number(availableProductCount) || 0) - (Number(withheldCount) || 0));
+}
+
+/** Why the ineligible count on the step is not offered. */
+export function buildIneligibleDetail(ineligibleCount = 0) {
+  const n = Number(ineligibleCount) || 0;
+  if (n <= 0) return '';
+  return `${n} product${n === 1 ? ' is' : 's are'} ineligible: not published to the Online Store, sold out, not available for sale, ${
+    n === 1 ? 'a gift card, or no price' : 'gift cards, or have no price'
+  }.`;
+}
+
+/**
  * One line for the products step and picker: store total, available, and in-other-tests.
  */
 export function buildStoreCatalogStatusText({
@@ -46,29 +69,23 @@ export function buildStoreCatalogStatusText({
   const withheld = Number(withheldCount) || 0;
   if (store <= 0 && available <= 0 && withheld <= 0) return '';
 
-  const headline =
-    store > 0
-      ? `${store} active product${store === 1 ? '' : 's'} in your store`
-      : `${available + withheld} active product${available + withheld === 1 ? '' : 's'} in your store`;
+  const total = store > 0 ? store : available + withheld;
+  const headline = `${total} total product${total === 1 ? '' : 's'}`;
 
-  const parts = [];
-  if (available > 0 || withheld > 0 || store > 0) {
-    parts.push(`${available} available to add`);
-  }
+  const parts = [`${available} eligible`];
   if (withheld > 0) {
-    parts.push(`${withheld} in other tests`);
+    parts.push(`${withheld} in active tests`);
   }
-  // The store count includes active products that cannot be sold in the Online
-  // Store, gift cards, and products with no usable price. Those never become
-  // rows, so explain the difference instead of making the totals look broken.
-  const untestable = store > 0 ? store - available - withheld : 0;
+  const untestable = countIneligibleProducts({
+    storeProductCount: store,
+    availableProductCount: available,
+    withheldCount: withheld,
+  });
   if (untestable > 0) {
-    parts.push(
-      `${untestable} can’t be tested (unpublished, sold out, gift cards, or no price)`
-    );
+    parts.push(`${untestable} ineligible`);
   }
 
-  let line = parts.length ? `${headline} · ${parts.join(' · ')}` : headline;
+  let line = `${headline} · ${parts.join(' · ')}`;
   if (catalogTruncated && store > 0) {
     line += '. Search in Browse products for products beyond this list';
   }
@@ -93,38 +110,39 @@ export function buildWithheldSummary(withheldCount = 0) {
   return `${n} product${n === 1 ? '' : 's'} in other tests`;
 }
 
+/** Multi-line: render it where line breaks are kept. */
 export function buildWithheldDetail(withheldByOtherTests = null) {
   const withheldCount = Number(withheldByOtherTests?.total) || 0;
   if (withheldCount <= 0) return '';
-  const withheldSummary = buildWithheldSummary(withheldCount);
+  const one = withheldCount === 1;
+  const lines = [
+    `${withheldCount} product${one ? ' is' : 's are'} running in other tests:`,
+  ];
   const experiments = (withheldByOtherTests?.experiments || []).filter(row => row?.title);
   if (experiments.length) {
-    const shown = experiments
+    experiments.slice(0, 3).forEach(row => {
+      const n = Number(row.products) || 0;
+      const state = row.live ? 'Running' : 'Paused';
+      lines.push(
+        n > 0
+          ? `• ${row.title} (${n} product${n === 1 ? '' : 's'} · ${state})`
+          : `• ${row.title} (${state})`
+      );
+    });
+    if (experiments.length > 3) lines.push(`• +${experiments.length - 3} more`);
+  } else {
+    (withheldByOtherTests?.tests || [])
+      .map(row => row?.name)
+      .filter(Boolean)
       .slice(0, 3)
-      .map(row => {
-        const n = Number(row.products) || 0;
-        const state = row.live ? 'running' : 'paused';
-        return n > 0
-          ? `${row.title} (${n} product${n === 1 ? '' : 's'}, ${state})`
-          : `${row.title} (${state})`;
-      })
-      .join('; ');
-    const more = experiments.length - 3;
-    const single = experiments.length === 1;
-    return `${withheldSummary}: ${shown}${more > 0 ? `; and ${more} more` : ''}. End ${
-      single ? 'that test' : 'those tests'
-    } on the Tests page to reuse ${withheldCount === 1 ? 'it' : 'them'} here.`;
+      .forEach(name => lines.push(`• ${name}`));
   }
-  const withheldTestNames = (withheldByOtherTests?.tests || [])
-    .slice(0, 2)
-    .map(row => row?.name)
-    .filter(Boolean)
-    .join(', ');
-  return `${withheldSummary}: ${
-    withheldCount === 1 ? 'it is' : 'they are'
-  } in another test${
-    withheldTestNames ? ` (${withheldTestNames})` : ''
-  }. End that test to reuse ${withheldCount === 1 ? 'it' : 'them'} here.`;
+  lines.push(
+    one
+      ? 'To include this item, stop or complete its active test first.'
+      : 'To include these items, stop or complete their active tests first.'
+  );
+  return lines.join('\n');
 }
 
 /**

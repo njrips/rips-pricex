@@ -93,9 +93,9 @@ describe('products step catalog messaging', () => {
       })),
       withheldByOtherTests: { total: 226, live: 226, paused: 0, tests: [] },
     });
-    expect(container.textContent).toContain('480 active products in your store');
-    expect(container.textContent).toContain('254 available to add');
-    expect(container.textContent).toContain('226 in other tests');
+    expect(container.textContent).toContain(
+      '480 total products · 254 eligible · 226 in active tests'
+    );
   });
 
   it('does not stack truncation help when nothing is pickable', async () => {
@@ -107,6 +107,6 @@ describe('products step catalog messaging', () => {
     });
     expect(container.textContent).not.toContain('more than 250 active products');
     expect(container.textContent).toContain('No products available to pick');
-    expect(container.textContent).toContain('40 in other tests');
+    expect(container.textContent).toContain('40 in active tests');
   });
 });

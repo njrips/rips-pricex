@@ -442,7 +442,9 @@ describe('smartPricingAiSuggestService', () => {
     expect(result.ai_pair_count).toBe(1);
     expect(result.fallback_pair_count).toBe(1);
     expect(result.summary).toContain('spread');
-    expect(result.summary).toMatch(/1 product the AI did not answer/);
+    expect(result.summary).toBe(
+      'AI recommendations were applied to 1 product; remaining products received an even spread within your guardrails.'
+    );
     expect(result.suggestions).toHaveLength(2);
   });
 
@@ -529,8 +531,7 @@ describe('smartPricingAiSuggestService', () => {
       const result = await suggestPrices({ variants: products(30), arms: [{ id: 'a' }], minPct: 10, maxPct: 20 });
 
       expect(result.summary).not.toContain('hoodie');
-      expect(result.summary).toMatch(/for 25 products/);
-      expect(result.summary).toMatch(/5 products/);
+      expect(result.summary).toMatch(/applied to 25 products; remaining products received an even spread/);
     });
   });
 

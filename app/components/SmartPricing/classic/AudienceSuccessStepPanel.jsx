@@ -262,7 +262,7 @@ export default function AudienceSuccessStepPanel({
           disabled={disabled}
         />
         <p className={styles.help}>
-          {trafficAllocation}% of eligible visitors will enter this test.
+          Allocating {trafficAllocation}% of eligible visitors to this test.
           {durationNotFeasible
             ? ' Current traffic does not support a practical 2–8 week test; Review shows the traffic needed.'
             : planningWindow

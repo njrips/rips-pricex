@@ -6,6 +6,8 @@ import {
   buildProductPickerEmptyMessage,
   buildProductsStepEmptyMessage,
   buildWithheldDetail,
+  buildIneligibleDetail,
+  countIneligibleProducts,
   countCatalogProducts,
   resolveCatalogLoadedProductCount,
   resolveStoreCatalogProductCount,
@@ -34,7 +36,7 @@ describe('productsStepCatalogCopy', () => {
       availableProductCount: 254,
       withheldCount: 226,
     })).toBe(
-      '480 active products in your store · 254 available to add · 226 in other tests'
+      '480 total products · 254 eligible · 226 in active tests'
     );
   });
 
@@ -45,7 +47,7 @@ describe('productsStepCatalogCopy', () => {
         availableProductCount: 0,
         withheldCount: 226,
       })
-    ).toBe('226 active products in your store · 0 available to add · 226 in other tests');
+    ).toBe('226 total products · 0 eligible · 226 in active tests');
   });
 
   it('accounts for store products that cannot be priced, so the line adds up', () => {
@@ -56,7 +58,7 @@ describe('productsStepCatalogCopy', () => {
         withheldCount: 15,
       })
     ).toBe(
-      '299 active products in your store · 282 available to add · 15 in other tests · 2 can’t be tested (unpublished, sold out, gift cards, or no price)'
+      '299 total products · 282 eligible · 15 in active tests · 2 ineligible'
     );
   });
 
@@ -196,13 +198,25 @@ describe('productsStepCatalogCopy', () => {
         total: 2,
         tests: [{ name: 'Summer pricing' }],
       })
-    ).toContain('2 products in other tests');
+    ).toContain('2 products are running in other tests:');
     expect(
       buildWithheldDetail({
         total: 2,
         tests: [{ name: 'Summer pricing' }],
       })
     ).toContain('Summer pricing');
+  });
+
+  it('explains the ineligible count, since the step line only counts it', () => {
+    expect(
+      countIneligibleProducts({ storeProductCount: 318, availableProductCount: 308, withheldCount: 7 })
+    ).toBe(3);
+    expect(countIneligibleProducts({ storeProductCount: 0, availableProductCount: 5 })).toBe(0);
+    expect(buildIneligibleDetail(3)).toBe(
+      '3 products are ineligible: not published to the Online Store, sold out, not available for sale, gift cards, or have no price.'
+    );
+    expect(buildIneligibleDetail(1)).toMatch(/^1 product is ineligible: .*a gift card, or no price\.$/);
+    expect(buildIneligibleDetail(0)).toBe('');
   });
 
   it('names the experiments holding products, not one test per product', () => {
@@ -217,7 +231,14 @@ describe('productsStepCatalogCopy', () => {
       ],
     });
     expect(detail).toBe(
-      '242 products in other tests: Offer Test Example (180 products, running); AAAAA (50 products, running); Spring (7 products, paused); and 1 more. End those tests on the Tests page to reuse them here.'
+      [
+        '242 products are running in other tests:',
+        '• Offer Test Example (180 products · Running)',
+        '• AAAAA (50 products · Running)',
+        '• Spring (7 products · Paused)',
+        '• +1 more',
+        'To include these items, stop or complete their active tests first.',
+      ].join('\n')
     );
     expect(detail).not.toContain('DZR Minna');
   });

@@ -169,7 +169,7 @@ describe('variations step traffic controls', () => {
     await renderPanel({ variations: fourRows, experimentType: 'offer_test' });
 
     expect(container.textContent).toContain(
-      'Split test traffic between your current price (control) and up to 3 price variations.'
+      'Distribute traffic between your current price (control) and up to 3 test variants'
     );
     expect(container.textContent).toContain('Control – current price');
     expect(container.textContent).toContain('Keeps your current catalog price.');
@@ -507,7 +507,7 @@ describe('the traffic allocation a new experiment starts on', () => {
     await renderPanel({ trafficAllocation: undefined });
 
     expect(fieldByLabel('Traffic allocation').value).toBe('100');
-    expect(container.textContent).toContain('100% of eligible visitors will enter this test');
+    expect(container.textContent).toContain('Allocating 100% of eligible visitors to this test');
   });
 
   it('still honours an allocation the merchant has dialled back', async () => {

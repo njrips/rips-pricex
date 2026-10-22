@@ -189,13 +189,13 @@ export default function VariationsStepPanel({
           What percentage of eligible visitors should enter this test?
         </p>
         <p className={styles.help} style={{ marginTop: 0 }}>
-          {formatTrafficPercent(allocation)}% of eligible visitors will enter this test.
+          Allocating {formatTrafficPercent(allocation)}% of eligible visitors to this test
         </p>
       </div>
 
-      <div className={styles.sectionLabel}>Split traffic between variations</div>
+      <div className={styles.sectionLabel}>Traffic distribution</div>
       <p className={styles.help} style={{ marginTop: 0, marginBottom: 12 }}>
-        Split test traffic between your current price (control) and up to 3 price variations.
+        Distribute traffic between your current price (control) and up to 3 test variants
       </p>
 
       <div className={styles.trafficBanner}>

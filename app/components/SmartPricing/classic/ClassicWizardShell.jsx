@@ -210,7 +210,11 @@ export default function ClassicWizardShell({
               before it, so committing an experiment to live shopper traffic
               looked exactly like advancing a step. The last click gets its own
               weight; the arrow buttons keep their trailing icon. */}
-          <TooltipWrapper content={blockedHint} preferredPosition="above" hoverDelay={150}>
+          <TooltipWrapper
+            content={blockedHint ? <span className={styles.tooltipLines}>{blockedHint}</span> : ''}
+            preferredPosition="above"
+            hoverDelay={150}
+          >
             <span className={isLaunch ? styles.launchBtn : styles.iconTrailingBtn}>
               <Button
                 variant="primary"

@@ -103,8 +103,7 @@ describe('Control is not something to price', () => {
       (node.textContent || '').trim()
     );
     expect(tabs).toEqual(['AVariation A']);
-    // Why it is missing, rather than leaving the merchant to wonder.
-    expect(container.textContent).toMatch(/Control keeps your current catalog prices/i);
+    expect(container.textContent).not.toMatch(/Control keeps your current catalog prices/i);
   });
 
   it('moves a draft left on Control onto the first variation it can price', async () => {

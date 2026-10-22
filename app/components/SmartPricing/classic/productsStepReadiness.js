@@ -309,12 +309,35 @@ export function guardrailPriceWindow(base, maxChangePercent) {
   };
 }
 
+export const PRICE_DETAILS_HOVER_HINT = 'Hover over the ⓘ beside any price for details.';
+
+/** "10%–20%" for a rise; a cut or a band across zero says which way. */
+function describeGuardrailBand(band, unit) {
+  const lo = Number(band?.min);
+  const hi = Number(band?.max);
+  if (!Number.isFinite(lo) || !Number.isFinite(hi)) return '';
+  if (lo >= 0) return `${formatBandValue(lo, unit)}–${formatBandValue(hi, unit)}`;
+  return describeAiBandRange(lo, hi, unit);
+}
+
 /** Tooltip copy: how shelf prices are derived from catalog data. */
-export function describeAiPriceCalculationTooltip({ unit = 'percent' } = {}) {
+export function describeAiPriceCalculationTooltip({ unit = 'percent', band = null } = {}) {
   if (unit === 'amount') {
     return 'Each suggested price starts in your min–max dollar band, then is rounded to a normal price ending. Spacing follows traffic-aware rules so variations are far enough apart to learn.';
   }
-  return 'AI picks a test range per product from perceived value, market price position, sales, and revenue per visitor; variations are spaced for statistical power inside your band, then rounded to realistic price endings such as .99, so the change column shows the exact result. Hover the ℹ beside a test price for its breakdown; for a product with several variants, expand it to see each one.';
+  const range = describeGuardrailBand(band, unit);
+  return `AI generates test prices based on perceived value, sales volume, and revenue per visitor, constrained by your ${
+    range ? `${range} ` : ''
+  }guardrails and rounded to standard price endings (.99).`;
+}
+
+/** The same line for prices Priceify spread itself, which no AI looked at. */
+function describeEvenSpreadCalculation({ unit = 'percent', band = null } = {}) {
+  if (unit === 'amount') return describeAiPriceCalculationTooltip({ unit });
+  const range = describeGuardrailBand(band, unit);
+  return `Test prices are spread evenly within your ${
+    range ? `${range} ` : ''
+  }guardrails and rounded to standard price endings (.99).`;
 }
 
 export function describeAiBandDirectionTooltip(direction) {
@@ -358,30 +381,45 @@ export function composeAiSuggestBanner({
   fallbackLine = '',
   errorMessage = '',
   unit = 'percent',
+  band = null,
+  hasPrices = true,
 } = {}) {
   const err = String(errorMessage || '').trim();
   const errShort = shortenAiSuggestError(err);
-  const sourceLine =
-    sourceNotice || describeAiSuggestionSource({ source, skippedReason });
+  const spread = source === 'deterministic';
+  // A fallback line already says why the spread was used; a second reason
+  // beside it contradicted it ("AI unavailable" next to "did not return").
+  const sourceLine = spread && !fallbackLine
+    ? sourceNotice || describeAiSuggestionSource({ source, skippedReason })
+    : '';
 
-  const detail = [
-    describeAiPriceCalculationTooltip({ unit }),
+  const parts = [
+    spread && hasPrices
+      ? describeEvenSpreadCalculation({ unit, band })
+      : describeAiPriceCalculationTooltip({ unit, band }),
     bandNotice,
     fallbackLine,
     sourceLine,
     limitedNotice,
     baseSummary && !/^prices applied\.?$/i.test(String(baseSummary).trim()) ? baseSummary : '',
-    err && err !== errShort ? err : '',
-  ]
-    .filter(part => part && String(part).trim())
-    .join('\n\n');
+  ].filter(part => part && String(part).trim());
+  // Only once prices are on the table is there an ⓘ to hover.
+  if (source && hasPrices && parts.length > 1) {
+    parts[parts.length - 1] = `${parts[parts.length - 1]} ${PRICE_DETAILS_HOVER_HINT}`;
+  } else if (source && hasPrices) {
+    parts.push(PRICE_DETAILS_HOVER_HINT);
+  }
+  if (err && err !== errShort) parts.push(err);
+  const detail = parts.join('\n\n');
 
   let status = '';
   if (errShort) {
     status = errShort;
+  } else if (!hasPrices) {
+    status = shortenAiSuggestError(fallbackLine || baseSummary) || 'No prices applied.';
   } else if (source === 'openai') {
     status = 'Prices applied (AI).';
-  } else if (fallbackLine || source === 'deterministic') {
+  } else if (fallbackLine || spread) {
     status = 'Prices applied (even spread across your band).';
   } else if (baseSummary) {
     status = shortenAiSuggestError(baseSummary);
@@ -934,7 +972,7 @@ export function findUnpricedTestArms({
 }
 
 /** Names the variations still missing prices, and what happens if they launch. */
-export function describeUnpricedTestArms(unpriced = [], { priceMode = 'manual' } = {}) {
+export function describeUnpricedTestArms(unpriced = []) {
   if (!unpriced.length) return '';
   // Named per variation, and counted only where some products are priced and
   // others are not -- "Variation C" is clearer than "Variation C (6 of 6)".
@@ -943,13 +981,14 @@ export function describeUnpricedTestArms(unpriced = [], { priceMode = 'manual' }
   );
   const names =
     parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
-  const how =
-    priceMode === 'ai'
-      ? 'Set each variation to AI suggested and click Suggest, or price it by hand.'
-      : 'Open each variation and set its prices.';
+  const labels = unpriced.map(arm => arm.label);
+  const removeNames =
+    labels.length === 1
+      ? labels[0]
+      : `${labels.slice(0, -1).join(', ')} and ${labels[labels.length - 1]}`;
   return `${names} ${
     parts.length === 1 ? 'has' : 'have'
-  } no test price yet. A variation left blank launches at your current price, so it would duplicate the control and take traffic without testing anything. ${how}`;
+  } no test prices.\nChoose a pricing method (AI suggestions, bulk adjustment, or manual) or remove ${removeNames} to continue.`;
 }
 
 export function formatCatalogLoadError(err) {
@@ -1300,7 +1339,7 @@ export function getProductsStepContinueState({
     return {
       disabled: true,
       reason: 'incomplete_arm_prices',
-      hint: describeUnpricedTestArms(unpricedArms, { priceMode }),
+      hint: describeUnpricedTestArms(unpricedArms),
     };
   }
   const priceArgs = { opportunities, selectedIds, pickMode, maxSelection, variations, priceOverrides };

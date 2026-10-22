@@ -104,13 +104,13 @@ describe('products held by another test', () => {
       },
     });
 
-    expect(container.textContent).toContain('4 in other tests');
+    expect(container.textContent).toContain('4 in active tests');
     // The long part is not printed on the step.
     expect(container.textContent).not.toContain('Summer pricing');
-    expect(container.textContent).not.toContain('in another test');
+    expect(container.textContent).not.toContain('running in other tests');
 
     const hint = withheldHint();
-    expect(hint.getAttribute('aria-label')).toContain('in another test');
+    expect(hint.getAttribute('aria-label')).toContain('4 products are running in other tests:');
     expect(hint.getAttribute('aria-label')).toContain('Summer pricing');
   });
 
@@ -129,8 +129,8 @@ describe('products held by another test', () => {
         withheldHint().dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
         await vi.advanceTimersByTimeAsync(1000);
       });
-      expect(document.body.textContent).toContain('in another test');
-      expect(document.body.textContent).toContain('Summer pricing');
+      expect(document.body.textContent).toContain('running in other tests');
+      expect(document.body.textContent).toContain('• Summer pricing');
     } finally {
       vi.useRealTimers();
     }
@@ -141,8 +141,9 @@ describe('products held by another test', () => {
       withheldByOtherTests: { total: 1, live: 1, paused: 0, tests: [] },
     });
 
-    expect(container.textContent).toContain('1 in other tests');
-    expect(withheldHint().getAttribute('aria-label')).toContain('it is in another test');
+    expect(container.textContent).toContain('1 in active tests');
+    expect(withheldHint().getAttribute('aria-label')).toContain('1 product is running in other tests');
+    expect(withheldHint().getAttribute('aria-label')).toContain('To include this item');
   });
 
   it('says what frees them up', async () => {
@@ -151,11 +152,11 @@ describe('products held by another test', () => {
     });
 
     expect(withheldHint().getAttribute('aria-label')).toMatch(
-      /end that test to reuse them here/i
+      /stop or complete their active tests first/i
     );
   });
 
-  it('names at most two tests, so the line stays a line', async () => {
+  it('lists at most three tests, one per line', async () => {
     await renderPanel({
       withheldByOtherTests: {
         total: 6,
@@ -165,12 +166,13 @@ describe('products held by another test', () => {
           { test_id: 'a', name: 'Test A', live: true },
           { test_id: 'b', name: 'Test B', live: true },
           { test_id: 'c', name: 'Test C', live: true },
+          { test_id: 'd', name: 'Test D', live: true },
         ],
       },
     });
 
-    expect(withheldHint().getAttribute('aria-label')).toContain('Test A, Test B');
-    expect(withheldHint().getAttribute('aria-label')).not.toContain('Test C');
+    expect(withheldHint().getAttribute('aria-label')).toContain('• Test A\n• Test B\n• Test C');
+    expect(withheldHint().getAttribute('aria-label')).not.toContain('Test D');
   });
 
   it('stays quiet when nothing was withheld', async () => {

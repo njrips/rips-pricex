@@ -353,6 +353,11 @@ button.stepItem {
   font-size: var(--classic-fs-label);
   line-height: 1.4;
   text-align: right;
+  white-space: pre-line;
+}
+
+.tooltipLines {
+  white-space: pre-line;
 }
 
 .footerBlockedHintPending {
@@ -3175,7 +3180,7 @@ button.stepItem {
   border-radius: 6px;
   background: var(--classic-table-head, #f7f7f7); /* Figma track */
   border: 1px solid var(--classic-line);
-  margin-bottom: 8px;
+  margin-bottom: 12px;
   width: 100%;
   box-sizing: border-box;
 }

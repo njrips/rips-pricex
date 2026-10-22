@@ -184,7 +184,7 @@ describe('global naming principles (PDF spot checks)', () => {
     expect(productsPanel).toContain('Price band (min–max)');
     expect(productsPanel).toContain('Pick specific products');
     expect(productsPanel).toContain('How would you like to pick products?');
-    expect(productsPanel).toContain('For each variation, choose how you');
+    expect(productsPanel).toContain('Configure pricing rules for your variations below.');
     const helpFaq = read('helpFaq.js');
     expect(helpFaq).toMatch(/term: 'Revenue guardrail'/);
     expect(helpFaq).toMatch(/term: 'Results settings'/);

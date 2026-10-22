@@ -430,7 +430,9 @@ describe('productsStepReadiness', () => {
   });
 
   it('explains how band spread becomes a shelf price', () => {
-    expect(describeAiPriceCalculationTooltip({ unit: 'percent' })).toMatch(/market price position[\s\S]*revenue per visitor/i);
+    expect(describeAiPriceCalculationTooltip({ unit: 'percent', band: { min: 10, max: 20 } })).toBe(
+      'AI generates test prices based on perceived value, sales volume, and revenue per visitor, constrained by your 10%–20% guardrails and rounded to standard price endings (.99).'
+    );
     const meta = buildLocalPriceSuggestionMeta(
       {
         rows: [{ variant_id: 'gid://shopify/ProductVariant/1', current_price: 100 }],
@@ -566,6 +568,56 @@ describe('productsStepReadiness', () => {
       expect(statusFor('variants cannot exceed 500 products in one request (received 832)')).toBe(
         'Too many products (832). Max 500 per suggest.'
       );
+    });
+
+    const band = { min: 10, max: 20 };
+
+    it('describes AI prices, then where they came from, then where to hover', () => {
+      const { status, detail } = composeAiSuggestBanner({
+        source: 'openai',
+        baseSummary:
+          'AI recommendations were applied to 25 products; remaining products received an even spread within your guardrails.',
+        band,
+      });
+      expect(status).toBe('Prices applied (AI).');
+      expect(detail).toBe(
+        'AI generates test prices based on perceived value, sales volume, and revenue per visitor, constrained by your 10%–20% guardrails and rounded to standard price endings (.99).\n\n' +
+          'AI recommendations were applied to 25 products; remaining products received an even spread within your guardrails. Hover over the ⓘ beside any price for details.'
+      );
+    });
+
+    it('does not credit AI for a spread it never made, or give two reasons for it', () => {
+      const { detail } = composeAiSuggestBanner({
+        source: 'deterministic',
+        fallbackLine: 'Even spread across your 10%–20% higher band (AI unavailable).',
+        band,
+      });
+      expect(detail).toMatch(/^Test prices are spread evenly within your 10%–20% guardrails/);
+      expect(detail).not.toMatch(/AI generates/);
+      expect(detail).not.toMatch(/did not return usable prices/);
+    });
+
+    it('does not say prices were applied, or point at them, when none were', () => {
+      const failed = composeAiSuggestBanner({
+        source: 'deterministic',
+        fallbackLine: 'Could not build local prices — check product prices and try again.',
+        band,
+        hasPrices: false,
+      });
+      expect(failed.status).not.toMatch(/applied/i);
+      expect(failed.detail).not.toContain('Hover over');
+
+      const empty = composeAiSuggestBanner({
+        source: 'openai',
+        baseSummary: 'No prices returned — try Re-suggest or adjust the band.',
+        band,
+        hasPrices: false,
+      });
+      expect(empty.status).toMatch(/^No prices returned/);
+      expect(empty.detail).not.toContain('Hover over');
+
+      const errorOnly = composeAiSuggestBanner({ errorMessage: 'Could not suggest prices.', band });
+      expect(errorOnly.detail).not.toMatch(/even spread/);
     });
   });
 
@@ -797,20 +849,16 @@ describe('variations still missing a test price', () => {
     const one = describeUnpricedTestArms([
       { id: 'var_b', label: 'Variation B', missing: 2, total: 2 },
     ]);
-    expect(one).toMatch(/^Variation B has no test price yet/);
-    expect(one).toMatch(/duplicate the control/);
+    expect(one).toBe(
+      'Variation B has no test prices.\nChoose a pricing method (AI suggestions, bulk adjustment, or manual) or remove Variation B to continue.'
+    );
 
     const two = describeUnpricedTestArms([
       { id: 'var_b', label: 'Variation B', missing: 2, total: 2 },
       { id: 'var_c', label: 'Variation C', missing: 1, total: 2 },
     ]);
-    expect(two).toMatch(/Variation B and Variation C on 1 of 2 products have no test price yet/);
-
-    expect(
-      describeUnpricedTestArms([{ id: 'var_b', label: 'Variation B', missing: 2, total: 2 }], {
-        priceMode: 'ai',
-      })
-    ).toMatch(/click Suggest/);
+    expect(two).toMatch(/^Variation B and Variation C on 1 of 2 products have no test prices\./);
+    expect(two).toMatch(/or remove Variation B and Variation C to continue\.$/);
     expect(describeUnpricedTestArms([])).toBe('');
   });
 });
