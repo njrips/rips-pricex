@@ -5181,6 +5181,16 @@ button.stepItem {
   gap: 16px;
 }
 
+/* One card per term, spaced like the other admin rows rather than stacked
+   edge to edge. */
+.glossaryList {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+}
+
 .adminRow {
   display: flex;
   flex-direction: column;

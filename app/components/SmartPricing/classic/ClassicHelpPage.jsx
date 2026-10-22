@@ -173,7 +173,6 @@ export default function ClassicHelpPage({
   return (
     <ClassicAdminShell
       titleBar="Help & docs"
-      meta="Support"
       title="Help & docs"
       subtitle="Find an answer, or ask our team. Tickets include your shop details automatically."
       tabs={HELP_TABS.map(item =>
