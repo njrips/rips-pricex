@@ -2833,6 +2833,38 @@ button.stepItem {
   background: var(--classic-table-head, var(--classic-wash));
 }
 
+/* The pinned cell takes its row's shade, laid over the card so a translucent
+   dark-theme tint still hides the columns scrolling beneath it. */
+.variationsProductsTableScroll .table tbody tr.productPriceRow > td:first-child {
+  background:
+    linear-gradient(var(--classic-table-row, #ffffff), var(--classic-table-row, #ffffff)),
+    var(--classic-card);
+}
+
+.variationsProductsTableScroll .table tbody tr.productPriceRow:hover > td:first-child {
+  background:
+    linear-gradient(var(--classic-table-row-hover, #f7f7f7), var(--classic-table-row-hover, #f7f7f7)),
+    var(--classic-card);
+}
+
+.variationsProductsTableScroll .table tbody tr.variantRow > td:first-child {
+  background:
+    linear-gradient(var(--classic-table-variant), var(--classic-table-variant)),
+    var(--classic-card);
+}
+
+.variationsProductsTableScroll .table tbody tr.variantRow:hover > td:first-child {
+  background:
+    linear-gradient(var(--classic-table-variant-hover), var(--classic-table-variant-hover)),
+    var(--classic-card);
+}
+
+/* A table sizes a column to its widest unbreakable line, so without a cap one
+   long product name widens the pinned column and the ellipsis never applies. */
+.variationsProductsTableScroll .productMeta {
+  max-width: 280px;
+}
+
 .variationsPriceCol {
   text-align: right;
   white-space: nowrap;

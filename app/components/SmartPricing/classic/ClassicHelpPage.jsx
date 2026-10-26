@@ -211,11 +211,11 @@ export default function ClassicHelpPage({
 
       {tab === 'answers' ? (
         <div>
-          <LabelWithInfo hash="how-settings-work" label="How Settings apply">
+          <LabelWithInfo hash="how-settings-work" label="How App settings apply">
             Test setting guides
           </LabelWithInfo>
           <p className={styles.help} style={{ marginTop: 0, marginBottom: 12 }}>
-            Info icons in Create and Settings open the matching guide. Use the icon here for how
+            Info icons in Create and App settings open the matching guide. Use the icon here for how
             shop defaults apply to a new test.
           </p>
           <p className={styles.help} style={{ marginTop: 0, marginBottom: 20 }}>
@@ -358,7 +358,7 @@ export default function ClassicHelpPage({
         <p className={styles.help} style={{ marginTop: 24 }}>
           <Link to={withCurrentEmbeddedSearch(searchParams, '/app/setup')}>Store setup</Link>
           {' · '}
-          <Link to={withCurrentEmbeddedSearch(searchParams, '/app/settings')}>Settings</Link>
+          <Link to={withCurrentEmbeddedSearch(searchParams, '/app/settings')}>App settings</Link>
           {' · '}
           Uninstalled or before install: use the public Contact page or the App Store listing.
         </p>
