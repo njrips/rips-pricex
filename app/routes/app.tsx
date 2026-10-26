@@ -132,11 +132,7 @@ async function resolveEntitlement({
     headers: internalServiceHeaders(shop),
     signal: AbortSignal.timeout(1500),
   })
-    .then(async res =>
-      res.ok
-        ? ((await res.json()) as { entitled?: boolean; planHandle?: string | null })
-        : null,
-    )
+    .then(async res => (res.ok ? ((await res.json()) as CachedEntitlement) : null))
     .catch(() => null);
 
   const [cached, live] = await Promise.all([
@@ -144,28 +140,41 @@ async function resolveEntitlement({
     fetchSubscriptionEntitlement(admin),
   ]);
 
-  const operatorDevPlan =
-    String(cached?.planHandle || "")
-      .trim()
-      .toLowerCase() === "dev" && Boolean(cached?.entitled);
+  // Support access is ours, not Shopify's, so Shopify saying "not paying"
+  // does not end it. It ends on its own date.
+  const supportAccess = cached?.source === "support_access";
+  // Partner development stores are free. Shopify's live answer decides; the
+  // cached flag only stands in when Shopify did not answer in time.
+  const developmentStore =
+    typeof live?.developmentStore === "boolean"
+      ? live.developmentStore
+      : Boolean(cached?.developmentStore);
 
   if (live) {
-    if (operatorDevPlan && !live.entitled) {
-      return {
-        entitled: true,
-        planHandle: planHandleFromQuery || "dev",
-        source: "dev_plan",
-      };
-    }
     // Only write when Shopify disagrees with our copy, so a steady state does
-    // not post on every page load.
-    if (Boolean(cached?.entitled) !== live.entitled) {
-      void pushEntitlementToExpress(shop, live).catch(err => {
+    // not post on every page load. Compare against Shopify's part of the
+    // answer: support access would otherwise look like a disagreement forever.
+    if (!cached || shopifyCopyIsStale(cached, live)) {
+      void pushEntitlementToExpress(shop, live, { source: "loader" }).catch(err => {
         console.warn(
           "[ripspricex] sync-entitlement error",
           err instanceof Error ? err.message : err,
         );
       });
+    }
+    if (!live.entitled && developmentStore) {
+      return {
+        entitled: true,
+        planHandle: planHandleFromQuery || null,
+        source: "development_store",
+      };
+    }
+    if (!live.entitled && supportAccess) {
+      return {
+        entitled: true,
+        planHandle: planHandleFromQuery || cached?.planHandle || null,
+        source: "support_access",
+      };
     }
     return {
       entitled: live.entitled,
@@ -177,8 +186,52 @@ async function resolveEntitlement({
   return {
     entitled: Boolean(cached?.entitled),
     planHandle: planHandleFromQuery || cached?.planHandle || null,
-    source: cached ? "cache" : "unknown",
+    source: developmentStore
+      ? "development_store"
+      : supportAccess
+        ? "support_access"
+        : cached
+          ? "cache"
+          : "unknown",
   };
+}
+
+type CachedEntitlement = {
+  entitled?: boolean;
+  shopifyEntitled?: boolean;
+  developmentStore?: boolean;
+  source?: string;
+  planHandle?: string | null;
+  billing?: {
+    shopGid?: string | null;
+    subscriptionGid?: string | null;
+    currentPeriodEnd?: string | null;
+  } | null;
+};
+
+function sameInstant(a: string | null | undefined, b: string | null | undefined) {
+  const left = a ? new Date(a).getTime() : NaN;
+  const right = b ? new Date(b).getTime() : NaN;
+  if (Number.isNaN(left) || Number.isNaN(right)) return !a === !b;
+  return left === right;
+}
+
+/** Whether what we stored from Shopify no longer matches what Shopify says. */
+function shopifyCopyIsStale(
+  cached: CachedEntitlement,
+  live: Awaited<ReturnType<typeof fetchSubscriptionEntitlement>> & object,
+) {
+  const billing = cached.billing || {};
+  const details = live.details || {};
+  if (Boolean(cached.shopifyEntitled) !== live.entitled) return true;
+  if (typeof live.developmentStore === "boolean" && Boolean(cached.developmentStore) !== live.developmentStore) {
+    return true;
+  }
+  // Only what Shopify reported: a cancelled shop has no subscription in the
+  // answer but keeps its last one on record, which is not a disagreement.
+  if (details.shopGid && !billing.shopGid) return true;
+  if (details.subscriptionGid && details.subscriptionGid !== billing.subscriptionGid) return true;
+  return Boolean(details.currentPeriodEnd) && !sameInstant(details.currentPeriodEnd, billing.currentPeriodEnd);
 }
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {

@@ -15,6 +15,7 @@ import {
 } from '../components/SmartPricing/smartPricingConstants';
 import { hydrateInboxFromServer, persistInboxPlansNow } from '../components/SmartPricing/smartPricingInboxPersistence';
 import {
+  currentRoundPlans,
   findExperimentByPlanId,
   findPlanInCatalog,
 } from '../components/SmartPricing/classic/classicExperimentHelpers';
@@ -151,6 +152,9 @@ export function useClassicExperimentDetails(shopDomain, planId) {
           : [],
     [rawExperimentPlans, plan]
   );
+  // Earlier rounds of a re-run product stay in the experiment for its history,
+  // but the product is listed once, as its current round.
+  const productPlans = useMemo(() => currentRoundPlans(experimentPlans), [experimentPlans]);
   const experimentTestIds = useMemo(
     () => collectExperimentTestIds(experimentPlans, testId),
     [experimentPlans, testId]
@@ -369,33 +373,33 @@ export function useClassicExperimentDetails(shopDomain, planId) {
     () =>
       buildVariationAveragePerformance({
         plan,
-        plans: experimentPlans,
+        plans: productPlans,
         analyticsByTestId,
         analytics,
       }),
-    [plan, experimentPlans, analyticsByTestId, analytics]
+    [plan, productPlans, analyticsByTestId, analytics]
   );
   const productPerformanceRows = useMemo(
     () =>
       buildProductPerformanceGrid({
         plan,
-        plans: experimentPlans,
+        plans: productPlans,
         analyticsByTestId,
         analytics,
       }),
-    [plan, experimentPlans, analyticsByTestId, analytics]
+    [plan, productPlans, analyticsByTestId, analytics]
   );
   const rolloutRows = useMemo(
-    () => buildProductRolloutRows({ plans: experimentPlans, analyticsByTestId }),
-    [experimentPlans, analyticsByTestId]
+    () => buildProductRolloutRows({ plans: productPlans, analyticsByTestId }),
+    [productPlans, analyticsByTestId]
   );
   const variations = useMemo(
     () =>
       buildVariationsSummary(plan, analytics, {
-        plans: experimentPlans,
+        plans: productPlans,
         test,
       }),
-    [plan, analytics, experimentPlans, test]
+    [plan, analytics, productPlans, test]
   );
   const audience = useMemo(() => buildAudienceSummary(plan, test), [plan, test]);
   const metrics = useMemo(() => buildMetricsSummary(plan, test), [plan, test]);
@@ -494,6 +498,7 @@ export function useClassicExperimentDetails(shopDomain, planId) {
     setMessageType,
     shopGuardrails,
     experimentPlans,
+    productPlans,
     experimentTestIds,
     refresh,
     patchPlanLocal,

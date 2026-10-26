@@ -7,6 +7,20 @@ import {
 } from '../productActionAvailability';
 
 describe('resolveProductActionAvailability', () => {
+  it('does not offer Resume once a re-run is queued for the round', () => {
+    const actions = resolveProductActionAvailability({
+      planStatus: 'paused',
+      testStatus: 'stopped',
+      hasFollowUpQueued: true,
+    });
+    expect(actions.canResume).toBe(false);
+    expect(actions.canRerun).toBe(false);
+    expect(actions.reasons.resume).toMatch(/re-run replaces this round/);
+    expect(
+      resolveProductActionAvailability({ planStatus: 'paused', testStatus: 'stopped' }).canResume
+    ).toBe(true);
+  });
+
   /**
    * Applying a winner leaves the test serving that price for ever, and nothing
    * ever turned it off -- so the product stayed out of every future test with

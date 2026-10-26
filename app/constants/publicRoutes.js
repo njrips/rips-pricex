@@ -6,8 +6,8 @@ export const PUBLIC_ROUTES = {
   contact: '/contact',
   docs: '/docs',
   docsSettings: '/docs/settings',
-  /** Operator ticket queue (header Login). Merchants install from the App Store. */
-  staff: '/staff/login',
+  /** Priceify Console sign-in for the team. Merchants install from the App Store. */
+  console: '/console/sign-in',
 };
 
 export const PUBLIC_ANCHORS = {

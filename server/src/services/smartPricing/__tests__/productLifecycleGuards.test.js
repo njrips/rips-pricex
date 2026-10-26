@@ -32,7 +32,7 @@ let productVariants;
 let planCountForTest;
 let productHold;
 
-function loadService({ plan, test } = {}) {
+function loadService({ plan, test, otherPlans = [] } = {}) {
   delete require.cache[SERVICE_PATH];
 
   shopifyCalls = { fetches: [], updates: [] };
@@ -82,7 +82,7 @@ function loadService({ plan, test } = {}) {
       return plan;
     },
     async listInboxPlans() {
-      return { plans: plan ? [plan] : [] };
+      return { plans: [...(plan ? [plan] : []), ...otherPlans] };
     },
     async saveInboxPlans() {
       return true;
@@ -450,6 +450,54 @@ describe('per-product actions on a shared test', () => {
     });
     assert.deepEqual(startedTests, ['test-1']);
     assert.equal(result.test.status, 'running');
+  });
+});
+
+describe('resuming a round that a re-run replaces', () => {
+  beforeEach(() => {
+    planCountForTest = 1;
+    productHold = null;
+  });
+
+  it('refuses while the next round is queued, so the product is not priced twice', async () => {
+    const service = loadService({
+      plan: { ...PLAN, status: 'paused' },
+      test: { ...TEST, status: 'stopped' },
+      otherPlans: [
+        { id: 'plan-2', parent_plan_id: PLAN.id, learning_round: 2, status: 'queued' },
+      ],
+    });
+
+    await assert.rejects(
+      () =>
+        service.resumeSmartPricingProduct({ testId: 'test-1', shopDomain: 'shop.myshopify.com' }),
+      err => {
+        assert.equal(err.code, 'FOLLOW_UP_QUEUED');
+        assert.equal(err.followUpPlanId, 'plan-2');
+        assert.match(err.message, /Round 2 is queued/);
+        return true;
+      }
+    );
+    assert.deepEqual(startedTests, []);
+  });
+
+  it('resumes again once the queued round is discarded or archived', async () => {
+    const service = loadService({
+      plan: { ...PLAN, status: 'paused' },
+      test: { ...TEST, status: 'stopped' },
+      otherPlans: [
+        {
+          id: 'plan-2',
+          parent_plan_id: PLAN.id,
+          learning_round: 2,
+          status: 'queued',
+          archived: true,
+        },
+      ],
+    });
+
+    await service.resumeSmartPricingProduct({ testId: 'test-1', shopDomain: 'shop.myshopify.com' });
+    assert.deepEqual(startedTests, ['test-1']);
   });
 });
 

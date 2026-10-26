@@ -12,6 +12,11 @@ const {
   verifyStaffLoginCode,
 } = require('../staffLoginOtp');
 const { STAFF_LOGIN_MAX_FAILURES, clearStaffLoginFailures } = require('../staffAuth');
+const { MAX_ATTEMPTS_PER_CODE } = require('../staffLoginOtp');
+
+const member = (email) => ({ id: 1, email, role: 'support', disabled: false });
+const anyMember = { findActiveMemberByEmail: async (email) => member(email) };
+const noMember = { findActiveMemberByEmail: async () => null };
 const { staffLoginCodeEmail } = require('../supportMailer');
 
 function memoryDb() {
@@ -31,17 +36,21 @@ function memoryDb() {
           code_hash: params[1],
           expires_at: params[2],
           used_at: null,
-          created_at: new Date(),
+          failed_attempts: 0,
+          created_at: new Date(Date.now() + rows.length),
         });
         return { rows: [] };
       }
       if (sql.includes('SELECT id, email')) {
-        const found = rows.filter((row) => row.email === params[0] && row.code_hash === params[1]);
+        const found = rows
+          .filter((row) => row.email === params[0] && !row.used_at)
+          .sort((a, b) => b.created_at - a.created_at);
         return { rows: found.slice(0, 1) };
       }
       if (sql.startsWith('UPDATE')) {
         const row = rows.find((item) => item.id === params[0]);
-        if (row) row.used_at = new Date();
+        if (row && sql.includes('failed_attempts')) row.failed_attempts += 1;
+        else if (row) row.used_at = new Date();
         return { rows: [] };
       }
       throw new Error(`unexpected sql: ${sql}`);
@@ -59,7 +68,7 @@ describe('staffLoginOtp', () => {
 
   it('builds a code email without extra copy', () => {
     const mail = staffLoginCodeEmail({ code: '123456', expiresMinutes: 1 });
-    assert.equal(mail.subject, 'Your Priceify staff sign-in code');
+    assert.equal(mail.subject, 'Your Priceify Console sign-in code');
     assert.match(mail.text, /123456/);
     assert.match(mail.text, /1 minute/);
     assert.match(mail.html, /123456/);
@@ -112,6 +121,7 @@ describe('staffLoginOtp', () => {
     const db = memoryDb();
     const sent = [];
     const result = await requestStaffLoginCode('Ops@Echologyx.com', {
+      ...anyMember,
       query: db.query.bind(db),
       sendStaffLoginCode: async (to, code) => {
         sent.push({ to, code });
@@ -124,9 +134,51 @@ describe('staffLoginOtp', () => {
     assert.equal(sent[0].to, 'ops@echologyx.com');
     assert.equal(sent[0].code.length, 6);
     const verified = await verifyStaffLoginCode('ops@echologyx.com', sent[0].code, {
+      ...anyMember,
       query: db.query.bind(db),
     });
     assert.equal(verified.email, 'ops@echologyx.com');
+    assert.equal(verified.member.role, 'support');
+  });
+
+  it('answers a non-member like a member but sends nothing', async () => {
+    process.env.RIPSPRICEX_STAFF_LOGIN_STUB = 'false';
+    const db = memoryDb();
+    const sent = [];
+    const result = await requestStaffLoginCode('notonteam@echologyx.com', {
+      ...noMember,
+      query: db.query.bind(db),
+      sendStaffLoginCode: async (to, code) => {
+        sent.push({ to, code });
+        return { sent: true };
+      },
+    });
+    assert.equal(result.ok, true);
+    assert.equal(result.message, SENT_MESSAGE);
+    assert.equal(sent.length, 0);
+    assert.equal(db.rows.length, 0);
+  });
+
+  it('refuses a valid code once the member has been disabled', async () => {
+    const db = memoryDb();
+    const created = await createCode('gone@echologyx.com', { query: db.query.bind(db) });
+    const verified = await verifyStaffLoginCode('gone@echologyx.com', created.code, {
+      ...noMember,
+      query: db.query.bind(db),
+    });
+    assert.equal(verified, null);
+  });
+
+  it('kills a code after too many wrong guesses and only honours the newest code', async () => {
+    const db = memoryDb();
+    const q = { query: db.query.bind(db) };
+    const older = await createCode('guess@example.com', q);
+    const newer = await createCode('guess@example.com', q);
+    assert.equal(await consumeCode('guess@example.com', older.code, q), null);
+    for (let i = 1; i < MAX_ATTEMPTS_PER_CODE; i += 1) {
+      assert.equal(await consumeCode('guess@example.com', '000000', q), null);
+    }
+    assert.equal(await consumeCode('guess@example.com', newer.code, q), null);
   });
 
   it('locks an email after too many wrong codes, even with the right one', async () => {
@@ -139,7 +191,8 @@ describe('staffLoginOtp', () => {
     }
     assert.equal(await verifyStaffLoginCode(email, created.code, { query: db.query.bind(db) }), null);
     clearStaffLoginFailures(`email:${email}`);
-    const verified = await verifyStaffLoginCode(email, created.code, { query: db.query.bind(db) });
+    db.rows[0].failed_attempts = 0;
+    const verified = await verifyStaffLoginCode(email, created.code, { ...anyMember, query: db.query.bind(db) });
     assert.equal(verified.email, email);
   });
 

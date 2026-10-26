@@ -46,7 +46,7 @@ describe('shop/redact', () => {
     expect(deleted.shops).toBe(1);
   });
 
-  it('covers every table the migrations create, bar the staff-only one', () => {
+  it('covers every table the migrations create, bar the team-only ones', () => {
     const dir = path.join(__dirname, '../../../../migrations');
     const created = new Set();
     for (const file of fs.readdirSync(dir).filter(f => f.endsWith('.sql'))) {
@@ -59,6 +59,8 @@ describe('shop/redact', () => {
       'key_value_store',
       'support_ticket_messages',
       'staff_login_otp_codes',
+      'team_members',
+      'team_sessions',
     ]);
     expect([...created].filter(table => !handled.has(table))).toEqual([]);
   });

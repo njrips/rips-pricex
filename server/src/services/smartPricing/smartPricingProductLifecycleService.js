@@ -81,6 +81,41 @@ async function assertTestIsNotShared(shopDomain, testId, action) {
   }
 }
 
+/** The next round queued from this plan that has not been launched yet. */
+async function findQueuedFollowUp(shopDomain, planId) {
+  const id = String(planId || '').trim();
+  if (!id) return null;
+  const stored = await listInboxPlans(shopDomain).catch(() => ({ plans: [] }));
+  return (
+    (stored.plans || []).find(row => {
+      if (row?.archived === true || String(row?.parent_plan_id || '') !== id) return false;
+      const status = String(row.status || '')
+        .trim()
+        .toLowerCase();
+      return status === 'queued' || status === 'draft';
+    }) || null
+  );
+}
+
+/**
+ * Once a re-run is queued, the round it replaces stays stopped. Resuming it
+ * would put the old prices back on the product while the new round waits, and
+ * the test would list the product twice.
+ */
+async function assertNoQueuedFollowUp(shopDomain, testId, test) {
+  const plan = await resolvePlanForTest(shopDomain, testId, test).catch(() => null);
+  const followUp = await findQueuedFollowUp(shopDomain, plan?.id);
+  if (!followUp) return;
+  const round = Number(followUp.learning_round) || resolveLearningRound(plan) + 1;
+  const err = new Error(
+    `Round ${round} is queued for this product with new prices. Launch it, or discard it to resume this round.`
+  );
+  err.code = 'FOLLOW_UP_QUEUED';
+  err.isValidation = true;
+  err.followUpPlanId = followUp.id;
+  throw err;
+}
+
 async function resolvePlanForTest(shopDomain, testId, test = null) {
   const plan =
     (await findInboxPlanByTestId(shopDomain, testId).catch(() => null)) ||
@@ -243,6 +278,7 @@ async function resumeSmartPricingProduct({ testId, shopDomain } = {}) {
   if (mode === 'personalized' || mode === 'rollout' || mode === 'control') {
     throw new Error('This product has already been decided. Start a re-run instead.');
   }
+  await assertNoQueuedFollowUp(shopDomain, testId, test);
 
   await rearmRevenueGuardrailForResume(testId, shopDomain, test);
 

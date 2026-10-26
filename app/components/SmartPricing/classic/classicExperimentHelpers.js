@@ -148,6 +148,45 @@ export function normalizePlanStatus(plan = {}) {
   return status || 'draft';
 }
 
+function isLaunchedRound(plan) {
+  const status = normalizePlanStatus(plan);
+  return Boolean(plan?.test_id) && status !== 'queued' && status !== 'draft';
+}
+
+/**
+ * Ids of plans that a later round of the same product has replaced. A re-run
+ * is queued from a stopped round, so the stopped round is finished with even
+ * before the new one launches.
+ */
+export function supersededRoundPlanIds(plans = []) {
+  const rows = Array.isArray(plans) ? plans : [];
+  const ids = new Set(rows.map(plan => String(plan?.id || '')).filter(Boolean));
+  const superseded = new Set();
+  rows.forEach(plan => {
+    const parentId = String(plan?.parent_plan_id || '');
+    if (plan?.archived || !parentId || !ids.has(parentId)) return;
+    superseded.add(parentId);
+  });
+  return superseded;
+}
+
+/**
+ * One plan per product: the round that is live or last ran. A queued re-run
+ * stays behind its parent until it launches, and is reached from the parent's
+ * product panel; once launched it takes the parent's place.
+ */
+export function currentRoundPlans(plans = []) {
+  const rows = Array.isArray(plans) ? plans : [];
+  const ids = new Set(rows.map(plan => String(plan?.id || '')).filter(Boolean));
+  const hidden = new Set();
+  rows.forEach(plan => {
+    const parentId = String(plan?.parent_plan_id || '');
+    if (plan?.archived || !parentId || !ids.has(parentId)) return;
+    hidden.add(isLaunchedRound(plan) ? parentId : String(plan.id));
+  });
+  return hidden.size ? rows.filter(plan => !hidden.has(String(plan?.id || ''))) : rows;
+}
+
 function statusRank(plan) {
   const status = normalizePlanStatus(plan);
   if (status === 'archived') return 0;
@@ -307,7 +346,7 @@ export function groupPlansIntoExperiments(plans = []) {
         id: group.id,
         title: group.title || getPlanExperimentTitle(representative),
         plans: sortedPlans,
-        productCount: sortedPlans.length,
+        productCount: currentRoundPlans(sortedPlans).length,
         status,
         primaryMetric,
         visitors: visitors || null,

@@ -1880,6 +1880,7 @@ export default function ClassicCreateWizard({ onTitleChange }) {
             revenue_30d: row.revenue_30d,
             daily_visitors: row.daily_visitors,
             visitors_30d: row.visitors_30d,
+            traffic_source: row.traffic_source || null,
             product_type: row.product_type,
             opportunity_score: row.opportunity_score,
             recommended_scenario_preset: row.recommended_scenario_preset,

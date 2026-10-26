@@ -87,7 +87,7 @@ async function launchSmartPricingPlanAsTest(
     );
     if (violations.length) {
       const err = new Error(
-        `${violations.join(' ')} Adjust the prices, or raise the max price change on the Products step.`
+        `${violations.join(' ')} Bring the prices inside the limit on the Products step, or use AI Suggest with a min–max band, which max price change does not limit.`
       );
       err.isValidation = true;
       err.errors = violations;

@@ -60,6 +60,7 @@ const {
   listOpportunities,
   getOpportunityByVariantId,
   clearOpportunityCache,
+  peekCachedCatalogSignals,
 } = require('../opportunityService');
 
 describe('opportunityService', () => {
@@ -502,5 +503,64 @@ describe('the AI ranking while a merchant waits', () => {
     }));
     await listOpportunities({ shopDomain: 'demo.myshopify.com', accessToken: 'token', aiRanking: 'background' });
     expect(store.writeOpportunityCache).not.toHaveBeenCalled();
+  });
+});
+
+describe('peekCachedCatalogSignals', () => {
+  const store = require('../smartPricingOpportunityStore');
+  const SALES = {
+    store: { net_revenue_30d: 5000, net_revenue_previous_30d: 4000 },
+    coverage: { current_window_complete: true, previous_window_complete: true },
+  };
+
+  beforeEach(() => {
+    clearOpportunityCache();
+    buildCatalogMetricsSnapshot.mockReset();
+    store.readOpportunityCache.mockReset();
+    store.readOpportunityCache.mockResolvedValue(null);
+  });
+
+  it('reads rows and the store sales summary from a cached catalog, keyed as asked', async () => {
+    buildCatalogMetricsSnapshot.mockResolvedValue({
+      generated_at: '2026-10-26T00:00:00.000Z',
+      sales_summary: SALES,
+      sku_rows: [
+        {
+          product_id: 'gid://shopify/Product/1',
+          variant_id: 'gid://shopify/ProductVariant/11',
+          title: 'Hoodie',
+          current_price: 59,
+          net_units_30d: 9,
+        },
+      ],
+    });
+    await listOpportunities({ shopDomain: 'demo.myshopify.com', accessToken: 'token' });
+
+    const result = await peekCachedCatalogSignals('demo.myshopify.com', ['11', 'gid://shopify/ProductVariant/99']);
+
+    expect(result.rows.get('11')).toMatchObject({ net_units_30d: 9 });
+    expect(result.rows.has('gid://shopify/ProductVariant/99')).toBe(false);
+    expect(result.sales_summary).toEqual(SALES);
+  });
+
+  it('falls back to the persisted catalog and never builds one', async () => {
+    store.readOpportunityCache.mockResolvedValue({
+      generated_at: '2026-10-25T00:00:00.000Z',
+      sales_summary: SALES,
+      byVariantId: new Map([['gid://shopify/ProductVariant/7', { net_units_30d: 2 }]]),
+    });
+
+    const result = await peekCachedCatalogSignals('demo.myshopify.com', [
+      'gid://shopify/ProductVariant/7',
+    ]);
+
+    expect(result.rows.get('gid://shopify/ProductVariant/7')).toEqual({ net_units_30d: 2 });
+    expect(buildCatalogMetricsSnapshot).not.toHaveBeenCalled();
+  });
+
+  it('returns nothing when no catalog is cached', async () => {
+    const result = await peekCachedCatalogSignals('demo.myshopify.com', ['1']);
+    expect(result).toEqual({ rows: new Map(), sales_summary: null, generated_at: null });
+    expect(buildCatalogMetricsSnapshot).not.toHaveBeenCalled();
   });
 });

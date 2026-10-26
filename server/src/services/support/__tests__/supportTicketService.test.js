@@ -174,7 +174,7 @@ describe('supportTicketService validators', () => {
     const previous = process.env.SHOPIFY_APP_URL;
     process.env.SHOPIFY_APP_URL = 'https://example.com/';
     try {
-      assert.equal(staffTicketUrl('PX-8BVE'), 'https://example.com/staff/support/PX-8BVE');
+      assert.equal(staffTicketUrl('PX-8BVE'), 'https://example.com/console/tickets/PX-8BVE');
     } finally {
       if (previous === undefined) delete process.env.SHOPIFY_APP_URL;
       else process.env.SHOPIFY_APP_URL = previous;

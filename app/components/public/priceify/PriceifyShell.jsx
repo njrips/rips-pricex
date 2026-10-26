@@ -133,11 +133,11 @@ export default function PriceifyShell({
               </nav>
               <div className="px-header-actions">
                 <Link
-                  to={PUBLIC_ROUTES.staff}
+                  to={PUBLIC_ROUTES.console}
                   className="px-nav-link px-header-login"
                   reloadDocument
                 >
-                  Login
+                  Team sign-in
                 </Link>
                 <InstallLink storeUrl={storeUrl} className="px-btn px-btn--dark">
                   Add to Shopify

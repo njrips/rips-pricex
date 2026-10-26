@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   countWinningExperiments,
+  currentRoundPlans,
   formatClassicStatusLabel,
   formatExperimentTypeLabel,
   getPlanExperimentId,
@@ -10,6 +11,7 @@ import {
   rollupExperimentStatus,
   sortExperimentRowsByRecency,
   stampClassicExperimentMetadata,
+  supersededRoundPlanIds,
   upsertExperimentPlansInInbox,
   wizardDraftAsExperimentRow,
 } from '../classicExperimentHelpers';
@@ -332,5 +334,45 @@ describe('countWinningExperiments', () => {
         plan('p4', 'exp-d', 'running'),
       ])
     ).toBe(0);
+  });
+});
+
+describe('currentRoundPlans', () => {
+  const round1 = { id: 'r1', test_id: 't1', product_id: 'P1', status: 'paused' };
+  const sibling = { id: 's1', test_id: 't9', product_id: 'P2', status: 'running' };
+
+  it('keeps the stopped round while its re-run is only queued', () => {
+    const queued = { id: 'r2', parent_plan_id: 'r1', learning_round: 2, status: 'queued' };
+    const ids = currentRoundPlans([round1, queued, sibling]).map(plan => plan.id);
+    expect(ids).toEqual(['r1', 's1']);
+  });
+
+  it('lists the product once, as the launched re-run', () => {
+    const launched = {
+      id: 'r2',
+      parent_plan_id: 'r1',
+      learning_round: 2,
+      test_id: 't2',
+      status: 'running',
+    };
+    const ids = currentRoundPlans([round1, launched, sibling]).map(plan => plan.id);
+    expect(ids).toEqual(['r2', 's1']);
+  });
+
+  it('follows a chain of rounds to the latest one', () => {
+    const r2 = { id: 'r2', parent_plan_id: 'r1', test_id: 't2', status: 'completed' };
+    const r3 = { id: 'r3', parent_plan_id: 'r2', test_id: 't3', status: 'running' };
+    expect(currentRoundPlans([round1, r2, r3]).map(plan => plan.id)).toEqual(['r3']);
+  });
+
+  it('ignores an archived re-run', () => {
+    const archived = { id: 'r2', parent_plan_id: 'r1', test_id: 't2', archived: true };
+    expect(currentRoundPlans([round1, archived]).map(plan => plan.id)).toEqual(['r1', 'r2']);
+    expect([...supersededRoundPlanIds([round1, archived])]).toEqual([]);
+  });
+
+  it('marks a round with any live re-run as replaced', () => {
+    const queued = { id: 'r2', parent_plan_id: 'r1', status: 'queued' };
+    expect([...supersededRoundPlanIds([round1, queued, sibling])]).toEqual(['r1']);
   });
 });

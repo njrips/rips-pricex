@@ -17,6 +17,18 @@ const {
   normalizeProductGid,
   normalizeVariantGid,
 } = require('./smartPricing/smartPricingCatalogUtils');
+const {
+  createSalesWindowAccumulator,
+  salesWindowOrderQuery,
+} = require('./smartPricing/orderSalesWindows');
+
+const MIN_ORDER_PAGE_SIZE = 10;
+
+function isQueryCostError(error) {
+  return /MAX_COST_EXCEEDED|max cost|exceeds the single query/i.test(
+    `${error?.message || ''} ${JSON.stringify(error?.response?.errors || error?.body?.errors || '')}`
+  );
+}
 // Keep in step with api_version in the shopify.app*.toml files. Each Admin API
 // version is served for about a year; past that Shopify answers with the oldest
 // one still live and flags the app for calling a retired version.
@@ -900,20 +912,15 @@ class ShopifyService {
   }
 
   /**
-   * Aggregate recent order line-item metrics keyed by variant GID.
+   * Recent sales per variant and for the store, in rolling 30-day windows.
+   * See orderSalesWindows for what each figure means and when a window counts
+   * as complete.
    */
-  async aggregateRecentOrderLineMetrics(
-    shopDomain,
-    accessToken,
-    { daysBack = 60, maxPages = 12, pageSize = 50 } = {}
-  ) {
+  async aggregateRecentOrderMetrics(shopDomain, accessToken, { maxPages = 12, pageSize = 50 } = {}) {
     const session = this.getSession(shopDomain, accessToken);
     const client = new this.api.clients.Graphql({ session });
-    const sinceDate = new Date();
-    sinceDate.setUTCDate(sinceDate.getUTCDate() - Math.max(1, Number(daysBack) || 60));
-    const sinceIso = sinceDate.toISOString().slice(0, 10);
-    const cutoff30 = new Date();
-    cutoff30.setUTCDate(cutoff30.getUTCDate() - 30);
+    const now = Date.now();
+    const accumulator = createSalesWindowAccumulator({ now });
 
     const query = `
       query smartPricingOrders($first: Int!, $cursor: String, $query: String) {
@@ -925,10 +932,13 @@ class ShopifyService {
           edges {
             node {
               createdAt
+              cancelledAt
+              test
               lineItems(first: 100) {
                 edges {
                   node {
                     quantity
+                    currentQuantity
                     variant {
                       id
                     }
@@ -936,6 +946,11 @@ class ShopifyService {
                       id
                     }
                     originalTotalSet {
+                      shopMoney {
+                        amount
+                      }
+                    }
+                    discountedUnitPriceAfterAllDiscountsSet {
                       shopMoney {
                         amount
                       }
@@ -949,83 +964,39 @@ class ShopifyService {
       }
     `;
 
-    const metrics = new Map();
     let cursor = null;
     let pages = 0;
-
-    const bump = (variantId, productId, quantity, revenue, createdAt) => {
-      if (!variantId) {
-        return;
-      }
-      const existing = metrics.get(variantId) || {
-        variant_id: variantId,
-        product_id: productId || null,
-        units_30d: 0,
-        units_60d: 0,
-        revenue_30d: 0,
-        revenue_60d: 0,
-        last_order_at: null,
-      };
-      const created = createdAt ? new Date(createdAt) : null;
-      existing.units_60d += quantity;
-      existing.revenue_60d += revenue;
-      if (created && (!existing.last_order_at || created > new Date(existing.last_order_at))) {
-        existing.last_order_at = created.toISOString();
-      }
-      if (created && created >= cutoff30) {
-        existing.units_30d += quantity;
-        existing.revenue_30d += revenue;
-      }
-      if (!existing.product_id && productId) {
-        existing.product_id = productId;
-      }
-      metrics.set(variantId, existing);
-    };
-
+    let exhausted = false;
+    let first = pageSize;
     try {
       while (pages < maxPages) {
         pages += 1;
-        const response = await client.request(query, {
-          variables: {
-            first: pageSize,
-            cursor,
-            query: `created_at:>=${sinceIso}`,
-          },
-        });
-        const connection = response.data?.orders;
-        const edges = connection?.edges || [];
-        edges.forEach(edge => {
-          const order = edge?.node;
-          if (!order) {
-            return;
-          }
-          (order.lineItems?.edges || []).forEach(lineEdge => {
-            const line = lineEdge?.node;
-            if (!line) {
-              return;
-            }
-            const quantity = Number.parseInt(String(line.quantity ?? ''), 10);
-            if (!Number.isFinite(quantity) || quantity <= 0) {
-              return;
-            }
-            const revenue = Number.parseFloat(
-              String(line.originalTotalSet?.shopMoney?.amount ?? '')
-            );
-            bump(
-              line.variant?.id || null,
-              line.product?.id || null,
-              quantity,
-              Number.isFinite(revenue) ? revenue : 0,
-              order.createdAt
-            );
+        let response;
+        try {
+          response = await client.request(query, {
+            variables: { first, cursor, query: salesWindowOrderQuery(now) },
           });
-        });
-        if (!connection?.pageInfo?.hasNextPage) {
+        } catch (error) {
+          // A shop whose orders carry long line lists can price a page over
+          // Shopify's single-query limit; smaller pages read the same orders.
+          if (first <= MIN_ORDER_PAGE_SIZE || !isQueryCostError(error)) throw error;
+          first = MIN_ORDER_PAGE_SIZE;
+          pages -= 1;
+          continue;
+        }
+        const connection = response.data?.orders;
+        // No connection is a failed read; reading it as "no more orders" would
+        // report every window complete with nothing sold.
+        if (!connection) throw new Error('Orders connection missing from response');
+        (connection.edges || []).forEach(edge => accumulator.addOrder(edge?.node));
+        const nextCursor = connection.pageInfo?.endCursor || null;
+        if (!connection.pageInfo?.hasNextPage || !nextCursor || nextCursor === cursor) {
+          exhausted = true;
           break;
         }
-        cursor = connection.pageInfo.endCursor;
+        cursor = nextCursor;
       }
-      return metrics;
+      return accumulator.finish({ exhausted });
     } catch (error) {
       logger.error('Error aggregating order line metrics', {
         error: error.message,
@@ -1033,6 +1004,12 @@ class ShopifyService {
       });
       throw error;
     }
+  }
+
+  /** Per-variant order metrics only, keyed by variant GID. */
+  async aggregateRecentOrderLineMetrics(shopDomain, accessToken, options = {}) {
+    const { variants } = await this.aggregateRecentOrderMetrics(shopDomain, accessToken, options);
+    return variants;
   }
 
   /**

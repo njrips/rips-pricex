@@ -28,9 +28,9 @@ function FooterLink({ link, storeUrl }) {
   if (link.muted) {
     return <span className="px-footer-muted">{link.label}</span>;
   }
-  const staffPath = String(link.to || '').startsWith('/staff');
+  const consolePath = String(link.to || '').startsWith('/console');
   return (
-    <Link to={link.to} reloadDocument={staffPath || undefined}>
+    <Link to={link.to} reloadDocument={consolePath || undefined}>
       {link.label}
     </Link>
   );

@@ -1365,7 +1365,7 @@ export function getProductsStepContinueState({
         maxChangePercent
       )}% from the current price, your max price change (${nameProducts(outOfRange)}). Bring ${
         n === 1 ? 'it' : 'them'
-      } inside the limit, or raise max price change in App settings.`,
+      } inside the limit, or use AI Suggest with a min–max band, which max price change does not limit.`,
     };
   }
   return { disabled: false, reason: null, hint: '' };

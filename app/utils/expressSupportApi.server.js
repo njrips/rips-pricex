@@ -12,11 +12,11 @@ function expressApiBase() {
 
 /**
  * @param {string} path
- * @param {{ shop?: string, staffToken?: string, method?: string, body?: unknown }} [options]
+ * @param {{ shop?: string, method?: string, body?: unknown }} [options]
  */
 export async function expressSupportFetch(
   path,
-  { shop, staffToken, method = 'GET', body } = {}
+  { shop, method = 'GET', body } = {}
 ) {
   const headers = { Accept: 'application/json' };
   if (body !== undefined) headers['Content-Type'] = 'application/json';
@@ -25,7 +25,6 @@ export async function expressSupportFetch(
     const proof = supportInternalToken(shop);
     if (proof) headers[SUPPORT_INTERNAL_HEADER] = proof;
   }
-  if (staffToken) headers.Authorization = `Bearer ${staffToken}`;
 
   try {
     const res = await fetch(`${expressApiBase()}/api${path.startsWith('/') ? path : `/${path}`}`, {

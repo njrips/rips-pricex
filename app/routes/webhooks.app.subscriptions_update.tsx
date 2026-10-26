@@ -2,8 +2,60 @@ import type { ActionFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
 import {
   entitlementFromStatus,
+  fetchSubscriptionEntitlement,
   pushEntitlementToExpress,
+  type SubscriptionDetails,
 } from "../utils/appSubscriptionEntitlement.server";
+
+type SubscriptionPayload = {
+  admin_graphql_api_id?: string;
+  admin_graphql_api_shop_id?: string;
+  name?: string;
+  status?: string;
+  created_at?: string;
+  price?: string | number;
+  currency?: string;
+  interval?: string;
+  plan_handle?: string;
+};
+
+function detailsFromPayload(subscription: SubscriptionPayload | undefined): SubscriptionDetails {
+  return {
+    shopGid: subscription?.admin_graphql_api_shop_id || null,
+    subscriptionGid: subscription?.admin_graphql_api_id || null,
+    subscriptionName: subscription?.name || null,
+    createdAt: subscription?.created_at || null,
+    price: subscription?.price ?? null,
+    currency: subscription?.currency || null,
+    interval: subscription?.interval || null,
+  };
+}
+
+/**
+ * The payload has no trial end or renewal date. Ask Shopify for them, and keep
+ * them only if the answer is about the same subscription: by the time this
+ * runs the shop may already be on a different one.
+ */
+async function withLiveDates(
+  admin: Parameters<typeof fetchSubscriptionEntitlement>[0] | undefined,
+  details: SubscriptionDetails,
+): Promise<SubscriptionDetails> {
+  if (!admin) return details;
+  const live = await fetchSubscriptionEntitlement(admin, { timeoutMs: 4000 });
+  const liveDetails = live?.details;
+  if (!liveDetails || liveDetails.subscriptionGid !== details.subscriptionGid) {
+    return { ...details, shopGid: details.shopGid || liveDetails?.shopGid || null };
+  }
+  return {
+    ...details,
+    test: liveDetails.test,
+    trialEndsAt: liveDetails.trialEndsAt,
+    currentPeriodEnd: liveDetails.currentPeriodEnd,
+    interval: details.interval || liveDetails.interval,
+    price: details.price ?? liveDetails.price,
+    currency: details.currency || liveDetails.currency,
+  };
+}
 
 /**
  * Shopify says a subscription changed.
@@ -19,11 +71,18 @@ import {
  * tests off the storefront from here.
  */
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { shop, topic, payload } = await authenticate.webhook(request);
+  const { shop, topic, payload, admin } = await authenticate.webhook(request);
 
-  const subscription = (payload as { app_subscription?: { status?: string; name?: string } })
-    ?.app_subscription;
-  const entitlement = entitlementFromStatus(subscription?.status, subscription?.name);
+  const subscription = (payload as { app_subscription?: SubscriptionPayload })?.app_subscription;
+  const fromStatus = entitlementFromStatus(subscription?.status, subscription?.name);
+  const details = await withLiveDates(admin, detailsFromPayload(subscription)).catch(() =>
+    detailsFromPayload(subscription),
+  );
+  const entitlement = {
+    ...fromStatus,
+    planHandle: fromStatus.entitled ? subscription?.plan_handle || fromStatus.planHandle : null,
+    details,
+  };
 
   console.log(`Received ${topic} webhook for ${shop}`, {
     status: entitlement.status,
@@ -31,7 +90,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   });
 
   try {
-    await pushEntitlementToExpress(shop, entitlement);
+    await pushEntitlementToExpress(shop, entitlement, { source: "webhook" });
   } catch (err) {
     // Answering 500 asks Shopify to redeliver.
     console.error("Failed to sync subscription entitlement", err);

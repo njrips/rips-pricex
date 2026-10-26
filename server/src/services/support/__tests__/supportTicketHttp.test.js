@@ -6,22 +6,30 @@ const {
   INTERNAL_HEADER,
   internalServiceToken,
 } = require('../../internalServiceAuth');
+const { consoleMemberHeaders, CONSOLE_PROOF_HEADER } = require('../../console/consoleInternalAuth');
 
 require('dotenv').config({ path: path.resolve(__dirname, '../../../../../.env') });
 
 const SHOP_A = 'rpx-support-http-a.myshopify.com';
 const SHOP_B = 'rpx-support-http-b.myshopify.com';
+const MEMBER = 'rpx-http-test-member@echologyx.com';
+const DISABLED_MEMBER = 'rpx-http-test-disabled@echologyx.com';
 
 function canRunHttp() {
   return Boolean(process.env.DATABASE_URL && process.env.SHOPIFY_API_KEY && process.env.SHOPIFY_API_SECRET);
 }
 
 describe('support ticket HTTP', { skip: !canRunHttp() }, () => {
-  it('enforces staff 401, shop isolation, and uninstall delete', async () => {
-    const previousStaff = process.env.RIPSPRICEX_STAFF_SUPPORT_TOKEN;
+  it('enforces console 401, shop isolation, and uninstall delete', async () => {
     const previousMailStub = process.env.RIPSPRICEX_SUPPORT_MAIL_STUB;
-    process.env.RIPSPRICEX_STAFF_SUPPORT_TOKEN = 'http-test-staff-token';
     process.env.RIPSPRICEX_SUPPORT_MAIL_STUB = 'true';
+    const { query } = require('../../../utils/database');
+    await query(
+      `INSERT INTO team_members (email, role, created_by, disabled_at)
+       VALUES ($1, 'support', 'test', NULL), ($2, 'support', 'test', NOW())
+       ON CONFLICT (email) DO UPDATE SET disabled_at = EXCLUDED.disabled_at`,
+      [MEMBER, DISABLED_MEMBER]
+    );
     const app = require('../../../app');
     const server = await new Promise((resolve) => {
       const s = app.listen(0, () => resolve(s));
@@ -36,8 +44,23 @@ describe('support ticket HTTP', { skip: !canRunHttp() }, () => {
     };
 
     try {
-      const noAuth = await json(`${base}/api/staff/support/tickets`);
+      const noAuth = await json(`${base}/api/console/tickets`);
       assert.equal(noAuth.status, 401);
+
+      const forged = await json(`${base}/api/console/tickets`, {
+        headers: { ...consoleMemberHeaders(MEMBER), [CONSOLE_PROOF_HEADER]: 'f'.repeat(64) },
+      });
+      assert.equal(forged.status, 401);
+
+      const disabled = await json(`${base}/api/console/tickets`, {
+        headers: consoleMemberHeaders(DISABLED_MEMBER),
+      });
+      assert.equal(disabled.status, 401);
+
+      const oldBearer = await json(`${base}/api/staff/support/tickets`, {
+        headers: { Authorization: 'Bearer anything' },
+      });
+      assert.equal(oldBearer.status, 404);
 
       const noInternal = await json(`${base}/api/support/tickets`, {
         method: 'POST',
@@ -117,9 +140,9 @@ describe('support ticket HTTP', { skip: !canRunHttp() }, () => {
       assert.equal(sameShop.data?.ticket?.shop_domain, undefined);
       assert.equal(sameShop.data?.ticket?.diagnostics, undefined);
 
-      const staffToken = process.env.RIPSPRICEX_STAFF_SUPPORT_TOKEN;
-      const staffList = await json(`${base}/api/staff/support/tickets?q=${encodeURIComponent(publicId)}`, {
-        headers: { Authorization: `Bearer ${staffToken}` },
+      const memberHeaders = consoleMemberHeaders(MEMBER);
+      const staffList = await json(`${base}/api/console/tickets?q=${encodeURIComponent(publicId)}`, {
+        headers: memberHeaders,
       });
       assert.equal(staffList.status, 200, staffList.data?.error || 'staff list failed');
       assert.equal(
@@ -129,7 +152,7 @@ describe('support ticket HTTP', { skip: !canRunHttp() }, () => {
       assert.equal(staffList.data?.tickets?.[0]?.id, undefined);
       assert.equal(staffList.data?.tickets?.[0]?.diagnostics, undefined);
 
-      const merchantOnStaff = await json(`${base}/api/staff/support/tickets`, {
+      const merchantOnStaff = await json(`${base}/api/console/tickets`, {
         headers: {
           'X-Shopify-Shop-Domain': SHOP_A,
           [SUPPORT_INTERNAL_HEADER]: supportInternalToken(SHOP_A),
@@ -138,32 +161,36 @@ describe('support ticket HTTP', { skip: !canRunHttp() }, () => {
       assert.equal(merchantOnStaff.status, 401);
 
       const staffOnMerchant = await json(`${base}/api/support/tickets`, {
-        headers: { Authorization: `Bearer ${staffToken}` },
+        headers: memberHeaders,
       });
       assert.equal(staffOnMerchant.status, 401);
 
-      const staffMissing = await json(`${base}/api/staff/support/tickets/PX-ZZZZ`, {
-        headers: { Authorization: `Bearer ${staffToken}` },
+      const staffMissing = await json(`${base}/api/console/tickets/PX-ZZZZ`, {
+        headers: memberHeaders,
       });
       assert.equal(staffMissing.status, 404);
 
-      const staffGet = await json(`${base}/api/staff/support/tickets/${publicId}`, {
-        headers: { Authorization: `Bearer ${staffToken}` },
+      const staffGet = await json(`${base}/api/console/tickets/${publicId}`, {
+        headers: memberHeaders,
       });
       assert.equal(staffGet.status, 200);
       assert.equal(staffGet.data?.ticket?.shop_domain, SHOP_A);
       assert.equal(staffGet.data?.ticket?.id, undefined);
       assert.equal(staffGet.data?.ticket?.diagnostics?.access_token, undefined);
 
-      const staffReply = await json(`${base}/api/staff/support/tickets/${publicId}/messages`, {
+      const staffReply = await json(`${base}/api/console/tickets/${publicId}/messages`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${staffToken}`,
+          ...memberHeaders,
         },
         body: JSON.stringify({ body: 'Enable the theme app embed, then retry Setup.' }),
       });
       assert.equal(staffReply.status, 201, staffReply.data?.error || 'staff reply failed');
+
+      const staffThread = await json(`${base}/api/console/tickets/${publicId}`, { headers: memberHeaders });
+      const reply = (staffThread.data?.ticket?.messages || []).find((row) => row.author === 'staff');
+      assert.equal(reply?.author_email, MEMBER);
 
       const afterStaff = await json(`${base}/api/support/tickets/${publicId}`, {
         headers: {
@@ -176,6 +203,8 @@ describe('support ticket HTTP', { skip: !canRunHttp() }, () => {
       const bodies = (afterStaff.data?.ticket?.messages || []).map((row) => row.body);
       assert.equal(bodies.includes('Enable the theme app embed, then retry Setup.'), true);
       assert.equal(afterStaff.data?.ticket?.diagnostics, undefined);
+      const merchantReply = (afterStaff.data?.ticket?.messages || []).find((row) => row.author === 'staff');
+      assert.equal(merchantReply?.author_email, undefined);
 
       // Uninstall is driven by our webhook handler, which proves itself with
       // the internal shared secret rather than an App Bridge token.
@@ -208,8 +237,8 @@ describe('support ticket HTTP', { skip: !canRunHttp() }, () => {
       });
       assert.equal(afterUninstall.status, 404);
 
-      const staffAfterUninstall = await json(`${base}/api/staff/support/tickets/${publicId}`, {
-        headers: { Authorization: `Bearer ${staffToken}` },
+      const staffAfterUninstall = await json(`${base}/api/console/tickets/${publicId}`, {
+        headers: memberHeaders,
       });
       assert.equal(staffAfterUninstall.status, 404);
     } finally {
@@ -219,8 +248,7 @@ describe('support ticket HTTP', { skip: !canRunHttp() }, () => {
         }
         server.close(resolve);
       });
-      if (previousStaff === undefined) delete process.env.RIPSPRICEX_STAFF_SUPPORT_TOKEN;
-      else process.env.RIPSPRICEX_STAFF_SUPPORT_TOKEN = previousStaff;
+      await query('DELETE FROM team_members WHERE email = ANY($1)', [[MEMBER, DISABLED_MEMBER]]).catch(() => {});
       if (previousMailStub === undefined) delete process.env.RIPSPRICEX_SUPPORT_MAIL_STUB;
       else process.env.RIPSPRICEX_SUPPORT_MAIL_STUB = previousMailStub;
     }

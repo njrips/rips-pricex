@@ -10,6 +10,8 @@ import {
   finishSmartPricingProduct,
   getSmartPricingProductDaily,
   getSmartPricingProductReport,
+  getSmartPricingInboxPlan,
+  launchSmartPricingPlan,
   releaseSmartPricingProduct,
   resumeSmartPricingProduct,
   revertSmartPricingProductPrice,
@@ -17,6 +19,8 @@ import {
   stopSmartPricingProduct,
 } from '../../../../services/smartPricingApi';
 import { resolveProductActionAvailability } from '../productActionAvailability';
+import { deletePersistedInboxPlan } from '../../smartPricingInboxPersistence';
+import { readInboxPlans, writeInboxPlans } from '../../smartPricingConstants';
 import {
   buildProductArmRows,
   buildProductHistory,
@@ -242,6 +246,19 @@ export default function ClassicProductDetailPanel({
       round.parent_plan_id === plan?.id &&
       (round.status === 'queued' || round.status === 'draft' || round.status === 'running')
   );
+  const queuedRound = useMemo(() => {
+    const isQueued = status => status === 'queued' || status === 'draft';
+    if (plan?.id && plan.parent_plan_id && isQueued(plan.status)) {
+      return { planId: plan.id, round: Number(plan.learning_round) || null, self: true };
+    }
+    const child = (report?.lineage || []).find(
+      round => round.parent_plan_id === plan?.id && isQueued(round.status)
+    );
+    return child
+      ? { planId: child.plan_id, round: Number(child.learning_round) || null, self: false }
+      : null;
+  }, [plan, report]);
+  const queuedRoundLabel = queuedRound?.round ? `round ${queuedRound.round}` : 'the re-run';
   const baseline = report?.applied_baseline || plan?.applied_baseline || null;
   const hasBaseline = Boolean(baseline?.variants?.length);
   const alreadyReverted = Boolean(baseline?.reverted_at);
@@ -262,7 +279,7 @@ export default function ClassicProductDetailPanel({
   );
 
   const runAction = async (key, fn) => {
-    if (!testId && key !== 'close') {
+    if (!testId && key !== 'launch_round' && key !== 'discard_round') {
       setError('This product is not linked to a live test yet.');
       return;
     }
@@ -274,6 +291,7 @@ export default function ClassicProductDetailPanel({
       setMessage(result?.message || 'Done.');
       reload();
       onChanged?.();
+      if (result?.openPlanId && result.openPlanId !== planId) onOpenProduct?.(result.openPlanId);
     } catch (err) {
       const details = err?.response?.data?.details;
       if (details?.code === 'PRICE_DRIFT' || err?.code === 'PRICE_DRIFT') {
@@ -285,6 +303,37 @@ export default function ClassicProductDetailPanel({
       setBusy('');
     }
   };
+
+  const launchQueuedRound = () =>
+    runAction('launch_round', async () => {
+      const queuedPlan = queuedRound.self
+        ? plan
+        : (await getSmartPricingInboxPlan(shopDomain, queuedRound.planId))?.plan;
+      if (!queuedPlan?.id) throw new Error('The queued round could not be found. Refresh and try again.');
+      const result = await launchSmartPricingPlan(shopDomain, queuedPlan, { autoStart: true });
+      if (!result?.started) {
+        throw new Error('The new round was saved but did not start. Refresh and try again.');
+      }
+      return {
+        message: `Launched ${queuedRoundLabel} with the new prices.`,
+        openPlanId: queuedPlan.id,
+      };
+    });
+
+  const discardQueuedRound = () =>
+    runAction('discard_round', async () => {
+      const deleted = await deletePersistedInboxPlan(shopDomain, queuedRound.planId);
+      if (!deleted.ok) throw new Error(deleted.error);
+      writeInboxPlans(
+        shopDomain,
+        readInboxPlans(shopDomain).filter(row => row?.id !== queuedRound.planId),
+        { persist: false }
+      );
+      return {
+        message: `Discarded ${queuedRoundLabel}.`,
+        openPlanId: queuedRound.self ? plan?.parent_plan_id || null : null,
+      };
+    });
 
   const catalogPrice = productCatalogPrice(report, plan);
   const armTable = useMemo(
@@ -474,6 +523,13 @@ export default function ClassicProductDetailPanel({
             </div>
           ) : null}
 
+          {queuedRound && !queuedRound.self ? (
+            <p className={styles.help}>
+              {queuedRound.round ? `Round ${queuedRound.round}` : 'A re-run'} is queued for this
+              product with new prices. Launch it to start testing them, or discard it to resume
+              this round instead.
+            </p>
+          ) : null}
           <div className={styles.productDetailActions}>
             {actions.canApply ? (
               <Button
@@ -501,6 +557,35 @@ export default function ClassicProductDetailPanel({
                 }
               >
                 Keep catalog price
+              </Button>
+            ) : null}
+            {queuedRound ? (
+              <TooltipWrapper
+                content={
+                  actions.canStop
+                    ? 'Stop this product first, so only one round prices it.'
+                    : 'Starts the queued round with its new prices.'
+                }
+              >
+                <Button
+                  variant="primary"
+                  loading={busy === 'launch_round'}
+                  disabled={Boolean(busy) || actions.canStop}
+                  onClick={launchQueuedRound}
+                >
+                  {queuedRound.round ? `Launch round ${queuedRound.round}` : 'Launch re-run'}
+                </Button>
+              </TooltipWrapper>
+            ) : null}
+            {queuedRound ? (
+              <Button
+                tone="critical"
+                variant="plain"
+                loading={busy === 'discard_round'}
+                disabled={Boolean(busy)}
+                onClick={discardQueuedRound}
+              >
+                {queuedRound.round ? `Discard round ${queuedRound.round}` : 'Discard re-run'}
               </Button>
             ) : null}
             {actions.canResume ? (

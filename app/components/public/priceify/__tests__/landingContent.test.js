@@ -83,11 +83,11 @@ describe('Priceify landing copy (Figma brochure)', () => {
       ),
       ['About Us', 'Contact Us', 'Privacy Policy', 'Terms and Conditions', 'Cookies Policy'],
     );
-    assert.equal(PUBLIC_ROUTES.staff, '/staff/login');
+    assert.equal(PUBLIC_ROUTES.console, '/console/sign-in');
     const shellSrc = fs.readFileSync(new URL('../PriceifyShell.jsx', import.meta.url), 'utf8');
     assert.match(shellSrc, /PriceifyFooter/);
-    assert.match(shellSrc, /Login/);
-    assert.match(shellSrc, /PUBLIC_ROUTES\.staff/);
+    assert.match(shellSrc, /Team sign-in/);
+    assert.match(shellSrc, /PUBLIC_ROUTES\.console/);
     const landingSrc = fs.readFileSync(new URL('../LandingPage.jsx', import.meta.url), 'utf8');
     assert.match(landingSrc, /LANDING_ASSETS\.heroDashboard/);
     assert.match(landingSrc, /px-get-started-card/);

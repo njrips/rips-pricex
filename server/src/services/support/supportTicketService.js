@@ -187,7 +187,7 @@ async function listMerchantTickets(shopDomain) {
   return tickets.map((ticket) => presentMerchantTicket(ticket));
 }
 
-async function addStaffMessage(publicId, bodyRaw) {
+async function addStaffMessage(publicId, bodyRaw, { authorEmail = null } = {}) {
   const ticket = await getTicketByPublicId(publicId);
   if (!ticket) {
     const error = new Error('Ticket not found');
@@ -205,7 +205,7 @@ async function addStaffMessage(publicId, bodyRaw) {
     error.status = 400;
     throw error;
   }
-  const message = await insertMessage({ ticketId: ticket.id, author: 'staff', body });
+  const message = await insertMessage({ ticketId: ticket.id, author: 'staff', body, authorEmail });
   const updated =
     (await updateTicketStatus(ticket.id, 'waiting_merchant')) || {
       ...ticket,

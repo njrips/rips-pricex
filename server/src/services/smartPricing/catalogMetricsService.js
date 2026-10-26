@@ -3,6 +3,7 @@
  */
 
 const shopifyService = require('../shopifyService');
+const logger = require('../../utils/logger');
 const {
   normalizeVariantGid,
   normalizeProductGid,
@@ -185,6 +186,8 @@ function flattenCatalogRows(
       const units30d = Number(orderStats.units_30d) || 0;
       const units60d = Number(orderStats.units_60d) || 0;
       const revenue30d = Number(orderStats.revenue_30d) || 0;
+      const orderNumber = key => Number(orderStats[key]) || 0;
+      const compareAtPrice = parseMoney(variant.compareAtPrice);
       const resolvedCost = resolveUnitCostWithOverrides(variantId, variant.unitCost, cogsOverrides);
       const marginEstimate = estimateMarginPercent({
         price: variant.price,
@@ -228,6 +231,12 @@ function flattenCatalogRows(
         units_sold_30d: units30d,
         units_sold_60d: units60d,
         revenue_30d: Number(revenue30d.toFixed(2)),
+        net_units_30d: orderNumber('net_units_30d'),
+        net_units_previous_30d: orderNumber('net_units_previous_30d'),
+        net_revenue_30d: orderNumber('net_revenue_30d'),
+        net_revenue_previous_30d: orderNumber('net_revenue_previous_30d'),
+        compare_at_price: compareAtPrice > currentPrice ? compareAtPrice : null,
+        published_at: product.publishedAt || null,
         last_order_at: orderStats.last_order_at || null,
         price_updated_at: variant.updatedAt || null,
         price_changed_recently: priceChangedRecently,
@@ -368,6 +377,22 @@ async function fetchCatalogProducts(shopDomain, accessToken, options = {}) {
   };
 }
 
+/**
+ * Order sales for the snapshot. A failed read is recorded on the coverage
+ * rather than passed off as a store with no sales.
+ */
+async function loadOrderSales(shopDomain, accessToken, maxPages) {
+  try {
+    const result = await shopifyService.aggregateRecentOrderMetrics(shopDomain, accessToken, {
+      maxPages,
+    });
+    if (result?.variants instanceof Map) return result;
+  } catch (error) {
+    logger.warn('Smart pricing order metrics unavailable', { shopDomain, error: error.message });
+  }
+  return { variants: new Map(), store: null, coverage: { available: false } };
+}
+
 async function buildCatalogMetricsSnapshot(shopDomain, accessToken, options = {}) {
   const maxProducts = Number(options.maxProducts) || DEFAULT_MAX_CATALOG_PRODUCTS;
   const guardrails =
@@ -377,7 +402,7 @@ async function buildCatalogMetricsSnapshot(shopDomain, accessToken, options = {}
     options.focusCollectionIds ||
     (Array.isArray(guardrails?.focus_collection_ids) ? guardrails.focus_collection_ids : []);
 
-  const [catalog, orderMetrics, viewMetrics, cogsStore] = await Promise.all([
+  const [catalog, orderSales, viewMetrics, cogsStore] = await Promise.all([
     fetchCatalogProducts(shopDomain, accessToken, {
       maxProducts,
       focusCollectionIds,
@@ -388,17 +413,13 @@ async function buildCatalogMetricsSnapshot(shopDomain, accessToken, options = {}
       options.progress?.update({ stage: 'orders', loaded: result.products.length });
       return result;
     }),
-    shopifyService
-      .aggregateRecentOrderLineMetrics(shopDomain, accessToken, {
-        daysBack: options.daysBack || 60,
-        maxPages: options.maxOrderPages || 16,
-      })
-      .catch(() => new Map()),
+    loadOrderSales(shopDomain, accessToken, options.maxOrderPages || 16),
     loadMeasuredViewMetricsMap(shopDomain, { daysBack: options.daysBack || 60 }),
     getSkuCogsOverrides(shopDomain).catch(() => ({ overrides: {} })),
   ]);
 
   options.progress?.setStage('scoring');
+  const orderMetrics = orderSales.variants;
   const shopConversionRate = calibrateShopConversionRate(orderMetrics);
   const productsWithCurrency = (catalog.products || []).map(product => ({
     ...product,
@@ -450,6 +471,7 @@ async function buildCatalogMetricsSnapshot(shopDomain, accessToken, options = {}
       0
     ),
     traffic_cross_check: trafficCrossCheckSummary,
+    sales_summary: { store: orderSales.store, coverage: orderSales.coverage },
     shop_conversion_rate: Number(shopConversionRate.toFixed(4)),
     guardrails: guardrails || null,
     focus_collection_ids: focusCollectionIds,

@@ -1427,6 +1427,175 @@ describe('what the model sees of each product', () => {
       perceived_tier: 'mid_market',
     });
   });
+
+  describe('with the server-side pricing signals', () => {
+    const NOW = Date.parse('2026-10-26T12:00:00Z');
+    const day = n => new Date(NOW - n * 86400000).toISOString();
+    const salesSummary = {
+      store: {
+        net_units_30d: 400,
+        net_units_previous_30d: 400,
+        net_revenue_30d: 10000,
+        net_revenue_previous_30d: 10000,
+      },
+      coverage: {
+        window_end: day(0),
+        current_window_complete: true,
+        previous_window_complete: true,
+      },
+    };
+    const catalogRow = {
+      variant_id: 'gid://shopify/ProductVariant/1',
+      net_units_30d: 12,
+      net_units_previous_30d: 8,
+      net_revenue_30d: 276,
+      net_revenue_previous_30d: 200,
+      units_sold_30d: 13,
+      inventory_tracked: true,
+      inventory_quantity: 6,
+      traffic_source: 'orders_estimated',
+      published_at: day(200),
+    };
+    const liveVariant = {
+      variant_title: 'Black',
+      sku: 'WAL-BLK',
+      barcode: '5012345678900',
+      options: [{ name: 'Colour', value: 'Black' }],
+      price: 25,
+      compare_at_price: 30,
+      inventory_tracked: true,
+      inventory_quantity: 6,
+      inventory_policy: 'DENY',
+    };
+
+    beforeEach(() => jest.spyOn(Date, 'now').mockReturnValue(NOW));
+    afterEach(() => Date.now.mockRestore());
+
+    async function productSent(overrides = {}) {
+      await suggestPrices({
+        ...wallet,
+        variants: [{ ...wallet.variants[0], visitors_30d: 900, ...overrides.row }],
+        loadVariantContext: async ids => {
+          expect(ids).toEqual(['gid://shopify/ProductVariant/1']);
+          return new Map([['gid://shopify/ProductVariant/1', liveVariant]]);
+        },
+        loadCatalogSignals: async () => ({
+          rows: new Map([['gid://shopify/ProductVariant/1', { ...catalogRow, ...overrides.catalog }]]),
+          sales_summary: overrides.salesSummary === undefined ? salesSummary : overrides.salesSummary,
+        }),
+      });
+      return JSON.parse(chatJson.mock.calls[0][0].userPrompt).products[0];
+    }
+
+    it('sends identifiers, both sales windows, momentum, stock cover and listing age', async () => {
+      const product = await productSent();
+
+      expect(product).toMatchObject({
+        sku: 'WAL-BLK',
+        barcode: '5012345678900',
+        options: [{ name: 'Colour', value: 'Black' }],
+        compare_at_price: 30,
+        monthly_units: 12,
+        sales_data: 'measured',
+        inventory: 6,
+        stock_cover_days: 15,
+        days_since_listing: 200,
+        listing_stage: 'established',
+      });
+      expect(product.sales_trend).toEqual({
+        units_previous_30d: 8,
+        revenue_30d: 276,
+        revenue_previous_30d: 200,
+        average_selling_price: 23,
+        average_daily_units: 0.4,
+        unit_growth_percent: 50,
+        revenue_growth_percent: 38,
+      });
+      expect(product.momentum.revenue_vs_store_percent).toBe(38);
+      expect(product.data_quality).toMatchObject({ sales: 'complete', identifiers: 'barcode' });
+    });
+
+    it('withholds estimated traffic instead of passing it off as measured', async () => {
+      const product = await productSent();
+
+      expect(product.traffic_data).toBe('estimated');
+      expect(product.visitors_30d).toBeNull();
+      expect(product.units_per_100_visitors).toBeNull();
+      expect(product.rpv_30d).toBeNull();
+    });
+
+    it('keeps measured storefront traffic', async () => {
+      const product = await productSent({ catalog: { traffic_source: 'storefront_measured' } });
+
+      expect(product.traffic_data).toBe('measured');
+      expect(product.visitors_30d).toBe(900);
+      expect(product.units_per_100_visitors).toBeCloseTo(1.33, 2);
+    });
+
+    it('reports a real zero when every order was read and none sold', async () => {
+      const product = await productSent({
+        row: { units_sold_30d: 0, revenue_30d: 0 },
+        catalog: { net_units_30d: 0, net_revenue_30d: 0 },
+      });
+
+      expect(product.sales_data).toBe('measured');
+      expect(product.monthly_units).toBe(0);
+    });
+
+    it('leaves growth and momentum unknown when the order read stopped short', async () => {
+      const product = await productSent({
+        salesSummary: {
+          ...salesSummary,
+          coverage: { ...salesSummary.coverage, previous_window_complete: false },
+        },
+      });
+
+      expect(product.sales_trend.unit_growth_percent).toBeNull();
+      expect(product.momentum.revenue_vs_store_percent).toBeNull();
+      expect(product.data_quality.sales).toBe('order_read_capped_inside_previous_window');
+      expect(product.monthly_units).toBe(12);
+    });
+
+    it('lists each variant being priced for a product with several', async () => {
+      await suggestPrices({
+        ...wallet,
+        variants: [
+          wallet.variants[0],
+          { ...wallet.variants[0], variant_id: 'gid://shopify/ProductVariant/2', current_price: 27 },
+        ],
+        loadVariantContext: async () =>
+          new Map([
+            ['gid://shopify/ProductVariant/1', liveVariant],
+            [
+              'gid://shopify/ProductVariant/2',
+              { ...liveVariant, variant_title: 'Brown', sku: 'WAL-BRN', barcode: null },
+            ],
+          ]),
+        loadCatalogSignals: async () => ({ rows: new Map(), sales_summary: salesSummary }),
+      });
+      const product = JSON.parse(chatJson.mock.calls[0][0].userPrompt).products[0];
+
+      expect(product.variants.map(row => row.sku)).toEqual(['WAL-BLK', 'WAL-BRN']);
+      expect(product.barcode).toBeNull();
+      expect(product.data_quality.sales).toBe('not_in_catalog_snapshot');
+    });
+
+    it('still asks the model when both signal lookups fail', async () => {
+      await suggestPrices({
+        ...wallet,
+        loadVariantContext: async () => {
+          throw new Error('throttled');
+        },
+        loadCatalogSignals: async () => {
+          throw new Error('kv down');
+        },
+      });
+      const product = JSON.parse(chatJson.mock.calls[0][0].userPrompt).products[0];
+
+      expect(product.monthly_units).toBe(4);
+      expect(product.data_quality.sales).toBe('not_in_catalog_snapshot');
+    });
+  });
 });
 
 describe('sanitizeMarketBenchmarks', () => {

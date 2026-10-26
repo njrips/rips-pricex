@@ -10,6 +10,13 @@ function presentMessage(message) {
   };
 }
 
+// Team view only: merchants see "Priceify Support", never who replied.
+function presentStaffMessage(message) {
+  const out = presentMessage(message);
+  if (out) out.author_email = message.author_email || null;
+  return out;
+}
+
 function presentMerchantTicket(ticket, { includeMessages = false } = {}) {
   if (!ticket) return null;
   const out = {
@@ -54,7 +61,7 @@ function presentStaffTicket(ticket, { includeMessages = false, includeDiagnostic
   }
   if (includeMessages) {
     out.messages = Array.isArray(ticket.messages)
-      ? ticket.messages.map(presentMessage).filter(Boolean)
+      ? ticket.messages.map(presentStaffMessage).filter(Boolean)
       : [];
   }
   return out;
@@ -62,6 +69,7 @@ function presentStaffTicket(ticket, { includeMessages = false, includeDiagnostic
 
 module.exports = {
   presentMessage,
+  presentStaffMessage,
   presentMerchantTicket,
   presentStaffTicket,
 };

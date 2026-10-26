@@ -78,6 +78,42 @@ describe('catalogMetricsService', () => {
     expect(rows[0].margin_percent).toBeGreaterThan(50);
   });
 
+  it('keeps both sales windows, the compare-at price and the listing date on each row', () => {
+    const product = (variant, extra = {}) => ({
+      id: 'gid://shopify/Product/1',
+      title: 'Hoodie',
+      publishedAt: '2026-03-01T00:00:00.000Z',
+      currency: 'USD',
+      variants: [{ id: 'gid://shopify/ProductVariant/11', price: '59.00', ...variant }],
+      ...extra,
+    });
+    const orders = new Map([
+      [
+        'gid://shopify/ProductVariant/11',
+        {
+          units_30d: 5,
+          net_units_30d: 4,
+          net_units_previous_30d: 6,
+          net_revenue_30d: 210.5,
+          net_revenue_previous_30d: 330,
+        },
+      ],
+    ]);
+
+    const [row] = flattenCatalogRows([product({ compareAtPrice: '79.00' })], orders);
+    expect(row).toMatchObject({
+      net_units_30d: 4,
+      net_units_previous_30d: 6,
+      net_revenue_30d: 210.5,
+      net_revenue_previous_30d: 330,
+      compare_at_price: 79,
+      published_at: '2026-03-01T00:00:00.000Z',
+    });
+
+    const [plain] = flattenCatalogRows([product({ compareAtPrice: '59.00' })]);
+    expect(plain).toMatchObject({ compare_at_price: null, net_units_30d: 0 });
+  });
+
   it('skips gift card products', () => {
     const rows = flattenCatalogRows(
       [

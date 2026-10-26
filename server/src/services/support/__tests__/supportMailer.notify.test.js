@@ -26,7 +26,7 @@ describe('supportMailer ticket notify', () => {
     }
   });
 
-  it('builds a Priceify staff email with ticket details', () => {
+  it('builds a Priceify Console email with ticket details', () => {
     const previous = process.env.SHOPIFY_APP_URL;
     process.env.SHOPIFY_APP_URL = 'https://example.com/';
     try {
@@ -50,7 +50,7 @@ describe('supportMailer ticket notify', () => {
       assert.match(created.text, /Category: Setup \/ checkout/);
       assert.match(created.text, /Theme embed is off\./);
       assert.match(created.text, /Plan: smart_pricing/);
-      assert.match(created.text, /https:\/\/example.com\/staff\/support\/PX-8BVE/);
+      assert.match(created.text, /https:\/\/example.com\/console\/tickets\/PX-8BVE/);
       assert.match(created.html, /Checkout &lt;blocked&gt;/);
       assert.match(created.html, /Open ticket/);
 
@@ -84,7 +84,7 @@ describe('supportMailer ticket notify', () => {
         ticket: { public_id: 'PX-8BVE', subject: 'Checkout blocked', status: 'waiting_staff' },
         body: 'Still blocked',
       });
-      assert.equal(relative.html.includes('href="/staff/support/'), false);
+      assert.equal(relative.html.includes('href="/console/tickets/'), false);
     } finally {
       if (previousApp === undefined) delete process.env.SHOPIFY_APP_URL;
       else process.env.SHOPIFY_APP_URL = previousApp;

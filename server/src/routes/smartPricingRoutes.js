@@ -6,6 +6,7 @@ const { getShopSession } = require('../models/shopSession');
 const {
   listOpportunities,
   clearOpportunityCache,
+  peekCachedCatalogSignals,
 } = require('../services/smartPricing/opportunityService');
 const { readCatalogProgress } = require('../services/smartPricing/catalogLoadProgress');
 const { createBatchFromSelection } = require('../services/smartPricing/batchService');
@@ -108,6 +109,7 @@ const { hasOpenAiKey } = require('../services/smartPricing/smartPricingAiProvide
 const {
   fetchProductContextForSuggest,
   fetchShopMarketForSuggest,
+  fetchVariantContextForSuggest,
 } = require('../services/smartPricing/smartPricingProductContextService');
 
 const router = express.Router();
@@ -1004,6 +1006,13 @@ router.post(
               shopDomain: req.shopDomain,
               accessToken: await resolveShopifyAccessToken(req),
             }),
+          loadVariantContext: async variantIds =>
+            fetchVariantContextForSuggest({
+              shopDomain: req.shopDomain,
+              accessToken: await resolveShopifyAccessToken(req),
+              variantIds,
+            }),
+          loadCatalogSignals: variantIds => peekCachedCatalogSignals(req.shopDomain, variantIds),
         })
       );
     } catch (error) {

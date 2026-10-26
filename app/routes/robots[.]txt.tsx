@@ -15,6 +15,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     "Allow: /contact",
     "Disallow: /app",
     "Disallow: /auth",
+    "Disallow: /console",
     "Disallow: /staff",
     "Disallow: /webhooks",
     "Disallow: /api",

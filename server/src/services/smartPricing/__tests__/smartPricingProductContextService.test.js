@@ -13,10 +13,12 @@ jest.mock('../../../utils/logger', () => ({
 
 const {
   fetchProductContextForSuggest,
+  fetchVariantContextForSuggest,
   fetchShopMarketForSuggest,
   __shopMarketCache,
   toProductGid,
   PRODUCT_CONTEXT_QUERY,
+  VARIANT_CONTEXT_QUERY,
 } = require('../smartPricingProductContextService');
 
 function productNode(id, extra = {}) {
@@ -27,6 +29,11 @@ function productNode(id, extra = {}) {
     totalInventory: 12,
     tracksInventory: true,
     featuredMedia: { preview: { image: { url: `https://cdn.shopify.com/${id.split('/').pop()}.jpg` } } },
+    productType: 'Bags',
+    tags: ['leather', ' handmade '],
+    createdAt: '2026-01-02T10:00:00Z',
+    publishedAt: '2026-01-05T10:00:00Z',
+    category: { fullName: 'Apparel & Accessories > Handbags' },
     ...extra,
   };
 }
@@ -34,7 +41,7 @@ function productNode(id, extra = {}) {
 describe('fetchProductContextForSuggest', () => {
   beforeEach(() => mockRequestAdminGraphql.mockReset());
 
-  it('returns description, vendor, image and stock keyed by the id the caller used', async () => {
+  it('returns what the product is, how it looks, when it listed and its stock, keyed by the id the caller used', async () => {
     mockRequestAdminGraphql.mockResolvedValue({
       data: { nodes: [productNode('gid://shopify/Product/9')] },
     });
@@ -51,7 +58,24 @@ describe('fetchProductContextForSuggest', () => {
       vendor: 'Atelier',
       image_url: 'https://cdn.shopify.com/9.jpg',
       inventory: 12,
+      product_type: 'Bags',
+      category: 'Apparel & Accessories > Handbags',
+      tags: ['leather', 'handmade'],
+      created_at: '2026-01-02T10:00:00.000Z',
+      published_at: '2026-01-05T10:00:00.000Z',
     });
+  });
+
+  it('leaves an unpublished product without a listing date', async () => {
+    mockRequestAdminGraphql.mockResolvedValue({
+      data: { nodes: [productNode('gid://shopify/Product/3', { publishedAt: null, category: null })] },
+    });
+    const result = await fetchProductContextForSuggest({
+      shopDomain: 'shop.myshopify.com',
+      accessToken: 'tok',
+      productIds: ['3'],
+    });
+    expect(result.get('3')).toMatchObject({ published_at: null, category: null });
   });
 
   it('reports untracked stock as unknown rather than zero', async () => {
@@ -108,6 +132,101 @@ describe('fetchProductContextForSuggest', () => {
     expect(toProductGid('42')).toBe('gid://shopify/Product/42');
     expect(toProductGid('gid://shopify/Product/42')).toBe('gid://shopify/Product/42');
     expect(toProductGid('gid://shopify/ProductVariant/42')).toBeNull();
+  });
+});
+
+describe('fetchVariantContextForSuggest', () => {
+  beforeEach(() => mockRequestAdminGraphql.mockReset());
+
+  function variantNode(id, extra = {}) {
+    return {
+      id,
+      title: 'Large / Black',
+      sku: 'BAG-L-BLK',
+      barcode: '5012345678900',
+      price: '49.00',
+      compareAtPrice: '59.00',
+      inventoryQuantity: 7,
+      inventoryPolicy: 'DENY',
+      availableForSale: true,
+      selectedOptions: [
+        { name: 'Size', value: 'Large' },
+        { name: 'Colour', value: 'Black' },
+      ],
+      inventoryItem: { tracked: true },
+      ...extra,
+    };
+  }
+
+  it('returns identifiers, options and variant stock keyed by the id the caller used', async () => {
+    mockRequestAdminGraphql.mockResolvedValue({
+      data: { nodes: [variantNode('gid://shopify/ProductVariant/77')] },
+    });
+    const result = await fetchVariantContextForSuggest({
+      shopDomain: 'shop.myshopify.com',
+      accessToken: 'tok',
+      variantIds: ['77'],
+    });
+    expect(mockRequestAdminGraphql.mock.calls[0][2]).toBe(VARIANT_CONTEXT_QUERY);
+    expect(mockRequestAdminGraphql.mock.calls[0][3]).toEqual({
+      ids: ['gid://shopify/ProductVariant/77'],
+    });
+    expect(result.get('77')).toEqual({
+      variant_title: 'Large / Black',
+      sku: 'BAG-L-BLK',
+      barcode: '5012345678900',
+      options: [
+        { name: 'Size', value: 'Large' },
+        { name: 'Colour', value: 'Black' },
+      ],
+      price: 49,
+      compare_at_price: 59,
+      inventory_tracked: true,
+      inventory_quantity: 7,
+      inventory_policy: 'DENY',
+      available_for_sale: true,
+    });
+  });
+
+  it('reports untracked stock as unknown and drops the placeholder option', async () => {
+    mockRequestAdminGraphql.mockResolvedValue({
+      data: {
+        nodes: [
+          variantNode('gid://shopify/ProductVariant/5', {
+            inventoryItem: { tracked: false },
+            inventoryQuantity: 0,
+            barcode: '',
+            selectedOptions: [{ name: 'Title', value: 'Default Title' }],
+          }),
+        ],
+      },
+    });
+    const result = await fetchVariantContextForSuggest({
+      shopDomain: 'shop.myshopify.com',
+      accessToken: 'tok',
+      variantIds: ['gid://shopify/ProductVariant/5'],
+    });
+    expect(result.get('gid://shopify/ProductVariant/5')).toMatchObject({
+      inventory_tracked: false,
+      inventory_quantity: null,
+      barcode: null,
+      options: [],
+    });
+  });
+
+  it('ignores product ids and keeps batches that answered', async () => {
+    mockRequestAdminGraphql
+      .mockResolvedValueOnce({ data: { nodes: [variantNode('gid://shopify/ProductVariant/1')] } })
+      .mockRejectedValueOnce(new Error('throttled'));
+    const ids = Array.from({ length: 120 }, (_, i) => `gid://shopify/ProductVariant/${i + 1}`);
+    const result = await fetchVariantContextForSuggest({
+      shopDomain: 'shop.myshopify.com',
+      accessToken: 'tok',
+      variantIds: [...ids, 'gid://shopify/Product/9'],
+    });
+    expect(mockRequestAdminGraphql).toHaveBeenCalledTimes(2);
+    expect(mockRequestAdminGraphql.mock.calls[0][3].ids).toHaveLength(100);
+    expect(result.size).toBe(1);
   });
 });
 

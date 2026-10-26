@@ -26,6 +26,8 @@ async function loadPlanState(request) {
         planHandle: bill.planHandle ?? null,
         status: bill.status,
         upgradeUrl: bill.upgradeUrl,
+        source: bill.source || null,
+        accessEndsAt: bill.accessEndsAt || null,
       },
       launchSummary: describeSmartPricingLaunchReadiness(
         unwrapCheckoutReadiness(readinessPayload)
@@ -39,6 +41,47 @@ async function loadPlanState(request) {
       loading: false,
     };
   }
+}
+
+function formatAccessEnd(value) {
+  const date = value ? new Date(value) : null;
+  if (!date || Number.isNaN(date.getTime())) return '';
+  return date.toLocaleDateString('en-GB', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    timeZone: 'UTC',
+  });
+}
+
+/**
+ * What to tell a merchant whose access comes from Priceify Support rather than
+ * a Shopify plan, or null. Close to the end it says to pick a plan.
+ */
+export function supportAccessMessage(remote, now = Date.now()) {
+  if (remote?.source !== 'support_access') return null;
+  const until = formatAccessEnd(remote.accessEndsAt);
+  const endsAt = remote.accessEndsAt ? new Date(remote.accessEndsAt).getTime() : NaN;
+  const endingSoon = Number.isFinite(endsAt) && endsAt - now < 3 * 24 * 60 * 60 * 1000;
+  return {
+    title: until ? `Access provided by Priceify Support until ${until}` : 'Access provided by Priceify Support',
+    detail: endingSoon
+      ? 'Choose a plan to keep using Priceify after that date.'
+      : 'You can use every feature until then. Choose a plan any time to keep access after it ends.',
+  };
+}
+
+/**
+ * What to tell a merchant on a Shopify Partner development store, or null.
+ * Priceify is free there until the store moves to a paid Shopify plan.
+ */
+export function developmentStoreMessage(remote) {
+  if (remote?.source !== 'development_store') return null;
+  return {
+    title: 'Free on development stores',
+    detail:
+      'This is a Shopify development store, so every Priceify feature is free here. If the store moves to a paid Shopify plan, choose a Priceify plan to keep using it.',
+  };
 }
 
 /**
@@ -68,10 +111,16 @@ export function usePlanBillingState(ctx, { enabled = true } = {}) {
   const { remote, loadError, loading, launchSummary } = state;
 
   const entitled = remote?.entitled ?? ctx.entitled;
-  const planHandle = remote?.planHandle || ctx.planHandle || 'none';
+  const planHandle =
+    remote?.planHandle ||
+    ctx.planHandle ||
+    (remote?.source === 'development_store' ? 'Development store (free)' : 'none');
   // The loader's URL carries the handle Shopify reported; the API's is built
   // from SHOPIFY_APP_HANDLE alone and is a "page not found" when that is wrong.
   const upgradeUrl = ctx.upgradeUrl || remote?.upgradeUrl;
+  const developmentStoreNotice = developmentStoreMessage(remote);
+  const supportAccessNotice = supportAccessMessage(remote);
+  const accessNotice = developmentStoreNotice || supportAccessNotice;
   const upgrade = useUpgradeRedirect(upgradeUrl);
   const checkoutReady = launchSummary.anyReady;
   const priceReady = launchSummary.priceReady;
@@ -119,7 +168,13 @@ export function usePlanBillingState(ctx, { enabled = true } = {}) {
     canOpenPricing,
     hasUpgradeUrl,
     pricingPlansReady,
-    planCtaLabel: entitled ? 'Manage plan' : 'Upgrade',
+    supportAccessNotice,
+    accessNotice,
+    planCtaLabel: developmentStoreNotice
+      ? 'View plans'
+      : entitled && !supportAccessNotice
+        ? 'Manage plan'
+        : 'Upgrade',
     calloutTitle: loading
       ? 'Checking plan status…'
       : !entitled
@@ -156,6 +211,7 @@ export default function SettingsPlanPanel({ ctx, planState }) {
     hasUpgradeUrl,
     pricingPlansReady,
     planCtaLabel,
+    accessNotice,
   } = planState;
 
   return (
@@ -177,6 +233,14 @@ export default function SettingsPlanPanel({ ctx, planState }) {
           </p>
         </Banner>
       </div>
+
+      {accessNotice ? (
+        <div style={{ marginBottom: 20 }}>
+          <Banner tone="info" title={accessNotice.title}>
+            <p>{accessNotice.detail}</p>
+          </Banner>
+        </div>
+      ) : null}
 
       {loadError ? <p className={styles.error}>{loadError}</p> : null}
 

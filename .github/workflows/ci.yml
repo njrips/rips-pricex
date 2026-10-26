@@ -19,6 +19,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Install API dependencies
+        run: npm --prefix server ci
+
       - name: Run TypeScript type checking
         run: npm run typecheck
 

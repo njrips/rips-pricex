@@ -68,6 +68,7 @@ function mapMessageRow(row) {
     id: row.id,
     ticket_id: row.ticket_id,
     author: row.author,
+    author_email: row.author_email || null,
     body: row.body,
     created_at: row.created_at,
   };
@@ -101,12 +102,16 @@ async function insertTicket({
   return mapTicketRow(rows[0]);
 }
 
-async function insertMessage({ ticketId, author, body }) {
+async function insertMessage({ ticketId, author, body, authorEmail = null }) {
   const { rows } = await query(
-    `INSERT INTO support_ticket_messages (ticket_id, author, body)
-     VALUES ($1, $2, $3)
-     RETURNING *`,
-    [ticketId, author, body]
+    authorEmail
+      ? `INSERT INTO support_ticket_messages (ticket_id, author, body, author_email)
+         VALUES ($1, $2, $3, $4)
+         RETURNING *`
+      : `INSERT INTO support_ticket_messages (ticket_id, author, body)
+         VALUES ($1, $2, $3)
+         RETURNING *`,
+    authorEmail ? [ticketId, author, body, authorEmail] : [ticketId, author, body]
   );
   return mapMessageRow(rows[0]);
 }

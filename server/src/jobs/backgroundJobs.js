@@ -94,9 +94,21 @@ async function pauseStaleRunningOnCancelPolicy() {
        AND t.type IN ('price','pricing','offer')
        AND t.status = 'running'
        AND (
-         s.entitlement_status IS NULL
-         OR lower(s.entitlement_status) IN ('none','cancelled','canceled','frozen','expired')
-         OR s.uninstalled_at IS NOT NULL
+         s.uninstalled_at IS NOT NULL
+         OR (
+           (
+             s.entitlement_status IS NULL
+             OR lower(s.entitlement_status) IN ('none','cancelled','canceled','frozen','expired')
+           )
+           AND s.partner_development IS NOT TRUE
+           AND NOT EXISTS (
+             SELECT 1 FROM support_access_grants g
+             WHERE g.shop_domain = s.shop_domain
+               AND g.revoked_at IS NULL
+               AND g.starts_at <= NOW()
+               AND g.expires_at > NOW()
+           )
+         )
        )`
   ).catch((err) => logger.warn('pauseStaleRunning failed', { message: err.message }));
 }
@@ -219,15 +231,28 @@ function startBackgroundJobs() {
   // run of passes instead of in one long one.
   const purgeMs = Number(process.env.RIPSPRICEX_TEST_PURGE_MS || 10 * 60 * 1000);
   everyInterval('test-purge', purgeMs, purgeDeletedTestsPass);
+  // Billing dates change at most daily, and the Partner API allows only a few
+  // requests a second across every shop.
+  const partnerBillingMs = Number(process.env.RIPSPRICEX_PARTNER_BILLING_MS || 24 * 60 * 60 * 1000);
+  everyInterval('partner-billing', partnerBillingMs, () =>
+    require('../services/billing/partnerBillingService').checkAllShopsBilling()
+  );
+
+  // Development stores are free, so whether a store still is one is checked
+  // daily as well as on every app open and shop/update webhook.
+  const shopPlanMs = Number(process.env.RIPSPRICEX_SHOP_PLAN_MS || 24 * 60 * 60 * 1000);
+  const refreshShopPlans = () => require('../services/billing/shopPlanService').refreshAllShopPlans();
+  everyInterval('shop-plan', shopPlanMs, refreshShopPlans);
 
   // First pass shortly after boot, so a restart does not wait a whole interval.
   // It goes through the same guard as the timers: readiness runs before the
   // auto-winner because the review window it stamps is what holds an unattended
-  // price write back.
+  // price write back. Shop plans come first so a development store is known
+  // before the first cancel-policy pass.
   const kickoff = setTimeout(() => {
-    runGuarded('rollout-readiness', sweepAllRolloutReadiness).finally(() =>
-      runGuarded('auto-winner', evaluateAllAutoWinners)
-    );
+    runGuarded('shop-plan', refreshShopPlans)
+      .finally(() => runGuarded('rollout-readiness', sweepAllRolloutReadiness))
+      .finally(() => runGuarded('auto-winner', evaluateAllAutoWinners));
   }, 45000);
   if (typeof kickoff.unref === 'function') kickoff.unref();
 
@@ -238,6 +263,8 @@ function startBackgroundJobs() {
     readinessMs,
     retentionMs,
     purgeMs,
+    partnerBillingMs,
+    shopPlanMs,
   });
 }
 

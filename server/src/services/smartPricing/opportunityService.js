@@ -523,6 +523,7 @@ async function loadCatalogOpportunities(shopDomain, accessToken, options = {}) {
       collection_view_metrics_available: snapshot.collection_view_metrics_available,
       collection_views_30d: snapshot.collection_views_30d,
       traffic_cross_check: snapshot.traffic_cross_check,
+      sales_summary: snapshot.sales_summary || null,
       shop_conversion_rate: snapshot.shop_conversion_rate,
       guardrails: snapshot.guardrails || guardrails || null,
       focus_collection_ids: snapshot.focus_collection_ids || focusCollectionIds || [],
@@ -646,6 +647,47 @@ async function getOpportunityByVariantId(variantId, { shopDomain = '', accessTok
   return catalogPayload.byVariantId?.get(id) || null;
 }
 
+/**
+ * Catalog rows already worked out for these variants, and the store's sales
+ * summary, from whatever is cached -- never a fresh catalog build, which takes
+ * far longer than a suggestion may wait. Rows are keyed by the id exactly as
+ * the caller passed it; missing variants are simply absent.
+ */
+async function peekCachedCatalogSignals(shopDomain, variantIds = []) {
+  const normalizedShop = normalizeShopDomain(shopDomain);
+  const empty = { rows: new Map(), sales_summary: null, generated_at: null };
+  if (!normalizedShop) return empty;
+
+  const prefix = `${normalizedShop}::`;
+  const payloads = [];
+  for (const [key, entry] of opportunityCache.entries()) {
+    if (key.startsWith(prefix) && Date.now() <= entry.expiresAt) payloads.push(entry.payload);
+  }
+  if (!getCacheEntry(normalizedShop, 'all')) {
+    const persisted = await readOpportunityCache(normalizedShop, 'all').catch(() => null);
+    if (persisted) payloads.push(persisted);
+  }
+  if (!payloads.length) return empty;
+
+  const newest = (a, b) =>
+    String(b?.generated_at || '').localeCompare(String(a?.generated_at || ''));
+  payloads.sort(newest);
+  const rows = new Map();
+  (Array.isArray(variantIds) ? variantIds : []).forEach(raw => {
+    const key = String(raw || '').trim();
+    const id = normalizeVariantGid(raw);
+    if (!id || rows.has(key)) return;
+    const payload = payloads.find(item => item?.byVariantId?.get?.(id));
+    if (payload) rows.set(key, payload.byVariantId.get(id));
+  });
+  const withSummary = payloads.find(item => item?.sales_summary?.store) || null;
+  return {
+    rows,
+    sales_summary: withSummary?.sales_summary || null,
+    generated_at: withSummary?.generated_at || payloads[0]?.generated_at || null,
+  };
+}
+
 function clearOpportunityCache(shopDomain) {
   if (shopDomain) {
     const prefix = `${normalizeShopDomain(shopDomain)}::`;
@@ -665,6 +707,7 @@ module.exports = {
   listOpportunities,
   getOpportunityByVariantId,
   loadCatalogOpportunities,
+  peekCachedCatalogSignals,
   clearOpportunityCache,
   listDemoOpportunities,
   buildCatalogUnavailablePayload,

@@ -23,21 +23,66 @@ const PAYING_STATUS = "ACTIVE";
 
 export const ACTIVE_SUBSCRIPTIONS_QUERY = `#graphql
   query PriceifyAppSubscriptionState {
+    shop {
+      id
+      plan { partnerDevelopment publicDisplayName }
+    }
     currentAppInstallation {
       activeSubscriptions {
         id
         name
         status
         test
+        createdAt
+        currentPeriodEnd
+        trialDays
+        lineItems {
+          plan {
+            pricingDetails {
+              __typename
+              ... on AppRecurringPricing {
+                interval
+                price { amount currencyCode }
+              }
+            }
+          }
+        }
       }
     }
   }
 `;
 
+/** What the console shows about a subscription. Absent fields keep their stored value. */
+export type SubscriptionDetails = {
+  shopGid?: string | null;
+  subscriptionGid?: string | null;
+  subscriptionName?: string | null;
+  test?: boolean | null;
+  createdAt?: string | null;
+  trialEndsAt?: string | null;
+  currentPeriodEnd?: string | null;
+  interval?: string | null;
+  price?: number | string | null;
+  currency?: string | null;
+};
+
 export type SubscriptionEntitlement = {
   entitled: boolean;
   status: string;
   planHandle: string | null;
+  details?: SubscriptionDetails;
+  /**
+   * Shopify's `shop.plan.partnerDevelopment`. Development stores use Priceify
+   * free; undefined when the answer did not include the plan.
+   */
+  developmentStore?: boolean;
+  shopPlanName?: string | null;
+};
+
+type RecurringPricing = {
+  __typename?: string;
+  interval?: string | null;
+  price?: { amount?: string | number | null; currencyCode?: string | null } | null;
 };
 
 type ActiveSubscription = {
@@ -45,7 +90,44 @@ type ActiveSubscription = {
   name?: string | null;
   status?: string | null;
   test?: boolean | null;
+  createdAt?: string | null;
+  currentPeriodEnd?: string | null;
+  trialDays?: number | null;
+  lineItems?: Array<{ plan?: { pricingDetails?: RecurringPricing | null } | null } | null> | null;
 };
+
+/**
+ * Shopify reports trial length, not its end. Counting from the subscription's
+ * creation is close enough for the console; the Partner API check replaces it
+ * with Shopify's own date, which also includes trial extensions.
+ */
+function trialEndFrom(createdAt: string | null | undefined, trialDays: number | null | undefined) {
+  const days = Number(trialDays || 0);
+  const start = createdAt ? new Date(createdAt).getTime() : NaN;
+  if (!days || !Number.isFinite(start)) return null;
+  return new Date(start + days * 24 * 60 * 60 * 1000).toISOString();
+}
+
+export function subscriptionDetails(
+  subscription: ActiveSubscription | null | undefined,
+  shopGid?: string | null,
+): SubscriptionDetails {
+  const recurring = (subscription?.lineItems || [])
+    .map(item => item?.plan?.pricingDetails)
+    .find(pricing => pricing?.__typename === "AppRecurringPricing");
+  return {
+    shopGid: shopGid || null,
+    subscriptionGid: subscription?.id || null,
+    subscriptionName: subscription?.name || null,
+    test: subscription?.test ?? null,
+    createdAt: subscription?.createdAt || null,
+    trialEndsAt: trialEndFrom(subscription?.createdAt, subscription?.trialDays),
+    currentPeriodEnd: subscription?.currentPeriodEnd || null,
+    interval: recurring?.interval || null,
+    price: recurring?.price?.amount ?? null,
+    currency: recurring?.price?.currencyCode || null,
+  };
+}
 
 /**
  * Shopify names plans for display ("Priceify Growth"); our column wants a
@@ -86,6 +168,7 @@ export function entitlementFromStatus(
  */
 export function entitlementFromActiveSubscriptions(
   subscriptions: ActiveSubscription[] | null | undefined,
+  shopGid?: string | null,
 ): SubscriptionEntitlement {
   const rows = Array.isArray(subscriptions) ? subscriptions : [];
   const paying = rows.find(
@@ -94,10 +177,13 @@ export function entitlementFromActiveSubscriptions(
         .trim()
         .toUpperCase() === PAYING_STATUS,
   );
-  if (paying) return entitlementFromStatus(paying.status, paying.name);
   // Nothing active. Report the first status we were given so the log says
   // whether this shop cancelled, expired or never subscribed.
-  return entitlementFromStatus(rows[0]?.status || "none", rows[0]?.name);
+  const chosen = paying || rows[0];
+  return {
+    ...entitlementFromStatus(chosen?.status || "none", chosen?.name),
+    details: subscriptionDetails(chosen, shopGid),
+  };
 }
 
 /**
@@ -135,7 +221,13 @@ export async function fetchSubscriptionEntitlement(
     ]);
     if (settled === expired) return null;
     const body = settled as {
-      data?: { currentAppInstallation?: { activeSubscriptions?: ActiveSubscription[] } };
+      data?: {
+        shop?: {
+          id?: string | null;
+          plan?: { partnerDevelopment?: boolean | null; publicDisplayName?: string | null } | null;
+        } | null;
+        currentAppInstallation?: { activeSubscriptions?: ActiveSubscription[] };
+      };
       errors?: unknown;
     };
     // A GraphQL error means the query did not run, so we learned nothing. The
@@ -143,7 +235,16 @@ export async function fetchSubscriptionEntitlement(
     if (body?.errors) return null;
     const installation = body?.data?.currentAppInstallation;
     if (!installation) return null;
-    return entitlementFromActiveSubscriptions(installation.activeSubscriptions);
+    const plan = body?.data?.shop?.plan;
+    return {
+      ...entitlementFromActiveSubscriptions(
+        installation.activeSubscriptions,
+        body?.data?.shop?.id || null,
+      ),
+      ...(typeof plan?.partnerDevelopment === "boolean"
+        ? { developmentStore: plan.partnerDevelopment, shopPlanName: plan.publicDisplayName || null }
+        : {}),
+    };
   } catch {
     return null;
   } finally {
@@ -162,6 +263,7 @@ export async function fetchSubscriptionEntitlement(
 export async function pushEntitlementToExpress(
   shop: string,
   entitlement: SubscriptionEntitlement,
+  { source }: { source?: "loader" | "webhook" } = {},
 ): Promise<void> {
   const res = await fetch(`${expressApiBase()}/api/billing/sync-entitlement`, {
     method: "POST",
@@ -169,7 +271,13 @@ export async function pushEntitlementToExpress(
     body: JSON.stringify({
       entitled: entitlement.entitled,
       status: entitlement.entitled ? entitlement.status : "none",
+      shopifyStatus: entitlement.status,
       planHandle: entitlement.planHandle,
+      details: entitlement.details || {},
+      ...(typeof entitlement.developmentStore === "boolean"
+        ? { developmentStore: entitlement.developmentStore, shopPlanName: entitlement.shopPlanName || null }
+        : {}),
+      source,
     }),
     signal: AbortSignal.timeout(8000),
   });

@@ -58,6 +58,7 @@ import {
   normalizePlanStatus,
   readClassicWizardDraft,
   rollupExperimentStatus,
+  supersededRoundPlanIds,
   writeClassicWizardDraft,
 } from './classicExperimentHelpers';
 import {
@@ -143,6 +144,7 @@ export default function ClassicExperimentOverview() {
     setMessage,
     setMessageType,
     experimentPlans,
+    productPlans,
     experimentTestIds,
     analyticsByTestId,
     refresh,
@@ -187,9 +189,12 @@ export default function ClassicExperimentOverview() {
   // so there is nothing to pause; restarting it would undo a decision the
   // merchant committed to; and marking it paused or completed would erase the
   // record that the price was applied at all.
+  // A round with a re-run queued or launched after it is out of reach too:
+  // resuming it would price the product twice.
+  const supersededPlanIds = supersededRoundPlanIds(experimentPlans);
   const settledTestIds = new Set(
     (Array.isArray(experimentPlans) ? experimentPlans : [])
-      .filter(isSettledClassicPlan)
+      .filter(row => isSettledClassicPlan(row) || supersededPlanIds.has(String(row?.id || '')))
       .map(row => String(row?.test_id || row?.metadata?.test_id || '').trim())
       .filter(Boolean)
   );
@@ -300,10 +305,10 @@ export default function ClassicExperimentOverview() {
 
   const productNavList = useMemo(
     () =>
-      (Array.isArray(experimentPlans) ? experimentPlans : [])
+      (Array.isArray(productPlans) ? productPlans : [])
         .filter(row => row?.id)
         .map(row => ({ planId: String(row.id), title: getPlanProductTitle(row) })),
-    [experimentPlans]
+    [productPlans]
   );
 
   const selectedProductRow = useMemo(() => {
@@ -1303,7 +1308,7 @@ export default function ClassicExperimentOverview() {
               <div className={styles.detailStack}>
                 <ClassicOverviewContextStrip
                   isOfferTest={isOfferTest}
-                  productCount={experimentPlans?.length || 0}
+                  productCount={productPlans?.length || 0}
                   primaryMetric={kpis.primaryMetric}
                   trafficAllocation={kpis.trafficAllocation}
                   isRunning={isRunning}
@@ -1320,7 +1325,7 @@ export default function ClassicExperimentOverview() {
                   shopDomain={shopDomain}
                   testId={testId}
                   isOfferTest={isOfferTest}
-                  inboxPlans={experimentPlans}
+                  inboxPlans={productPlans}
                   onOpenProduct={openProduct}
                   overviewMode
                   primaryMetric={kpis.primaryMetric}

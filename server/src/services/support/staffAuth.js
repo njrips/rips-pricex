@@ -1,16 +1,14 @@
-const crypto = require('crypto');
-const { safeStaffNext, staffNextTicketId } = require('./staffNextPath');
+/**
+ * Shared helpers for Priceify Console sign-in: who may request a code, and the
+ * per-client limit on failed attempts. Sessions live in console/teamSessions.
+ */
 
-const STAFF_COOKIE_NAME = 'rpx_staff_support';
-const STAFF_COOKIE_MAX_AGE_SEC = 7 * 24 * 60 * 60;
+const crypto = require('crypto');
+
 const STAFF_LOGIN_WINDOW_MS = 15 * 60 * 1000;
 const STAFF_LOGIN_MAX_FAILURES = 8;
 const STAFF_EMAIL_DOMAIN = 'echologyx.com';
 const staffLoginFailures = new Map();
-
-function staffToken() {
-  return String(process.env.RIPSPRICEX_STAFF_SUPPORT_TOKEN || '').trim();
-}
 
 function normalizeStaffEmail(value) {
   const email = String(value || '')
@@ -26,8 +24,10 @@ function isStaffEmail(value) {
   return email.endsWith(`@${STAFF_EMAIL_DOMAIN}`);
 }
 
+// Console calls to the API are signed with the app secret, so without it a
+// session would sign in to a console that cannot load anything.
 function isStaffLoginConfigured() {
-  return Boolean(staffToken());
+  return Boolean(String(process.env.SHOPIFY_API_SECRET || '').trim());
 }
 
 function timingSafeEqualString(left, right) {
@@ -35,10 +35,6 @@ function timingSafeEqualString(left, right) {
   const b = Buffer.from(String(right || ''), 'utf8');
   if (a.length === 0 || a.length !== b.length) return false;
   return crypto.timingSafeEqual(a, b);
-}
-
-function cookieValueForToken(token) {
-  return crypto.createHmac('sha256', String(token)).update('rpx-staff-ok').digest('hex');
 }
 
 function parseCookieHeader(header) {
@@ -53,41 +49,6 @@ function parseCookieHeader(header) {
       if (key) out[key] = decodeURIComponent(value);
     });
   return out;
-}
-
-function isValidStaffToken(candidate) {
-  const token = staffToken();
-  return Boolean(token && timingSafeEqualString(candidate, token));
-}
-
-function isValidStaffCookieValue(cookieVal) {
-  const token = staffToken();
-  if (!token || !cookieVal) return false;
-  return timingSafeEqualString(cookieVal, cookieValueForToken(token));
-}
-
-function isValidStaffRequest(req) {
-  const auth = String(req.get('Authorization') || '');
-  const bearer = auth.replace(/^Bearer\s+/i, '').trim();
-  if (isValidStaffToken(bearer)) return true;
-  const cookies = parseCookieHeader(req.get('Cookie'));
-  return isValidStaffCookieValue(cookies[STAFF_COOKIE_NAME]);
-}
-
-function staffCookieSecureFlag(secure) {
-  const useSecure =
-    secure === true || (secure !== false && process.env.NODE_ENV === 'production');
-  return useSecure ? '; Secure' : '';
-}
-
-function staffSetCookieHeader({ secure } = {}) {
-  const token = staffToken();
-  if (!token) return null;
-  return `${STAFF_COOKIE_NAME}=${cookieValueForToken(token)}; Path=/staff; HttpOnly; SameSite=Lax; Max-Age=${STAFF_COOKIE_MAX_AGE_SEC}${staffCookieSecureFlag(secure)}`;
-}
-
-function staffClearCookieHeader({ secure } = {}) {
-  return `${STAFF_COOKIE_NAME}=; Path=/staff; HttpOnly; SameSite=Lax; Max-Age=0${staffCookieSecureFlag(secure)}`;
 }
 
 function staffClientKeyFromHeaders(getHeader) {
@@ -124,24 +85,13 @@ function clearStaffLoginFailures(clientKey) {
 }
 
 module.exports = {
-  STAFF_COOKIE_NAME,
-  STAFF_COOKIE_MAX_AGE_SEC,
-  staffToken,
   normalizeStaffEmail,
   STAFF_EMAIL_DOMAIN,
   isStaffEmail,
   isStaffLoginConfigured,
   timingSafeEqualString,
-  cookieValueForToken,
   parseCookieHeader,
-  isValidStaffToken,
-  isValidStaffCookieValue,
-  isValidStaffRequest,
-  staffSetCookieHeader,
-  staffClearCookieHeader,
   staffClientKeyFromHeaders,
-  safeStaffNext,
-  staffNextTicketId,
   STAFF_LOGIN_MAX_FAILURES,
   staffLoginBlocked,
   recordStaffLoginFailure,

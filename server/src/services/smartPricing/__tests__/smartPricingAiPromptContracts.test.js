@@ -12,12 +12,16 @@ const {
 
 const repoRoot = path.resolve(__dirname, '../../../../..');
 
+const promptDocsDir = path.join(repoRoot, 'docs/ai-prompts');
+// docs/ is kept out of the GitHub repo, so a fresh clone has no prompt docs.
+const itWithPromptDocs = fs.existsSync(promptDocsDir) ? it : it.skip;
+
 function readDoc(name) {
-  return fs.readFileSync(path.join(repoRoot, 'docs/ai-prompts', name), 'utf8');
+  return fs.readFileSync(path.join(promptDocsDir, name), 'utf8');
 }
 
 describe('Priceify AI prompt contracts', () => {
-  it('documents the client baseline and every production correction', () => {
+  itWithPromptDocs('documents the client baseline and every production correction', () => {
     const doc = readDoc('price-suggestions.md');
 
     expect(doc).toContain('Client baseline prompt (reference)');
@@ -129,7 +133,7 @@ describe('Priceify AI prompt contracts', () => {
     });
   });
 
-  it('documents product ranking as a separate prompt with its own builder', () => {
+  itWithPromptDocs('documents product ranking as a separate prompt with its own builder', () => {
     const doc = readDoc('product-ranking.md');
     const prompt = buildProductRankingSystemPrompt({
       objective: 'conversion_rate',

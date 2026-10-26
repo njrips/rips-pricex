@@ -21,6 +21,8 @@ describe('product performance labels (naming doc)', () => {
       })
     ).toBe('Excluded by guardrail');
     expect(formatProductStatusLabel({ planStatus: 'paused' })).toBe('Paused');
+    expect(formatProductStatusLabel({ planStatus: 'queued' })).toBe('Not launched');
+    expect(formatProductStatusLabel({ planStatus: 'draft' })).toBe('Not launched');
     expect(formatProductStatusLabel({ rolloutState: 'applied' })).toBe('Applied');
     expect(formatProductStatusLabel({ planStatus: 'applied' })).toBe('Applied');
     expect(formatProductStatusLabel({ planStatus: 'applied', isOffer: true })).toBe('Completed');

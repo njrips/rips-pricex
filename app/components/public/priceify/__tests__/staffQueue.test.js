@@ -35,7 +35,7 @@ function memoryStorage() {
 describe('staffQueue', () => {
   it('shortens shop domains and ticket hrefs', () => {
     assert.equal(shopHandle('ripx-plus.myshopify.com'), 'ripx-plus');
-    assert.equal(ticketHref('PX-7K2M'), '/staff/support/PX-7K2M');
+    assert.equal(ticketHref('PX-7K2M'), '/console/tickets/PX-7K2M');
     assert.equal(clipPreview('  one   two  '.repeat(20), 24).endsWith('…'), true);
   });
 
@@ -70,13 +70,13 @@ describe('staffQueue', () => {
   });
 
   it('keeps queue filter hrefs on the staff path', () => {
-    assert.equal(queueHref({}), '/staff/support');
-    assert.equal(queueHref({ status: '' }), '/staff/support?status=');
+    assert.equal(queueHref({}), '/console/tickets');
+    assert.equal(queueHref({ status: '' }), '/console/tickets?status=');
     assert.equal(
       queueHref({ status: 'closed', shop: 'ripx-plus.myshopify.com', sort: 'need' }),
-      '/staff/support?status=closed&shop=ripx-plus.myshopify.com&sort=need',
+      '/console/tickets?status=closed&shop=ripx-plus.myshopify.com&sort=need',
     );
-    assert.equal(queueHref({ sort: 'nope' }), '/staff/support');
+    assert.equal(queueHref({ sort: 'nope' }), '/console/tickets');
   });
 
   it('expands shop handles and restores the last queue view', () => {
@@ -95,6 +95,6 @@ describe('staffQueue', () => {
     const storage = memoryStorage();
     writeStaffQueueFilters({ status: '', shop: 'ripx-plus', sort: 'need' }, storage);
     assert.equal(storage.getItem(STAFF_QUEUE_FILTERS_KEY).includes('"status":""'), true);
-    assert.equal(staffQueueBackHref(storage), '/staff/support?status=&shop=ripx-plus&sort=need');
+    assert.equal(staffQueueBackHref(storage), '/console/tickets?status=&shop=ripx-plus&sort=need');
   });
 });

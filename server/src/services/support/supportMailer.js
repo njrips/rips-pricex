@@ -73,7 +73,7 @@ function ticketNotifyKindLabel(kind) {
     case 'merchant_reply':
       return 'Merchant reply';
     case 'staff_reply':
-      return 'Staff reply';
+      return 'Team reply';
     case 'status':
       return 'Status updated';
     default:
@@ -89,7 +89,7 @@ function staffTicketUrl(publicId) {
   const base = String(process.env.SHOPIFY_APP_URL || process.env.APP_URL || '')
     .trim()
     .replace(/\/+$/, '');
-  const path = `/staff/support/${encodeURIComponent(publicId)}`;
+  const path = `/console/tickets/${encodeURIComponent(publicId)}`;
   return base ? `${base}${path}` : path;
 }
 
@@ -149,13 +149,13 @@ function staffLoginCodeEmail({ code, expiresMinutes = 1 } = {}) {
     'If you did not request this, you can ignore this email.',
   ].join('\n');
   return {
-    subject: 'Your Priceify staff sign-in code',
+    subject: 'Your Priceify Console sign-in code',
     text,
     html: [
       '<!DOCTYPE html><html><body style="margin:0;padding:24px;background:#faf7f2;font-family:Inter,Arial,sans-serif;color:#1c1917;line-height:1.5">',
       '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;margin:0 auto;background:#fff;border:1px solid #eadfd4;border-radius:16px">',
       '<tr><td style="padding:24px 28px">',
-      '<p style="margin:0 0 8px;color:#fc4c02;font-size:12px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase">Priceify staff</p>',
+      '<p style="margin:0 0 8px;color:#fc4c02;font-size:12px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase">Priceify Console</p>',
       '<p style="margin:0 0 16px">Your sign-in code is</p>',
       `<p style="margin:0 0 16px;letter-spacing:0.2em;font-size:28px;font-weight:700">${digits}</p>`,
       `<p style="margin:0 0 16px">It expires in ${minutes} ${unit}.</p>`,
@@ -315,7 +315,7 @@ function ticketNotifyEmail({ kind, ticket = {}, body = '', previousStatus = '' }
     diagnosticRows.length ? '' : null,
     ...diagnosticRows.map(([label, value]) => `${label}: ${value}`),
     '',
-    absoluteUrl ? `Open in staff queue: ${url}` : 'Open this ticket in the Priceify staff queue.',
+    absoluteUrl ? `Open in Priceify Console: ${url}` : 'Open this ticket in Priceify Console.',
   ]
     .filter((line) => line != null)
     .join('\n');
@@ -327,7 +327,7 @@ function ticketNotifyEmail({ kind, ticket = {}, body = '', previousStatus = '' }
     '<!DOCTYPE html><html><body style="margin:0;padding:24px;background:#faf7f2;font-family:Inter,Arial,sans-serif;color:#1c1917;line-height:1.5">',
     '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;margin:0 auto;background:#fff;border:1px solid #eadfd4;border-radius:16px">',
     '<tr><td style="padding:24px 28px">',
-    '<p style="margin:0 0 8px;color:#fc4c02;font-size:12px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase">Priceify staff</p>',
+    '<p style="margin:0 0 8px;color:#fc4c02;font-size:12px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase">Priceify Console</p>',
     `<p style="margin:0 0 6px;font-size:12px;font-weight:700;letter-spacing:0.04em;color:#fc4c02">${escapeHtml(id)}</p>`,
     `<p style="margin:0 0 16px;font-size:22px;font-weight:700;letter-spacing:-0.4px">${escapeHtml(event)}</p>`,
     `<p style="margin:0 0 16px;font-weight:650">${escapeHtml(subjectLine)}</p>`,
@@ -346,7 +346,7 @@ function ticketNotifyEmail({ kind, ticket = {}, body = '', previousStatus = '' }
       : '',
     absoluteUrl
       ? `<p style="margin:20px 0 0"><a href="${escapeHtml(url)}" style="display:inline-block;padding:10px 16px;border-radius:999px;background:#fc4c02;color:#fff;font-weight:650;text-decoration:none">Open ticket</a></p>`
-      : '<p style="margin:20px 0 0;color:#57534e">Open this ticket in the Priceify staff queue.</p>',
+      : '<p style="margin:20px 0 0;color:#57534e">Open this ticket in Priceify Console.</p>',
     '</td></tr></table>',
     '</body></html>',
   ].join('');

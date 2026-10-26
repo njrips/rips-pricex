@@ -368,6 +368,7 @@ export function formatProductStatusLabel({
     .trim()
     .toLowerCase();
   if (status === 'paused' || status === 'stopped') return 'Paused';
+  if (status === 'queued' || status === 'draft') return 'Not launched';
   // Plan status wins when analytics lag behind a successful apply/finish.
   if (status === 'applied') return formatProductAppliedStatusLabel(isOffer);
   if (status === 'completed' || status === 'complete' || status === 'ended') {

@@ -53,6 +53,12 @@ api_version = "2026-07"
   topics = ["app_subscriptions/update"]
   uri = "/webhooks/app/subscriptions_update"
 
+  # Development stores use Priceify free; this is how the app hears that one
+  # moved to a paid Shopify plan.
+  [[webhooks.subscriptions]]
+  topics = ["shop/update"]
+  uri = "/webhooks/shop/update"
+
   # Purchases are recorded from these: Shopify no longer runs the storefront
   # script on the order-status page. Orders are protected customer data
   # (level 1: no name, email, phone or address fields are read), so Shopify

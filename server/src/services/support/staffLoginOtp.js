@@ -1,5 +1,6 @@
 /**
- * Staff login OTP — 6-digit code, 1 min expiry, 3 sends / 15 min per email (RipX).
+ * Priceify Console sign-in code — 6-digit code, 1 min expiry, 3 sends / 15 min
+ * per email, sent only to enabled team members.
  */
 
 const crypto = require('crypto');
@@ -11,13 +12,16 @@ const {
   staffLoginBlocked,
   recordStaffLoginFailure,
   clearStaffLoginFailures,
+  timingSafeEqualString,
 } = require('./staffAuth');
 const {
   isSupportMailerConfigured,
   sendStaffLoginCode,
 } = require('./supportMailer');
+const { findActiveMemberByEmail } = require('../console/teamMembers');
 
 const OTP_EXPIRY_MINUTES = 1;
+const MAX_ATTEMPTS_PER_CODE = 5;
 const RATE_LIMIT_WINDOW_MINUTES = 15;
 const MAX_SENDS_PER_WINDOW = 3;
 const UNVERIFIED_EMAIL_MESSAGE = 'Not a verified email.';
@@ -88,6 +92,8 @@ async function createCode(email, deps = {}) {
   }
 }
 
+// Only the newest unused code counts, and each one takes a handful of wrong
+// guesses before it is dead.
 async function consumeCode(email, code, deps = {}) {
   const normalized = normalizeStaffEmail(email);
   const trimmedCode = String(code || '')
@@ -97,16 +103,25 @@ async function consumeCode(email, code, deps = {}) {
   const codeHash = hashCode(trimmedCode);
   try {
     const result = await runQuery(
-      `SELECT id, email, expires_at, used_at FROM staff_login_otp_codes
-       WHERE email = $1 AND code_hash = $2
+      `SELECT id, email, code_hash, expires_at, used_at, failed_attempts FROM staff_login_otp_codes
+       WHERE email = $1 AND used_at IS NULL
        ORDER BY created_at DESC
        LIMIT 1`,
-      [normalized, codeHash],
+      [normalized],
       deps
     );
     const row = result.rows[0];
     if (!row || row.used_at) return null;
     if (new Date(row.expires_at) < new Date()) return null;
+    if (Number(row.failed_attempts || 0) >= MAX_ATTEMPTS_PER_CODE) return null;
+    if (!timingSafeEqualString(row.code_hash, codeHash)) {
+      await runQuery(
+        'UPDATE staff_login_otp_codes SET failed_attempts = failed_attempts + 1 WHERE id = $1',
+        [row.id],
+        deps
+      );
+      return null;
+    }
     await runQuery('UPDATE staff_login_otp_codes SET used_at = NOW() WHERE id = $1', [row.id], deps);
     return { email: row.email };
   } catch (err) {
@@ -122,6 +137,20 @@ async function requestStaffLoginCode(email, deps = {}) {
   }
   if (!isStaffEmail(normalized)) {
     return { ok: false, error: UNVERIFIED_EMAIL_MESSAGE, email: normalized };
+  }
+  // Someone who is not on the team gets the same answer as someone who is, so
+  // the form cannot be used to find out who has console access.
+  const findMember = deps.findActiveMemberByEmail || findActiveMemberByEmail;
+  const member = await findMember(normalized, deps).catch((err) => {
+    logger.error('Console member lookup failed', { error: err.message });
+    return undefined;
+  });
+  if (member === undefined) {
+    return { ok: false, email: normalized, error: 'Could not create a sign-in code. Try again.' };
+  }
+  if (!member) {
+    logger.info('Console sign-in code requested for a non-member', { email: maskEmail(normalized) });
+    return { ok: true, email: normalized, sent: true, message: SENT_MESSAGE };
   }
   const otp = await createCode(normalized, deps);
   if (otp?.rateLimited) {
@@ -162,13 +191,19 @@ async function verifyStaffLoginCode(email, code, deps = {}) {
   const emailKey = `email:${normalized}`;
   if (staffLoginBlocked(emailKey)) return null;
   const payload = await consumeCode(normalized, code, deps);
-  if (payload) clearStaffLoginFailures(emailKey);
-  else recordStaffLoginFailure(emailKey);
-  return payload;
+  if (!payload) {
+    recordStaffLoginFailure(emailKey);
+    return null;
+  }
+  clearStaffLoginFailures(emailKey);
+  const findMember = deps.findActiveMemberByEmail || findActiveMemberByEmail;
+  const member = await findMember(normalized, deps).catch(() => null);
+  return member ? { email: payload.email, member } : null;
 }
 
 module.exports = {
   OTP_EXPIRY_MINUTES,
+  MAX_ATTEMPTS_PER_CODE,
   RATE_LIMIT_WINDOW_MINUTES,
   MAX_SENDS_PER_WINDOW,
   UNVERIFIED_EMAIL_MESSAGE,

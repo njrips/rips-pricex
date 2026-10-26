@@ -11,6 +11,7 @@ import { classicExperimentMatchesQuery } from './classicExperimentSearch';
 import { hydrateInboxFromServer, schedulePersistInboxPlans } from '../smartPricingInboxPersistence';
 import {
   countWinningExperiments,
+  currentRoundPlans,
   formatClassicStatusLabel,
   getPlanExperimentId,
   getPlanProductTitle,
@@ -568,6 +569,7 @@ export default function ClassicExperimentsList() {
                   const lift = experiment.lift;
                   const confidence = experiment.confidence;
                   const visitors = experiment.visitors;
+                  const productPlans = currentRoundPlans(experiment.plans);
                   return (
                     <React.Fragment key={experiment.id}>
                       <tr className={styles.expRow}>
@@ -578,7 +580,7 @@ export default function ClassicExperimentsList() {
                                 counts the variants picked in the wizard but has
                                 no plans built yet, so counting those offered a
                                 chevron that expanded to nothing. */}
-                            {experiment.plans.length > 1 ? (
+                            {productPlans.length > 1 ? (
                               <button
                                 type="button"
                                 className={styles.expExpandBtn}
@@ -615,9 +617,9 @@ export default function ClassicExperimentsList() {
                         </td>
                         <td>
                           <Badge tone={status.tone}>{status.text}</Badge>
-                          {experiment.plans.some(plan => plan?.product_deleted_at) ? (
+                          {productPlans.some(plan => plan?.product_deleted_at) ? (
                             <div className={styles.productSub}>
-                              {experiment.plans.length > 1
+                              {productPlans.length > 1
                                 ? 'A product was deleted in Shopify'
                                 : 'Product deleted in Shopify'}
                             </div>
@@ -662,7 +664,7 @@ export default function ClassicExperimentsList() {
                         </td>
                       </tr>
                       {expanded
-                        ? experiment.plans.map(plan => {
+                        ? productPlans.map(plan => {
                             const arms = Array.isArray(plan.price_arms) ? plan.price_arms : [];
                             const isOffer = isOfferExperimentType(experiment.experimentType);
                             const control = arms[0]?.price;

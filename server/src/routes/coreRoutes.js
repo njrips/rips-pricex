@@ -7,10 +7,12 @@ const { asyncHandler } = require('../middleware/asyncHandler');
 const {
   getShopEntitlement,
   setEntitlement,
+  recordAppOpen,
   upsertShopInstall,
   markShopUninstalled,
   pricingPlansUrl,
 } = require('../services/billing/entitlementService');
+const { recordShopPlan } = require('../services/billing/shopPlanService');
 const { upsertShopSession, getShopSession, deleteShopSession } = require('../models/shopSession');
 const {
   redactShop,
@@ -48,16 +50,23 @@ router.post('/billing/sync-entitlement', requireInternalService, asyncHandler(as
   const body = req.body || {};
   const entitled = body.entitled === true || ['ACTIVE', 'active', 'trial', 'TRIAL', 'paid', 'PAID'].includes(String(body.status || ''));
   const planHandle = body.planHandle || body.plan_handle || null;
-  const current = await getShopEntitlement(req.shopDomain);
-  const operatorDevPlan =
-    String(current.planHandle || '').trim().toLowerCase() === 'dev' && current.entitled;
-  if (operatorDevPlan && !entitled) {
-    return res.json({ shop: req.shopDomain, ...current, synced: false, skipped: 'dev_plan' });
-  }
+  const source = ['loader', 'webhook', 'daily_check', 'console_refresh'].includes(body.source)
+    ? body.source
+    : null;
   await setEntitlement(req.shopDomain, {
     status: entitled ? String(body.status || 'ACTIVE') : 'none',
     planHandle: entitled ? planHandle || 'smart_pricing' : null,
+    shopifyStatus: body.shopifyStatus || body.status || null,
+    details: body.details && typeof body.details === 'object' ? body.details : {},
+    source,
   });
+  if (typeof body.developmentStore === 'boolean') {
+    await recordShopPlan(req.shopDomain, {
+      developmentStore: body.developmentStore,
+      planName: typeof body.shopPlanName === 'string' ? body.shopPlanName.slice(0, 120) : null,
+      source,
+    });
+  }
   const entitlement = await getShopEntitlement(req.shopDomain);
   res.json({ shop: req.shopDomain, ...entitlement, synced: true });
 }));
@@ -87,6 +96,7 @@ router.post('/billing/dev-entitle', requireShopSessionOrInternal, asyncHandler(a
 
 router.post('/shops/install', requireShopSessionOrInternal, asyncHandler(async (req, res) => {
   await upsertShopInstall(req.shopDomain);
+  await recordAppOpen(req.shopDomain);
   const accessToken = req.shopifyAccessToken || req.body?.access_token || req.body?.accessToken;
   let scope = req.body?.scope || process.env.SHOPIFY_SCOPES || process.env.SCOPES || null;
   if (accessToken && req.body?.refresh_scopes === true) {

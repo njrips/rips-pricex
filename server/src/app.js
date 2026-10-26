@@ -159,11 +159,13 @@ try {
 
 try {
   const supportTicketRoutes = require('./routes/supportTicketRoutes');
-  const staffSupportRoutes = require('./routes/staffSupportRoutes');
-  const { requireStaff } = require('./middleware/staffContext');
+  const consoleTicketRoutes = require('./routes/consoleTicketRoutes');
+  const consoleRoutes = require('./routes/consoleRoutes');
+  const { requireConsoleMember } = require('./middleware/consoleContext');
   const { requireSupportInternal } = require('./middleware/supportInternalContext');
   app.use('/api/support/tickets', requireShop, requireSupportInternal, supportTicketRoutes);
-  app.use('/api/staff/support/tickets', requireStaff, staffSupportRoutes);
+  app.use('/api/console/tickets', requireConsoleMember('support'), consoleTicketRoutes);
+  app.use('/api/console', consoleRoutes);
   logger.info('Support ticket routes mounted');
 } catch (err) {
   logger.warn('support ticket routes not available', { message: err.message });

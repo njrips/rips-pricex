@@ -74,7 +74,8 @@ export function resolveProductActionAvailability({
 
   return {
     canStop: Boolean(running && !sharedTest && !decided),
-    canResume: Boolean(paused && !decided && !sharedTest && !running),
+    // A later round replaces this one, so resuming it would price the product twice.
+    canResume: Boolean(paused && !decided && !sharedTest && !running && !hasFollowUpQueued),
     canApply,
     canFinish,
     canRevert: Boolean(hasAppliedBaseline && !alreadyReverted),
@@ -89,7 +90,9 @@ export function resolveProductActionAvailability({
       stop: sharedBlock || (!running ? 'Product is not running.' : null),
       resume: decided
         ? 'This product has already been decided. Start a re-run instead.'
-        : !paused
+        : hasFollowUpQueued
+          ? 'A re-run replaces this round. Launch or discard it instead.'
+          : !paused
           ? 'Product is not paused.'
           : null,
       apply: canApply ? null : 'A reviewed challenger winner is not ready yet.',

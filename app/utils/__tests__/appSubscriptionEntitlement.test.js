@@ -82,7 +82,77 @@ describe('asking Shopify what the shop is paying for', () => {
   it('reports the subscription it found', async () => {
     const entitlement = await fetchSubscriptionEntitlement(adminReturning(PAYING));
 
-    expect(entitlement).toEqual({ entitled: true, status: 'ACTIVE', planHandle: 'pro' });
+    expect(entitlement).toMatchObject({ entitled: true, status: 'ACTIVE', planHandle: 'pro' });
+  });
+
+  it('carries the billing details the console shows', async () => {
+    const entitlement = await fetchSubscriptionEntitlement(
+      adminReturning({
+        data: {
+          shop: { id: 'gid://shopify/Shop/42' },
+          currentAppInstallation: {
+            activeSubscriptions: [
+              {
+                id: 'gid://shopify/AppSubscription/7',
+                name: 'Pro',
+                status: 'ACTIVE',
+                test: true,
+                createdAt: '2026-10-01T00:00:00Z',
+                currentPeriodEnd: '2026-11-01T00:00:00Z',
+                trialDays: 14,
+                lineItems: [
+                  {
+                    plan: {
+                      pricingDetails: {
+                        __typename: 'AppRecurringPricing',
+                        interval: 'EVERY_30_DAYS',
+                        price: { amount: '29.0', currencyCode: 'USD' },
+                      },
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        },
+      })
+    );
+
+    expect(entitlement?.details).toEqual({
+      shopGid: 'gid://shopify/Shop/42',
+      subscriptionGid: 'gid://shopify/AppSubscription/7',
+      subscriptionName: 'Pro',
+      test: true,
+      createdAt: '2026-10-01T00:00:00Z',
+      trialEndsAt: '2026-10-15T00:00:00.000Z',
+      currentPeriodEnd: '2026-11-01T00:00:00Z',
+      interval: 'EVERY_30_DAYS',
+      price: '29.0',
+      currency: 'USD',
+    });
+  });
+
+  it('reports a development store from the shop plan', async () => {
+    const entitlement = await fetchSubscriptionEntitlement(
+      adminReturning({
+        data: {
+          shop: { id: 'gid://shopify/Shop/1', plan: { partnerDevelopment: true, publicDisplayName: 'Development' } },
+          currentAppInstallation: { activeSubscriptions: [] },
+        },
+      })
+    );
+
+    expect(entitlement?.entitled).toBe(false);
+    expect(entitlement?.developmentStore).toBe(true);
+    expect(entitlement?.shopPlanName).toBe('Development');
+  });
+
+  it('leaves the development store flag out when the plan is missing', async () => {
+    const entitlement = await fetchSubscriptionEntitlement(
+      adminReturning({ data: { shop: { id: 'gid://shopify/Shop/1' }, currentAppInstallation: { activeSubscriptions: [] } } })
+    );
+
+    expect(entitlement?.developmentStore).toBeUndefined();
   });
 
   it('reports a shop with no subscription as not paying', async () => {

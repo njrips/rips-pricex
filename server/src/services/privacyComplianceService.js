@@ -31,6 +31,9 @@ const SHOP_TABLES = [
   'tests',
   'shop_settings',
   'webhook_events',
+  'shop_billing_events',
+  'support_access_grants',
+  'console_audit_log',
   'shops',
 ];
 

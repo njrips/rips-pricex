@@ -34,6 +34,7 @@ const {
   sanitizeModelDirection,
   sanitizeModelConfidence,
 } = require('./smartPricingAiSuggestFeatures');
+const { buildProductPricingSignals } = require('./smartPricingPricingSignals');
 function round2(n) {
   return Math.round(Number(n) * 100) / 100;
 }
@@ -101,6 +102,25 @@ async function loadContextWithinBudget(loadProductContext, groups) {
     return result instanceof Map ? result : new Map();
   } catch {
     return new Map();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Whatever `load(ids)` returns within the context budget, or `fallback`. */
+async function loadIdsWithinBudget(load, ids, accept, fallback) {
+  if (typeof load !== 'function' || !ids.length) return fallback;
+  let timer;
+  try {
+    const result = await Promise.race([
+      Promise.resolve(load(ids)),
+      new Promise(resolve => {
+        timer = setTimeout(() => resolve(null), PRODUCT_CONTEXT_TIMEOUT_MS);
+      }),
+    ]);
+    return accept(result) ? result : fallback;
+  } catch {
+    return fallback;
   } finally {
     clearTimeout(timer);
   }
@@ -394,34 +414,92 @@ function hasMeasuredSalesHistory(row) {
   );
 }
 
+/**
+ * Visits are only shown to the model as visits when the storefront counted
+ * them. An estimate from orders or a shop prior is our guess at traffic, and
+ * a model told it was measured treats a made-up conversion rate as evidence.
+ * Without a source (an older wizard) the figure is passed on as before.
+ */
+function trafficSource(row, pricing) {
+  const source = String(pricing?.traffic_source || row?.traffic_source || '').trim();
+  if (!source) return null;
+  return source === 'storefront_measured' ? 'measured' : 'estimated';
+}
+
 function describeProductForModel(
   row,
   index,
   context = null,
-  { withImage = false, allowRowImageFallback = true } = {}
+  { withImage = false, allowRowImageFallback = true, pricing = null } = {}
 ) {
-  const units = Number(row.units_sold_30d);
-  const measured = hasMeasuredSalesHistory(row);
+  const sales = pricing?.signals?.sales || null;
+  const serverUnits = sales ? sales.units_30d : null;
+  const readFromOrders = serverUnits !== null && serverUnits !== undefined;
+  const units = readFromOrders ? serverUnits : Number(row.units_sold_30d);
+  const measured = readFromOrders || hasMeasuredSalesHistory(row);
+  const revenueRow =
+    readFromOrders && sales.revenue_30d !== null ? { ...row, revenue_30d: sales.revenue_30d } : row;
+  const traffic = trafficSource(row, pricing);
+  const estimatedTraffic = traffic === 'estimated';
+  const trafficRow = estimatedTraffic ? { ...revenueRow, visitors_30d: 0 } : revenueRow;
   const scenario = String(row.recommended_scenario_preset || 'recommended').trim() || 'recommended';
   const hint = String(row.ai_reason || row.scenario_rationale || '').trim();
-  const inventory = finiteOrNull(context?.inventory ?? row.inventory_quantity);
+  const trackedUnits = pricing?.signals?.inventory?.tracked_units;
+  const inventory = finiteOrNull(
+    trackedUnits !== null && trackedUnits !== undefined
+      ? trackedUnits
+      : (context?.inventory ?? row.inventory_quantity)
+  );
   const signals = enrichProductSignalsForPriceSuggest(row);
+  const lone = pricing?.variants?.length === 1 ? pricing.variants[0] : null;
   return {
     product_index: index,
     title: row.title,
     description: context?.description || null,
     vendor: context?.vendor || null,
+    category: context?.category || null,
+    tags: context?.tags?.length ? context.tags : null,
+    sku: lone?.sku || null,
+    barcode: lone?.barcode || null,
+    options: lone?.options || null,
     has_image:
       withImage && Boolean(productImageUrl(row, context, { allowRowFallback: allowRowImageFallback })),
     current_price: row.current_price,
+    compare_at_price: lone?.compare_at_price ?? null,
     currency: row.currency || 'USD',
     monthly_units: measured ? units : 0,
     sales_data: measured ? 'measured' : 'none_recorded',
-    revenue_signal: revenueSignal(row),
-    visitors_30d: Number(row.visitors_30d) > 0 ? Math.round(Number(row.visitors_30d)) : null,
-    units_per_100_visitors: unitsPer100Visitors(row, measured ? units : null),
-    rpv_30d: revenuePerVisitor30d(row),
+    revenue_signal: revenueSignal(revenueRow),
+    traffic_data: traffic,
+    visitors_30d:
+      Number(trafficRow.visitors_30d) > 0 ? Math.round(Number(trafficRow.visitors_30d)) : null,
+    units_per_100_visitors: unitsPer100Visitors(trafficRow, measured ? units : null),
+    rpv_30d: revenuePerVisitor30d(trafficRow),
     inventory: inventory === null ? null : Math.round(inventory),
+    ...(pricing
+      ? {
+          sales_trend: {
+            units_previous_30d: sales.units_previous_30d,
+            revenue_30d: sales.revenue_30d,
+            revenue_previous_30d: sales.revenue_previous_30d,
+            average_selling_price: sales.average_selling_price,
+            average_daily_units: sales.average_daily_units,
+            unit_growth_percent: sales.unit_growth_percent,
+            revenue_growth_percent: sales.revenue_growth_percent,
+          },
+          momentum: pricing.signals.momentum,
+          stock_cover_days: pricing.signals.inventory.stock_cover_days,
+          days_since_listing: pricing.signals.listing.days_since_listing,
+          listing_stage: pricing.signals.listing.lifecycle,
+          data_quality: pricing.signals.data_quality,
+          ...(pricing.variants.length > 1
+            ? {
+                variants: pricing.variants,
+                ...(pricing.variants_omitted ? { variants_omitted: pricing.variants_omitted } : {}),
+              }
+            : {}),
+        }
+      : {}),
     opportunity_score: row.opportunity_score,
     recommended_scenario: scenario,
     catalog_hint: hint ? hint.slice(0, 160) : null,
@@ -429,8 +507,8 @@ function describeProductForModel(
     price_tier: signals.price_tier,
     traffic_tier: signals.traffic_tier,
     heuristic_direction: signals.heuristic_direction,
-    daily_visitors: signals.daily_visitors,
-    product_type: signals.product_type,
+    daily_visitors: estimatedTraffic ? null : signals.daily_visitors,
+    product_type: context?.product_type || signals.product_type,
   };
 }
 
@@ -586,6 +664,7 @@ function normalizeVariantRows(variants = []) {
       scenario_rationale: row.scenario_rationale || null,
       image_url: row.image_url ? String(row.image_url) : null,
       inventory_quantity: finiteOrNull(row.inventory_quantity),
+      traffic_source: row.traffic_source ? String(row.traffic_source).slice(0, 40) : null,
     }))
     .filter(row => row.variant_id && row.current_price > 0);
 }
@@ -898,14 +977,13 @@ function deterministicPriceSuggestions({
   });
 
   if (amountBand) {
+    const band = describeSignedBand(amountBand.min, amountBand.max, '$');
     return {
       source: 'deterministic',
       suggestions,
-      summary: `Suggested ${suggestions.length} test prices using ${describeSignedBand(
-        amountBand.min,
-        amountBand.max,
-        '$'
-      )}, capped per product by your ${shopMax}% max price change.`,
+      summary: suggestions.some(item => item.guardrail_limited)
+        ? `Suggested ${suggestions.length} test prices using ${band}, capped per product by your ${shopMax}% max price change.`
+        : `Suggested ${suggestions.length} test prices using ${band}.`,
     };
   }
 
@@ -1182,6 +1260,8 @@ async function suggestPricesForAllArms({
   shopDomain = null,
   loadProductContext = null,
   loadShopMarket = null,
+  loadVariantContext = null,
+  loadCatalogSignals = null,
 } = {}) {
   const normalizedObjective = String(objective || '')
     .trim()
@@ -1255,11 +1335,40 @@ async function suggestPricesForAllArms({
    * stays well clear of the ceiling that used to truncate it.
    */
   const deadline = Date.now() + AI_SUGGEST_BUDGET_MS;
-  const [contextByProduct, shopMarket] = await Promise.all([
-    loadContextWithinBudget(loadProductContext, groups),
+  const aiVariantIds = aiGroups.flatMap(group => group.variants.map(row => row.variant_id));
+  const [contextByProduct, shopMarket, liveVariants, catalogSignals] = await Promise.all([
+    loadContextWithinBudget(loadProductContext, aiGroups),
     loadShopMarketWithinBudget(loadShopMarket),
+    loadIdsWithinBudget(loadVariantContext, aiVariantIds, r => r instanceof Map, new Map()),
+    loadIdsWithinBudget(
+      loadCatalogSignals,
+      aiVariantIds,
+      r => r && r.rows instanceof Map,
+      null
+    ),
   ]);
   const contextFor = group => contextByProduct.get(group.product.product_id) || null;
+  const signalsNow = Date.now();
+  const pricingByGroup = new Map();
+  const pricingFor = group => {
+    if (typeof loadVariantContext !== 'function' && typeof loadCatalogSignals !== 'function') {
+      return null;
+    }
+    if (!pricingByGroup.has(group)) {
+      pricingByGroup.set(
+        group,
+        buildProductPricingSignals({
+          variants: group.variants,
+          catalogRows: catalogSignals?.rows || new Map(),
+          liveVariants,
+          productContext: contextFor(group),
+          salesSummary: catalogSignals?.sales_summary || null,
+          now: signalsNow,
+        })
+      );
+    }
+    return pricingByGroup.get(group);
+  };
   const sendImages = imagesEnabled();
   const searchWeb = webSearchEnabled();
   // The runtime loader returns Shopify's 1024px transform. If that lookup was
@@ -1312,6 +1421,7 @@ async function suggestPricesForAllArms({
           describeProductForModel(group.product, index, contextFor(group), {
             withImage: sendImages,
             allowRowImageFallback,
+            pricing: pricingFor(group),
           })
         ),
       }),

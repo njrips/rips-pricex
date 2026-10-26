@@ -94,12 +94,12 @@ export function readStaffQueueFilters(storage) {
 
 export function staffQueueBackHref(storage) {
   const filters = readStaffQueueFilters(storage);
-  return filters ? queueHref(filters) : '/staff/support';
+  return filters ? queueHref(filters) : '/console/tickets';
 }
 
 export function ticketHref(publicId) {
   const id = String(publicId || '').trim();
-  return id ? `/staff/support/${encodeURIComponent(id)}` : '/staff/support';
+  return id ? `/console/tickets/${encodeURIComponent(id)}` : '/console/tickets';
 }
 
 export function clipPreview(text, max = 96) {
@@ -179,7 +179,7 @@ export function queueSearchParams(filters = {}) {
 
 export function queueHref(filters = {}) {
   const qs = queueSearchParams(filters).toString();
-  return qs ? `/staff/support?${qs}` : '/staff/support';
+  return qs ? `/console/tickets?${qs}` : '/console/tickets';
 }
 
 export function countNeedsYou(tickets) {
