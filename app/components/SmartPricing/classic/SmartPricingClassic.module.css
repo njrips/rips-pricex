@@ -564,11 +564,23 @@ button.stepItem {
   padding-bottom: 8px;
 }
 
+/* The row padding rule under .expTableWrap outranks .expChildRow td. */
+.expTableWrap .table .expChildRow td {
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+
+/* Indented by the chevron and its gap, so each product lines up under the
+   test title, and the chips start at the Status column on every row. */
 .expChildInner {
   display: flex;
   align-items: center;
   gap: 12px;
   padding-left: 28px;
+}
+
+.expChildInner .thumb {
+  flex-shrink: 0;
 }
 
 .expChildMeta {
@@ -579,7 +591,8 @@ button.stepItem {
 .expChildArms {
   display: flex;
   flex-wrap: wrap;
-  justify-content: flex-end;
+  justify-content: flex-start;
+  align-items: center;
   gap: 4px;
 }
 
@@ -1616,10 +1629,37 @@ button.stepItem {
 
 .priceSummary {
   display: inline-flex;
+  flex-direction: column;
   align-items: center;
+  justify-content: center;
+  gap: 2px;
   min-height: 32px;
   color: var(--classic-ink);
   font-variant-numeric: tabular-nums;
+}
+
+.priceSummaryMain {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  column-gap: 8px;
+}
+
+.priceSummaryRange,
+.priceSummaryAction {
+  white-space: nowrap;
+}
+
+.priceSummaryStatus {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  column-gap: 4px;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--classic-muted, #616161);
+  white-space: nowrap;
 }
 
 .priceSummaryMuted {
@@ -2325,7 +2365,8 @@ button.stepItem {
   display: block;
   color: var(--classic-ink);
   font-size: var(--classic-fs-meta);
-  line-height: 34px;
+  /* Matches the field's height, so a wrapped line clears it without gaps. */
+  line-height: 26px;
 }
 
 .guardrailRule .guardrailInputWrap,
@@ -2346,11 +2387,13 @@ button.stepItem {
 
 .guardrailInput {
   width: 70px;
-  padding: 4px 24px 4px 9px;
+  padding: 3px 24px 3px 9px;
   border: 1px solid var(--classic-line);
-  border-radius: 10px;
+  border-radius: 8px;
   font: inherit;
   font-size: var(--classic-fs-label);
+  /* `font: inherit` would otherwise take the sentence's line height. */
+  line-height: 18px;
   text-align: right;
   color: var(--classic-ink);
   background: var(--classic-card);
@@ -2397,6 +2440,12 @@ button.stepItem {
   display: flex;
   flex-direction: column;
   gap: 24px;
+}
+
+/* Polaris adds 16px above a banner that follows another one. The gap above
+   already spaces them, so two banners in a row sat 40px apart. */
+.reviewStack > :global(.Polaris-Banner.Polaris-Banner) {
+  margin-top: 0;
 }
 
 .reviewOverview {
@@ -3608,6 +3657,14 @@ button.stepItem {
   padding-right: 18px;
   text-align: center;
   color: inherit;
+}
+
+/* A product row's chips span Status through Actions; they are not the Actions cell. */
+.expTableWrap .table .expChildRow td:last-child {
+  width: auto;
+  padding-left: 20px;
+  padding-right: 20px;
+  text-align: left;
 }
 
 /* Figma pricing table: Product left · Base price right · Test price center · Δ right */

@@ -408,8 +408,12 @@ async function assertTestIsFreeToStart({ shopDomain, test, title = '' } = {}) {
   if (!isPricingTestType(test?.type)) {
     return null;
   }
+  // Its own experiment's other variants hold only their variants, as they do
+  // at launch. Without this, the first variant Resume started held the whole
+  // product and refused every sibling after it.
   const enrollment = await getPriceTestEnrollment(shopDomain, {
     ignoreTestIds: [String(test.id)],
+    siblingExperimentId: experimentIdOfTest(test),
   });
   const hold = findLiveHoldForTest(enrollment, test);
   if (!hold) return null;
@@ -434,6 +438,32 @@ const CATALOG_LOCK_KEY = 'catalog';
 
 /** Past this, naming every product costs more than it protects. */
 const MAX_PRICING_LOCK_KEYS = 40;
+
+/**
+ * How long a start waits for another start on the same product to finish.
+ *
+ * An experiment launches one test per variant, and Resume starts them all at
+ * once. They share a product, so they share its key, and refusing on the first
+ * miss failed every variant but one with "already being started" -- while the
+ * one that won was running, so a reload showed the experiment live. A start
+ * holds the key for a check and a status write, well under this.
+ */
+const PRICING_LOCK_WAIT_MS = 10000;
+const PRICING_LOCK_RETRY_MS = 150;
+
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+async function acquirePricingLease(acquireJobLease, name, { waitMs = PRICING_LOCK_WAIT_MS } = {}) {
+  const deadline = Date.now() + Math.max(0, waitMs);
+  for (;;) {
+    // eslint-disable-next-line no-await-in-loop -- polling one lease on purpose
+    const acquired = await acquireJobLease(name, PRICING_LOCK_SECONDS, { failClosed: true });
+    if (acquired || Date.now() >= deadline) return acquired;
+    // Jittered so siblings that missed together do not retry in lockstep.
+    // eslint-disable-next-line no-await-in-loop
+    await sleep(PRICING_LOCK_RETRY_MS + Math.floor(Math.random() * PRICING_LOCK_RETRY_MS));
+  }
+}
 
 /**
  * Every product a start has to hold before it may claim anything.
@@ -494,7 +524,10 @@ function enrollmentLockKeys({ test, productId, variantId } = {}) {
  * all-products starts are not. The free-to-start check still refuses the
  * overlap in every case except the moment both requests read it at once.
  */
-async function withPricingEnrollmentLock({ shopDomain, productId, variantId, test } = {}, fn) {
+async function withPricingEnrollmentLock(
+  { shopDomain, productId, variantId, test, waitMs = PRICING_LOCK_WAIT_MS } = {},
+  fn
+) {
   const shop = String(shopDomain || '')
     .trim()
     .toLowerCase();
@@ -508,9 +541,7 @@ async function withPricingEnrollmentLock({ shopDomain, productId, variantId, tes
     for (const key of keys) {
       const name = `price_test_enroll.${shop}.${key}`;
       // eslint-disable-next-line no-await-in-loop -- taken in order on purpose
-      const acquired = await acquireJobLease(name, PRICING_LOCK_SECONDS, {
-        failClosed: true,
-      });
+      const acquired = await acquirePricingLease(acquireJobLease, name, { waitMs });
       if (!acquired) {
         const err = new Error(
           'This product is already being started by another request. Give it a moment and try again.'
@@ -552,7 +583,13 @@ async function previewResumeConflicts({ shopDomain, testIds = [] } = {}) {
   }
   const { getTestsByIds } = require('../../models/test');
   const tests = await getTestsByIds(ids, shopDomain).catch(() => []);
-  const enrollment = await getPriceTestEnrollment(shopDomain, { ignoreTestIds: ids });
+  const experiments = new Set(
+    (Array.isArray(tests) ? tests : []).map(experimentIdOfTest).filter(Boolean)
+  );
+  const enrollment = await getPriceTestEnrollment(shopDomain, {
+    ignoreTestIds: ids,
+    siblingExperimentId: experiments.size === 1 ? [...experiments][0] : '',
+  });
   const clear = [];
   const blocked = [];
 
@@ -645,6 +682,7 @@ module.exports = {
   holdKind,
   heldProductIds,
   heldVariantIds,
+  experimentIdOfTest,
   isCatalogWideTest,
   enrollmentLockKeys,
   HOLDING_STATUSES,

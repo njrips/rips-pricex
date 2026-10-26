@@ -58,6 +58,25 @@ function normalizePlanJson(plan = {}) {
   };
 }
 
+/** Matches CLASSIC_ACTIVITY_LOG_MAX in the admin's classicActivity.js. */
+const ACTIVITY_LOG_MAX = 40;
+
+function mergeActivityLog(current, additions) {
+  const byId = new Map();
+  for (const row of [
+    ...(Array.isArray(current) ? current : []),
+    ...(Array.isArray(additions) ? additions : []),
+  ]) {
+    if (!row || typeof row !== 'object' || !row.id) continue;
+    const at = new Date(row.at).getTime();
+    if (!Number.isFinite(at)) continue;
+    byId.set(String(row.id), row);
+  }
+  return [...byId.values()]
+    .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())
+    .slice(0, ACTIVITY_LOG_MAX);
+}
+
 /** How far back a plan's own activity entry can be and still describe this save. */
 const ACTIVITY_MATCH_MS = 15 * 60 * 1000;
 
@@ -744,8 +763,16 @@ async function patchInboxPlan(shopDomain, planId, patch = {}) {
     throw new Error('shop_domain and planId are required');
   }
 
+  const { append_activity: appendActivity, ...fields } = patch || {};
   const patched = await patchInboxPlanRows(domain, [id], existing => {
-    const next = keepTestlessPlanOffLive({ ...existing, ...patch, id }, existing?.status);
+    const next = keepTestlessPlanOffLive({ ...existing, ...fields, id }, existing?.status);
+    if (Array.isArray(appendActivity) && appendActivity.length) {
+      next.metadata = {
+        ...(existing?.metadata || {}),
+        ...(fields.metadata || {}),
+        activity_log: mergeActivityLog(existing?.metadata?.activity_log, appendActivity),
+      };
+    }
     if (patch.archived === true) {
       next.archived = true;
       next.archived_at = patch.archived_at || new Date().toISOString();

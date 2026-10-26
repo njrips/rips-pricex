@@ -311,6 +311,10 @@
      Actions column is last, which made Remove unclickable on a narrow admin
      rather than merely cramped. Scroll the table instead of hiding controls. */
   overflow-x: auto;
+  /* overflow-x: auto turns the other axis to auto as well. With Safari's
+     always-visible scrollbars, a pixel of vertical overflow added a vertical
+     bar, and the width it took then forced a horizontal one over the fields. */
+  overflow-y: hidden;
 }
 
 .priceSurfaceMappingHeaderRow,
@@ -324,9 +328,12 @@
   gap: 8px;
   align-items: center;
   /* Fill the panel when the row fits and keep its full width when it does not,
-     so a scrolled row's border and background never stop mid-content. */
-  width: max-content;
-  min-width: 100%;
+     so a scrolled row's border and background never stop mid-content. The floor
+     is the tracks' minimums, not the controls' max-content: Safari sizes native
+     inputs and selects wider, so max-content overflowed a panel the row fit in
+     and showed a scrollbar over the fields. */
+  width: auto;
+  min-width: min-content;
   flex-shrink: 0;
 }
 

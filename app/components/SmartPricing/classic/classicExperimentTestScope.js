@@ -23,11 +23,15 @@ export function runningExperimentTestIds(plans) {
   );
 }
 
-/** No answer at all, or the server failing rather than refusing. */
+/**
+ * No answer at all, the server failing rather than refusing, or another start
+ * on the same product still holding it -- which clears in a moment.
+ */
 export function isTransientLifecycleFailure(error) {
   if (!error) return false;
   const status = Number(error?.response?.status);
   if (!error.response) return true;
+  if (error.response?.data?.code === 'PRODUCT_LAUNCH_IN_PROGRESS') return true;
   return status >= 500 || status === 429;
 }
 
@@ -36,12 +40,12 @@ const RETRY_DELAY_MS = 800;
 /**
  * Posts `/tests/:id/:action` for each id and reports which were accepted.
  *
- * Products that failed for a transient reason are sent once more. Pause and
- * Stop are safe to repeat, and a brief overload used to fail the whole click
- * with the experiment left running and nothing visibly changed.
+ * Products that failed for a transient reason are sent once more. Pause, Stop
+ * and Start are safe to repeat, and a brief overload used to fail the whole
+ * click with the experiment left running and nothing visibly changed.
  *
  * @param {string[]} testIds
- * @param {'pause'|'stop'} action
+ * @param {'pause'|'stop'|'start'} action
  * @param {(path: string, body: object) => Promise<unknown>} post
  */
 export async function postToEachExperimentTest(

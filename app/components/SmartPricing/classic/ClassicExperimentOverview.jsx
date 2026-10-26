@@ -42,11 +42,16 @@ import {
   canEditClassicAudienceMetrics,
   canEditClassicTestSetup,
   validateClassicAudienceUi,
-  resolveAudienceHistoryActivityTitle,
+  resolveLiveEditActivityEntries,
 } from './classicAudienceEdit';
 import { enrichExperimentsWithListAnalytics } from './classicExperimentListAnalytics';
 import { describeDeletedProducts, formatDetailDate } from './classicExperimentDetailsHelpers';
-import { appendActivityToPlans, createActivityEntry } from './classicActivity';
+import {
+  appendActivityToPlans,
+  createActivityEntry,
+  resolveActivityFilter,
+} from './classicActivity';
+import { setInboxPlansArchived } from '../smartPricingInboxPersistence';
 import {
   formatClassicStatusLabel,
   getPlanProductTitle,
@@ -100,6 +105,7 @@ export default function ClassicExperimentOverview() {
   // and deep links land on the right one without a state copy to resync.
   const tab = resolveClassicDetailsTab(searchParams.get('tab'));
   const selectedProductId = String(searchParams.get('product') || '').trim();
+  const historyFilter = resolveActivityFilter(searchParams.get('history'));
   const [busyAction, setBusyAction] = useState('');
   const [moreOpen, setMoreOpen] = useState(false);
   const [winnerModalOpen, setWinnerModalOpen] = useState(false);
@@ -235,6 +241,15 @@ export default function ClassicExperimentOverview() {
     else params.set('tab', resolved.toLowerCase());
     // Leaving a product drill-down when switching tabs keeps the URL honest.
     params.delete('product');
+    if (resolved !== 'History') params.delete('history');
+    setSearchParams(params, { replace: true });
+  };
+
+  const selectHistoryFilter = nextFilter => {
+    const resolved = resolveActivityFilter(nextFilter);
+    const params = new URLSearchParams(searchParams);
+    if (resolved === 'all') params.delete('history');
+    else params.set('history', resolved);
     setSearchParams(params, { replace: true });
   };
 
@@ -366,6 +381,20 @@ export default function ClassicExperimentOverview() {
       }),
       createActivityEntry({ actor: activityActor, ...entry })
     );
+
+  /** Archive or restore on the server first; this page's copy follows the server's rows. */
+  const setExperimentArchived = async (archived, entry) => {
+    const ids = new Set((experimentPlans || []).map(row => row?.id).filter(Boolean));
+    const next = await setInboxPlansArchived(shopDomain, experimentPlans, {
+      archived,
+      archivedAt: entry?.at,
+      entry: createActivityEntry({ actor: activityActor, ...entry }),
+    });
+    const updated = next.filter(row => ids.has(row?.id));
+    if (updated.length) {
+      await replaceExperimentPlansLocal(updated, { persist: false });
+    }
+  };
 
   /**
    * Records a rollout on the one plan it touched.
@@ -641,19 +670,15 @@ export default function ClassicExperimentOverview() {
    * paused for no reason.
    */
   const startTests = async testIds => {
-    const results = await Promise.allSettled(
-      testIds.map(id =>
-        apiPost(`/tests/${encodeURIComponent(id)}/start`, {
-          force: true,
-          forceReason: 'classic_resume_after_pause',
-        })
-      )
-    );
-    const failed = results.filter(row => row.status === 'rejected');
-    return { started: results.length - failed.length, failed };
+    const { succeeded, failed } = await postToEachExperimentTest(testIds, 'start', apiPost, {
+      body: { force: true, forceReason: 'classic_resume_after_pause' },
+    });
+    return { started: succeeded.length, startedIds: succeeded, failed };
   };
 
-  const finishResume = async ({ started, skipped }) => {
+  // Only the products that started read Running. Stamping the whole experiment
+  // showed a refused product as live until the next reload put it back.
+  const finishResume = async ({ started, startedIds, skipped }) => {
     if (started > 0) {
       await replaceExperimentPlansLocal(
         stampPlans(
@@ -664,7 +689,7 @@ export default function ClassicExperimentOverview() {
             detail: 'Traffic assignment resumed.',
           },
           { status: 'running' },
-          { skipSettled: true }
+          { skipSettled: true, onlyTestIds: startedIds }
         )
       );
     }
@@ -707,12 +732,12 @@ export default function ClassicExperimentOverview() {
         return;
       }
 
-      const { started, failed } = await startTests(plan.start);
+      const { started, startedIds, failed } = await startTests(plan.start);
       if (!started) {
         showError(failed[0]?.reason, 'Could not resume test.');
         return;
       }
-      await finishResume({ started, skipped: failed.length });
+      await finishResume({ started, startedIds, skipped: failed.length });
     } catch (err) {
       showError(err, 'Could not resume test.');
     } finally {
@@ -728,12 +753,12 @@ export default function ClassicExperimentOverview() {
     if (!clear.length) return;
     setBusyAction('resume');
     try {
-      const { started, failed } = await startTests(clear);
+      const { started, startedIds, failed } = await startTests(clear);
       if (!started) {
         showError(failed[0]?.reason, 'Could not resume test.');
         return;
       }
-      await finishResume({ started, skipped: skipped + failed.length });
+      await finishResume({ started, startedIds, skipped: skipped + failed.length });
     } catch (err) {
       showError(err, 'Could not resume test.');
     } finally {
@@ -752,20 +777,15 @@ export default function ClassicExperimentOverview() {
           postToEachExperimentTest(ids, 'stop', apiPost, { body: ARCHIVE_STOP_BODY })
         )
       );
-      const archived = stampPlans(
-        experimentPlans,
-        {
-          kind: 'archived',
-          title: 'Test archived',
-          detail: archiveActivityDetail(
-            { ...experiment, plans: experimentPlans },
-            { stoppedCount: stopped.size }
-          ),
-          at: archivedAt,
-        },
-        { archived: true, archived_at: archivedAt }
-      );
-      await replaceExperimentPlansLocal(archived);
+      await setExperimentArchived(true, {
+        kind: 'archived',
+        title: 'Test archived',
+        detail: archiveActivityDetail(
+          { ...experiment, plans: experimentPlans },
+          { stoppedCount: stopped.size }
+        ),
+        at: archivedAt,
+      });
       showSuccess('Test archived.');
       navigate(preserveEmbeddedSearch('/app?tab=archived'));
     } catch (err) {
@@ -780,17 +800,11 @@ export default function ClassicExperimentOverview() {
     setBusyAction('restore');
     setMoreOpen(false);
     try {
-      await replaceExperimentPlansLocal(
-        stampPlans(
-          experimentPlans,
-          {
-            kind: 'restored',
-            title: 'Test restored',
-            detail: restoreActivityDetail({ ...experiment, plans: experimentPlans }),
-          },
-          { archived: false, archived_at: null }
-        )
-      );
+      await setExperimentArchived(false, {
+        kind: 'restored',
+        title: 'Test restored',
+        detail: restoreActivityDetail({ ...experiment, plans: experimentPlans }),
+      });
       showSuccess('Test restored.');
       refresh({
         quiet: true,
@@ -953,7 +967,19 @@ export default function ClassicExperimentOverview() {
     }
     setEditSaving(true);
     try {
-      const nextPlans = appendActivityToPlans(
+      // One History line per area that changed: the editor shows audience,
+      // metrics and guardrail together, whichever Edit button opened it.
+      const entries = resolveLiveEditActivityEntries(editSeed, audienceState).map(entry =>
+        createActivityEntry({
+          kind: 'updated',
+          title: entry.title,
+          detail: entry.detail,
+          actor: activityActor,
+        })
+      );
+      const nextPlans = entries.reduce(
+        (acc, entry, index) =>
+          appendActivityToPlans(acc, { ...entry, id: `${entries[0].id}_${index}` }),
         applyAudienceUiToPlans(experimentPlans, audienceState, {
           experimentId: resumeId,
           experimentTitle: experiment?.title || plan?.metadata?.experiment_title || '',
@@ -961,17 +987,6 @@ export default function ClassicExperimentOverview() {
           experimentType:
             plan?.experiment_type || plan?.metadata?.experiment_type || experiment?.experimentType,
           shopGuardrails,
-        }),
-        createActivityEntry({
-          kind: 'updated',
-          title: resolveAudienceHistoryActivityTitle(editFocus, editSeed, audienceState),
-          detail:
-            editFocus === 'guardrail'
-              ? 'Revenue per visitor guardrail settings changed.'
-              : editFocus === 'metrics'
-                ? 'Primary success metric changed.'
-                : 'Segment, devices, sources, countries, or traffic allocation changed.',
-          actor: activityActor,
         })
       );
       await replaceExperimentPlansLocal(nextPlans);
@@ -1337,7 +1352,13 @@ export default function ClassicExperimentOverview() {
               </div>
             )
           ) : null}
-          {tab === 'History' ? <ClassicActivityTab activity={activity} /> : null}
+          {tab === 'History' ? (
+            <ClassicActivityTab
+              activity={activity}
+              filter={historyFilter}
+              onFilterChange={selectHistoryFilter}
+            />
+          ) : null}
           {tab === 'Settings' ? (
             <ClassicSettingsTab
               settings={settings}

@@ -676,7 +676,7 @@ export default function ClassicExperimentsList() {
                                 key={`${experiment.id}-${plan.id}`}
                                 className={styles.expChildRow}
                               >
-                                <td colSpan={7}>
+                                <td>
                                   <div className={styles.expChildInner}>
                                     {plan.image_url ? (
                                       <img
@@ -710,7 +710,10 @@ export default function ClassicExperimentsList() {
                                           : ''}
                                       </div>
                                     </div>
-                                    <div className={styles.expChildArms}>
+                                  </div>
+                                </td>
+                                <td colSpan={6}>
+                                  <div className={styles.expChildArms}>
                                       {arms.slice(0, 3).map((arm, idx) => {
                                         const isControl = idx === 0 || arm.role === 'control';
                                         const letter =
@@ -753,7 +756,6 @@ export default function ClassicExperimentsList() {
                                           </span>
                                         );
                                       })}
-                                    </div>
                                   </div>
                                 </td>
                               </tr>

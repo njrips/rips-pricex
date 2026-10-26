@@ -439,6 +439,45 @@ describe('ClassicCreateWizard resume from another device', () => {
     expect(text('name')).toBe('Saved here');
   });
 
+  it('keeps a draft only the server holds behind a loader until it arrives', async () => {
+    // A blank, editable wizard used to stand in while the lookup was out. A
+    // step back and a product pick counted as the merchant's own work, so the
+    // restore stood down and the blank form was saved as an unnamed second
+    // draft beside the real one.
+    const { saveSmartPricingWizardDraft } = await import('../../../../services/smartPricingApi');
+    saveSmartPricingWizardDraft.mockClear();
+    let answer;
+    getSmartPricingWizardDrafts.mockReturnValue(
+      new Promise(resolve => {
+        answer = resolve;
+      })
+    );
+
+    const onTitleChange = vi.fn();
+    await renderWizard('/app/experiments/new?resume=exp_1&step=audience', { onTitleChange });
+
+    expect(container.textContent).toContain('Opening draft…');
+    expect(text('step')).toBeNull();
+
+    await act(async () => {
+      answer({
+        drafts: [{ experiment_id: 'exp_1', name: 'Summer price test', step: 3, selectedIds: ['v1'] }],
+      });
+      await new Promise(resolve => setTimeout(resolve, 0));
+    });
+
+    expect(container.textContent).not.toContain('Opening draft…');
+    expect(onTitleChange).toHaveBeenLastCalledWith('Summer price test');
+    expect(text('step')).toBe('3');
+    const savedIds = JSON.parse(localStorage.getItem(classicWizardDraftKey(SHOP)) || '[]').map(
+      draft => draft.experiment_id
+    );
+    expect(savedIds.filter(id => id !== 'exp_1')).toEqual([]);
+    expect(
+      saveSmartPricingWizardDraft.mock.calls.filter(([, draft]) => draft?.experiment_id !== 'exp_1')
+    ).toEqual([]);
+  });
+
   it('leaves the wizard alone when the server has never heard of the draft', async () => {
     await renderWizard('/app/experiments/new?resume=exp_missing');
 

@@ -55,10 +55,14 @@ function normalizeId(value) {
   return raw;
 }
 
-function matchesCollection(row, collectionId, collectionLabel) {
-  if (!collectionId) return true;
-  const want = normalizeId(collectionId);
-  const candidates = [
+/**
+ * Products in no collection. Without this group they were reachable only
+ * under All products, so the collection counts summed to less than All.
+ */
+const NO_COLLECTION = '__no_collection__';
+
+function rowCollectionIds(row) {
+  return [
     row.collection_id,
     row.primary_collection_id,
     row.collection_gid,
@@ -66,6 +70,18 @@ function matchesCollection(row, collectionId, collectionLabel) {
   ]
     .map(normalizeId)
     .filter(Boolean);
+}
+
+/** Only a row that lists its collections can say it has none. */
+function isUncollected(row) {
+  return Array.isArray(row?.collection_ids) && !rowCollectionIds(row).length;
+}
+
+function matchesCollection(row, collectionId, collectionLabel) {
+  if (!collectionId) return true;
+  if (collectionId === NO_COLLECTION) return isUncollected(row);
+  const want = normalizeId(collectionId);
+  const candidates = rowCollectionIds(row);
   if (want && candidates.some(id => id === want || id.endsWith(want) || want.endsWith(id))) {
     return true;
   }
@@ -170,11 +186,15 @@ export default function ClassicProductPickerModal({
       label: 'All products',
       value: '',
     };
+    const hasUncollected = (opportunities || []).some(isUncollected);
     return [
       { ...allOption, kind: 'collection' },
       ...[...byId.values()].sort((a, b) =>
         a.label.localeCompare(b.label, undefined, { sensitivity: 'base' })
       ),
+      ...(hasUncollected
+        ? [{ value: NO_COLLECTION, label: 'Not in a collection', kind: 'collection' }]
+        : []),
     ];
   }, [opportunities, collectionOptions]);
 
@@ -270,7 +290,7 @@ export default function ClassicProductPickerModal({
   const collectionsTouched = useMemo(() => {
     let count = 0;
     collectionGroups.forEach(opt => {
-      if (!opt.value) return;
+      if (!opt.value || opt.value === NO_COLLECTION) return;
       if (groupStats.get(groupKey(opt))?.selected > 0) count += 1;
     });
     return count;

@@ -143,6 +143,11 @@ export function apiPut(endpoint, data, config = {}) {
   return apiClient.put(endpoint, data, { ...config, params });
 }
 
+export function apiPatch(endpoint, data, config = {}) {
+  const params = withDomainParams(config.params || {});
+  return apiClient.patch(endpoint, data, { ...config, params });
+}
+
 export function apiDelete(endpoint, config = {}) {
   const params = withDomainParams(config.params || {});
   return apiClient.delete(endpoint, { ...config, params });

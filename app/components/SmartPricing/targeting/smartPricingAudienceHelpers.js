@@ -178,6 +178,15 @@ const SECONDARY_LOOKUP_OPTIONS = [...GOAL_METRIC_OPTIONS, ...SECONDARY_METRIC_OP
 const SECONDARY_BY_VALUE = new Map(SECONDARY_LOOKUP_OPTIONS.map(o => [o.value, o]));
 const SECONDARY_BY_LABEL = new Map(SECONDARY_LOOKUP_OPTIONS.map(o => [o.label.toLowerCase(), o]));
 
+/** Whether a key names a metric from the catalog rather than a storefront goal. */
+export function isCatalogSecondaryMetric(key) {
+  return SECONDARY_BY_VALUE.has(
+    String(key || '')
+      .trim()
+      .toLowerCase()
+  );
+}
+
 /**
  * Secondary keys that name a metric computed from visits and orders, rather
  * than a storefront event to count.

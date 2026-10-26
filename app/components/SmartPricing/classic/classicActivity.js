@@ -125,18 +125,28 @@ export function activityKindMeta(kind) {
   return ACTIVITY_KIND_META[String(kind || '').trim()] || { label: 'Event', group: 'lifecycle' };
 }
 
+/** Detail line every guardrail settings save has carried, including older History entries. */
+const GUARDRAIL_SETTINGS_DETAIL = 'revenue per visitor guardrail settings changed.';
+
 /**
- * A threshold change is a guardrail event; turning the guardrail on or off,
- * like audience, traffic and metric edits, is a settings change.
+ * Any guardrail edit (turned on, turned off, threshold) is filed under
+ * Guardrails; audience, traffic and metric edits stay settings changes.
  */
-function activityGroup(item = {}) {
-  if (
-    String(item?.kind || '').trim() === 'updated' &&
-    /^guardrail threshold/i.test(String(item?.title || ''))
-  ) {
-    return 'guardrail';
+export function activityGroup(item = {}) {
+  if (String(item?.kind || '').trim() === 'updated') {
+    const title = String(item?.title || '').trim();
+    const detail = String(item?.detail || '').trim().toLowerCase();
+    if (/^guardrail\b/i.test(title) || detail === GUARDRAIL_SETTINGS_DETAIL) return 'guardrail';
   }
   return activityKindMeta(item?.kind).group;
+}
+
+/** Badge text for one History line. */
+export function activityItemLabel(item = {}) {
+  if (String(item?.kind || '').trim() === 'updated' && activityGroup(item) === 'guardrail') {
+    return 'Guardrail changed';
+  }
+  return activityKindMeta(item?.kind).label;
 }
 
 export function activityKindTone(item = {}) {
@@ -246,6 +256,11 @@ export function collectActivityLogs(plans = [], fallbackActor = 'You') {
     }
   }
   return [...byId.values()];
+}
+
+export function resolveActivityFilter(raw) {
+  const key = String(raw || '').trim().toLowerCase();
+  return ACTIVITY_FILTERS.some(row => row.id === key) ? key : 'all';
 }
 
 export function filterActivityItems(items = [], filter = 'all') {

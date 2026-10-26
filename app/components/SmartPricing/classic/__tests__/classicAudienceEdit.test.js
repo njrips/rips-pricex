@@ -13,8 +13,8 @@ import {
   resolveLiveEditActivityEntries,
   resolveMinSampleSize,
   validateClassicAudienceUi,
-  resolveAudienceHistoryActivityTitle,
 } from '../classicAudienceEdit';
+import { buildMetricsSummary } from '../classicExperimentDetailsHelpers';
 import {
   GOAL_METRIC_OPTIONS,
   classicMetricOptionsFor,
@@ -159,6 +159,30 @@ describe('audienceUiFromSummaries', () => {
     expect(state.primaryCustomGoal?.event_name).toBe('vip_checkout');
     expect(state.customGoals.map(goal => goal.event_name)).toEqual(['add_to_cart']);
     expect(state.secondaryMetrics).not.toContain('vip_checkout');
+  });
+
+  it('reads each saved secondary back once from a copy without its wizard state', () => {
+    // A paused test reloaded from the server can carry its goal but not
+    // audience_ui. The goal's secondary list holds the catalog metrics as well
+    // as storefront goals, and read back as custom goals each catalog metric
+    // got a second pill -- which the next save wrote back onto the test.
+    const roundTrip = audienceUi => {
+      const [plan] = applyAudienceUiToPlans([{ id: 'p1', goal: {}, metadata: {} }], audienceUi);
+      const metrics = buildMetricsSummary({ ...plan, metadata: {} });
+      return audienceUiFromSummaries({}, metrics, {});
+    };
+    const first = roundTrip({
+      primaryMetric: 'revenue_per_visitor',
+      secondaryMetrics: ['conversion_rate', 'aov'],
+      customGoals: [{ event_name: 'add_to_cart', label: 'Add to cart', trigger_type: 'custom_event' }],
+    });
+
+    expect(first.secondaryMetrics).toEqual(['conversion_rate', 'aov']);
+    expect(first.customGoals.map(goal => goal.event_name)).toEqual(['add_to_cart']);
+
+    const second = roundTrip(first);
+    expect(second.secondaryMetrics).toEqual(['conversion_rate', 'aov']);
+    expect(second.customGoals.map(goal => goal.event_name)).toEqual(['add_to_cart']);
   });
 });
 
@@ -357,24 +381,6 @@ describe('profit per visitor, after it stopped being offered', () => {
 
   it('falls back to revenue for a metric that never existed', () => {
     expect(normalizePrimaryMetric('vibes_per_visitor')).toBe('revenue_per_visitor');
-  });
-});
-
-describe('resolveAudienceHistoryActivityTitle', () => {
-  it('names traffic-only saves separately from targeting', () => {
-    const prev = { trafficAllocation: 50, segment: 'all_visitors', devices: ['all'] };
-    const next = { ...prev, trafficAllocation: 60 };
-    expect(resolveAudienceHistoryActivityTitle('audience', prev, next)).toBe(
-      'Traffic allocation changed'
-    );
-  });
-
-  it('names guardrail on/off toggles', () => {
-    const prev = { guardrails: [{ id: 'revenue', on: true, threshold: 10 }] };
-    const next = { guardrails: [{ id: 'revenue', on: false, threshold: 10 }] };
-    expect(resolveAudienceHistoryActivityTitle('guardrail', prev, next)).toBe(
-      'Guardrail turned off'
-    );
   });
 });
 

@@ -44,6 +44,48 @@ describe('ClassicActivityTab', () => {
     expect(container.textContent).not.toContain('Test paused');
   });
 
+  it('counts turning the guardrail on or off under Guardrails', () => {
+    render([
+      { id: 'a', at, kind: 'updated', title: 'Guardrail turned on' },
+      { id: 'b', at, kind: 'updated', title: 'Audience targeting changed' },
+    ]);
+    expect(filterButton('Guardrails').textContent).toBe('Guardrails1');
+    expect(container.textContent).toContain('1 guardrail');
+    act(() => filterButton('Guardrails').click());
+    expect(container.textContent).toContain('Guardrail turned on');
+    expect(container.textContent).toContain('Guardrail changed');
+    expect(container.textContent).not.toContain('Audience targeting changed');
+  });
+
+  it('keeps the page-held filter when the tab is mounted again', () => {
+    let pageFilter = 'all';
+    const activity = [
+      { id: 'a', at, kind: 'updated', title: 'Guardrail turned off' },
+      { id: 'b', at, kind: 'paused', title: 'Test paused' },
+    ];
+    const renderControlled = () =>
+      act(() =>
+        root.render(
+          h(ClassicActivityTab, {
+            activity,
+            filter: pageFilter,
+            onFilterChange: next => {
+              pageFilter = next;
+            },
+          })
+        )
+      );
+    renderControlled();
+    act(() => filterButton('Guardrails').click());
+    expect(pageFilter).toBe('guardrail');
+
+    act(() => root.unmount());
+    root = createRoot(container);
+    renderControlled();
+    expect(filterButton('Guardrails').getAttribute('aria-pressed')).toBe('true');
+    expect(container.textContent).not.toContain('Test paused');
+  });
+
   it('keeps an empty filter selected instead of jumping back to All', () => {
     render([{ id: 'b', at, kind: 'paused', title: 'Test paused' }]);
     act(() => filterButton('Guardrails').click());

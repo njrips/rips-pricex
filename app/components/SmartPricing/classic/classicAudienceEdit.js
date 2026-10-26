@@ -9,6 +9,7 @@ import {
   CLASSIC_SOURCE_OPTIONS,
   buildClassicGoalPayload,
   classicAudienceToSegments,
+  isCatalogSecondaryMetric,
   normalizeClassicAudienceTargeting,
   normalizeCustomGoals,
   normalizePrimaryMetric,
@@ -204,7 +205,18 @@ export function audienceUiFromSummaries(summary = {}, metrics = {}, ui = {}) {
   const storedPrimaryCustom = stored.primaryCustomGoal
     ? normalizeCustomGoals([stored.primaryCustomGoal])[0] || null
     : null;
-  const metricCustoms = normalizeCustomGoals(stored.customGoals || metrics.secondary);
+  // `goal.secondary` lists every secondary, the catalog metrics as well as
+  // storefront goals. Read back as custom goals, each catalog metric got a
+  // second pill beside its own, and saving wrote the copy back to the test.
+  const goalRows = normalizeCustomGoals(stored.customGoals || metrics.secondary);
+  const metricCustoms = goalRows.filter(goal => !isCatalogSecondaryMetric(goal.event_name));
+  const customKeys = new Set(
+    metricCustoms.map(goal =>
+      String(goal.event_name || '')
+        .trim()
+        .toLowerCase()
+    )
+  );
   const rawPrimaryKey = String(rawPrimary || '')
     .trim()
     .toLowerCase();
@@ -235,9 +247,12 @@ export function audienceUiFromSummaries(summary = {}, metrics = {}, ui = {}) {
     countryMode: countryLists.countryMode,
     primaryMetric,
     primaryCustomGoal,
-    secondaryMetrics: normalizeSecondaryEvents(
-      stored.secondaryMetrics || metrics.secondaryEvents
-    ).filter(key => key !== primaryKey),
+    // `secondary_events` names the storefront goals too; they already have
+    // their own pill from customGoals.
+    secondaryMetrics: normalizeSecondaryEvents([
+      ...(stored.secondaryMetrics || metrics.secondaryEvents || []),
+      ...goalRows.filter(goal => isCatalogSecondaryMetric(goal.event_name)).map(goal => goal.event_name),
+    ]).filter(key => key !== primaryKey && !customKeys.has(key)),
     customGoals: metricCustoms.filter(
       goal =>
         String(goal.event_name || '')
@@ -373,28 +388,10 @@ function audienceTargetingFingerprint(state = {}) {
   });
 }
 
-/** History tab title when audience/metrics/guardrail settings are saved on a running test. */
-export function resolveAudienceHistoryActivityTitle(editFocus, prev = {}, next = {}) {
-  const focus = String(editFocus || 'audience').trim();
-  if (focus === 'metrics') return 'Primary metric changed';
-  if (focus === 'guardrail') {
-    const prevRow = revenueGuardrailUiRow(prev);
-    const nextRow = revenueGuardrailUiRow(next);
-    const prevOn = prevRow?.on !== false;
-    const nextOn = nextRow?.on !== false;
-    if (prevOn !== nextOn) return nextOn ? 'Guardrail turned on' : 'Guardrail turned off';
-    return 'Guardrail threshold changed';
-  }
-  const trafficChanged = Number(prev.trafficAllocation) !== Number(next.trafficAllocation);
-  const targetingChanged = audienceTargetingFingerprint(prev) !== audienceTargetingFingerprint(next);
-  if (trafficChanged && !targetingChanged) return 'Traffic allocation changed';
-  return 'Audience targeting changed';
-}
-
 const GUARDRAIL_EDIT_DETAIL = 'Revenue per visitor guardrail settings changed.';
 
 /**
- * History entries for a live-test edit saved from the wizard, one per area
+ * History entries for a live-test settings save, one per area
  * that changed, so a guardrail edit is filed under Guardrails rather than
  * hidden inside a generic "Settings changed".
  */

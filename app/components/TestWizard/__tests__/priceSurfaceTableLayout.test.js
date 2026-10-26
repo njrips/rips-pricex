@@ -46,8 +46,14 @@ describe('the price surface mapping table', () => {
 
   it('lets a scrolled row keep its full width', () => {
     const row = ruleBody('.priceSurfaceMappingGridRow {');
-    expect(row).toMatch(/width:\s*max-content/);
-    expect(row).toMatch(/min-width:\s*100%/);
+    expect(row).toMatch(/min-width:\s*min-content/);
+  });
+
+  it('only scrolls when the column minimums do not fit', () => {
+    // Sizing the row to its controls' max-content overflowed on Safari, which
+    // reads native inputs and selects wider, even where the row fit the panel.
+    const row = ruleBody('.priceSurfaceMappingGridRow {');
+    expect(row).not.toMatch(/(^|[^-])width:\s*max-content/);
   });
 
   it('does not let the selector field alone force the row past the panel', () => {

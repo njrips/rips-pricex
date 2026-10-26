@@ -2,11 +2,12 @@ import {
   deleteSmartPricingInboxPlan,
   getSmartPricingInboxPlans,
   getSmartPricingInboxSummary,
+  patchSmartPricingInboxPlan,
   saveSmartPricingInboxPlans,
 } from '../../services/smartPricingApi';
-import { mergePlanActivityLogs } from './classic/classicActivity';
+import { appendActivityToPlans, mergePlanActivityLogs } from './classic/classicActivity';
 import { compactInboxPlans } from './classic/classicWizardDraftSize';
-import { readInboxPlans, updateInboxPlan } from './smartPricingConstants';
+import { readInboxPlans, updateInboxPlan, writeInboxPlans } from './smartPricingConstants';
 
 const persistTimers = new Map();
 const revisionByDomain = new Map();
@@ -223,6 +224,85 @@ export async function persistInboxPlansNow(domain, plans, { deletedPlanIds = [] 
     }
     return saved;
   }
+}
+
+function isRetryableNetworkError(err) {
+  return !err?.response || err?.code === 'ECONNABORTED' || err?.response?.status >= 500;
+}
+
+async function patchPlanWithRetry(domain, planId, patch) {
+  try {
+    return await patchSmartPricingInboxPlan(domain, planId, patch);
+  } catch (err) {
+    if (!isRetryableNetworkError(err)) throw err;
+    return patchSmartPricingInboxPlan(domain, planId, patch);
+  }
+}
+
+/**
+ * Archive or restore plans on the server, one row each, before this browser's
+ * copy changes.
+ *
+ * Archive used to rewrite the whole inbox and mark the browser's copy first. On
+ * a slow connection that large save could time out after the copy already read
+ * Archived, so the screen said Archived until a reload brought the server's
+ * Finished back. A plan the server never had falls back to the whole-inbox save.
+ */
+export async function setInboxPlansArchived(
+  domain,
+  plans,
+  { archived, archivedAt = null, entry = null } = {}
+) {
+  const targets = (Array.isArray(plans) ? plans : []).filter(plan => plan?.id);
+  const patch = {
+    archived: Boolean(archived),
+    archived_at: archived ? archivedAt || new Date().toISOString() : null,
+    ...(entry ? { append_activity: [entry] } : {}),
+  };
+  const outcomes = await Promise.allSettled(
+    targets.map(plan => patchPlanWithRetry(domain, plan.id, patch))
+  );
+
+  const fromServer = new Map();
+  const missingIds = new Set();
+  let failure = null;
+  let revision = null;
+  outcomes.forEach((outcome, index) => {
+    const plan = targets[index];
+    if (outcome.status === 'fulfilled') {
+      if (outcome.value?.plan?.id) fromServer.set(plan.id, outcome.value.plan);
+      revision = outcome.value?.revision || revision;
+      return;
+    }
+    const reason = outcome.reason;
+    const notFound =
+      reason?.response?.status === 400 &&
+      /plan not found/i.test(JSON.stringify(reason.response?.data || ''));
+    if (notFound) missingIds.add(plan.id);
+    else failure = failure || reason;
+  });
+  if (revision) setInboxServerRevision(domain, revision);
+
+  const stamp = plan => {
+    const next = { ...plan, archived: patch.archived, archived_at: patch.archived_at };
+    return entry ? appendActivityToPlans([next], entry)[0] : next;
+  };
+  const local = readInboxPlans(domain);
+  const localIds = new Set(local.map(plan => plan?.id));
+  const next = [
+    ...local.map(plan => {
+      if (fromServer.has(plan.id)) return fromServer.get(plan.id);
+      if (missingIds.has(plan.id) && !failure) return stamp(plan);
+      return plan;
+    }),
+    ...[...fromServer.values()].filter(plan => !localIds.has(plan.id)),
+  ];
+  writeInboxPlans(domain, next, { persist: false });
+  if (failure) throw failure;
+  if (missingIds.size) {
+    await persistInboxPlansNow(domain, next);
+  }
+  return next;
 }
 
 export async function patchServerInboxPlan(domain, planId, patch = {}) {

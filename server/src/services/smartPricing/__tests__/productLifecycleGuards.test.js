@@ -128,6 +128,7 @@ function loadService({ plan, test } = {}) {
       throw err;
     },
     heldVariantIds: () => new Set(['gid://V1']),
+    experimentIdOfTest: () => '',
     // The real lock is a Postgres lease; here it only has to run the work.
     async withPricingEnrollmentLock(_target, fn) {
       return fn();

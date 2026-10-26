@@ -104,6 +104,34 @@ describe('postToEachExperimentTest', () => {
     expect(result.succeeded).toEqual(['t1']);
   });
 
+  it('starts a variant again when a sibling variant was still being started', async () => {
+    const busy = Object.assign(new Error('This product is already being started'), {
+      response: { status: 409, data: { code: 'PRODUCT_LAUNCH_IN_PROGRESS' } },
+    });
+    const post = vi.fn().mockRejectedValueOnce(busy).mockResolvedValue({ data: {} });
+
+    const result = await postToEachExperimentTest(['t1'], 'start', post, {
+      retryDelayMs: 0,
+      body: { force: true },
+    });
+
+    expect(post).toHaveBeenCalledTimes(2);
+    expect(post).toHaveBeenLastCalledWith('/tests/t1/start', { force: true });
+    expect(result.succeeded).toEqual(['t1']);
+  });
+
+  it('does not retry a product another test is pricing', async () => {
+    const taken = Object.assign(new Error('Held by Summer pricing'), {
+      response: { status: 409, data: { code: 'PRODUCT_IN_ANOTHER_TEST' } },
+    });
+    const post = vi.fn().mockRejectedValue(taken);
+
+    const result = await postToEachExperimentTest(['t1'], 'start', post, { retryDelayMs: 0 });
+
+    expect(post).toHaveBeenCalledTimes(1);
+    expect(result.failed[0].reason).toBe(taken);
+  });
+
   it('does not repeat a refusal', async () => {
     const post = vi.fn(async () => {
       throw httpError(409, 'Only a running test can be paused.');

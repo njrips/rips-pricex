@@ -550,7 +550,9 @@ export default function ProductsPricingStepPanel({
   });
   const aiSuggestCopy = getAiSuggestCopy({
     hasProducts: Boolean(pricingRows.length),
-    suggested: effectiveAiSuggested,
+    // Cleared by a band edit while the prices stay, which is how "Band
+    // updated" knows the prices on screen came from another band.
+    suggested: aiSuggested,
     hasArmPrices: activeArmHasAiPrices,
     summary: aiSuggestSummary,
     busy: suggestBusy,
@@ -764,27 +766,40 @@ export default function ProductsPricingStepPanel({
       ? 0
       : group.variants.filter(v => priceRangeError(Number(v.current_price ?? v.price) || 0, getTestPrice(v, armId), v.variant_id, armId))
           .length;
+    // The status sits on its own line: inline after a wide range such as
+    // "$1.00–$999,999.90" it wrapped mid-phrase under the figures.
     return (
       <div className={styles.priceSummary} key={`${group.key}-${armId}-summary`}>
-        <span className={prices.length || isControlArm ? undefined : styles.priceSummaryMuted}>
-          {text}
-          {missing > 0 ? ` · ${missing} unpriced` : ''}
-        </span>
-        {invalid > 0 ? (
-          <span className={styles.priceSummaryInvalid}>
-            {` · ${invalid} ${invalid === 1 ? 'needs' : 'need'} fixing`}
+        <div className={styles.priceSummaryMain}>
+          <span
+            className={`${styles.priceSummaryRange} ${
+              prices.length || isControlArm ? '' : styles.priceSummaryMuted
+            }`}
+          >
+            {text}
           </span>
-        ) : null}
-        {!isControlArm && !isOpen ? (
-          <span style={{ marginLeft: 8 }}>
-            <Button
-              variant="plain"
-              onClick={() => toggleExpand(group.key)}
-              accessibilityLabel={`Set prices for each variant of ${group.title}`}
-            >
-              Edit variants
-            </Button>
-          </span>
+          {!isControlArm && !isOpen ? (
+            <span className={styles.priceSummaryAction}>
+              <Button
+                variant="plain"
+                onClick={() => toggleExpand(group.key)}
+                accessibilityLabel={`Set prices for each variant of ${group.title}`}
+              >
+                Edit variants
+              </Button>
+            </span>
+          ) : null}
+        </div>
+        {missing > 0 || invalid > 0 ? (
+          <div className={styles.priceSummaryStatus}>
+            {missing > 0 ? <span>{`${missing} unpriced`}</span> : null}
+            {missing > 0 && invalid > 0 ? <span aria-hidden>·</span> : null}
+            {invalid > 0 ? (
+              <span className={styles.priceSummaryInvalid}>
+                {`${invalid} ${invalid === 1 ? 'needs' : 'need'} fixing`}
+              </span>
+            ) : null}
+          </div>
         ) : null}
       </div>
     );

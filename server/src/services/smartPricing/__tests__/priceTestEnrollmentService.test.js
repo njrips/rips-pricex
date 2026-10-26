@@ -15,7 +15,14 @@ jest.mock('../../../models/test', () => ({
   getTestsByIds: jest.fn(async () => resumeCandidates),
 }));
 
+jest.mock('../../../utils/jobLease', () => ({
+  acquireJobLease: jest.fn(async () => true),
+  releaseJobLease: jest.fn(async () => undefined),
+}));
+const jobLease = require('../../../utils/jobLease');
+
 const {
+  withPricingEnrollmentLock,
   assertProductIsFreeToPrice,
   assertTestIsFreeToStart,
   getPriceTestEnrollment,
@@ -825,5 +832,96 @@ describe('an experiment launching its own product one variant at a time', () => 
 
     expect(findLiveHold(enrollment, { productId: PRODUCT })).toBeNull();
     expect(findLiveHold(enrollment, { variantId: VARIANT })).toMatchObject({ test_id: 'test-v1' });
+  });
+});
+
+describe('resuming a product with several variants', () => {
+  // A classic experiment launches one test per variant, all naming the product.
+  const VARIANT_B = 'gid://shopify/ProductVariant/223';
+  const variantTest = (id, variantId, overrides = {}) =>
+    priceTest({
+      id,
+      metadata: { experiment_id: 'exp-1' },
+      variants: [
+        {
+          id: 'control',
+          config: { byProduct: { [PRODUCT]: { byVariant: { [variantId]: { price: 40 } } } } },
+        },
+      ],
+      ...overrides,
+    });
+
+  it('starts a variant while a sibling variant is already running', async () => {
+    rows.push(variantTest('test-v1', VARIANT));
+    await expect(
+      assertTestIsFreeToStart({
+        shopDomain: 'demo.myshopify.com',
+        test: variantTest('test-v2', VARIANT_B, { status: 'paused' }),
+      })
+    ).resolves.toBeNull();
+  });
+
+  it('is still refused by another experiment pricing the product', async () => {
+    rows.push(variantTest('thief', VARIANT, { metadata: { experiment_id: 'exp-other' } }));
+    await expect(
+      assertTestIsFreeToStart({
+        shopDomain: 'demo.myshopify.com',
+        test: variantTest('test-v2', VARIANT_B, { status: 'paused' }),
+      })
+    ).rejects.toMatchObject({ code: 'PRODUCT_IN_ANOTHER_TEST' });
+  });
+
+  it('is still refused on the very variant a sibling prices', async () => {
+    rows.push(variantTest('test-v1', VARIANT));
+    await expect(
+      assertTestIsFreeToStart({
+        shopDomain: 'demo.myshopify.com',
+        test: variantTest('test-v1-again', VARIANT, { status: 'paused' }),
+      })
+    ).rejects.toMatchObject({ code: 'PRODUCT_IN_ANOTHER_TEST' });
+  });
+
+  it('previews the rest of the experiment as clear once one variant runs', async () => {
+    rows.push(variantTest('test-v1', VARIANT));
+    resumeCandidates.push(variantTest('test-v2', VARIANT_B, { status: 'paused' }));
+    const result = await previewResumeConflicts({
+      shopDomain: 'demo.myshopify.com',
+      testIds: ['test-v2'],
+    });
+    expect(result).toEqual({ clear: ['test-v2'], blocked: [] });
+  });
+});
+
+describe('the start lock', () => {
+  beforeEach(() => {
+    jobLease.acquireJobLease.mockReset();
+    jobLease.releaseJobLease.mockClear();
+  });
+
+  it('waits for a sibling start to finish instead of refusing at once', async () => {
+    jobLease.acquireJobLease
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValue(true);
+    const work = jest.fn(async () => 'started');
+
+    await expect(
+      withPricingEnrollmentLock({ shopDomain: 'demo.myshopify.com', test: priceTest() }, work)
+    ).resolves.toBe('started');
+    expect(work).toHaveBeenCalledTimes(1);
+    expect(jobLease.releaseJobLease).toHaveBeenCalledTimes(1);
+  });
+
+  it('gives up after the wait with a message the merchant can act on', async () => {
+    jobLease.acquireJobLease.mockResolvedValue(false);
+    const work = jest.fn();
+
+    await expect(
+      withPricingEnrollmentLock(
+        { shopDomain: 'demo.myshopify.com', test: priceTest(), waitMs: 0 },
+        work
+      )
+    ).rejects.toMatchObject({ code: 'PRODUCT_LAUNCH_IN_PROGRESS' });
+    expect(work).not.toHaveBeenCalled();
   });
 });

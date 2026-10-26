@@ -2,9 +2,10 @@ import { useMemo, useState } from 'react';
 import {
   ACTIVITY_FILTERS,
   activityFilterCounts,
-  activityKindMeta,
+  activityItemLabel,
   activityKindTone,
   filterActivityItems,
+  resolveActivityFilter,
 } from '../classicActivity';
 import {
   formatActivityMeta,
@@ -13,8 +14,15 @@ import {
 } from '../classicExperimentDetailsHelpers';
 import styles from '../SmartPricingClassic.module.css';
 
-export default function ClassicActivityTab({ activity }) {
-  const [filter, setFilter] = useState('all');
+/**
+ * `filter` / `onFilterChange` let the page keep the choice in the URL, so it
+ * survives the page reloading its data; without them the tab keeps its own.
+ */
+export default function ClassicActivityTab({ activity, filter: filterProp, onFilterChange }) {
+  const [localFilter, setLocalFilter] = useState('all');
+  const controlled = typeof onFilterChange === 'function';
+  const filter = resolveActivityFilter(controlled ? filterProp : localFilter);
+  const setFilter = controlled ? onFilterChange : setLocalFilter;
   const items = useMemo(() => (Array.isArray(activity) ? activity : []), [activity]);
   const counts = useMemo(() => activityFilterCounts(items), [items]);
   const visible = useMemo(() => filterActivityItems(items, filter), [items, filter]);
@@ -64,7 +72,7 @@ export default function ClassicActivityTab({ activity }) {
               <ol className={styles.activityTimeline}>
                 {group.items.map((item, index) => {
                   const tone = activityKindTone(item);
-                  const kindLabel = activityKindMeta(item.kind).label;
+                  const kindLabel = activityItemLabel(item);
                   return (
                     <li
                       key={`${item.id}-${item.at}`}

@@ -44,6 +44,7 @@ When starting a new investigation in this project:
 | 2026-09-03 | [2026-09-03_CONFIDENCE_METHOD.md](./2026-09-03_CONFIDENCE_METHOD.md) | Done | How test confidence is computed and why |
 | 2026-10-15 | [2026-10-15_AI_PRICING_SIGNALS_AND_WEIGHTS.md](./2026-10-15_AI_PRICING_SIGNALS_AND_WEIGHTS.md) | Awaiting client | Shopify variable lists, weighted-signal scoring plan, ShopifyQL / Level 2 data needs |
 | 2026-10-15 | [2026-10-15_STEP3_CATALOG_LOADING.md](./2026-10-15_STEP3_CATALOG_LOADING.md) | Phase 1 done; 2–3 proposed | Where step 3's catalog wait goes, AI ranking off the critical path, progress and large-catalog options |
+| 2026-10-23 | [2026-10-23_STAFF_STORES_AND_SUPPORT_ACCESS.md](./2026-10-23_STAFF_STORES_AND_SUPPORT_ACCESS.md) | Planned | Staff Stores panel with billing dates, per-person staff sessions, time-limited support grants replacing the dev plan |
 
 ## Quick facts
 

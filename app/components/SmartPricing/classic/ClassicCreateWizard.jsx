@@ -412,6 +412,11 @@ export default function ClassicCreateWizard({ onTitleChange }) {
   // Restored from plans already in the inbox rather than from a draft, so
   // there is no draft for the server to be holding a newer copy of.
   const [resumedFromInbox, setResumedFromInbox] = useState(false);
+  // Set while ?resume= names a draft only the server can hold. The wizard
+  // stays behind its loader until that copy lands: a blank, editable form in
+  // the meantime counted as the merchant's own input, so the restore stood
+  // down and the blank form was saved as a second, unnamed draft.
+  const [serverDraftPendingId, setServerDraftPendingId] = useState('');
   // Set when ?resume= names an experiment that has already launched. Edit for
   // one of those is its details page; this wizard can only create.
   const [launchedResumeId, setLaunchedResumeId] = useState('');
@@ -659,8 +664,12 @@ export default function ClassicCreateWizard({ onTitleChange }) {
   // restored". `wizardSnapshotHasMerchantInput` cannot: a resumed draft is
   // full of input by definition, all of it the draft's own.
   const seededSnapshot = useRef(null);
+  // What is on screen while a server draft is still loading is a blank form,
+  // not the draft, so nothing may save it.
+  const draftPending = useRef(false);
   useEffect(() => {
     liveSnapshot.current = wizardSnapshot;
+    draftPending.current = Boolean(serverDraftPendingId);
     if (draftHydrated && seededSnapshot.current === null) {
       seededSnapshot.current = JSON.stringify(wizardSnapshot);
     }
@@ -695,7 +704,7 @@ export default function ClassicCreateWizard({ onTitleChange }) {
   const persistWizardDraft = useCallback(
     snapshot => {
       // A live edit never becomes a draft: the experiment already exists.
-      if (autosaveSuspended.current || liveEdit) return false;
+      if (autosaveSuspended.current || liveEdit || draftPending.current) return false;
       if (!shouldAutosaveWizardSnapshot(snapshot)) return false;
       try {
         writeClassicWizardDraft(shopDomain, snapshot);
@@ -991,6 +1000,8 @@ export default function ClassicCreateWizard({ onTitleChange }) {
           if (urlStep == null) {
             setStep(editingLive ? 0 : inboxPlans.some(p => p.price_arms?.length) ? 4 : 2);
           }
+        } else {
+          setServerDraftPendingId(resumeId);
         }
         // Neither store knows this id — a link to an experiment that was
         // launched, deleted, or aged out. Opening a blank wizard beats
@@ -1023,7 +1034,11 @@ export default function ClassicCreateWizard({ onTitleChange }) {
     // draft without leaving the wizard still looks that one up.
     if (serverResumeTried.current === resumeId) return undefined;
     serverResumeTried.current = resumeId;
+    // Read once: the loader has kept the wizard out of reach since seeding, so
+    // nothing on screen can be the merchant's own input.
+    const heldBehindLoader = serverDraftPendingId === resumeId;
     let cancelled = false;
+    let settled = false;
     loadServerWizardDraft(shopDomain, resumeId).then(async match => {
       if (cancelled) return;
       // If the experiment has launched, it belongs to its details page, even
@@ -1034,6 +1049,8 @@ export default function ClassicCreateWizard({ onTitleChange }) {
         .then(() => getSmartPricingExperimentTests(shopDomain, resumeId))
         .catch(() => []);
       if (cancelled) return;
+      settled = true;
+      setServerDraftPendingId(prev => (prev === resumeId ? '' : prev));
       const launched = (Array.isArray(tests) ? tests : []).some(test =>
         LAUNCHED_TEST_STATUSES.has(String(test?.status || '').trim().toLowerCase())
       );
@@ -1064,7 +1081,7 @@ export default function ClassicCreateWizard({ onTitleChange }) {
         const serverPlans = Array.isArray(match.plans) ? match.plans.length : 0;
         const localPlans = Array.isArray(resumedLocalDraft.plans) ? resumedLocalDraft.plans.length : 0;
         if (serverAt === localAt && serverPlans < localPlans) return;
-      } else if (wizardSnapshotHasMerchantInput(liveSnapshot.current)) {
+      } else if (!heldBehindLoader && wizardSnapshotHasMerchantInput(liveSnapshot.current)) {
         // The wizard is on screen and editable while this request is out, so
         // by the time it lands the merchant may have started typing. Their
         // work wins: restoring over it would wipe what they can watch
@@ -1078,6 +1095,9 @@ export default function ClassicCreateWizard({ onTitleChange }) {
     });
     return () => {
       cancelled = true;
+      // A lookup dropped before it answered never ran, so the next pass has to
+      // ask again rather than find it marked as tried.
+      if (!settled && serverResumeTried.current === resumeId) serverResumeTried.current = '';
     };
   }, [
     draftHydrated,
@@ -1085,6 +1105,7 @@ export default function ClassicCreateWizard({ onTitleChange }) {
     launchedResumeId,
     resumedLocalDraft,
     resumedFromInbox,
+    serverDraftPendingId,
     shopDomain,
     applyWizardSnapshot,
     isUntouchedSinceSeed,
@@ -2025,11 +2046,19 @@ export default function ClassicCreateWizard({ onTitleChange }) {
     return bases.length ? bases.reduce((sum, n) => sum + n, 0) / bases.length : 0;
   }, [opportunities, selectedIds, pickMode, maxSelection]);
 
+  // The status line quotes the band Suggest ran with. Once the band on screen
+  // changes it describes prices from another band, so it has to go.
+  const dropAiSuggestStatus = useCallback(() => {
+    if (aiPriceMetaArmId !== activeArmId) return;
+    setAiPriceMeta(prev => ({ ...prev, source: null, summary: null, detail: null }));
+  }, [aiPriceMetaArmId, activeArmId]);
+
   const applyBandField = useCallback(
     (field, value) => {
       patchAiBand({ [field === 'max' ? 'aiMaxPct' : 'aiMinPct']: value, aiSuggested: false });
+      dropAiSuggestStatus();
     },
-    [patchAiBand]
+    [patchAiBand, dropAiSuggestStatus]
   );
 
   const setAiMinPct = useCallback(value => applyBandField('min', value), [applyBandField]);
@@ -2059,8 +2088,9 @@ export default function ClassicCreateWizard({ onTitleChange }) {
         ...(nextMin != null ? { aiMinPct: nextMin } : {}),
         ...(nextMax != null ? { aiMaxPct: nextMax } : {}),
       });
+      dropAiSuggestStatus();
     },
-    [aiUnit, aiMinPct, aiMaxPct, aiBandAveragePrice, patchAiBand]
+    [aiUnit, aiMinPct, aiMaxPct, aiBandAveragePrice, patchAiBand, dropAiSuggestStatus]
   );
 
   const handleAudienceChange = useCallback(nextAudience => {
@@ -2656,7 +2686,9 @@ export default function ClassicCreateWizard({ onTitleChange }) {
         : 'Launching test…'
       : launchPhase === 'opening' || launchedResumeId
         ? 'Opening test…'
-        : '';
+        : serverDraftPendingId
+          ? 'Opening draft…'
+          : '';
   if (wizardBootstrapping || launchLoaderLabel) {
     return (
       <PageShell>

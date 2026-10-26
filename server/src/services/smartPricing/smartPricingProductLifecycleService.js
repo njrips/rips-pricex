@@ -26,6 +26,7 @@ const {
   withPricingEnrollmentLock,
   releasePriceTestHold,
   heldVariantIds,
+  experimentIdOfTest,
 } = require('./priceTestEnrollmentService');
 const { buildSmartPricingTestAnalytics } = require('./smartPricingTestAnalyticsService');
 const { getShopSmartPricingGuardrails } = require('./smartPricingGuardrailsService');
@@ -265,6 +266,8 @@ async function resumeSmartPricingProduct({ testId, shopDomain } = {}) {
         variantId: [...heldVariantIds(test)][0] || null,
         title: test.name,
         ignoreTestIds: [testId],
+        // A running sibling variant holds its own variant, not this one.
+        experimentId: experimentIdOfTest(test),
       });
       return startTest(testId, shopDomain);
     }

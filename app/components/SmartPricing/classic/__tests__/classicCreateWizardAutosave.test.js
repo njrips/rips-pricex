@@ -505,11 +505,10 @@ describe('ClassicCreateWizard server-side drafts', () => {
     expect(readClassicWizardDraft(SHOP).name).toBe('Spring pricing');
   });
 
-  it('keeps what the merchant typed while a cross-device lookup was still out', async () => {
-    // Resuming a draft this browser has never seen means a request, and the
-    // wizard is on screen and editable the whole time it is in flight.
-    // Restoring over what the merchant is watching themselves type would be
-    // worse than not restoring at all.
+  it('offers nothing to edit until a cross-device draft has arrived', async () => {
+    // Resuming a draft this browser has never seen means a request. A blank,
+    // editable wizard in the meantime took the merchant's first edits as a
+    // reason not to restore, and was then saved as a second, unnamed draft.
     const { getSmartPricingWizardDrafts } = await import('../../../../services/smartPricingApi');
     let release;
     getSmartPricingWizardDrafts.mockReturnValue(
@@ -520,12 +519,14 @@ describe('ClassicCreateWizard server-side drafts', () => {
     );
 
     await renderWizard('/app/experiments/new?resume=exp_1');
-    await type('name', 'Typed here instead');
+    expect(container.querySelector('[data-testid="name"]')).toBeNull();
     await act(async () => {
       release();
     });
 
-    expect(read('name')).toBe('Typed here instead');
+    expect(read('name')).toBe('From the laptop');
+    await type('name', 'Renamed after it arrived');
+    expect(read('name')).toBe('Renamed after it arrived');
     getSmartPricingWizardDrafts.mockResolvedValue({ drafts: [] });
   });
 

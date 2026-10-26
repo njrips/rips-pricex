@@ -167,6 +167,26 @@ describe('collections', () => {
     expect(document.body.textContent).toContain('They are in other tests');
   });
 
+  it('lists products in no collection, so the collection counts add up to All', () => {
+    renderPicker({ opportunities: inCollections });
+    const groupButton = label =>
+      Array.from(document.querySelectorAll('button')).find(node =>
+        node.textContent.trim().startsWith(label)
+      );
+    const none = groupButton('Not in a collection');
+    expect(none.textContent).toContain('0/1');
+    expect(groupButton('Running').textContent).toContain('0/1');
+    expect(groupButton('All products').textContent).toContain('0/2');
+    act(() => none.click());
+    expect(rowCheckboxes()).toHaveLength(1);
+    expect(document.body.textContent).toContain('Wool Hat');
+  });
+
+  it('does not claim a product is in no collection when the catalog did not say', () => {
+    renderPicker();
+    expect(document.body.textContent).not.toContain('Not in a collection');
+  });
+
   it('filters by real membership rather than by a name that looks alike', () => {
     renderPicker({
       opportunities: inCollections.map(row =>

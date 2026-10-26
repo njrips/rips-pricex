@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   activityFilterCounts,
+  activityItemLabel,
   activityKindTone,
   appendActivityToPlans,
   collapseDuplicateLaunchActivities,
@@ -11,6 +12,7 @@ import {
   mergeActivityTimeline,
   mergePlanActivityLogs,
   prependActivityLog,
+  resolveActivityFilter,
   stampLaunchOnPlan,
 } from '../classicActivity';
 import { mapServerEventToActivity } from '../productActionAvailability';
@@ -131,12 +133,13 @@ describe('classic activity log', () => {
     expect(activityFilterCounts(items)).toMatchObject({ all: 3, lifecycle: 2, settings: 1 });
   });
 
-  it('files settings edits under Settings changes and threshold edits under Guardrails', () => {
+  it('files every guardrail edit under Guardrails and other edits under Settings changes', () => {
     const items = [
       { kind: 'updated', title: 'Audience targeting changed' },
       { kind: 'updated', title: 'Traffic allocation changed' },
       { kind: 'updated', title: 'Primary metric changed' },
       { kind: 'updated', title: 'Guardrail turned off' },
+      { kind: 'updated', title: 'Guardrail turned on' },
       { kind: 'updated', title: 'Guardrail threshold changed' },
       { kind: 'paused', title: 'Test paused' },
     ];
@@ -144,14 +147,38 @@ describe('classic activity log', () => {
       'Audience targeting changed',
       'Traffic allocation changed',
       'Primary metric changed',
+    ]);
+    expect(filterActivityItems(items, 'guardrail').map(item => item.title)).toEqual([
       'Guardrail turned off',
+      'Guardrail turned on',
+      'Guardrail threshold changed',
     ]);
     expect(activityFilterCounts(items)).toMatchObject({
-      all: 6,
-      settings: 4,
-      guardrail: 1,
+      all: 7,
+      settings: 3,
+      guardrail: 3,
       lifecycle: 1,
     });
+    expect(activityItemLabel(items[3])).toBe('Guardrail changed');
+    expect(activityItemLabel(items[0])).toBe('Settings changed');
+  });
+
+  it('counts an older guardrail save by its detail line', () => {
+    const items = [
+      {
+        kind: 'updated',
+        title: 'Settings changed',
+        detail: 'Revenue per visitor guardrail settings changed.',
+      },
+    ];
+    expect(activityFilterCounts(items)).toMatchObject({ guardrail: 1, settings: 0 });
+  });
+
+  it('reads the History filter from the URL, falling back to All', () => {
+    expect(resolveActivityFilter('guardrail')).toBe('guardrail');
+    expect(resolveActivityFilter('Settings')).toBe('settings');
+    expect(resolveActivityFilter('nope')).toBe('all');
+    expect(resolveActivityFilter(null)).toBe('all');
   });
 
   it('keeps a reverted price in Lifecycle with its own badge', () => {

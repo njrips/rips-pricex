@@ -6,7 +6,7 @@ import { Button, Modal } from '@shopify/polaris';
 import { ROUTES } from '../../../constants';
 import { apiPost } from '../../../services';
 import { readInboxPlans, writeInboxPlans } from '../smartPricingConstants';
-import { persistInboxPlansNow } from '../smartPricingInboxPersistence';
+import { persistInboxPlansNow, setInboxPlansArchived } from '../smartPricingInboxPersistence';
 import { ButtonIconMore } from './classicIcons';
 import { rollupExperimentStatus } from './classicExperimentHelpers';
 import { appendActivityToPlans, createActivityEntry } from './classicActivity';
@@ -335,14 +335,15 @@ export default function ClassicExperimentRowActions({
       if (resumePlan.action !== 'resume_all') {
         throw new Error(resumeConflictListMessage(resumePlan));
       }
-      await Promise.all(
-        testIds.map(id =>
-          apiPost(`/tests/${encodeURIComponent(id)}/start`, {
-            force: true,
-            forceReason: 'classic_list_resume',
-          })
-        )
-      );
+      // One refusal used to reject the batch under Promise.all: the error was
+      // shown and the row kept Paused, while the products that did start ran
+      // on, so a reload showed the experiment Running.
+      const { succeeded, failed } = await postToEachExperimentTest(testIds, 'start', apiPost, {
+        body: { force: true, forceReason: 'classic_list_resume' },
+      });
+      if (!succeeded.length) {
+        throw failed[0]?.reason || new Error('Could not resume test.');
+      }
       const resumeEntry = createActivityEntry({
         kind: 'resumed',
         title: 'Test resumed',
@@ -351,9 +352,16 @@ export default function ClassicExperimentRowActions({
       });
       await patchExperimentPlans(
         plan => appendActivityToPlans([{ ...plan, status: 'running' }], resumeEntry)[0],
-        { skipSettled: true }
+        { skipSettled: true, onlyTestIds: succeeded }
       );
-      notify('success', 'Test resumed.');
+      notify(
+        failed.length ? 'warning' : 'success',
+        failed.length
+          ? `Resumed ${succeeded.length} product${succeeded.length === 1 ? '' : 's'}. ${
+              failed.length
+            } stayed paused; open the test to resume ${failed.length === 1 ? 'it' : 'them'}.`
+          : 'Test resumed.'
+      );
       await refreshList({ preferLocalIds: planIds, quiet: true });
     });
 
@@ -372,9 +380,11 @@ export default function ClassicExperimentRowActions({
         at,
         actor: experiment?.representative?.owner_name || experiment?.representative?.created_by_name || 'You',
       });
-      await patchExperimentPlans(plan =>
-        appendActivityToPlans([{ ...plan, archived: true, archived_at: at }], archiveEntry)[0]
-      );
+      await setInboxPlansArchived(shopDomain, experiment?.plans, {
+        archived: true,
+        archivedAt: at,
+        entry: archiveEntry,
+      });
       notify('success', 'Test archived.');
       await refreshList({ preferLocalIds: planIds, quiet: true });
     });
@@ -387,9 +397,10 @@ export default function ClassicExperimentRowActions({
         detail: restoreActivityDetail(experiment),
         actor: experiment?.representative?.owner_name || experiment?.representative?.created_by_name || 'You',
       });
-      await patchExperimentPlans(plan =>
-        appendActivityToPlans([{ ...plan, archived: false, archived_at: null }], restoreEntry)[0]
-      );
+      await setInboxPlansArchived(shopDomain, experiment?.plans, {
+        archived: false,
+        entry: restoreEntry,
+      });
       notify('success', 'Test restored.');
       await refreshList({ preferLocalIds: planIds, quiet: true });
     });

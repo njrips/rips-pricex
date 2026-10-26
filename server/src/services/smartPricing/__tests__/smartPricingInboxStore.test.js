@@ -285,6 +285,40 @@ describe('smartPricingInboxStore', () => {
     expect(updates[0][1][1]).toBe('SP-1');
   });
 
+  it('archives a plan with its history entry merged into the stored log', async () => {
+    const kept = { id: 'started_1', kind: 'started', title: 'Test started', at: '2026-10-01T00:00:00.000Z' };
+    const client = lockingClient({
+      'SP-1': {
+        plan_id: 'SP-1',
+        status: 'completed',
+        test_id: 'test-1',
+        plan_json: {
+          id: 'SP-1',
+          status: 'completed',
+          test_id: 'test-1',
+          metadata: { test_sync_at: 'server-only', activity_log: [kept] },
+        },
+      },
+    });
+    getClient.mockResolvedValueOnce(client);
+    query.mockResolvedValue({ rows: [] });
+    const entry = { id: 'archived_1', kind: 'archived', title: 'Test archived', at: '2026-10-22T10:00:00.000Z' };
+
+    await patchInboxPlan('demo.myshopify.com', 'SP-1', {
+      archived: true,
+      archived_at: entry.at,
+      append_activity: [entry, entry],
+    });
+
+    const update = findCall(client, 'UPDATE smart_pricing_inbox_plans');
+    const saved = JSON.parse(update[1][2]);
+    expect(saved.append_activity).toBeUndefined();
+    expect(saved.metadata.test_sync_at).toBe('server-only');
+    expect(saved.metadata.activity_log.map(row => row.id)).toEqual(['archived_1', 'started_1']);
+    expect(update[1][3]).toBe('completed');
+    expect(update[1][5]).toBe(true);
+  });
+
   it('locks the row it patches so two patches of one plan cannot overwrite', async () => {
     const client = lockingClient({
       'SP-1': { plan_id: 'SP-1', plan_json: { id: 'SP-1', status: 'queued' } },

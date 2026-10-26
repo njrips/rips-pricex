@@ -218,6 +218,33 @@ describe('ClassicCreateWizard AI suggest', () => {
     expect(await priceInputValue()).toMatch(/44\.99/);
   });
 
+  it('drops the applied status, and the band it quotes, once the band is edited', async () => {
+    suggestSmartPricingPrices.mockResolvedValue({
+      source: 'openai',
+      suggestions: [{ variant_id: 'v1', arm_id: 'var_a', price: 44.99 }],
+    });
+    await renderWizardOnProductsStep();
+
+    const suggestBtn = await readySuggestButton();
+    await act(async () => {
+      suggestBtn.click();
+    });
+    expect(await priceInputValue()).toMatch(/44\.99/);
+    expect(container.textContent).toContain('Prices applied (AI).');
+
+    const maxInput = container.querySelector('input[aria-label="AI suggestion maximum percent"]');
+    const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+    await act(async () => {
+      setValue.call(maxInput, '30');
+      maxInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    expect(maxInput.value).toBe('30');
+    expect(container.textContent).not.toContain('Prices applied (AI).');
+    expect(container.textContent).toContain('Band updated');
+    expect(await readySuggestButton()).toHaveProperty('textContent', 'Re-suggest');
+  });
+
   it('prices only the variation on screen, not every AI variation', async () => {
     writeClassicWizardDraft(SHOP, {
       experiment_id: 'exp_ai',

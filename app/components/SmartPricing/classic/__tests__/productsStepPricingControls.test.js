@@ -269,3 +269,31 @@ describe('variations still missing a price', () => {
     expect(dottedTabs()).toEqual(['BVariation B']);
   });
 });
+
+describe('a product row priced across several variants', () => {
+  const MULTI = ['v1', 'v2', 'v3'].map((id, i) => ({
+    variant_id: id,
+    product_id: 'p1',
+    title: `Runner Shoe - Size ${i + 7}`,
+    product_title: 'Runner Shoe',
+    variant_title: `Size ${i + 7}`,
+    current_price: 40,
+    currency: 'USD',
+  }));
+
+  it('puts the needs-fixing status on its own line under the range', async () => {
+    await renderPanel({
+      opportunities: MULTI,
+      selectedIds: ['v1', 'v2', 'v3'],
+      activeArmIndex: 1,
+      shopMaxChangePercent: 30,
+      priceOverrides: { 'v1::var_a': '999999.9' },
+    });
+
+    const summary = container.querySelector('[class*="priceSummary_"]');
+    const [main, status] = summary.children;
+    expect(main.textContent).toContain('$40–$999,999.90');
+    expect(main.textContent).not.toMatch(/fixing/);
+    expect(status.textContent).toBe('1 needs fixing');
+  });
+});

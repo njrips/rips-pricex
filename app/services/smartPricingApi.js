@@ -2,7 +2,7 @@ import {
   compactInboxPlan,
   compactInboxPlans,
 } from '../components/SmartPricing/classic/classicWizardDraftSize';
-import { apiGet, apiPost, apiPut, apiDelete, unwrapData } from './api';
+import { apiGet, apiPost, apiPut, apiPatch, apiDelete, unwrapData } from './api';
 
 export async function getSmartPricingGuardrails(domain) {
   const res = await apiGet('/smart-pricing/guardrails', domain ? { domain } : {});
@@ -254,6 +254,19 @@ export async function getSmartPricingInboxPlan(domain, planId) {
   const res = await apiGet(
     `/smart-pricing/inbox/plans/${encodeURIComponent(planId)}`,
     domain ? { domain } : {}
+  );
+  return unwrapData(res);
+}
+
+/**
+ * Patch one plan row in place. `append_activity` entries are merged into the
+ * row's own history rather than replacing it.
+ */
+export async function patchSmartPricingInboxPlan(domain, planId, patch) {
+  const res = await apiPatch(
+    `/smart-pricing/inbox/plans/${encodeURIComponent(planId)}`,
+    patch,
+    domain ? { params: { domain } } : {}
   );
   return unwrapData(res);
 }
