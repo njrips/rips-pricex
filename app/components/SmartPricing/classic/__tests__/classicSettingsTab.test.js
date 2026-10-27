@@ -55,7 +55,9 @@ function visibleText() {
 }
 
 function buttonLabelled(label) {
-  return [...container.querySelectorAll('button')].find(el => el.textContent.trim() === label);
+  return [...container.querySelectorAll('button')].find(
+    el => el.textContent.trim() === label || el.getAttribute('aria-label') === label
+  );
 }
 
 const SETTINGS = {

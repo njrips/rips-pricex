@@ -800,7 +800,6 @@ async function buildFollowUpPlan({
 
   if (armPrices && typeof armPrices === 'object' && Object.keys(armPrices).length) {
     if (aiPriced) {
-      // Launch holds every other price to max price change; AI prices are not.
       rebuilt = {
         ...rebuilt,
         price_arms: (rebuilt.price_arms || []).map(arm =>
@@ -810,7 +809,7 @@ async function buildFollowUpPlan({
         ),
       };
     }
-    rebuilt = applyPriceArmOverrides(rebuilt, armPrices, guardrails);
+    rebuilt = applyPriceArmOverrides(rebuilt, armPrices);
   }
 
   // The test can know the experiment when its plan does not (an older plan, or

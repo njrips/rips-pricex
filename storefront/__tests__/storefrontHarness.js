@@ -254,11 +254,16 @@ export function loadPdpPainter({ display = "$70.00", priceNum = 70 } = {}) {
     }
     function recordRipxPricePaintParity() {}
     function inCartUi(el) { return !!(el.closest && el.closest('.cart-drawer, cart-drawer')); }
+    function formatShopPrice(n) { return '$' + Number(n).toFixed(2); }
     var seen = new WeakSet();
     var currentDisplay = __display;
     var priceNum = __priceNum;
+    var currentTargetUnit = __priceNum;
+    var qty = 1;
+    var catalogUnit = null;
     var testId = 'test-1';
     var variantIdForCart = 'variant-1';
+    ${extractFunction(source(), "isQuantityTotal")}
     ${extractFunction(source(), "paintEl")}
     return paintEl;
     `,

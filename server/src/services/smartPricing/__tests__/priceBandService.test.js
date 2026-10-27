@@ -2,7 +2,7 @@ const {
   applyScenarioPreset,
   generateCandidatePrices,
   buildGuardrailBand,
-  findPriceChangeViolations,
+  findPriceArmViolations,
 } = require('../priceBandService');
 
 describe('priceBandService', () => {
@@ -71,55 +71,28 @@ describe('priceBandService', () => {
     expect(band.max_change_percent).toBe(5);
   });
 
-  describe('findPriceChangeViolations', () => {
-    it('flags a manually typed price beyond the shop limit', () => {
-      const violations = findPriceChangeViolations(
-        100,
-        [
-          { label: 'Control', price: 100 },
-          { label: 'B', price: 130 },
-        ],
-        { max_price_change_percent: 10 }
-      );
-      expect(violations).toHaveLength(1);
-      expect(violations[0]).toMatch(/B at \$130 is outside your 10% max price change/);
-      expect(violations[0]).toMatch(/\$90–\$110/);
-    });
-
-    it('accepts arms inside the limit', () => {
-      const violations = findPriceChangeViolations(
-        100,
-        [
-          { label: 'Control', price: 100 },
-          { label: 'B', price: 108 },
-        ],
-        { max_price_change_percent: 10 }
-      );
+  describe('findPriceArmViolations', () => {
+    it('does not limit how far a typed price moves', () => {
+      const violations = findPriceArmViolations(100, [
+        { label: 'Control', price: 100 },
+        { label: 'B', price: 300 },
+        { label: 'C', price: 5 },
+      ]);
       expect(violations).toEqual([]);
     });
 
-    it('never rejects prices this service generated', () => {
-      // Cent rounding must not push a boundary arm over its own limit.
-      [9.99, 19.95, 100, 249.5].forEach(price => {
-        const guardrails = { max_price_change_percent: 5 };
-        const preset = applyScenarioPreset(price, 'aggressive', guardrails);
-        expect(findPriceChangeViolations(price, preset.price_arms, guardrails)).toEqual([]);
-      });
-    });
-
     it('flags a missing or zero price', () => {
-      const violations = findPriceChangeViolations(
-        100,
-        [{ label: 'Control', price: 100 }, { label: 'B', price: 0 }],
-        { max_price_change_percent: 10 }
-      );
+      const violations = findPriceArmViolations(100, [
+        { label: 'Control', price: 100 },
+        { label: 'B', price: 0 },
+      ]);
       expect(violations).toHaveLength(1);
       expect(violations[0]).toMatch(/does not have a valid price/);
     });
 
     it('stays silent when the plan has no usable baseline', () => {
-      expect(findPriceChangeViolations(null, [{ price: 100 }], {})).toEqual([]);
-      expect(findPriceChangeViolations(100, [], {})).toEqual([]);
+      expect(findPriceArmViolations(null, [{ price: 100 }])).toEqual([]);
+      expect(findPriceArmViolations(100, [])).toEqual([]);
     });
   });
 
@@ -138,21 +111,17 @@ describe('priceBandService', () => {
  * The wizard falls back to the catalog price for any arm without an override,
  * so an unpriced variation launches at exactly the control price -- a second
  * control wearing a variation's name, taking its share of the traffic and
- * measuring nothing. Every other check here passes it, because the current
- * price is trivially inside the allowed band.
+ * measuring nothing. The valid-price check passes it.
  */
 describe('a challenger priced at the catalog price', () => {
-  const guardrails = { max_price_change_percent: 10 };
-
   it('is rejected, and named', () => {
-    const violations = findPriceChangeViolations(
+    const violations = findPriceArmViolations(
       100,
       [
         { id: 'control', role: 'control', label: 'Control', price: 100 },
         { id: 'var_a', role: 'challenger', label: 'Variation A', price: 106 },
         { id: 'var_b', role: 'challenger', label: 'Variation B', price: 100 },
       ],
-      guardrails
     );
 
     expect(violations).toHaveLength(1);
@@ -162,58 +131,39 @@ describe('a challenger priced at the catalog price', () => {
 
   it('leaves the control itself alone', () => {
     expect(
-      findPriceChangeViolations(
+      findPriceArmViolations(
         100,
         [
           { id: 'control', role: 'control', label: 'Control', price: 100 },
           { id: 'var_a', role: 'challenger', label: 'Variation A', price: 106 },
         ],
-        guardrails
       )
     ).toEqual([]);
-  });
-
-  it('reports only the band problem when an arm is also out of range', () => {
-    // One arm, one complaint: naming both would be two ways of saying the
-    // price is wrong.
-    const violations = findPriceChangeViolations(
-      100,
-      [
-        { id: 'control', role: 'control', label: 'Control', price: 100 },
-        { id: 'var_a', role: 'challenger', label: 'Variation A', price: 140 },
-      ],
-      guardrails
-    );
-
-    expect(violations).toHaveLength(1);
-    expect(violations[0]).toMatch(/outside your 10% max price change/);
   });
 
   it('stays quiet when the plan does not say which arm is the control', () => {
     // Bare {label, price} arms give no baseline to compare against, and
     // guessing one would risk refusing a launch that is perfectly valid.
     expect(
-      findPriceChangeViolations(
+      findPriceArmViolations(
         100,
         [
           { label: 'Control', price: 100 },
           { label: 'B', price: 108 },
         ],
-        guardrails
       )
     ).toEqual([]);
   });
 
-  it('lets an AI price past max price change but still checks it is a price', () => {
+  it('checks every arm is a price, whatever set it', () => {
     const arms = [
       { id: 'control', role: 'control', label: 'Control', price: 40 },
       { id: 'var_a', role: 'challenger', label: 'Variation A', price: 60, price_source: 'ai' },
       { id: 'var_b', role: 'challenger', label: 'Variation B', price: 0, price_source: 'ai' },
       { id: 'var_c', role: 'challenger', label: 'Variation C', price: 60 },
     ];
-    const violations = findPriceChangeViolations(40, arms, { max_price_change_percent: 15 });
-    expect(violations).toHaveLength(2);
-    expect(violations.join(' ')).toMatch(/Variation B does not have a valid price/);
-    expect(violations.join(' ')).toMatch(/Variation C at \$60 is outside/);
+    const violations = findPriceArmViolations(40, arms);
+    expect(violations).toHaveLength(1);
+    expect(violations[0]).toMatch(/Variation B does not have a valid price/);
   });
 });

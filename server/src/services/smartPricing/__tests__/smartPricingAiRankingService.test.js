@@ -461,10 +461,10 @@ describe('enriching an opportunity list', () => {
       expect((await promptFor()).systemPrompt).toMatch(/judged on revenue per visitor/);
     });
 
-    it("states the shop's price change limit", async () => {
+    it('does not tell the model test prices have a change limit', async () => {
       const { systemPrompt } = await promptFor({ max_price_change_percent: 10 });
 
-      expect(systemPrompt).toMatch(/at most 10%/);
+      expect(systemPrompt).not.toMatch(/at most 10%/);
     });
 
     it('supplies the ranking strict JSON Schema to the chat path', async () => {

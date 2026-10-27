@@ -4,7 +4,7 @@ const { buildPriceTestPayloadFromPlan } = require('./planToPriceTestService');
 const { buildOfferTestPayloadFromPlan, isOfferPlan } = require('./planToOfferTestService');
 const { applyPriceArmOverrides } = require('./testPlanService');
 const { getShopSmartPricingGuardrails } = require('./smartPricingGuardrailsService');
-const { findPriceChangeViolations } = require('./priceBandService');
+const { findPriceArmViolations } = require('./priceBandService');
 const { assertCanLaunchPriceTests } = require('./smartPricingLaunchGuardService');
 const {
   assertProductIsFreeToPrice,
@@ -80,15 +80,12 @@ async function launchSmartPricingPlanAsTest(
   let validatedPlan = plan;
 
   if (!offerPlan) {
-    const violations = findPriceChangeViolations(
+    const violations = findPriceArmViolations(
       plan?.current_price ?? plan?.currentPrice,
-      plan?.price_arms ?? plan?.priceArms,
-      guardrails
+      plan?.price_arms ?? plan?.priceArms
     );
     if (violations.length) {
-      const err = new Error(
-        `${violations.join(' ')} Bring the prices inside the limit on the Products step, or use AI Suggest with a min–max band, which max price change does not limit.`
-      );
+      const err = new Error(`${violations.join(' ')} Fix the prices on the Products step.`);
       err.isValidation = true;
       err.errors = violations;
       throw err;
@@ -100,7 +97,7 @@ async function launchSmartPricingPlanAsTest(
       Number(plan?.current_price ?? plan?.currentPrice) > 0 &&
       (plan?.price_arms ?? plan?.priceArms)?.length >= 2
     ) {
-      validatedPlan = applyPriceArmOverrides(plan, {}, guardrails);
+      validatedPlan = applyPriceArmOverrides(plan, {});
     }
   }
 

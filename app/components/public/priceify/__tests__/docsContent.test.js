@@ -87,7 +87,7 @@ describe('Priceify guides content', () => {
     const ids = DOCS_SECTIONS.map((section) => section.id);
     assert.equal(new Set(ids).size, ids.length, 'duplicate section ids');
     const ai = DOCS_SECTIONS.find((section) => section.id === 'ai-price');
-    assert.ok(/max price change does not limit the band/i.test(ai.paragraphs.join(' ')));
+    assert.ok(/no max price change on the band/i.test(ai.paragraphs.join(' ')));
     // The band is signed, so the guide has to say so: a merchant who believes
     // Suggest only raises prices will never try the test their slow sellers
     // most need. The minimum margin is the limit on a cut, so it is named too.
@@ -195,8 +195,8 @@ describe('Priceify guides content', () => {
       return [section.summary || '', ...section.paragraphs].join(' ');
     };
 
-    assert.match(copyOf('max-price-change'), /15%/);
-    assert.match(copyOf('max-price-change'), /no longer a field in App settings/i);
+    assert.match(copyOf('max-price-change'), /no limit on how far a test price may move/i);
+    assert.match(copyOf('max-price-change'), /above \$0/i);
     assert.match(copyOf('max-price-change'), /Products step/);
     assert.match(copyOf('max-price-change'), /no margin floor/i);
     assert.ok(!DOCS_SECTIONS.some(section => section.id === 'cost-floor'));

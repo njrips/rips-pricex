@@ -491,7 +491,8 @@ button.stepItem {
 .variationRemove :global(.Polaris-Button),
 .selectionBar :global(.Polaris-Button--variantPlain),
 .selectionCard :global(.Polaris-Button--variantPlain),
-.adminRowActions :global(.Polaris-Button--variantPlain) {
+.adminRowActions :global(.Polaris-Button--variantPlain),
+.guardrailCardHeadEnd :global(.Polaris-Button--variantPlain) {
   --pc-button-padding-block: 0px;
   --pc-button-padding-inline: 0px;
   margin: 0;
@@ -2344,6 +2345,13 @@ button.stepItem {
   gap: 8px;
 }
 
+.guardrailCardHeadEnd {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
 .guardrailCardTitle {
   display: inline-flex;
   align-items: center;
@@ -2875,6 +2883,27 @@ button.stepItem {
   text-align: right;
   white-space: nowrap;
   width: 1%;
+}
+
+/* Firefox and Safari share out a table's width differently from Chrome and
+   squeezed this column until "Kept catalog" broke inside its pill. */
+.variationsStatusCol {
+  white-space: nowrap;
+  width: 1%;
+}
+
+.variationsStatusCol .winnerBadge {
+  box-sizing: border-box;
+  min-height: 20px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 16px;
+  letter-spacing: 0;
+  text-transform: none;
+  white-space: nowrap;
+  vertical-align: middle;
+  margin-left: 0;
 }
 
 .variationsProductsFooter {
@@ -4740,6 +4769,28 @@ button.stepItem {
   margin-top: 6px;
 }
 
+.detailFactHead .statLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Settings tab: every card opens its tiles at the same distance under the
+   title, and the guardrail below lines up with the tile gap. */
+.settingsCardGrid {
+  margin-top: 14px;
+}
+
+.settingsCardGrid + .guardrailCard {
+  margin-top: 16px;
+}
+
+@media (max-width: 700px) {
+  .settingsCardGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 /* Experiment Settings tab.
 
    Definition rows, not a full-width split. `selectionBar` pushes the value to
@@ -4795,7 +4846,8 @@ button.stepItem {
 
   .settingsRowNote {
     grid-column: 1;
-  }}
+  }
+}
 
 /* Points at the tab that owns a setting shown here read-only. */
 .settingsFootnote {
@@ -4925,11 +4977,15 @@ button.stepItem {
 .okBadge {
   display: inline-flex;
   align-items: center;
+  box-sizing: border-box;
   min-height: 20px;
-  padding: 0 8px;
+  padding: 2px 8px;
   border-radius: 999px;
   font-size: 11px;
   font-weight: var(--classic-fw-medium);
+  line-height: 16px;
+  white-space: nowrap;
+  vertical-align: middle;
 }
 
 .trapBadge {
@@ -4946,11 +5002,15 @@ button.stepItem {
 .appliedBadge {
   display: inline-flex;
   align-items: center;
+  box-sizing: border-box;
   min-height: 20px;
-  padding: 0 8px;
+  padding: 2px 8px;
   border-radius: 999px;
   font-size: 11px;
   font-weight: var(--classic-fw-medium);
+  line-height: 16px;
+  white-space: nowrap;
+  vertical-align: middle;
   background: rgba(0, 82, 124, 0.12);
   color: #00527c;
 }
@@ -5275,12 +5335,11 @@ button.stepItem {
   gap: 16px;
 }
 
-/* One card per term, spaced like the other admin rows rather than stacked
-   edge to edge. */
+/* One card per term, spaced like the Common questions accordions below it. */
 .glossaryList {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
   margin: 0;
   padding: 0;
 }

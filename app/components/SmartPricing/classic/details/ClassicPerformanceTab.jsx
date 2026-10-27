@@ -529,7 +529,9 @@ export default function ClassicPerformanceTab({
             <thead>
               <tr>
                 <th scope="col">Product</th>
-                <th scope="col">Status</th>
+                <th scope="col" className={styles.variationsStatusCol}>
+                  Status
+                </th>
                 <th scope="col">Decision</th>
                 {armColumns.map(arm => (
                   <th
@@ -606,7 +608,7 @@ export default function ClassicPerformanceTab({
                         </div>
                       </div>
                     </td>
-                    <td>
+                    <td className={styles.variationsStatusCol}>
                       {statusTone ? (
                         <span className={statusTone}>{statusLabel}</span>
                       ) : (

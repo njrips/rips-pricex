@@ -294,21 +294,6 @@ export function sanitizePriceInput(raw) {
   return out;
 }
 
-/**
- * The prices max price change allows for one product, rounded inward to the
- * cent so a price at the edge never reads as over it ($4.99 at 20% allows up
- * to $5.98; $5.99 would be a 20.04% change).
- */
-export function guardrailPriceWindow(base, maxChangePercent) {
-  const price = Number(base);
-  const cap = Number(maxChangePercent);
-  if (!(price > 0) || !(cap > 0)) return null;
-  return {
-    low: Math.ceil(price * (1 - cap / 100) * 100 - 1e-6) / 100,
-    high: Math.floor(price * (1 + cap / 100) * 100 + 1e-6) / 100,
-  };
-}
-
 export const PRICE_DETAILS_HOVER_HINT = 'Hover over the ⓘ beside any price for details.';
 
 /** "10%–20%" for a rise; a cut or a band across zero says which way. */
@@ -1266,8 +1251,6 @@ export function getProductsStepContinueState({
   experimentType = 'price_test',
   offerByArm = {},
   priceMode = 'manual',
-  maxChangePercent = null,
-  priceSuggestionMeta = {},
 } = {}) {
   const hasCatalog = (opportunities || []).some(row => row?.variant_id);
   if (loadingProducts && !hasCatalog) {
@@ -1353,48 +1336,12 @@ export function getProductsStepContinueState({
       )}). Enter a price above $0.`,
     };
   }
-  // Launch refuses these anyway; catching them here keeps the merchant on the
-  // step where the price can be fixed, not on Review with a server error.
-  const outOfRange = findOutOfRangeTestPrices({ ...priceArgs, maxChangePercent, priceSuggestionMeta });
-  if (outOfRange.length > 0) {
-    const n = outOfRange.length;
-    return {
-      disabled: true,
-      reason: 'outside_max_price_change',
-      hint: `${n} test ${n === 1 ? 'price is' : 'prices are'} more than ${Number(
-        maxChangePercent
-      )}% from the current price, your max price change (${nameProducts(outOfRange)}). Bring ${
-        n === 1 ? 'it' : 'them'
-      } inside the limit, or use AI Suggest with a min–max band, which max price change does not limit.`,
-    };
-  }
   return { disabled: false, reason: null, hint: '' };
-}
-
-/** The test prices outside max price change, one entry per variant and variation. */
-export function findOutOfRangeTestPrices({
-  opportunities = [],
-  selectedIds = [],
-  pickMode = 'manual',
-  maxSelection = 100,
-  variations = [],
-  priceOverrides = {},
-  maxChangePercent = null,
-  priceSuggestionMeta = {},
-} = {}) {
-  if (!(Number(maxChangePercent) > 0)) return [];
-  return collectTestPrices({ opportunities, selectedIds, pickMode, maxSelection, variations, priceOverrides })
-    .filter(({ row, armId, price }) => {
-      if (isAiSuggestedPrice(priceSuggestionMeta, priceOverrides, row.variant_id, armId)) return false;
-      const window = guardrailPriceWindow(row.current_price ?? row.price, maxChangePercent);
-      return window && (price < window.low - 0.005 || price > window.high + 0.005);
-    });
 }
 
 /**
  * Test prices of $0. The field cannot take a sign, but it can take "0", and a
- * bulk decrease bigger than the price lands there; with max price change still
- * loading nothing else would stop it.
+ * bulk decrease bigger than the price lands there.
  */
 export function findZeroTestPrices(args = {}) {
   return collectTestPrices(args).filter(({ price }) => price < 0.005);

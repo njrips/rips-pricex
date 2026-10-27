@@ -67,7 +67,7 @@ export const HELP_FAQ_ITEMS = [
   },
   {
     q: 'How does AI price Suggest work?',
-    a: 'On Products & prices, choose AI suggested, set a min–max band, and click Suggest. Suggest prices only the variation whose tab is open: it asks the AI for a range inside that variation’s band for every product you selected, then places the test-variation prices across that range. Max price change does not limit AI prices: they stay inside the band you typed, and a cut stops at 99%. Control stays at the catalog price. Variations are spread across the range rather than bunched together, because prices a point or two apart cannot be told apart at real store traffic. Each click asks the AI again, but its range is rounded to 2.5-point steps, so prices change only when its read of the product changes, and a variation is kept clear of prices your other variations already hold. Every cell stays editable before launch. Open the info icon next to How would you like to set prices? for the full calculation.',
+    a: 'On Products & prices, choose AI suggested, set a min–max band, and click Suggest. Suggest prices only the variation whose tab is open: it asks the AI for a range inside that variation’s band for every product you selected, then places the test-variation prices across that range. AI prices stay inside the band you typed, and a cut stops at 99%. Control stays at the catalog price. Variations are spread across the range rather than bunched together, because prices a point or two apart cannot be told apart at real store traffic. Each click asks the AI again, but its range is rounded to 2.5-point steps, so prices change only when its read of the product changes, and a variation is kept clear of prices your other variations already hold. Every cell stays editable before launch. Open the info icon next to How would you like to set prices? for the full calculation.',
   },
   {
     q: 'What does Suggest send to the AI?',
@@ -99,7 +99,7 @@ export const HELP_FAQ_ITEMS = [
   },
   {
     q: 'Where is the revenue guardrail?',
-    a: 'On each test — Audience & goals when you create it, and Settings on the test after launch. It is not in Results settings. Choose 3%–50% (default 10%). It starts checking once every variation reaches the test’s minimum visitors. Priceify then pauses the whole test if any variation’s revenue per visitor falls more than your threshold below control, and Resume continues it. After a resume the guardrail counts only new visitors, so it waits for the minimum again before it can pause. Max price change is enforced on Products & prices for manual and bulk-adjusted prices, not here; AI-suggested prices follow your band instead.',
+    a: 'On each test — Audience & goals when you create it, and Settings on the test after launch. It is not in Results settings. Choose 3%–50% (default 10%). It starts checking once every variation reaches the test’s minimum visitors. Priceify then pauses the whole test if any variation’s revenue per visitor falls more than your threshold below control, and Resume continues it. After a resume the guardrail counts only new visitors, so it waits for the minimum again before it can pause. Test prices themselves have no max price change: typed, bulk-adjusted and AI-suggested prices are used as you set them, as long as they stay above $0.',
   },
   {
     q: 'How do I contact support?',

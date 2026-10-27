@@ -1174,7 +1174,7 @@ const AI_BAND_MIN_PERCENT = -99;
 
 /**
  * Args with max price change widened to the band's own reach, so the band is
- * used as typed. The guardrail limits manual and bulk prices, not an AI band.
+ * used as typed. Max price change only seeds starting prices; it limits no test price.
  */
 function widenGuardrailsToBand(args = {}) {
   const edge = (raw, fallback) => {

@@ -805,7 +805,7 @@ describe('classicExperimentDetailsHelpers', () => {
       { max_parallel_tests: 5, max_price_change_percent: 15, min_margin_percent: 35 }
     );
     expect(settings.trafficRampPercent).toBe(40);
-    expect(settings.guardrailNotes).toEqual(['Max parallel tests: 5', 'Max price change: ±15%']);
+    expect(settings.guardrailNotes).toEqual(['Max parallel tests: 5']);
     expect(settings.minMarginPercent).toBeUndefined();
     expect(settings.maxParallelTests).toBe(5);
     expect(settings.priceApplicationMethod).toBe('direct_price_override');

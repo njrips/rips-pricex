@@ -152,28 +152,18 @@ function applyScenarioPreset(currentPrice, presetId, guardrails = {}) {
 }
 
 /**
- * Price-safety violations for a plan's arms against the shop's configured
- * limit. Generated arms are already clamped, but manually typed prices and
- * direct API callers reach launch without passing through generation, so this
- * is the funnel where "max price change" becomes binding rather than advisory.
+ * Arms that cannot launch: no usable price, or a variation at the current
+ * price. Test prices are not held to max price change; that value only seeds
+ * the first candidate prices.
  *
- * @returns {string[]} Empty when every arm is within the limit.
+ * @returns {string[]} Empty when every arm can launch.
  */
-function findPriceChangeViolations(currentPrice, priceArms = [], guardrails = {}) {
+function findPriceArmViolations(currentPrice, priceArms = []) {
   const current = Number(currentPrice);
   const arms = Array.isArray(priceArms) ? priceArms : [];
   if (!Number.isFinite(current) || current <= 0 || arms.length === 0) {
     return [];
   }
-  const { maxChangePercent } = resolveBandInputs(guardrails);
-  if (!Number.isFinite(maxChangePercent) || maxChangePercent <= 0) {
-    return [];
-  }
-  // Compare against the same rounded bounds generation clamps to, so a
-  // cent-rounded arm at the limit is never counted as over it.
-  const maxDelta = current * (maxChangePercent / 100);
-  const ceiling = roundPrice(current + maxDelta);
-  const floor = roundPrice(Math.max(0, current - maxDelta));
 
   const isControlArm = arm => arm?.role === 'control' || arm?.id === 'control';
   // Only worth asking which arms duplicate the control when the plan says
@@ -190,18 +180,9 @@ function findPriceChangeViolations(currentPrice, priceArms = [], guardrails = {}
       violations.push(`${label} does not have a valid price.`);
       return;
     }
-    // An AI price comes from the merchant's band, which max price change does not limit.
-    if (arm?.price_source !== 'ai' && (price < floor || price > ceiling)) {
-      violations.push(
-        `${label} at $${roundPrice(price)} is outside your ${maxChangePercent}% max price change ` +
-          `(allowed $${floor}–$${ceiling}).`
-      );
-      return;
-    }
     // A challenger at the catalog price is a second control wearing a
     // variation's name: it takes its share of the traffic and measures
-    // nothing, and every other check here passes it because the current price
-    // is trivially inside the allowed band.
+    // nothing, and the valid-price check above passes it.
     //
     // The usual way in is a variation the merchant never priced -- the wizard
     // falls back to the catalog price for any arm without an override -- so
@@ -222,7 +203,7 @@ function findPriceChangeViolations(currentPrice, priceArms = [], guardrails = {}
 
 module.exports = {
   SCENARIO_PRESETS,
-  findPriceChangeViolations,
+  findPriceArmViolations,
   roundPrice,
   clampPrice,
   buildGuardrailBand,

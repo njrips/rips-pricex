@@ -2,15 +2,11 @@
  * Builds SmartPricingTestPlan artifacts from SKU metrics + merchant choices.
  */
 
-const { applyScenarioPreset, buildGuardrailBand, roundPrice } = require('./priceBandService');
+const { applyScenarioPreset, roundPrice } = require('./priceBandService');
 const { buildStatisticalDesign, buildVariantCountOptions } = require('./statisticalDesignService');
 
-function buildGuardrailChecks(currentPrice, priceArms = [], guardrails = {}, options = {}) {
-  const maxChange = guardrails.maxChangePercent ?? guardrails.max_price_change_percent ?? 15;
+function buildGuardrailChecks(priceArms = [], options = {}) {
   const { checkoutPriceFunctionActive = null } = options;
-  const band = buildGuardrailBand(currentPrice, guardrails);
-  // AI prices come from the merchant's band, which max price change does not limit.
-  const capped = priceArms.filter(a => a.price_source !== 'ai');
 
   const checkoutActive = checkoutPriceFunctionActive;
   const checkoutActual =
@@ -22,25 +18,11 @@ function buildGuardrailChecks(currentPrice, priceArms = [], guardrails = {}, opt
 
   const checks = [
     {
-      id: 'price_floor',
-      label: 'Price floor',
-      threshold: `≥ $${band.floor}`,
+      id: 'price_positive',
+      label: 'Test prices',
+      threshold: '> $0',
       actual: `$${Math.min(...priceArms.map(a => a.price))}`,
-      passed: capped.every(a => a.price >= band.floor),
-    },
-    {
-      id: 'price_ceiling',
-      label: 'Price ceiling',
-      threshold: `≤ $${band.ceiling}`,
-      actual: `$${Math.max(...priceArms.map(a => a.price))}`,
-      passed: capped.every(a => a.price <= band.ceiling),
-    },
-    {
-      id: 'max_change',
-      label: 'Max price change',
-      threshold: `±${maxChange}%`,
-      actual: `${Math.max(...priceArms.map(a => Math.abs(a.delta_percent)))}%`,
-      passed: capped.every(a => Math.abs(a.delta_percent) <= maxChange),
+      passed: priceArms.every(a => a.price > 0),
     },
     {
       id: 'allocation_total',
@@ -216,7 +198,7 @@ function buildSmartPricingTestPlan(input = {}) {
     ...(sampleFloor ? { min_sample_size: sampleFloor } : {}),
     ...(conversionFloor ? { min_conversions_per_variation: conversionFloor } : {}),
   };
-  const guardrailChecks = buildGuardrailChecks(currentPrice, priceArms, guardrails, {
+  const guardrailChecks = buildGuardrailChecks(priceArms, {
     checkoutPriceFunctionActive,
   });
   const armProjections = buildArmProjections(priceArms, baselinePpv);
@@ -290,7 +272,7 @@ function buildSmartPricingTestPlan(input = {}) {
   };
 }
 
-function applyPriceArmOverrides(plan = {}, armPrices = {}, guardrails = {}) {
+function applyPriceArmOverrides(plan = {}, armPrices = {}) {
   const currentPrice = Number(plan.current_price);
   const currency = plan.currency || 'USD';
   if (!Number.isFinite(currentPrice) || currentPrice <= 0) {
@@ -318,7 +300,7 @@ function applyPriceArmOverrides(plan = {}, armPrices = {}, guardrails = {}) {
   if (arms.length < 2) {
     throw new Error('A test needs control and at least one price variation');
   }
-  const guardrailChecks = buildGuardrailChecks(currentPrice, arms, guardrails, {
+  const guardrailChecks = buildGuardrailChecks(arms, {
     checkoutPriceFunctionActive: plan.checkout_price_function_active ?? null,
   });
   const baselinePpv = Number(plan.baseline_ppv) || 0;

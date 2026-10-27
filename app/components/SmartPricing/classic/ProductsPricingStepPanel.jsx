@@ -11,11 +11,9 @@ import {
   aiBandDirection,
   aiBandOrderError,
   aiSuggestBlockedReason,
-  guardrailPriceWindow,
   variantIdentity,
   sanitizePriceInput,
   armHasAiPrices,
-  isAiSuggestedPrice,
   describeCollapsedAiBand,
   describeNarrowAiBand,
   resolveAiSuggestSpreadArms,
@@ -63,6 +61,7 @@ import {
 import styles from './SmartPricingClassic.module.css';
 
 const PRICING_TABLE_PAGE_SIZES = [10, 25, 50, 100];
+const MAX_BULK_DECREASE_PERCENT = 99;
 
 function formatMoney(value, currency = 'USD') {
   const n = Number(value);
@@ -221,7 +220,6 @@ export default function ProductsPricingStepPanel({
   onAiBandDirty,
   aiUnit = 'percent',
   onAiUnitChange,
-  shopMaxChangePercent,
   aiMinPct = '10',
   aiMaxPct = '20',
   onAiMinPctChange,
@@ -459,28 +457,26 @@ export default function ProductsPricingStepPanel({
 
   const bulkAmount = Number(bulkPercent);
   const bulkAmountValid = String(bulkPercent ?? '').trim() !== '' && bulkAmount > 0;
-  const shopCap = Number(shopMaxChangePercent);
-  // In dollars the cap differs per product; past what the priciest one allows,
-  // every product would be held back, so that is where the field stops.
-  const bulkDollarCap = (() => {
-    if (!(shopCap > 0)) return null;
-    const top = Math.max(0, ...pricingSource.map(row => Number(row.current_price ?? row.price) || 0));
-    return top > 0 ? Math.floor(top * shopCap) / 100 : null;
-  })();
-  const bulkCapFor = unit => (unit === 'amount' ? bulkDollarCap : shopCap > 0 ? shopCap : null);
+  // A cut of 100% or more is a $0 price, so a percent decrease stops short of it.
+  const bulkCapFor = (unit, direction) =>
+    unit === 'percent' && direction === 'decrease' ? MAX_BULK_DECREASE_PERCENT : null;
 
   const handleBulkAmountChange = raw => {
     let next = sanitizePriceInput(raw);
-    // An amount above max price change could only ever be capped, so the
-    // field stops there instead of accepting it and failing at launch.
-    const cap = bulkCapFor(bulkUnit);
+    const cap = bulkCapFor(bulkUnit, bulkDirection);
     if (cap && Number(next) > cap) next = String(cap);
     onBulkPercentChange(next);
   };
 
   const switchBulkUnit = unit => {
     setBulkUnit(unit);
-    const cap = bulkCapFor(unit);
+    const cap = bulkCapFor(unit, bulkDirection);
+    if (cap && bulkAmount > cap) onBulkPercentChange(String(cap));
+  };
+
+  const switchBulkDirection = direction => {
+    onBulkDirectionChange(direction);
+    const cap = bulkCapFor(bulkUnit, direction);
     if (cap && bulkAmount > cap) onBulkPercentChange(String(cap));
   };
 
@@ -496,15 +492,9 @@ export default function ProductsPricingStepPanel({
       result?.armLabel ||
       targetArm?.name ||
       (targetArm?.letter ? `Variation ${targetArm.letter}` : 'this variation');
-    const cappedNote =
-      result?.capped > 0
-        ? ` ${result.capped} of ${result.total} ${
-            result.total === 1 ? 'price was' : 'prices were'
-          } held at your ${result.maxChange}% max price change.`
-        : '';
     setLocalBulkNotice({
       armId: result?.armId || targetArm?.id || null,
-      text: `Applied ${sign}${label} to all prices for ${armLabel}.${cappedNote}`,
+      text: `Applied ${sign}${label} to all prices for ${armLabel}.`,
     });
   };
 
@@ -569,8 +559,6 @@ export default function ProductsPricingStepPanel({
       setLocalSuggestBusy(false);
     }
   }, [suggestBusy, aiBlockedReason, onAiSuggest, aiUnit]);
-  // The AI band is used as typed: max price change limits manual and bulk
-  // prices only, so there is no cap to report or raise here.
   const aiBandCollapsedNotice = describeCollapsedAiBand(aiBand, { unit: aiUnit });
   const aiBandNarrowNotice = aiBandCollapsedNotice
     ? ''
@@ -664,7 +652,7 @@ export default function ProductsPricingStepPanel({
         : formatPriceInputValue(Number.isFinite(test) ? test : '');
     const pendingAiPrice =
       priceMode === 'ai' && !effectiveAiSuggested && !String(override || '').trim();
-    const rangeError = isControlArm ? '' : priceRangeError(base, test, id, armId);
+    const rangeError = isControlArm ? '' : priceRangeError(base, test);
     return (
       <tr key={`${id}-${armId}-v`} className={styles.variantRow}>
         <td>
@@ -689,18 +677,10 @@ export default function ProductsPricingStepPanel({
     );
   };
 
-  /** Why a price cannot launch under max price change, or '' when it can. */
-  const priceRangeError = (base, price, variantId, armId) => {
+  /** Why a price cannot launch, or '' when it can. */
+  const priceRangeError = (base, price) => {
     if (price === null || price === undefined || !Number.isFinite(Number(price))) return '';
-    const n = Number(price);
-    if (n < 0.005) return 'Enter a price above $0.';
-    if (isAiSuggestedPrice(priceSuggestionMeta, priceOverrides, variantId, armId)) return '';
-    const window = guardrailPriceWindow(base, shopMaxChangePercent);
-    if (!window) return '';
-    if (n >= window.low - 0.005 && n <= window.high + 0.005) return '';
-    return `Outside your ${Number(shopMaxChangePercent)}% max price change. Use $${window.low.toFixed(
-      2
-    )} to $${window.high.toFixed(2)}.`;
+    return Number(price) < 0.005 ? 'Enter a price above $0.' : '';
   };
 
   const renderPriceInput = ({ key, base, value, placeholder, label, rangeError = '' }) => (
@@ -764,7 +744,7 @@ export default function ProductsPricingStepPanel({
     // Continue would refuse without showing where.
     const invalid = isControlArm
       ? 0
-      : group.variants.filter(v => priceRangeError(Number(v.current_price ?? v.price) || 0, getTestPrice(v, armId), v.variant_id, armId))
+      : group.variants.filter(v => priceRangeError(Number(v.current_price ?? v.price) || 0, getTestPrice(v, armId)))
           .length;
     // The status sits on its own line: inline after a wide range such as
     // "$1.00–$999,999.90" it wrapped mid-phrase under the figures.
@@ -893,7 +873,7 @@ export default function ProductsPricingStepPanel({
                   placeholder:
                     priceMode === 'ai' && !effectiveAiSuggested && !singleDisplay ? 'Suggest' : undefined,
                   label: `${group.title} test price`,
-                  rangeError: isControlArm ? '' : priceRangeError(onlyBase, onlyTest, only?.variant_id, armId),
+                  rangeError: isControlArm ? '' : priceRangeError(onlyBase, onlyTest),
                 })}
           </td>
           <td>
@@ -1403,7 +1383,7 @@ export default function ProductsPricingStepPanel({
                 className={`${styles.segmentBtn} ${
                   bulkDirection === 'decrease' ? styles.segmentBtnActive : ''
                 }`}
-                onClick={() => onBulkDirectionChange('decrease')}
+                onClick={() => switchBulkDirection('decrease')}
               >
                 − Decrease
               </button>
@@ -1412,7 +1392,7 @@ export default function ProductsPricingStepPanel({
                 className={`${styles.segmentBtn} ${
                   bulkDirection === 'increase' ? styles.segmentBtnActive : ''
                 }`}
-                onClick={() => onBulkDirectionChange('increase')}
+                onClick={() => switchBulkDirection('increase')}
               >
                 + Increase
               </button>
@@ -1469,14 +1449,9 @@ export default function ProductsPricingStepPanel({
             <p className={styles.fieldError} role="alert">
               Enter an amount above 0.
             </p>
-          ) : bulkUnit === 'percent' && shopCap > 0 ? (
+          ) : bulkCapFor(bulkUnit, bulkDirection) ? (
             <p className={styles.help} style={{ marginTop: -6, marginBottom: 12 }}>
-              Up to {shopCap}%, your max price change.
-            </p>
-          ) : bulkUnit === 'amount' && bulkDollarCap ? (
-            <p className={styles.help} style={{ marginTop: -6, marginBottom: 12 }}>
-              Up to ${bulkDollarCap.toFixed(2)}, your {shopCap}% max price change on your
-              highest-priced product. Cheaper products are held at their own {shopCap}%.
+              Up to {MAX_BULK_DECREASE_PERCENT}%, so every price stays above $0.
             </p>
           ) : null}
           {bulkNotice ? (

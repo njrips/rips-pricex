@@ -394,9 +394,11 @@ export default function ClassicExperimentsList() {
                     ? 'Updating tests…'
                     : 'Loading tests…';
 
+  // The loader covers the whole page, so a toast shown under it ran out its
+  // timer unseen. It waits in state and appears once the list is back.
   if (loading || gridBusy) {
     return (
-      <PageShell message={message} messageType={messageType} onCloseMessage={() => setMessage('')}>
+      <PageShell>
         <ClassicPageLoader label={gridBusy ? gridBusyLabel : 'Loading tests…'} />
       </PageShell>
     );

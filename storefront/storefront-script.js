@@ -637,7 +637,9 @@
   function getPdpNavigationKey() {
     return [
       String((window.location && window.location.pathname) || '').toLowerCase(),
-      getUrlShopifyVariantId() || '',
+      (typeof getCurrentProductId === 'function' && getCurrentProductId()
+        ? getSelectedVariantId()
+        : getUrlShopifyVariantId()) || '',
       typeof getCurrentProductId === 'function' ? getCurrentProductId() || '' : '',
     ].join('|');
   }
@@ -678,6 +680,88 @@
     }, 40);
   }
 
+  var _ripxPdpVariantReapplyTimer = null;
+
+  /**
+   * Re-run every price test on the page now, whatever the navigation key says.
+   * A test hands the page over when the shopper picks a variant it does not
+   * price, and the test that does price it may never have painted yet.
+   */
+  function requestPdpVariantReapply(reason) {
+    if (_ripxPdpVariantReapplyTimer) return;
+    _ripxPdpVariantReapplyTimer = setTimeout(function () {
+      _ripxPdpVariantReapplyTimer = null;
+      _ripxPdpNavLastKey = getPdpNavigationKey();
+      flushQueuedPriceReapply(reason || 'pdp_variant');
+    }, 30);
+  }
+
+  /**
+   * Swatches, option selects and quantity steppers, across themes. A theme
+   * that keeps the URL as it is and announces nothing still changes the
+   * product form, and the navigation key compares the selected variant, so
+   * any of these is enough to notice the change.
+   */
+  function installPdpVariantSelectionReapply() {
+    if (window.__RIPX_PDP_VARIANT_REAPPLY__) return;
+    window.__RIPX_PDP_VARIANT_REAPPLY__ = true;
+    function onSelection() {
+      if (typeof isPdpProductPath === 'function' && !isPdpProductPath()) return;
+      if (getPdpNavigationKey() === _ripxPdpNavLastKey) return;
+      schedulePdpNavReapply('variant_selection');
+    }
+    function onVariantEvent() {
+      if (typeof isPdpProductPath === 'function' && !isPdpProductPath()) return;
+      schedulePdpNavReapply('variant_event');
+    }
+    [
+      'variant:changed',
+      'variant:update',
+      'variant:updated',
+      'variant:selected',
+      'on:variant:change',
+      'product:variant-change',
+      'product:variant:change',
+      'theme:variant:change',
+    ].forEach(function (evt) {
+      try {
+        document.addEventListener(evt, onVariantEvent);
+      } catch (_eVariantEvt) {}
+    });
+    ['change', 'input'].forEach(function (evt) {
+      try {
+        document.addEventListener(
+          evt,
+          function (e) {
+            var el = e && e.target;
+            if (!el || !el.closest) return;
+            if (!el.closest('form, variant-selects, variant-radios, variant-picker, [data-variant-picker]')) {
+              return;
+            }
+            onSelection();
+          },
+          true
+        );
+      } catch (_eFormEvt) {}
+    });
+    if (typeof MutationObserver === 'undefined') return;
+    var timer = null;
+    try {
+      new MutationObserver(function () {
+        if (timer) return;
+        timer = setTimeout(function () {
+          timer = null;
+          onSelection();
+        }, 120);
+      }).observe(document.documentElement || document.body, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['value', 'checked', 'selected', 'aria-checked', 'aria-selected'],
+      });
+    } catch (_eVariantObs) {}
+  }
+
   function installPdpNavigationReapply() {
     if (window.__RIPX_PDP_NAV_REAPPLY__) return;
     window.__RIPX_PDP_NAV_REAPPLY__ = true;
@@ -716,6 +800,7 @@
         };
       }
     }
+    installPdpVariantSelectionReapply();
   }
 
   function releaseAntiFlickerGuard(reason) {
@@ -5122,16 +5207,55 @@
     return null;
   }
 
+  var _ripxVariantSourceSeen = null;
+  var _ripxVariantSourcePreferred = 'url';
+
+  /**
+   * The variant the main product form will add to the cart. A native-variant
+   * swap rewrites that input to a hidden variant; the shopper still has the
+   * source variant selected.
+   */
+  function getProductFormVariantId() {
+    var formIdSelector = 'form[action*="cart/add"] [name="id"]';
+    var root = getMainProductRoot(toNumericProductId(getCurrentProductId()));
+    var input =
+      (root && root.querySelector(formIdSelector)) ||
+      document.querySelector(formIdSelector) ||
+      document.querySelector('input[name="id"], input[name="variant_id"], [name="id"]');
+    if (!input || !input.value) return '';
+    var value = String(input.value).trim();
+    if (input.getAttribute && input.getAttribute('data-ripx-native-variant') === value) {
+      var swap = getRipxNativeVariantSwapState(_ripxCartAttributeState);
+      return swap ? swap.sourceVariantId : '';
+    }
+    return value;
+  }
+
   /**
    * Get currently selected variant ID (URL ?variant=, form input, or product JSON).
-   * Dawn collection cards and option pickers put the SKU in the query string before the
-   * hidden `id` input is hydrated; prefer the live URL so tests apply without a reload.
+   *
+   * Dawn collection cards and option pickers put the SKU in the query string
+   * before the hidden `id` input is hydrated, so the URL wins at first. Plenty
+   * of themes never update the URL on a swatch change, though, and a page
+   * opened on `?variant=` kept reporting that variant forever; whichever of the
+   * two changed last is the shopper's choice.
    */
   function getSelectedVariantId() {
     var fromUrl = getUrlShopifyVariantId();
+    var fromForm = getProductFormVariantId();
+    if (!_ripxVariantSourceSeen) {
+      _ripxVariantSourceSeen = { url: fromUrl, form: fromForm };
+    } else {
+      // A form filling in its first value is hydration, not a choice.
+      var urlMoved = fromUrl !== _ripxVariantSourceSeen.url;
+      var formMoved = !!_ripxVariantSourceSeen.form && fromForm !== _ripxVariantSourceSeen.form;
+      _ripxVariantSourceSeen = { url: fromUrl, form: fromForm };
+      if (urlMoved && fromUrl) _ripxVariantSourcePreferred = 'url';
+      else if (formMoved && fromForm) _ripxVariantSourcePreferred = 'form';
+    }
+    if (_ripxVariantSourcePreferred === 'form' && fromForm) return fromForm;
     if (fromUrl) return fromUrl;
-    var input = document.querySelector('input[name="id"], input[name="variant_id"], [name="id"]');
-    if (input && input.value) return input.value.trim();
+    if (fromForm) return fromForm;
     var json = getProductJson();
     if (json && json.selectedVariant && json.selectedVariant.id) {
       return String(json.selectedVariant.id);
@@ -7750,6 +7874,52 @@
     } catch (e) {}
   }
 
+  /**
+   * Drop a price test's line properties once the shopper selects a variant it
+   * does not price. The cart transform charges whatever target unit a line
+   * carries, so left in place they sold the newly selected variant at the
+   * previous variant's test price and credited the sale to that test.
+   */
+  function releaseRipxPriceTestCartState(testId, selectedVariantId) {
+    var state = _ripxCartAttributeState;
+    if (!state || String(state._ripx_price_test || '') !== String(testId)) return;
+    var source = normalizeCartVariantId(state.__ripx_source_variant_id);
+    var selected = normalizeCartVariantId(selectedVariantId);
+    if (!source || !selected || source === selected) return;
+    clearRipxPriceOnlyCartHints();
+    _ripxCartAttributeState = null;
+    if (
+      window.__RIPX_PRICE_TEST_CTX__ &&
+      String(window.__RIPX_PRICE_TEST_CTX__.testId) === String(testId)
+    ) {
+      window.__RIPX_PRICE_TEST_CTX__ = null;
+    }
+    var names = {};
+    RIPX_LINE_PROPERTY_KEYS.concat([
+      RIPX_BUYER_VISIBLE_PROPERTY_KEY,
+      RIPX_LEGACY_BUYER_VISIBLE_PROPERTY_KEY,
+    ]).forEach(function (key) {
+      names['properties[' + key + ']'] = true;
+      names['properties[' + getRipxPublicLinePropertyKey(key) + ']'] = true;
+    });
+    try {
+      var forms = document.querySelectorAll(
+        'form[action*="cart/add"], form[action*="/cart/add"], form[data-ajax-cart-form], form[data-cart-add]'
+      );
+      Array.prototype.forEach.call(forms || [], function (form) {
+        var inputs = form.querySelectorAll('input[type="hidden"]');
+        Array.prototype.slice.call(inputs || []).forEach(function (input) {
+          if (!input || !names[input.name]) return;
+          if (input.parentNode) input.parentNode.removeChild(input);
+          else if (Array.isArray(form.__hiddenInputs)) {
+            var idx = form.__hiddenInputs.indexOf(input);
+            if (idx !== -1) form.__hiddenInputs.splice(idx, 1);
+          }
+        });
+      });
+    } catch (_eRelease) {}
+  }
+
   function installRipxCartFormObserver() {
     if (_ripxCartFormObserverInstalled) return;
     if (typeof MutationObserver === 'undefined') return;
@@ -8521,6 +8691,23 @@
   }
 
   /**
+   * Another variant of the product on this page. A Smart Pricing test prices
+   * one variant, and every other variant of the product has a test of its own;
+   * letting the single-SKU fallback cover them painted one colour's test price
+   * on every colour.
+   */
+  function isSiblingVariantOnPage(currentVariantId, matrixVariantKey) {
+    var current = toVariantIdKey(currentVariantId);
+    if (!current || current === toVariantIdKey(matrixVariantKey)) return false;
+    var json = getProductJson();
+    var variants = json && Array.isArray(json.variants) ? json.variants : [];
+    if (variants.length < 2) return false;
+    return variants.some(function (v) {
+      return toVariantIdKey(v && v.id) === current;
+    });
+  }
+
+  /**
    * Resolve matrix pricing for the current PDP selection.
    *
    * Precedence is intentionally identical to checkout resolve:
@@ -8570,7 +8757,10 @@
       if (!variantOverride || typeof variantOverride !== 'object') {
         var fallbackVariantKeys = Object.keys(byVariant);
         variantOverride =
-          fallbackVariantKeys.length === 1 ? byVariant[fallbackVariantKeys[0]] : null;
+          fallbackVariantKeys.length === 1 &&
+          !isSiblingVariantOnPage(currentVariantId, fallbackVariantKeys[0])
+            ? byVariant[fallbackVariantKeys[0]]
+            : null;
         if (!variantOverride && fallbackVariantKeys.length > 1) {
           ripxTrace(
             'S7',
@@ -8627,6 +8817,23 @@
   }
 
   /**
+   * Hand the product page back from a test that does not price the selected
+   * variant: stop repainting, put back prices it painted that the theme has
+   * not re-rendered since, and drop its cart line properties. The test that
+   * does price the variant takes over on the reapply this schedules.
+   */
+  function leavePdpPriceTest(testId, productId, selectedVariantId) {
+    var key = String(testId) + '|' + String(productId || '');
+    var watcher = _ripxPdpPaintWatchers[key];
+    if (watcher) {
+      delete _ripxPdpPaintWatchers[key];
+      watcher.stop();
+      if (typeof watcher.restore === 'function') watcher.restore();
+    }
+    releaseRipxPriceTestCartState(testId, selectedVariantId);
+  }
+
+  /**
    * Apply a price-test assignment to the product page.
    *
    * This function has two jobs: paint the main PDP price and prepare cart/checkout handoff data.
@@ -8675,6 +8882,7 @@
         testId: testId,
         productId: productId,
       });
+      leavePdpPriceTest(testId, productId, currentPdpVariantId);
       return;
     }
 
@@ -8700,6 +8908,7 @@
           },
           'warn'
         );
+        leavePdpPriceTest(testId, productId, currentPdpVariantId);
         return;
       }
       priceNum = parseFloat(rawPrice, 10);
@@ -8851,8 +9060,9 @@
      * byVariant test priced per variant follows the picker instead of staying
      * on the first variant's fixed price.
      *
-     * Returns null when the page no longer carries enough to price it, which
-     * leaves the last good display in place.
+     * Returns `{ uncovered: true }` when this test does not price the selected
+     * variant, and null when the page no longer carries enough to price it,
+     * which leaves the last good display in place.
      */
     function recomputeTarget() {
       var selectedId = getSelectedVariantId();
@@ -8861,11 +9071,11 @@
       }
       var liveCfg = getEffectivePriceConfig(variant.config, productId, selectedId);
       var liveMode = (liveCfg.priceMode || 'fixed').toLowerCase();
-      if (liveMode === 'control') return null;
+      if (liveMode === 'control') return { uncovered: true, variantId: selectedId };
       var num = null;
       if (liveMode === 'fixed') {
         if (liveCfg.price === null || liveCfg.price === undefined || liveCfg.price === '') {
-          return null;
+          return { uncovered: true, variantId: selectedId };
         }
         num = parseFloat(liveCfg.price, 10);
       } else if (liveMode === 'amount' || liveMode === 'percent') {
@@ -9051,7 +9261,124 @@
     var pdpPaintRoot = mainProductRoot();
     var pdpPaintScope = pdpPaintRoot || document.querySelector('main') || document.body;
 
+    /**
+     * Keep up with the variant picker before painting. Themes re-render the
+     * price for a new variant before, after, or without any event we hear, so
+     * every paint checks which variant is selected first.
+     *
+     * Returns false once the selected variant belongs to another test (or to
+     * none), after handing the page back.
+     */
+    function followSelectedVariant() {
+      var selected = normalizeCartVariantId(getSelectedVariantId());
+      if (!selected || selected === currentSourceVariantId) return true;
+      var next = recomputeTarget();
+      if (next && next.uncovered) {
+        stopped = true;
+        restorePaintedNodes();
+        leavePdpPriceTest(testId, productId, next.variantId);
+        requestPdpVariantReapply('variant_left_test');
+        return false;
+      }
+      if (!next) return true;
+      currentDisplay = next.display;
+      restampCartAttributes(next);
+      currentTargetUnit = next.priceNum;
+      currentSourceVariantId = normalizeCartVariantId(next.variantId);
+      return true;
+    }
+
+    var stopped = false;
+    var paintedTextNodes = [];
+
+    /** Put back the theme's prices on nodes this test painted and nothing has touched since. */
+    function restorePaintedNodes() {
+      var nodes = [];
+      try {
+        nodes = (pdpPaintRoot || pdpPaintScope).querySelectorAll('[data-ripx-original]');
+      } catch (_eRestore) {}
+      Array.prototype.forEach.call(nodes, function (node) {
+        if (node.getAttribute('data-test-id') !== String(testId)) return;
+        if (node.textContent !== node.getAttribute('data-ripx-shown')) return;
+        node.textContent = node.getAttribute('data-ripx-original');
+        [
+          'data-ripx-original',
+          'data-ripx-price',
+          'data-test-id',
+          'data-test-variant',
+          'data-ripx-shown',
+          'data-ripx-qty-total',
+        ].forEach(function (attr) {
+          node.removeAttribute(attr);
+        });
+      });
+      paintedTextNodes.forEach(function (entry) {
+        if (entry.node.nodeValue === entry.written) entry.node.nodeValue = entry.original;
+      });
+      paintedTextNodes = [];
+    }
+
+    /** Quantity the main product form will add; totals on the page follow it. */
+    function selectedQuantity() {
+      var root = pdpPaintRoot || document;
+      var input =
+        root.querySelector('form[action*="cart/add"] [name="quantity"]') ||
+        root.querySelector('[name="quantity"]');
+      var qty = input ? parseInt(input.value, 10) : 1;
+      return isFinite(qty) && qty > 1 ? qty : 1;
+    }
+
+    /**
+     * A price node the theme filled with the line total (unit × quantity)
+     * rather than the unit price. It gets the test total.
+     */
+    function isQuantityTotal(themeText, qty, catalogUnit) {
+      if (!(qty > 1) || catalogUnit == null || !themeText) return false;
+      var catalogTotal = formatShopPrice(catalogUnit * qty);
+      return !!catalogTotal && themeText.indexOf(catalogTotal) !== -1;
+    }
+
+    /**
+     * Totals the theme prints outside the price block, such as "Add to cart ·
+     * $1,399.90" on the buy button: the catalog amount for the selected
+     * quantity is swapped for the test amount, leaving the rest of the label.
+     */
+    function paintQuantityTotals(qty, catalogUnit) {
+      if (catalogUnit == null || !isFinite(Number(catalogUnit))) return;
+      var from = formatShopPrice(Number(catalogUnit) * qty);
+      var to = formatShopPrice(currentTargetUnit * qty);
+      if (!from || !to || from === to) return;
+      var scope = pdpPaintRoot || pdpPaintScope;
+      var holders = [];
+      try {
+        holders = scope.querySelectorAll(
+          'form[action*="cart/add"] button, form[action*="cart/add"] [class*="total"]'
+        );
+      } catch (_eTotals) {}
+      paintedTextNodes = paintedTextNodes.filter(function (entry) {
+        return entry.node.isConnected !== false;
+      });
+      Array.prototype.forEach.call(holders, function (holder) {
+        if (inCartUi(holder)) return;
+        if (holder.closest && holder.closest('s, del, [data-ripx-price]')) return;
+        var walker = document.createTreeWalker(holder, 4, null);
+        var node = walker.nextNode();
+        while (node) {
+          var text = node.nodeValue || '';
+          if (text.indexOf(from) !== -1) {
+            var written = text.split(from).join(to);
+            node.nodeValue = written;
+            paintedTextNodes.push({ node: node, original: text, written: written });
+          }
+          node = walker.nextNode();
+        }
+      });
+    }
+
     function paint() {
+      if (stopped || !followSelectedVariant()) return;
+      var qty = selectedQuantity();
+      var catalogUnit = getCatalogPriceFromPage(currentSourceVariantId);
       var seen = new WeakSet();
       /**
        * The selectors above deliberately include containers (`… .price`,
@@ -9067,7 +9394,21 @@
         resolveRipxPricePaintTargets(el).forEach(function (target) {
           if (seen.has(target)) return;
           seen.add(target);
-          writeRipxPriceNode(target, currentDisplay, testId, variantIdForCart, 'pdp', priceNum);
+          var ours = target.getAttribute('data-ripx-shown');
+          if (ours == null || target.textContent !== ours) {
+            target.setAttribute('data-ripx-original', target.textContent);
+            if (isQuantityTotal(target.textContent, qty, catalogUnit)) {
+              target.setAttribute('data-ripx-qty-total', '1');
+            } else {
+              target.removeAttribute('data-ripx-qty-total');
+            }
+          }
+          var shown =
+            target.getAttribute('data-ripx-qty-total') === '1'
+              ? formatShopPrice(currentTargetUnit * qty) || currentDisplay
+              : currentDisplay;
+          writeRipxPriceNode(target, shown, testId, variantIdForCart, 'pdp', currentTargetUnit);
+          target.setAttribute('data-ripx-shown', shown);
         });
       }
       specificSelectors.forEach(function (sel) {
@@ -9110,9 +9451,11 @@
           });
         } catch (e) {}
       });
+      paintQuantityTotals(qty, catalogUnit);
     }
 
     paint();
+    if (stopped) return;
 
     var root =
       pdpPaintRoot ||
@@ -9150,14 +9493,23 @@
         if (t) clearTimeout(t);
         t = setTimeout(paint, 80);
       });
-      obs.observe(root, { childList: true, subtree: true, characterData: false });
+      // Morphing themes (Horizon) re-render a price by rewriting the text node
+      // in place, which only a characterData mutation reports.
+      obs.observe(root, { childList: true, subtree: true, characterData: true });
     } catch (e) {}
 
     function recomputeAndPaint() {
+      if (stopped) return;
       var next = recomputeTarget();
+      if (next && next.uncovered) {
+        paint();
+        return;
+      }
       if (next) {
         currentDisplay = next.display;
         restampCartAttributes(next);
+        currentTargetUnit = next.priceNum;
+        currentSourceVariantId = normalizeCartVariantId(next.variantId);
       }
       if (currentDisplay) paint();
     }
@@ -9175,7 +9527,9 @@
       variantInput.addEventListener('change', onThemePriceChange);
     }
     _ripxPdpPaintWatchers[watcherKey] = {
+      restore: restorePaintedNodes,
       stop: function () {
+        stopped = true;
         if (t) clearTimeout(t);
         if (frame && typeof window.cancelAnimationFrame === 'function') {
           window.cancelAnimationFrame(frame);
@@ -10689,6 +11043,24 @@
    * Apply price test to cart line items (drawer, cart page). Display only; checkout uses catalog unless Discount Function.
    * Matches rows by data-product-id (and product id in selector) or by data-variant-id when present (best effort for themes without product id on line).
    */
+  /**
+   * On the product page of one of the test's products, whether the test leaves
+   * the selected variant unpriced. Each variant of a product has its own test,
+   * and the cart line belongs to the one that prices the variant being added;
+   * stamping every test in turn left the line on whichever ran last.
+   */
+  function skipsSelectedPdpVariant(variant, targetIds) {
+    var pdpProductId = getCurrentProductId();
+    if (!pdpProductId || !variant || !variant.config) return false;
+    var onPage = (targetIds || []).some(function (id) {
+      return id && gidMatches(id, pdpProductId);
+    });
+    if (!onPage) return false;
+    var cfg = getEffectivePriceConfig(variant.config, pdpProductId, getSelectedVariantId());
+    var mode = String((cfg && cfg.priceMode) || 'fixed').toLowerCase();
+    return mode === 'fixed' && (cfg.price === null || cfg.price === undefined || cfg.price === '');
+  }
+
   function applyPriceTestToCart(testId, variant, targetIds) {
     if (!variant || !targetIds || !targetIds.length) return;
     if (!variant.config) {
@@ -10705,7 +11077,11 @@
       return excludedProductIds.indexOf(normalized) === -1;
     });
     if (!filteredTargetIds.length) return;
-    if (variantIdForCart != null && String(variantIdForCart).trim() !== '') {
+    if (
+      variantIdForCart != null &&
+      String(variantIdForCart).trim() !== '' &&
+      !skipsSelectedPdpVariant(variant, filteredTargetIds)
+    ) {
       window.__RIPX_PRICE_TEST_CTX__ = { testId: testId, variantId: variantIdForCart };
       var proofTargetId = filteredTargetIds[0] || null;
       var proofCfg = proofTargetId

@@ -191,7 +191,6 @@ import {
   metaFromPriceSuggestions,
   resolveAiSuggestSpreadArms,
   siblingArmPrices,
-  guardrailPriceWindow,
   aiBandOrderError,
   variantIdentity,
   resolveAiSuggestTargetArms,
@@ -285,7 +284,6 @@ function rebuildPlanArmsFromVariations(
       traffic_percent: Number(variation.traffic) || 0,
       allocation_percent: Number(variation.traffic) || 0,
       offer: isControl || !isActionableOfferConfig(offer) ? null : offer,
-      // Launch holds every other price to max price change; an AI band is used as typed.
       ...(!isControl && hasOverride && isAiSuggestedPrice(priceSuggestionMeta, priceOverrides, variantId, armId)
         ? { price_source: 'ai' }
         : {}),
@@ -1651,30 +1649,18 @@ export default function ClassicCreateWizard({ onTitleChange }) {
       maxSelection,
     });
     if (!rows.length || !(amount > 0)) return null;
-    const maxChange = shopGuardrailsReady ? Number(shopGuardrails.max_price_change_percent) : NaN;
     const next = { ...priceOverrides };
-    let capped = 0;
     rows.forEach(row => {
       const base = Number(row.current_price ?? row.price) || 0;
       const key = priceOverrideKey(row.variant_id, arm.id);
       const delta = unit === 'amount' ? amount : base * (amount / 100);
-      let price = Math.max(0, base + sign * delta);
-      // Held to max price change here rather than refused at launch, where the
-      // merchant would have to come back to this step to find out why.
-      const window = guardrailPriceWindow(base, maxChange);
-      if (window && (price > window.high || price < window.low)) {
-        price = Math.min(window.high, Math.max(window.low, price));
-        capped += 1;
-      }
-      next[key] = price.toFixed(2);
+      next[key] = Math.max(0, base + sign * delta).toFixed(2);
     });
     setPriceOverrides(next);
     return {
       armId: arm.id,
       armLabel: arm.name || (arm.letter ? `Variation ${arm.letter}` : 'Variation'),
       total: rows.length,
-      capped,
-      maxChange: Number.isFinite(maxChange) ? maxChange : null,
     };
   };
 
@@ -2330,9 +2316,6 @@ export default function ClassicCreateWizard({ onTitleChange }) {
         experimentType,
         offerByArm,
         priceMode,
-        maxChangePercent:
-          shopGuardrailsReady && !liveEdit ? shopGuardrails.max_price_change_percent : null,
-        priceSuggestionMeta,
       });
       if (gate.disabled) {
         setMessageType('error');
@@ -2511,9 +2494,6 @@ export default function ClassicCreateWizard({ onTitleChange }) {
         experimentType,
         offerByArm,
         priceMode,
-        maxChangePercent:
-          shopGuardrailsReady && !liveEdit ? shopGuardrails.max_price_change_percent : null,
-        priceSuggestionMeta,
       }),
     [
       loadingProducts,
@@ -2527,10 +2507,6 @@ export default function ClassicCreateWizard({ onTitleChange }) {
       experimentType,
       offerByArm,
       priceMode,
-      shopGuardrailsReady,
-      liveEdit,
-      shopGuardrails.max_price_change_percent,
-      priceSuggestionMeta,
     ]
   );
 
@@ -2930,7 +2906,6 @@ export default function ClassicCreateWizard({ onTitleChange }) {
             loadError={productsLoadError}
             onRetryLoad={loadOpportunities}
             shopDefaultsReady={shopGuardrailsReady}
-            shopMaxChangePercent={shopGuardrails.max_price_change_percent}
             experimentType={experimentType}
             offerByArm={offerByArm}
             onOfferByArmChange={setOfferByArm}

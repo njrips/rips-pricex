@@ -33,11 +33,9 @@ import {
   resolvePricingRows,
   variantIdsMatch,
   aiBandOrderError,
-  isAiSuggestedPrice,
   AI_BAND_MIN_PERCENT,
   spreadAiBandPriceEntries,
   aiSuggestBlockedReason,
-  guardrailPriceWindow,
   sanitizePriceInput,
   variantIdentity,
 } from '../productsStepReadiness';
@@ -996,67 +994,16 @@ describe('QA round: step 3 price inputs', () => {
     expect(sanitizePriceInput('99999999')).toBe('999999.99');
   });
 
-  it('rounds the max price change window inward to the cent', () => {
-    expect(guardrailPriceWindow(4.99, 20)).toEqual({ low: 4, high: 5.98 });
-    expect(guardrailPriceWindow(100, 30)).toEqual({ low: 70, high: 130 });
-    expect(guardrailPriceWindow(0, 30)).toBeNull();
-    expect(guardrailPriceWindow(10, null)).toBeNull();
-  });
-
-  it('holds Continue while a test price is outside max price change', () => {
-    const opportunities = [
-      { variant_id: 'gid://shopify/ProductVariant/1', product_id: 'p1', title: 'Mug', current_price: 100 },
-    ];
-    const variations = [{ id: 'control' }, { id: 'arm_b', letter: 'A', name: 'Variation A' }];
-    const base = {
-      opportunities,
-      selectedIds: ['gid://shopify/ProductVariant/1'],
-      pickMode: 'manual',
-      variations,
-      maxChangePercent: 30,
-    };
-    const over = { 'gid://shopify/ProductVariant/1::arm_b': '500' };
-    const gate = getProductsStepContinueState({ ...base, priceOverrides: over });
-    expect(gate.disabled).toBe(true);
-    expect(gate.reason).toBe('outside_max_price_change');
-    expect(gate.hint).toMatch(/\(Mug\)/);
-    const ok = getProductsStepContinueState({
-      ...base,
-      priceOverrides: { 'gid://shopify/ProductVariant/1::arm_b': '120' },
-    });
-    expect(ok.disabled).toBe(false);
-    // An unknown cap never reports a price as out of range.
-    expect(
-      getProductsStepContinueState({ ...base, maxChangePercent: null, priceOverrides: over }).reason
-    ).not.toBe('outside_max_price_change');
-  });
-
-  it('does not hold a price Suggest produced to max price change, but does once it is edited', () => {
+  it('does not hold Continue for how far a typed or bulk price moves', () => {
     const variant = 'gid://shopify/ProductVariant/1';
     const opportunities = [{ variant_id: variant, product_id: 'p1', title: 'Mug', current_price: 100 }];
     const variations = [{ id: 'control' }, { id: 'arm_b', letter: 'A', name: 'Variation A' }];
-    const priceSuggestionMeta = { [priceOverrideKey(variant, 'arm_b')]: { price: 149.994 } };
-    const base = {
-      opportunities,
-      selectedIds: [variant],
-      pickMode: 'manual',
-      variations,
-      maxChangePercent: 15,
-      priceSuggestionMeta,
-    };
-    const suggested = { [`${variant}::arm_b`]: '149.99' };
-    expect(isAiSuggestedPrice(priceSuggestionMeta, suggested, variant, 'arm_b')).toBe(true);
-    expect(getProductsStepContinueState({ ...base, priceOverrides: suggested }).disabled).toBe(false);
-    // Typed or bulk-adjusted over the suggestion: an ordinary price again.
-    const edited = { [`${variant}::arm_b`]: '150.00' };
-    expect(isAiSuggestedPrice(priceSuggestionMeta, edited, variant, 'arm_b')).toBe(false);
-    expect(getProductsStepContinueState({ ...base, priceOverrides: edited }).reason).toBe(
-      'outside_max_price_change'
-    );
-    // No suggestion behind it, whichever tab the variation is on.
-    expect(
-      getProductsStepContinueState({ ...base, priceSuggestionMeta: {}, priceOverrides: suggested }).reason
-    ).toBe('outside_max_price_change');
+    const base = { opportunities, selectedIds: [variant], pickMode: 'manual', variations };
+    ['500', '1', '99999'].forEach(price => {
+      expect(
+        getProductsStepContinueState({ ...base, priceOverrides: { [`${variant}::arm_b`]: price } }).disabled
+      ).toBe(false);
+    });
   });
 
   it('spreads an uncapped AI band past max price change, above $0', () => {

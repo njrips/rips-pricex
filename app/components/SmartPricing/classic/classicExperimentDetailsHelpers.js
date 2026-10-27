@@ -2224,16 +2224,6 @@ export function buildSettingsSummary(
   if (hasParallelCap) {
     notes.push(`Max parallel tests: ${maxParallel}`);
   }
-  if (!isOffer && Number.isFinite(Number(guardrails.max_price_change_percent))) {
-    const hasAiPrices = (Array.isArray(plan?.price_arms) ? plan.price_arms : []).some(
-      arm => arm?.price_source === 'ai'
-    );
-    notes.push(
-      `Max price change: ±${guardrails.max_price_change_percent}%${
-        hasAiPrices ? ' (manual and bulk prices; AI prices follow the band you set)' : ''
-      }`
-    );
-  }
   const revenueDrop =
     Number(
       guardrails.max_revenue_drop_percent ??

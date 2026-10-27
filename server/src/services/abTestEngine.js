@@ -149,6 +149,47 @@ class ABTestEngine {
       .toLowerCase();
   }
 
+  /**
+   * The Smart Pricing experiment a test belongs to. A classic experiment
+   * launches one test per product variant, all with the same arms in the same
+   * order.
+   */
+  _getPricingExperimentId(test) {
+    let metadata = test?.metadata;
+    if (typeof metadata === 'string') {
+      try {
+        metadata = JSON.parse(metadata);
+      } catch {
+        metadata = null;
+      }
+    }
+    return String(metadata?.experiment_id || '').trim();
+  }
+
+  /**
+   * What a visitor's arm is hashed on. Hashing by the test put a shopper in
+   * Variation A on one colour and Control on the next, so changing a swatch
+   * changed their price; every test in an experiment shares one key instead.
+   */
+  _getArmSaltKey(test) {
+    const experimentId = this._getPricingExperimentId(test);
+    return experimentId ? `experiment:${experimentId}` : String(test?.id || '');
+  }
+
+  /**
+   * The arm in the same position as one the visitor already holds in a
+   * sibling test, for visitors assigned before arms were shared.
+   */
+  _alignVariantToSibling(test, siblingTest, siblingVariantId) {
+    const own = Array.isArray(test?.variants) ? test.variants : [];
+    const theirs = Array.isArray(siblingTest?.variants) ? siblingTest.variants : [];
+    if (!own.length || own.length !== theirs.length) {
+      return null;
+    }
+    const index = theirs.findIndex(v => String(v?.id ?? v?.name) === String(siblingVariantId));
+    return index === -1 ? null : own[index];
+  }
+
   _isUserInGlobalHoldout(userId, shopDomain, holdoutPercent = 0) {
     if (!Number.isFinite(holdoutPercent) || holdoutPercent <= 0) {
       return false;
@@ -392,13 +433,38 @@ class ABTestEngine {
         return null;
       }
 
-      // Select variant based on traffic allocation
-      const variant = this.selectVariant(
-        test.variants,
-        userId,
-        test.holdout_percent || 0,
-        test.id
-      );
+      let variant = null;
+      const experimentId = this._getPricingExperimentId(test);
+      if (experimentId) {
+        const siblings = ((await getActiveTestsForStorefront(shopDomain)) || []).filter(
+          candidate =>
+            candidate &&
+            String(candidate.id) !== String(test.id) &&
+            this._getPricingExperimentId(candidate) === experimentId
+        );
+        if (siblings.length > 0) {
+          const siblingAssignments = await getTestAssignmentsBatch(
+            userId,
+            shopDomain,
+            siblings.map(candidate => String(candidate.id))
+          );
+          for (const sibling of siblings) {
+            const held = siblingAssignments.get(String(sibling.id));
+            variant = held ? this._alignVariantToSibling(test, sibling, held.variant_id) : null;
+            if (variant) {
+              break;
+            }
+          }
+        }
+      }
+      if (!variant) {
+        variant = this.selectVariant(
+          test.variants,
+          userId,
+          test.holdout_percent || 0,
+          this._getArmSaltKey(test)
+        );
+      }
       if (!variant) {
         return null;
       }
@@ -592,6 +658,21 @@ class ABTestEngine {
       }
     }
 
+    // First arm each experiment's visitor holds among the tests asked about,
+    // so the rest of its variants line up with it.
+    const heldArmByExperiment = new Map();
+    const rememberHeldArm = (test, variantId) => {
+      const experimentId = this._getPricingExperimentId(test);
+      if (experimentId && variantId != null && !heldArmByExperiment.has(experimentId)) {
+        heldArmByExperiment.set(experimentId, { test, variantId });
+      }
+    };
+    assignmentsMap.forEach((assignment, testId) => {
+      if (assignment) {
+        rememberHeldArm(testsMap.get(testId), assignment.variant_id);
+      }
+    });
+
     const userInGlobalHoldout = this._isUserInGlobalHoldout(
       userId,
       shopDomain,
@@ -690,12 +771,15 @@ class ABTestEngine {
         continue;
       }
 
-      const variant = this.selectVariant(
-        test.variants,
-        userId,
-        test.holdout_percent || 0,
-        test.id
-      );
+      const held = heldArmByExperiment.get(this._getPricingExperimentId(test));
+      const variant =
+        (held && this._alignVariantToSibling(test, held.test, held.variantId)) ||
+        this.selectVariant(
+          test.variants,
+          userId,
+          test.holdout_percent || 0,
+          this._getArmSaltKey(test)
+        );
       if (!variant) {
         continue;
       }
@@ -715,6 +799,7 @@ class ABTestEngine {
         isNewAssignment: true,
         config: variant.config || {},
       };
+      rememberHeldArm(test, variantId);
       if (this._shouldPersistAssignment(testContext)) {
         toSave.push({
           test_id: testId,

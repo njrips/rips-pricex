@@ -186,21 +186,19 @@ describe('buildFollowUpPlan round caps', () => {
     expect(result.follow_up_plan.rerun_note).toBe('Trying a quieter band');
   });
 
-  it('lets an AI-priced follow-up launch past max price change, and no other', async () => {
-    const { findPriceChangeViolations } = require('../priceBandService');
+  it('lets a follow-up launch past max price change, AI-priced or typed', async () => {
+    const { findPriceArmViolations } = require('../priceBandService');
     const args = { shopDomain: 'demo.myshopify.com', plan: { ...samplePlan, status: 'stopped' } };
     const { follow_up_plan: draft } = await buildFollowUpPlan(args);
     const challenger = draft.price_arms.find(arm => arm.role !== 'control');
     const armPrices = { [challenger.id]: 89 };
-    const guardrails = { max_price_change_percent: 15 };
-
     const ai = await buildFollowUpPlan({ ...args, armPrices, aiPriced: true });
     const aiArm = ai.follow_up_plan.price_arms.find(arm => arm.id === challenger.id);
     expect(aiArm.price_source).toBe('ai');
-    expect(findPriceChangeViolations(59, ai.follow_up_plan.price_arms, guardrails)).toEqual([]);
+    expect(findPriceArmViolations(59, ai.follow_up_plan.price_arms)).toEqual([]);
 
     const typed = await buildFollowUpPlan({ ...args, armPrices });
     expect(typed.follow_up_plan.price_arms.some(arm => arm.price_source === 'ai')).toBe(false);
-    expect(findPriceChangeViolations(59, typed.follow_up_plan.price_arms, guardrails)).toHaveLength(1);
+    expect(findPriceArmViolations(59, typed.follow_up_plan.price_arms)).toEqual([]);
   });
 });

@@ -30,9 +30,6 @@ function SettingRow({
   infoHash = null,
   infoLabel = null,
   multilineValue = false,
-  action = null,
-  actionLabel = null,
-  onAction = null,
 }) {
   return (
     <div
@@ -43,11 +40,6 @@ function SettingRow({
         {infoHash ? <SettingsInfoLink hash={infoHash} label={infoLabel || label} /> : null}
       </span>
       <span className={styles.settingsRowValue}>{value}</span>
-      {action && onAction ? (
-        <Button variant="plain" accessibilityLabel={actionLabel || action} onClick={onAction}>
-          {action}
-        </Button>
-      ) : null}
       {note ? <p className={`${styles.help} ${styles.settingsRowNote}`}>{note}</p> : null}
     </div>
   );
@@ -127,29 +119,26 @@ export default function ClassicSettingsTab({
       {lockedNote ? <p className={styles.help}>{lockedNote}</p> : null}
       <div className={styles.statCard}>
         <h3 className={styles.panelTitle}>Status & traffic</h3>
-        <div className={styles.settingsRows}>
-          <SettingRow
+        <div className={`${styles.detailCardGrid} ${styles.settingsCardGrid}`}>
+          <DetailFactCard
             label="Status"
             value={mapSettingsStatusLabel(settings.testStatus)}
             note="Controls whether new visitors can enter this test."
           />
-          <SettingRow
+          <DetailFactCard
             label="Traffic allocation"
             value={percentOrDash(trafficAllocation)}
             note="Percentage of eligible visitors who may enter this test."
+            action={onAdjustTraffic ? 'Adjust traffic' : null}
+            onAction={onAdjustTraffic}
           />
         </div>
-        {onAdjustTraffic ? (
-          <Button variant="plain" onClick={onAdjustTraffic}>
-            Adjust traffic
-          </Button>
-        ) : null}
       </div>
 
       {audience ? (
         <div className={styles.statCard}>
           <h3 className={styles.panelTitle}>Audience & targeting</h3>
-          <div className={styles.detailCardGrid}>
+          <div className={`${styles.detailCardGrid} ${styles.settingsCardGrid}`}>
             <DetailFactCard
               label="Segment"
               value={audience.segmentLabel || 'All visitors'}
@@ -192,8 +181,8 @@ export default function ClassicSettingsTab({
 
       <div className={styles.statCard}>
         <h3 className={styles.panelTitle}>Metrics & guardrail</h3>
-        <div className={styles.settingsRows}>
-          <SettingRow
+        <div className={`${styles.detailCardGrid} ${styles.settingsCardGrid}`}>
+          <DetailFactCard
             label="Primary success metric"
             value={metrics?.primaryMetricLabel || '—'}
             note="Choose one metric to optimise for this test."
@@ -201,42 +190,46 @@ export default function ClassicSettingsTab({
             actionLabel="Change primary success metric"
             onAction={onChangeMetric}
           />
-          <SettingRow
+          <DetailFactCard
             label="Secondary metrics"
-            multilineValue
             action={onChangeMetric ? 'Edit metrics' : null}
             actionLabel="Edit secondary metrics"
             onAction={onChangeMetric}
-            value={
-              secondaryItems.length ? (
-                <div className={styles.detailChipRow}>
-                  {secondaryItems.map((item, index) => (
-                    <span
-                      key={item.catalog_id || item.event_name || index}
-                      className={styles.detailChip}
-                    >
-                      {secondaryMetricDisplayLabel(item, index)}
-                    </span>
-                  ))}
-                </div>
-              ) : (
-                'None'
-              )
+          >
+            {secondaryItems.length ? (
+              <div className={styles.detailChipRow}>
+                {secondaryItems.map((item, index) => (
+                  <span
+                    key={item.catalog_id || item.event_name || index}
+                    className={styles.detailChip}
+                  >
+                    {secondaryMetricDisplayLabel(item, index)}
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <div className={styles.statValue}>None</div>
+            )}
+          </DetailFactCard>
+          <DetailFactCard
+            label={
+              <>
+                Confidence level
+                <SettingsInfoLink hash="confidence" label="Confidence level" />
+              </>
             }
-          />
-          <SettingRow
-            label="Confidence level"
             value={percentOrDash(metrics?.confidenceLevel)}
             note="Set in App settings → Results settings."
-            infoHash="confidence"
-            infoLabel="Confidence level"
           />
-          <SettingRow
-            label="Minimum visitors per variation"
+          <DetailFactCard
+            label={
+              <>
+                Minimum visitors per variation
+                <SettingsInfoLink hash="min-sample" label="Minimum visitors" />
+              </>
+            }
             value={minSample ? Number(minSample).toLocaleString() : '—'}
             note="Set in App settings → Results settings."
-            infoHash="min-sample"
-            infoLabel="Minimum visitors"
           />
         </div>
 
@@ -253,10 +246,21 @@ export default function ClassicSettingsTab({
                   <IconShield size={14} />
                   {row.label || row.id}
                 </span>
-                <span
-                  className={`${styles.badge} ${on ? styles.badgeAccent : ''}`.trim()}
-                >
-                  {on ? 'On' : 'Off'}
+                <span className={styles.guardrailCardHeadEnd}>
+                  <span
+                    className={`${styles.badge} ${on ? styles.badgeAccent : ''}`.trim()}
+                  >
+                    {on ? 'On' : 'Off'}
+                  </span>
+                  {onEditMetrics ? (
+                    <Button
+                      variant="plain"
+                      accessibilityLabel="Edit guardrail"
+                      onClick={onEditMetrics}
+                    >
+                      Edit
+                    </Button>
+                  ) : null}
                 </span>
               </div>
               {on ? (
@@ -284,11 +288,6 @@ export default function ClassicSettingsTab({
             </div>
           );
         })}
-        {onEditMetrics ? (
-          <Button variant="plain" accessibilityLabel="Edit guardrail" onClick={onEditMetrics}>
-            Edit guardrail
-          </Button>
-        ) : null}
       </div>
 
       {/* Reference material, folded away. Identifiers always exist, so the

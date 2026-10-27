@@ -286,13 +286,12 @@ describe('a product row priced across several variants', () => {
       opportunities: MULTI,
       selectedIds: ['v1', 'v2', 'v3'],
       activeArmIndex: 1,
-      shopMaxChangePercent: 30,
-      priceOverrides: { 'v1::var_a': '999999.9' },
+      priceOverrides: { 'v1::var_a': '0' },
     });
 
     const summary = container.querySelector('[class*="priceSummary_"]');
     const [main, status] = summary.children;
-    expect(main.textContent).toContain('$40–$999,999.90');
+    expect(main.textContent).toContain('$0–$40');
     expect(main.textContent).not.toMatch(/fixing/);
     expect(status.textContent).toBe('1 needs fixing');
   });
